@@ -24,12 +24,15 @@ jobs:
         with:
           packages: 'platforms;android-34 build-tools;34.0.0'
 
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
       - name: Build Release APK
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
         run: |
-          ./gradlew assembleRelease \
+          gradle assembleRelease \
             -PdeepseekKey="${{ secrets.DEEPSEEK_KEY }}" \
             -PsiliconflowKey="${{ secrets.SILICONFLOW_KEY }}" \
             -PkeystorePassword="${{ secrets.KEYSTORE_PASSWORD }}" \
