@@ -1,0 +1,43 @@
+name: Release APK
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-34 build-tools;34.0.0'
+
+      - name: Build Release APK
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        run: |
+          ./gradlew assembleRelease \
+            -PdeepseekKey="${{ secrets.DEEPSEEK_KEY }}" \
+            -PsiliconflowKey="${{ secrets.SILICONFLOW_KEY }}" \
+            -PkeystorePassword="${{ secrets.KEYSTORE_PASSWORD }}" \
+            -PkeyAlias="${{ secrets.KEY_ALIAS }}"
+
+      - name: Upload APK to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: app/build/outputs/apk/release/app-release.apk
+          name: AiChat ${{ github.ref_name }}
+          generate_release_notes: true

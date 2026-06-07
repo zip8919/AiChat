@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:orientation="vertical"
+    android:background="@color/background"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <LinearLayout
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:background="@color/primary"
+        android:padding="16dp"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
+        <TextView
+            android:textSize="20sp"
+            android:textStyle="bold"
+            android:textColor="@android:color/white"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:text="对话历史"
+            android:layout_weight="1"/>
+        <Button
+            android:textSize="12sp"
+            android:textColor="@color/primary"
+            android:id="@+id/new_conversation_button"
+            android:background="@android:color/white"
+            android:padding="8dp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginRight="4dp"
+            android:text="@string/new_conversation"/>
+        <Button
+            android:textSize="12sp"
+            android:textColor="@color/primary"
+            android:id="@+id/clear_history_button"
+            android:background="@android:color/white"
+            android:padding="8dp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="清空历史"/>
+    </LinearLayout>
+
+    <ListView
+        android:id="@+id/conversation_list"
+        android:padding="8dp"
+        android:longClickable="true"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:divider="@color/gray"
+        android:dividerHeight="1dp"
+        android:choiceMode="singleChoice"/>
+</LinearLayout>

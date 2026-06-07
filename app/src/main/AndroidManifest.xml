@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
+
+    <application
+        android:theme="@style/AppTheme"
+        android:label="@string/app_name"
+        android:icon="@mipmap/ic_launcher"
+        android:allowBackup="true">
+
+        <activity
+            android:label="@string/app_name"
+            android:name="xyz.zip8919.app.aichat.MainActivity"
+            android:exported="true"
+            android:configChanges="screenSize|orientation|keyboardHidden">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:label="设置"
+            android:name="xyz.zip8919.app.aichat.SettingsActivity"
+            android:exported="false"
+            android:configChanges="screenSize|orientation|keyboardHidden"/>
+
+        <activity
+            android:label="对话历史"
+            android:name="xyz.zip8919.app.aichat.ConversationManagerActivity"
+            android:exported="false"
+            android:configChanges="screenSize|orientation|keyboardHidden"/>
+
+    </application>
+</manifest>

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">AiChat</string>
+    <string name="cancel">取消</string>
+    <string name="config_saved">配置已保存</string>
+    <string name="conversation_history">对话历史</string>
+    <string name="error">错误</string>
+    <string name="history">历史</string>
+    <string name="input_hint">输入消息...</string>
+    <string name="loading">加载中...</string>
+    <string name="model">模型</string>
+    <string name="network_error">网络错误，请检查连接</string>
+    <string name="new_conversation">新建对话</string>
+    <string name="save">保存</string>
+    <string name="send">发送</string>
+    <string name="settings">设置</string>
+    <string name="stream_mode">流式模式</string>
+    <string name="system_prompt">系统提示词</string>
+</resources>

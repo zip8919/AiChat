@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:orientation="vertical"
+    android:background="@color/background"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <!-- Top bar -->
+    <LinearLayout
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:background="@color/primary"
+        android:padding="8dp"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
+        <Button
+            android:textSize="12sp"
+            android:textColor="@color/primary"
+            android:id="@+id/new_conversation_button"
+            android:background="@android:color/white"
+            android:padding="8dp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginRight="4dp"
+            android:text="@string/new_conversation"/>
+        <Button
+            android:textSize="12sp"
+            android:textColor="@color/primary"
+            android:id="@+id/history_button"
+            android:background="@android:color/white"
+            android:padding="8dp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginRight="8dp"
+            android:text="@string/history"/>
+        <Button
+            android:textSize="12sp"
+            android:textColor="@color/primary"
+            android:id="@+id/settings_button"
+            android:background="@android:color/white"
+            android:padding="8dp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/settings"/>
+    </LinearLayout>
+
+    <!-- Model selector row -->
+    <LinearLayout
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:background="@color/primary_dark"
+        android:padding="8dp"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
+        <Spinner
+            android:id="@+id/model_spinner"
+            android:background="@android:color/white"
+            android:padding="8dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"/>
+    </LinearLayout>
+
+    <!-- Thinking level row -->
+    <LinearLayout
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:background="@color/primary_dark"
+        android:padding="8dp"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
+        <TextView
+            android:textSize="12sp"
+            android:textColor="@android:color/white"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="思考等级:"/>
+        <Spinner
+            android:id="@+id/thinking_spinner"
+            android:background="@android:color/white"
+            android:padding="4dp"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginLeft="8dp"
+            android:layout_weight="1"/>
+    </LinearLayout>
+
+    <!-- Message list -->
+    <ListView
+        android:id="@+id/message_list"
+        android:padding="8dp"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:stackFromBottom="true"
+        android:transcriptMode="alwaysScroll"
+        android:divider="@null"
+        android:dividerHeight="0dp"
+        android:layout_weight="1"/>
+
+    <!-- Bottom input bar -->
+    <LinearLayout
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:background="@color/white"
+        android:padding="8dp"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
+        <EditText
+            android:id="@+id/input_edit_text"
+            android:background="@drawable/edit_text_background"
+            android:padding="12dp"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:hint="@string/input_hint"
+            android:maxLines="4"
+            android:layout_weight="1"
+            android:inputType="textMultiLine"/>
+        <Button
+            android:textColor="@android:color/white"
+            android:id="@+id/send_button"
+            android:background="@color/primary"
+            android:padding="12dp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginLeft="8dp"
+            android:text="@string/send"/>
+    </LinearLayout>
+</LinearLayout>
