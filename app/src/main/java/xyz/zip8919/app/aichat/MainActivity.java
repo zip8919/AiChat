@@ -486,32 +486,40 @@ public class MainActivity extends Activity {
                                 rawContent.append(ct);
                             }
 
-                            // Throttle: update WebView at most every 80ms
+                            // Throttle: light text update at most every 200ms
                             long now = System.currentTimeMillis();
-                            if (now - lastUpdate > 80) {
+                            if (now - lastUpdate > 200) {
                                 lastUpdate = now;
                                 final String content = rawContent.toString();
                                 runOnUiThread(new Runnable() {
                                     public void run() {
                                         if (aiIndex < messages.size()) {
                                             messages.get(aiIndex).content = content;
-                                            updateAiContent(content);
+                                            String esc = jsEscape(content);
+                                            conversationWebView.loadUrl("javascript:updateLastText('" + esc + "')");
                                         }
                                     }
                                 });
                             }
                         } catch (Exception e) { }
                     }
-                    // Final update
+                    // Final update: full render with markdown/LaTeX/highlighting
                     final String finalContent = rawContent.toString();
-                    runOnUiThread(new Runnable() {
+                    new Thread(new Runnable() {
                         public void run() {
-                            if (aiIndex < messages.size()) {
-                                messages.get(aiIndex).content = finalContent;
-                                updateAiContent(finalContent);
-                            }
+                            final String html = MessageHtmlRenderer.contentToHtml(finalContent, MainActivity.this);
+                            runOnUiThread(new Runnable() {
+                                public void run() {
+                                    if (aiIndex < messages.size()) {
+                                        messages.get(aiIndex).content = finalContent;
+                                        String esc = jsEscape(html);
+                                        conversationWebView.loadUrl("javascript:updateLastMsg('" + esc + "')");
+                                        conversationWebView.loadUrl("javascript:finalizeLast(" + aiIndex + ")");
+                                    }
+                                }
+                            });
                         }
-                    });
+                    }).start();
                     reader.close();
                 } catch (final Exception e) {
                     runOnUiThread(new Runnable() {
@@ -592,8 +600,16 @@ public class MainActivity extends Activity {
     // ========== WebView helpers ==========
 
     private void refreshWebView() {
-        String html = MessageHtmlRenderer.buildConversationHtml(messages, this);
-        conversationWebView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null);
+        new Thread(new Runnable() {
+            public void run() {
+                final String html = MessageHtmlRenderer.buildConversationHtml(messages, MainActivity.this);
+                runOnUiThread(new Runnable() {
+                    public void run() {
+                        conversationWebView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null);
+                    }
+                });
+            }
+        }).start();
     }
 
     private void appendHtml(String msgHtml) {
@@ -765,7 +781,12 @@ public class MainActivity extends Activity {
                         showConfirmDialog("确定修改本条消息？", new Runnable() {
                             public void run() {
                                 msg.content = newContent;
-                                refreshWebView();
+                                // DOM update: only update this message's div
+                                String html = msg.isAssistant()
+                                    ? MessageHtmlRenderer.contentToHtml(newContent, MainActivity.this)
+                                    : "<div class=\"bubble\">" + MessageHtmlRenderer.esc(newContent) + "</div>";
+                                String esc = jsEscape(html);
+                                conversationWebView.loadUrl("javascript:updateMsgAt(" + pos + ",'" + esc + "')");
                                 conversationManager.saveCurrentConversation();
                                 Toast.makeText(MainActivity.this, "已修改", Toast.LENGTH_SHORT).show();
                             }
@@ -784,8 +805,9 @@ public class MainActivity extends Activity {
         showConfirmDialog("确定删除本条消息？\n\n" + preview, new Runnable() {
             public void run() {
                 messages.remove(pos);
-                // Rebuild all DOM - simpler than reindexing
-                refreshWebView();
+                removeDomFrom(pos);
+                // Reindex DOM: update data-idx of remaining messages after pos
+                conversationWebView.loadUrl("javascript:reindexFrom(" + pos + ")");
                 conversationManager.saveCurrentConversation();
                 Toast.makeText(MainActivity.this, "已删除", Toast.LENGTH_SHORT).show();
             }
@@ -854,7 +876,7 @@ public class MainActivity extends Activity {
         showConfirmDialog("将删除本条之后共 " + n + " 条消息（保留本条），确定？", new Runnable() {
             public void run() {
                 messages.subList(messages.size() - n, messages.size()).clear();
-                refreshWebView();
+                removeDomFrom(messages.size());
                 conversationManager.saveCurrentConversation();
                 Toast.makeText(MainActivity.this, "已回溯", Toast.LENGTH_SHORT).show();
             }

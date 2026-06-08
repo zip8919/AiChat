@@ -95,6 +95,13 @@ public class MessageHtmlRenderer {
             ".msg-menu-btn:active{color:#555;background:#e8e8e8;border-radius:12px;}" +
             ".ai-menu-wrap{text-align:left;margin-top:4px;}" +
             ".user-menu-wrap{text-align:right;margin-top:2px;}" +
+            ".tk-kw{color:#d73a49;font-weight:bold;}" +
+            ".tk-str{color:#032f62;}" +
+            ".tk-cmt{color:#6a737d;font-style:italic;}" +
+            ".tk-num{color:#005cc5;}" +
+            ".tk-type{color:#6f42c1;}" +
+            ".tk-fn{color:#6f42c1;}" +
+            ".tk-op{color:#d73a49;}" +
             ".fn-ref{font-size:0.75em;vertical-align:super;}" +
             ".fn-ref a{color:#2196F3;text-decoration:none;}" +
             ".fn-def{font-size:12px;color:#888;border-top:1px solid #eee;" +
@@ -160,6 +167,10 @@ public class MessageHtmlRenderer {
             "var ms=document.querySelectorAll('.msg.ai .content');" +
             "if(ms.length>0){ms[ms.length-1].innerHTML=html;}" +
             "addCopyBtns();window.scrollTo(0,document.body.scrollHeight);};" +
+            "window.updateLastText=function(text){" +
+            "var ms=document.querySelectorAll('.msg.ai .content');" +
+            "if(ms.length>0){ms[ms.length-1].textContent=text;}" +
+            "window.scrollTo(0,document.body.scrollHeight);};" +
             "window.appendAiDiv=function(){" +
             "var d=document.createElement('div');" +
             "d.className='msg ai';d.setAttribute('data-idx','-1');" +
@@ -169,6 +180,19 @@ public class MessageHtmlRenderer {
             "event.stopPropagation();return false;\">⋯</button></div>';" +
             "document.getElementById('msgs').appendChild(d);" +
             "window.scrollTo(0,document.body.scrollHeight);};" +
+            "window.updateMsgAt=function(idx,html){" +
+            "var all=document.querySelectorAll('.msg');" +
+            "for(var i=0;i<all.length;i++){" +
+            "if(all[i].getAttribute('data-idx')===''+idx){" +
+            "var isAi=all[i].className.indexOf('msg ai')>=0;" +
+            "if(isAi){var c=all[i].querySelector('.content');if(c)c.innerHTML=html;}" +
+            "else{var b=all[i].querySelector('.bubble');if(b)b.innerHTML=html;}" +
+            "addCopyBtns();return;}}};" +
+            "window.reindexFrom=function(start){" +
+            "var all=document.querySelectorAll('.msg');" +
+            "for(var i=0;i<all.length;i++){" +
+            "var cur=parseInt(all[i].getAttribute('data-idx'));" +
+            "if(cur>=start)all[i].setAttribute('data-idx',''+(cur-1));}};" +
             "window.finalizeLast=function(idx){" +
             "var ms=document.querySelectorAll('.msg.ai');" +
             "if(ms.length>0){" +
@@ -442,7 +466,7 @@ public class MessageHtmlRenderer {
                "</body>\n</html>";
     }
 
-    static String esc(String s) {
+    public static String esc(String s) {
         if (s == null) return "";
         return s.replace("&", "&amp;")
                 .replace("<", "&lt;")
@@ -497,7 +521,8 @@ public class MessageHtmlRenderer {
             String code = fcb.getLiteral();
             if (code != null) {
                 if (code.endsWith("\n")) code = code.substring(0, code.length() - 1);
-                out.append(esc(code));
+                out.append(info != null && !info.isEmpty()
+                    ? CodeHighlighter.highlight(code, info) : esc(code));
             }
             out.append("</code></pre>");
         }

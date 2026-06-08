@@ -33,7 +33,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 echo "========================================="
-echo "  AiChat Build Script v1.2.3"
+echo "  AiChat Build Script v1.3.0"
 echo "========================================="
 echo ""
 [ -n "$DEEPSEEK_KEY" ] && echo "DeepSeek Key:      (set)" || echo "DeepSeek Key:      (sk-xxx placeholder)"
@@ -51,7 +51,7 @@ echo ""
 
 # Rename output
 TIMESTAMP=$(date +%Y%m%d-%H%M)
-OUTPUT="AiChat-v1.2.3-${TIMESTAMP}-release.apk"
+OUTPUT="AiChat-v1.3.0-${TIMESTAMP}-release.apk"
 cp app/build/outputs/apk/release/app-release.apk "$OUTPUT"
 
 echo ""
