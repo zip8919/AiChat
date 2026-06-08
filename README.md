@@ -103,4 +103,4 @@ git push origin v1.3.5
 
 ## License
 
-MIT
+GPL-3.0
