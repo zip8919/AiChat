@@ -111,6 +111,15 @@ public class MainActivity extends Activity {
         findViewById(R.id.settings_button).setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) { openSettings(); }
         });
+        findViewById(R.id.rotate_button).setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                int orient = getResources().getConfiguration().orientation;
+                if (orient == android.content.res.Configuration.ORIENTATION_LANDSCAPE)
+                    setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+                else
+                    setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
+            }
+        });
 
         // Send button
         sendButton.setOnClickListener(new View.OnClickListener() {
@@ -538,11 +547,11 @@ public class MainActivity extends Activity {
                     ProviderInfo titleProvider = configManager.getProvider(tmi.provider);
                     if (titleProvider == null) return;
 
+                    String titlePrompt = SettingsActivity.getTitlePrompt(MainActivity.this);
                     List<Message> titleMsgs = new ArrayList<Message>();
-                    Message sysMsg = new Message(Message.ROLE_SYSTEM,
-                            "你是一个标题生成助手。根据用户消息生成3-15字标题。只输出标题本身，禁止输出任何其他文字、解释、标点或换行。");
+                    Message sysMsg = new Message(Message.ROLE_SYSTEM, titlePrompt);
                     Message userMsg = new Message(Message.ROLE_USER,
-                            "生成标题（仅输出标题文字，不要任何其他内容）：\n" + firstMessage);
+                            "根据以上要求，为以下对话生成标题：\n" + firstMessage);
                     titleMsgs.add(sysMsg);
                     titleMsgs.add(userMsg);
 

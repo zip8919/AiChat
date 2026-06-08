@@ -42,6 +42,19 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="@string/settings"/>
+        <View
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:layout_weight="1"/>
+        <Button
+            android:textSize="14sp"
+            android:textColor="@android:color/white"
+            android:id="@+id/rotate_button"
+            android:background="@android:color/transparent"
+            android:padding="8dp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="↻"/>
     </LinearLayout>
 
     <!-- Model selector row -->
