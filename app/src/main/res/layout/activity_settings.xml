@@ -43,7 +43,7 @@
         android:orientation="horizontal"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginBottom="16dp">
+        android:layout_marginBottom="12dp">
         <TextView
             android:textSize="14sp"
             android:textStyle="bold"
@@ -57,6 +57,37 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"/>
     </LinearLayout>
+
+    <!-- Title model -->
+    <LinearLayout
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="16dp">
+        <TextView
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:textColor="@color/text_primary"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="标题生成模型"/>
+        <Spinner
+            android:id="@+id/title_model_spinner"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginLeft="8dp"/>
+    </LinearLayout>
+
+    <!-- Manage models -->
+    <Button
+        android:textSize="14sp"
+        android:id="@+id/manage_models_button"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="16dp"
+        android:text="管理模型 →"/>
 
     <!-- Balance query button -->
     <Button

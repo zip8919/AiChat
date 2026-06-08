@@ -1,6 +1,10 @@
 package xyz.zip8919.app.aichat;
 
 import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import java.net.HttpURLConnection;
@@ -15,8 +19,10 @@ import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.Spinner;
+import android.widget.TextView;
 import android.widget.Toast;
 import java.util.ArrayList;
 import java.util.List;
@@ -152,6 +158,14 @@ public class MainActivity extends Activity {
 
         // Model spinner
         refreshModelSpinner();
+
+        // Message long-press menu
+        messageListView.setOnItemLongClickListener(new AdapterView.OnItemLongClickListener() {
+            public boolean onItemLongClick(AdapterView<?> parent, View view, int pos, long id) {
+                showMessageMenu(pos);
+                return true;
+            }
+        });
     }
 
     private void refreshModelSpinner() {
@@ -504,9 +518,12 @@ public class MainActivity extends Activity {
         new Thread(new Runnable() {
             public void run() {
                 try {
-                    ProviderInfo titleProvider = findTitleProvider();
+                    // Get title model from settings, then find its provider
+                    String titleModel = SettingsActivity.getTitleModel(MainActivity.this);
+                    ModelInfo tmi = configManager.getModel(titleModel);
+                    if (tmi == null) return;
+                    ProviderInfo titleProvider = configManager.getProvider(tmi.provider);
                     if (titleProvider == null) return;
-                    String titleModel = findTitleModel(titleProvider);
 
                     List<Message> titleMsgs = new ArrayList<Message>();
                     Message sysMsg = new Message(Message.ROLE_SYSTEM,
@@ -550,26 +567,219 @@ public class MainActivity extends Activity {
         }).start();
     }
 
-    private ProviderInfo findTitleProvider() {
-        // Prefer SiliconFlow with Qwen model for better Chinese title quality
-        ProviderInfo sf = configManager.getProvider("硅基流动");
-        if (sf != null && sf.apiKey != null && !sf.apiKey.isEmpty()) return sf;
-        // Fallback to any provider with an API key
-        for (ProviderInfo p : configManager.getProviders()) {
-            if (p.apiKey != null && !p.apiKey.isEmpty()) return p;
-        }
-        return null;
+    // ========== 消息长按菜单 ==========
+
+    private void showMessageMenu(final int pos) {
+        final Message msg = messages.get(pos);
+        String[] items = {"复制", "选择文本", "修改", "删除", "重试", "回溯到此处", "创建分支"};
+
+        new AlertDialog.Builder(this)
+                .setTitle("操作消息")
+                .setItems(items, new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface dialog, int which) {
+                        switch (which) {
+                            case 0: copyMessage(pos); break;
+                            case 1: selectText(pos); break;
+                            case 2: editMessage(pos); break;
+                            case 3: deleteMessage(pos); break;
+                            case 4: retryMessage(pos); break;
+                            case 5: rollbackTo(pos); break;
+                            case 6: branchAt(pos); break;
+                        }
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
     }
 
-    private String findTitleModel(ProviderInfo provider) {
-        if ("硅基流动".equals(provider.name)) return "Qwen/Qwen3.6-35B-A3B";
-        if ("DeepSeek".equals(provider.name)) return "deepseek-v4-flash";
-        // Use first available model for unknown providers
-        List<ModelInfo> models = configManager.getModels();
-        for (ModelInfo m : models) {
-            if (m.provider.equals(provider.name)) return m.name;
+    private String getMessageText(Message msg) {
+        if (msg.isAssistant()) return ApiClient.removeThinkingContent(msg.content);
+        return msg.content;
+    }
+
+    // 1. 复制
+    private void copyMessage(int pos) {
+        String text = getMessageText(messages.get(pos));
+        ClipboardManager cm = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+        cm.setPrimaryClip(ClipData.newPlainText("message", text));
+        Toast.makeText(this, "已复制", Toast.LENGTH_SHORT).show();
+    }
+
+    // 2. 选择文本
+    private void selectText(int pos) {
+        String text = getMessageText(messages.get(pos));
+        final TextView tv = new TextView(this);
+        tv.setText(text);
+        tv.setTextIsSelectable(true);
+        tv.setPadding(32, 32, 32, 32);
+        tv.setTextSize(14);
+        new AlertDialog.Builder(this)
+                .setTitle("选择文本")
+                .setView(tv)
+                .setPositiveButton("关闭", null)
+                .show();
+    }
+
+    // 3. 修改
+    private void editMessage(final int pos) {
+        final Message msg = messages.get(pos);
+        final String oldContent = getMessageText(msg);
+
+        final EditText input = new EditText(this);
+        input.setText(oldContent);
+        input.setMinLines(3);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        input.setLayoutParams(lp);
+
+        new AlertDialog.Builder(this)
+                .setTitle("修改消息")
+                .setView(input)
+                .setPositiveButton("确定", new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface d, int w) {
+                        final String newContent = input.getText().toString().trim();
+                        if (newContent.isEmpty()) return;
+                        showConfirmDialog("确定修改本条消息？", new Runnable() {
+                            public void run() {
+                                msg.content = newContent;
+                                messageAdapter.notifyDataSetChanged();
+                                conversationManager.saveCurrentConversation();
+                                Toast.makeText(MainActivity.this, "已修改", Toast.LENGTH_SHORT).show();
+                            }
+                        });
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    // 4. 删除
+    private void deleteMessage(final int pos) {
+        Message msg = messages.get(pos);
+        String preview = getMessageText(msg);
+        if (preview.length() > 30) preview = preview.substring(0, 30) + "...";
+        showConfirmDialog("确定删除本条消息？\n\n" + preview, new Runnable() {
+            public void run() {
+                messages.remove(pos);
+                messageAdapter.notifyDataSetChanged();
+                conversationManager.saveCurrentConversation();
+                Toast.makeText(MainActivity.this, "已删除", Toast.LENGTH_SHORT).show();
+            }
+        });
+    }
+
+    // 5. 重试
+    private void retryMessage(final int pos) {
+        final Message msg = messages.get(pos);
+        final int n = messages.size() - pos;
+
+        if (msg.isAssistant()) {
+            // Verify there's a user message before this AI
+            boolean hasUserBefore = false;
+            for (int i = pos - 1; i >= 0; i--) {
+                if (messages.get(i).isUser()) { hasUserBefore = true; break; }
+            }
+            if (!hasUserBefore) {
+                Toast.makeText(this, "无法找到对应的用户消息", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            showConfirmDialog("将删除本条及之后共 " + n + " 条消息并重新生成回复，确定？", new Runnable() {
+                public void run() {
+                    messages.subList(pos, messages.size()).clear();
+                    messageAdapter.notifyDataSetChanged();
+                    // User message already at end of list, send directly
+                    execStreamingRequest();
+                }
+            });
+        } else {
+            final String uc = msg.content;
+            showConfirmDialog("将删除本条及之后共 " + n + " 条消息并重新发送，确定？", new Runnable() {
+                public void run() {
+                    messages.subList(pos, messages.size()).clear();
+                    messageAdapter.notifyDataSetChanged();
+                    // Need to add user message back
+                    Message um = new Message(Message.ROLE_USER, uc);
+                    messages.add(um);
+                    conversationManager.getCurrentConversation().touch();
+                    messageAdapter.notifyDataSetChanged();
+                    execStreamingRequest();
+                }
+            });
         }
-        return "";
+    }
+
+    private void execStreamingRequest() {
+        loadSystemPrompt();
+        ProviderInfo provider = configManager.getProvider(
+                availableModels.get(modelSpinner.getSelectedItemPosition()).provider);
+        if (provider == null) {
+            Toast.makeText(this, "未选择模型", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        String thinkingLevel = configManager.getThinkingLevel();
+        if (!configManager.isThinkingEnabled()) thinkingLevel = "off";
+        sendStreamingRequest(provider, thinkingLevel);
+    }
+
+    // 6. 回溯到此处
+    private void rollbackTo(int pos) {
+        if (pos >= messages.size() - 1) {
+            Toast.makeText(this, "已在最新位置", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        final int n = messages.size() - pos - 1;
+        showConfirmDialog("将删除本条之后共 " + n + " 条消息（保留本条），确定？", new Runnable() {
+            public void run() {
+                messages.subList(messages.size() - n, messages.size()).clear();
+                messageAdapter.notifyDataSetChanged();
+                conversationManager.saveCurrentConversation();
+                Toast.makeText(MainActivity.this, "已回溯", Toast.LENGTH_SHORT).show();
+            }
+        });
+    }
+
+    // 7. 创建分支
+    private void branchAt(final int pos) {
+        final int n = pos + 1;
+        showConfirmDialog("将前 " + n + " 条消息复制到新对话分支，确定？", new Runnable() {
+            public void run() {
+                Conversation current = conversationManager.getCurrentConversation();
+                Conversation branch = new Conversation();
+                branch.title = current.title + "-分支";
+                branch.systemPrompt = current.systemPrompt;
+                branch.model = current.model;
+
+                for (int i = 0; i <= pos; i++) {
+                    Message src = messages.get(i);
+                    Message copy = new Message();
+                    copy.role = src.role;
+                    copy.content = src.content;
+                    copy.timestamp = src.timestamp;
+                    branch.messages.add(copy);
+                }
+
+                conversationManager.getConversations().add(0, branch);
+                conversationManager.saveCurrentConversation();
+                StorageManager.getInstance().saveConversation(branch.id, ConversationManager.toJson(branch));
+
+                conversationManager.setCurrentConversation(branch);
+                messages = branch.messages;
+                messageAdapter.setMessages(messages);
+                messageAdapter.notifyDataSetChanged();
+                Toast.makeText(MainActivity.this, "已创建分支: " + branch.title, Toast.LENGTH_SHORT).show();
+            }
+        });
+    }
+
+    private void showConfirmDialog(String message, final Runnable onConfirm) {
+        new AlertDialog.Builder(this)
+                .setTitle("确认")
+                .setMessage(message)
+                .setPositiveButton("确定", new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface d, int w) { onConfirm.run(); }
+                })
+                .setNegativeButton("取消", null)
+                .show();
     }
 
 }

@@ -33,6 +33,10 @@ public class ConversationManager {
         return this.currentConversation;
     }
 
+    public void setCurrentConversation(Conversation conv) {
+        this.currentConversation = conv;
+    }
+
     public Conversation createNewConversation() {
         if (this.currentConversation != null && !this.currentConversation.messages.isEmpty()) {
             saveCurrentConversation();
