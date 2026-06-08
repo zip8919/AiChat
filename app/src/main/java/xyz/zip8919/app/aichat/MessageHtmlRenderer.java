@@ -5,10 +5,11 @@ import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.util.Base64;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
-import java.io.FileWriter;
-import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
@@ -255,18 +256,23 @@ public class MessageHtmlRenderer {
     private static File latexDir = null;
 
     private static String renderMarkdown(String text, Context ctx) {
+        List<String> mathTags = new ArrayList<>();
         float density = ctx.getResources().getDisplayMetrics().density;
-        text = renderBareLatexCommands(text, density, latexDir);
-        text = extractAndRenderLatex(text, density, latexDir);
+        text = extractAndRenderLatex(text, density, latexDir, mathTags);
+        text = renderBareLatexCommands(text, density, latexDir, mathTags);
         text = preProcessExtensions(text);
         Node document = PARSER.parse(text);
         StringBuilder html = new StringBuilder();
         document.accept(new HtmlVisitor(html));
-        return html.toString();
+        // Replace @@MATHn@@ placeholders with actual rendered HTML
+        String result = html.toString();
+        for (int i = 0; i < mathTags.size(); i++)
+            result = result.replace("@@MATH" + i + "@@", mathTags.get(i));
+        return result;
     }
 
     // Detect and render bare \command or \command{args} that aren't inside $...$
-    private static String renderBareLatexCommands(String text, float density, File dir) {
+    private static String renderBareLatexCommands(String text, float density, File dir, List<String> mathTags) {
         StringBuilder out = new StringBuilder();
         int i = 0;
         while (i < text.length()) {
@@ -275,23 +281,18 @@ public class MessageHtmlRenderer {
                 int start = i;
                 i++;
                 while (i < text.length() && Character.isLetter(text.charAt(i))) i++;
-                // Require at least 2-letter command to avoid false positives (\n, \t, etc.)
-                if (i - start < 3) {
-                    // Too short, output literally
-                    out.append(text, start, i);
-                    continue;
-                }
+                if (i - start < 3) { out.append(text, start, i); continue; }
                 while (i < text.length() && text.charAt(i) == '{') {
-                    int depth = 1;
-                    i++;
+                    int depth = 1; i++;
                     while (i < text.length() && depth > 0) {
                         if (text.charAt(i) == '{') depth++;
                         else if (text.charAt(i) == '}') depth--;
                         i++;
                     }
                 }
-                String latex = text.substring(start, i);
-                out.append(renderLatexImg(latex, false, density, dir));
+                String html = renderLatexImg(text.substring(start, i), false, density, dir);
+                mathTags.add(html);
+                out.append("@@MATH").append(mathTags.size() - 1).append("@@");
             } else {
                 out.append(text.charAt(i));
                 i++;
@@ -316,43 +317,45 @@ public class MessageHtmlRenderer {
         return text;
     }
 
-    private static String extractAndRenderLatex(String text, float density, File latexDir) {
+    private static String extractAndRenderLatex(String text, float density, File latexDir, List<String> mathTags) {
         StringBuilder out = new StringBuilder();
         int i = 0;
         while (i < text.length()) {
-            // Block: $$...$$ or \[...\]
             if (text.startsWith("$$", i)) {
                 int end = text.indexOf("$$", i + 2);
                 if (end > i) {
-                    out.append('\n').append(renderLatexImg(
-                        text.substring(i + 2, end).trim(), true, density, latexDir)).append('\n');
+                    String html = renderLatexImg(text.substring(i + 2, end).trim(), true, density, latexDir);
+                    mathTags.add(html);
+                    out.append('\n').append("@@MATH").append(mathTags.size() - 1).append("@@\n");
                     i = end + 2; continue;
                 }
             }
             if (text.startsWith("\\[", i)) {
                 int end = text.indexOf("\\]", i + 2);
                 if (end > i) {
-                    out.append('\n').append(renderLatexImg(
-                        text.substring(i + 2, end).trim(), true, density, latexDir)).append('\n');
+                    String html = renderLatexImg(text.substring(i + 2, end).trim(), true, density, latexDir);
+                    mathTags.add(html);
+                    out.append('\n').append("@@MATH").append(mathTags.size() - 1).append("@@\n");
                     i = end + 2; continue;
                 }
             }
-            // Inline: $...$ or \(...\)
             if (text.charAt(i) == '$' && i + 1 < text.length()
                     && text.charAt(i + 1) != '$'
                     && (i == 0 || text.charAt(i - 1) != '$')) {
                 int end = text.indexOf('$', i + 1);
                 if (end > i + 1) {
-                    out.append(renderLatexImg(
-                        text.substring(i + 1, end), false, density, latexDir));
+                    String html = renderLatexImg(text.substring(i + 1, end), false, density, latexDir);
+                    mathTags.add(html);
+                    out.append("@@MATH").append(mathTags.size() - 1).append("@@");
                     i = end + 1; continue;
                 }
             }
             if (text.startsWith("\\(", i)) {
                 int end = text.indexOf("\\)", i + 2);
                 if (end > i + 2) {
-                    out.append(renderLatexImg(
-                        text.substring(i + 2, end), false, density, latexDir));
+                    String html = renderLatexImg(text.substring(i + 2, end), false, density, latexDir);
+                    mathTags.add(html);
+                    out.append("@@MATH").append(mathTags.size() - 1).append("@@");
                     i = end + 2; continue;
                 }
             }
@@ -368,63 +371,54 @@ public class MessageHtmlRenderer {
         if (cached != null) return cached;
 
         String imgTag = null;
-        try {
-            float textSize = block ? 24f : 18f;
-            JLatexMathDrawable d = JLatexMathDrawable.builder(formula)
-                    .textSize(textSize)
-                    .background(0xFFFFFFFF)
-                    .build();
+        float textSize = block ? 24f : 18f;
 
+        try {
+            JLatexMathDrawable d = JLatexMathDrawable.builder(formula)
+                    .textSize(textSize).background(0xFFFFFFFF).build();
             int w = d.getIntrinsicWidth();
             int h = d.getIntrinsicHeight();
+
             if (w > 0 && h > 0) {
                 int maxW = (int)(280 * density);
-                if (w > maxW) {
-                    float scale = (float) maxW / w;
-                    d = JLatexMathDrawable.builder(formula)
-                            .textSize(textSize * scale)
-                            .background(0xFFFFFFFF)
-                            .build();
-                    w = maxW;
-                    h = (int)(h * scale);
+                if (w > maxW) { float s = (float) maxW / w;
+                    d = JLatexMathDrawable.builder(formula).textSize(textSize * s)
+                            .background(0xFFFFFFFF).build();
+                    w = maxW; h = (int)(h * s);
                 }
 
                 d.setBounds(0, 0, w, h);
                 Bitmap bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
-                Canvas canvas = new Canvas(bmp);
-                canvas.drawColor(Color.WHITE);
-                d.draw(canvas);
+                Canvas c = new Canvas(bmp);
+                c.drawColor(Color.WHITE);
+                d.draw(c);
 
-                int hash = Math.abs(key.hashCode());
-                String fname = "ltx_" + hash + ".png";
-                if (dir != null) {
-                    File f = new File(dir, fname);
-                    if (!f.exists()) {
-                        FileOutputStream fos = new FileOutputStream(f);
-                        bmp.compress(Bitmap.CompressFormat.PNG, 100, fos);
-                        fos.close();
-                    }
-                }
+                // Render to base64 data URI — no file:// access needed
+                ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                bmp.compress(Bitmap.CompressFormat.PNG, 90, baos);
+                String b64 = Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP);
                 bmp.recycle();
 
                 String alt = escAttr(formula);
                 if (block) {
-                    imgTag = "<div class=\"math-block\"><img src=\"" + fname + "\" alt=\"" + alt + "\" style=\"max-width:100%;height:auto;\"></div>";
+                    imgTag = "<div class=\"math-block\"><img src=\"data:image/png;base64," + b64
+                        + "\" alt=\"" + alt + "\" style=\"max-width:100%;height:auto;\"></div>";
                 } else {
-                    imgTag = "<img class=\"math-inline\" src=\"" + fname + "\" alt=\"" + alt + "\" style=\"height:1.6em;vertical-align:middle;\">";
+                    imgTag = "<img class=\"math-inline\" src=\"data:image/png;base64," + b64
+                        + "\" alt=\"" + alt + "\" style=\"height:1.6em;vertical-align:middle;\">";
                 }
             }
         } catch (Exception e) {
             e.printStackTrace();
         }
 
-        // Fallback: show formula as visible styled text
+        // Clean fallback — monospace code-style, not debug-yellow
         if (imgTag == null) {
             if (block) {
-                imgTag = "<div class=\"math-block\" style=\"background:#fff3cd;padding:10px;border:2px solid #ffc107;\">"
-                    + "<code style=\"font-size:14px;color:#856404;\">" + esc(formula) + "</code></div>";
+                imgTag = "<div class=\"math-block\" style=\"background:#f6f8fa;padding:10px;border:1px solid #d1d5da;border-radius:4px;\">"
+                    + "<code style=\"font-size:14px;color:#555;\">" + esc(formula) + "</code></div>";
             } else {
-                imgTag = "<code style=\"font-size:0.9em;background:#fff3cd;padding:2px 5px;color:#856404;border:1px solid #ffc107;\">"
+                imgTag = "<code style=\"font-size:0.9em;background:#f0f0f0;padding:1px 5px;border-radius:3px;color:#555;\">"
                     + esc(formula) + "</code>";
             }
         }
@@ -463,24 +457,6 @@ public class MessageHtmlRenderer {
                 .replace("<", "&lt;")
                 .replace(">", "&gt;")
                 .replace("'", "&#39;");
-    }
-
-    public static File writeHtmlToCacheDir(String html, Context ctx) {
-        try {
-            File dir = new File(ctx.getCacheDir(), "latex_cache");
-            if (!dir.exists()) dir.mkdirs();
-            // Clean old HTML files
-            for (File f : dir.listFiles()) {
-                if (f.getName().endsWith(".html")) f.delete();
-            }
-            File f = new File(dir, "conv.html");
-            FileWriter fw = new FileWriter(f);
-            fw.write(html);
-            fw.close();
-            return f;
-        } catch (IOException e) {
-            return null;
-        }
     }
 
     // ---- AST → HTML visitor ----

@@ -7,7 +7,6 @@ import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
-import java.io.File;
 import android.content.SharedPreferences;
 import android.net.Uri;
 import java.net.HttpURLConnection;
@@ -585,11 +584,7 @@ public class MainActivity extends Activity {
 
     private void refreshWebView() {
         String html = MessageHtmlRenderer.buildConversationHtml(messages, this);
-        File f = MessageHtmlRenderer.writeHtmlToCacheDir(html, this);
-        if (f != null)
-            conversationWebView.loadUrl("file://" + f.getAbsolutePath());
-        else
-            conversationWebView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null);
+        conversationWebView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null);
     }
 
     private void appendHtml(String msgHtml) {
