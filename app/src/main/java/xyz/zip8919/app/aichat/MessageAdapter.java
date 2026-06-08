@@ -7,6 +7,7 @@ import android.text.method.LinkMovementMethod;
 import android.text.style.ClickableSpan;
 import android.text.style.ForegroundColorSpan;
 import android.text.style.StyleSpan;
+import android.text.style.URLSpan;
 import android.util.SparseBooleanArray;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -81,20 +82,28 @@ public class MessageAdapter extends BaseAdapter {
 
         Message msg = messages.get(position);
         String content = msg.content;
+        Context ctx = context;
 
         if (content != null && content.contains("[thinking]")) {
-            SpannableStringBuilder formatted = formatThinkingContent(content, position);
+            SpannableStringBuilder formatted = formatThinkingContent(content, position, ctx);
             holder.textView.setText(formatted);
             holder.textView.setMovementMethod(LinkMovementMethod.getInstance());
         } else {
-            holder.textView.setText(content);
-            holder.textView.setMovementMethod(null);
+            SpannableStringBuilder parsed = MarkdownParser.parse(content, ctx);
+            holder.textView.setText(parsed);
+            boolean hasLinks = hasClickableLinks(parsed);
+            holder.textView.setMovementMethod(hasLinks ? LinkMovementMethod.getInstance() : null);
         }
 
         return convertView;
     }
 
-    private SpannableStringBuilder formatThinkingContent(String content, final int position) {
+    private boolean hasClickableLinks(SpannableStringBuilder sb) {
+        URLSpan[] spans = sb.getSpans(0, sb.length(), URLSpan.class);
+        return spans != null && spans.length > 0;
+    }
+
+    private SpannableStringBuilder formatThinkingContent(String content, final int position, Context ctx) {
         SpannableStringBuilder builder = new SpannableStringBuilder();
         boolean isExpanded = thoughtExpanded.get(position, false);
 
@@ -102,20 +111,18 @@ public class MessageAdapter extends BaseAdapter {
         while (start < content.length()) {
             int thinkStart = content.indexOf("[thinking]", start);
             if (thinkStart == -1) {
-                builder.append(content.substring(start));
+                // Remaining content after last thinking block → markdown
+                builder.append(MarkdownParser.parse(content.substring(start), ctx));
                 break;
             }
             if (thinkStart > start) {
-                builder.append(content.substring(start, thinkStart));
+                // Content before thinking → markdown
+                builder.append(MarkdownParser.parse(content.substring(start, thinkStart), ctx));
             }
             int thinkEnd = content.indexOf("[/thinking]", thinkStart);
             if (thinkEnd == -1 || !content.contains("[/thinking]")) {
                 // Thinking not closed yet (streaming in progress)
-                // Just show thinking content in gray italic
                 String thinkingText = content.substring(thinkStart + 10);
-                if (thinkStart > 0) {
-                    builder.append(content.substring(0, thinkStart));
-                }
                 int spanStart = builder.length();
                 builder.append(thinkingText);
                 int spanEnd = builder.length();

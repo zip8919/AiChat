@@ -1,52 +1,93 @@
 # AiChat
 
-armv7a Android 4.3 (API 18) 词典笔 AI 对话应用。纯原生 Android，零第三方依赖。
+armv7a Android 4.3 (API 18) 词典笔 AI 对话应用。基于 WebView + HTML/CSS 的 Markdown/LaTeX 渲染，支持 DeepSeek 和 SiliconFlow API。
 
 ## 功能
 
-- 流式对话，支持 DeepSeek 和硅基流动双 API
-- 思考模式（三档可调），思考内容实时显示 + 自动折叠/展开
-- 多对话管理，自动生成标题（Qwen 3.5）
-- 系统提示词自定义
-- 长按发送键打断请求
-- DeepSeek 余额查询
-- 对话历史自动保存，支持重命名/删除
+- **流式对话** — SSE 实时响应，支持 DeepSeek 和 SiliconFlow 双 API
+- **思考模式** — 三档可调，思考内容可折叠/展开
+- **Markdown 渲染** — WebView + HTML/CSS 完整渲染：
+  - 标题、粗体、斜体、删除线、代码块（带复制按钮）
+  - 表格、引用块、列表、分割线、图片、链接
+  - LaTeX 数学公式：`$...$` / `$$...$$` / `\(...\)` / `\[...\]` / 裸 `\command`
+  - 脚注 `[^id]`、高亮 `==text==`、上标 `^text^`、下标 `~text~`
+  - 内嵌 HTML 直通
+- **对话管理** — 多对话、历史列表、分支、回溯
+- **消息操作** — `⋯` 按钮菜单：复制、选择文本、修改、删除、重试、回溯、分支
+- **自动标题** — 首次对话自动调用 AI 生成标题
+- **打断请求** — 长按发送键可中断正在进行的请求
 
 ## 构建
 
-### 本地构建
-
 ```bash
+# Debug
+gradle assembleDebug
+
 # Windows PowerShell
 .\build.ps1 -DeepseekKey "sk-xxx" -SiliconflowKey "sk-xxx"
 
-# 签名需要额外参数
-.\build.ps1 -DeepseekKey "sk-xxx" -SiliconflowKey "sk-xxx" -KeystorePassword "pwd" -KeyAlias "mc"
-```
-
-```bash
 # Linux / macOS
 ./build.sh --deepseek-key sk-xxx --siliconflow-key sk-xxx
-./build.sh --deepseek-key sk-xxx --siliconflow-key sk-xxx --keystore-password pwd --key-alias mc
 ```
 
-### 环境变量
+签名密钥通过环境变量提供：
 
 | 变量 | 说明 |
 |------|------|
 | `KEYSTORE_PASSWORD` | 签名密钥库密码 |
 | `KEY_ALIAS` | 签名密钥别名（默认 `mc`） |
 
-### GitHub Actions
+## 发布
 
-推送 `v*` 标签自动触发构建和发布。需要在仓库配置以下 Secrets：
+推送 `v*` 标签触发 GitHub Actions 自动构建和发布：
 
-| Secret | 说明 |
-|--------|------|
-| `DEEPSEEK_KEY` | DeepSeek API Key |
-| `SILICONFLOW_KEY` | 硅基流动 API Key |
-| `KEYSTORE_PASSWORD` | 签名密钥库密码 |
-| `KEY_ALIAS` | 签名密钥别名 |
+```bash
+git tag v1.2.0
+git push origin v1.2.0
+```
+
+需配置 Secrets：`DEEPSEEK_KEY`、`SILICONFLOW_KEY`、`KEYSTORE_PASSWORD`、`KEY_ALIAS`
+
+## 技术栈
+
+- 纯 Android Framework（Activity、WebView）
+- Markdown 解析：[commonmark-java](https://github.com/commonmark/commonmark-java) + GFM 扩展（strikethrough、tables）
+- LaTeX 渲染：[jlatexmath-android](https://github.com/noties/jlatexmath-android)
+- HTTP：`java.net.HttpURLConnection` + TLS 1.2 手动配置
+- 最小 API 18（Android 4.3），armv7a
+- 零第三方 HTTP/图片加载库
+
+## 项目结构
+
+```
+├── app/
+│   ├── build.gradle
+│   ├── keystore/mc.jks
+│   └── src/main/
+│       ├── AndroidManifest.xml
+│       ├── java/xyz/zip8919/app/aichat/
+│       │   ├── ApiClient.java
+│       │   ├── ConfigManager.java
+│       │   ├── Conversation.java
+│       │   ├── ConversationAdapter.java
+│       │   ├── ConversationManager.java
+│       │   ├── ConversationManagerActivity.java
+│       │   ├── MainActivity.java
+│       │   ├── MarkdownParser.java
+│       │   ├── Message.java
+│       │   ├── MessageAdapter.java
+│       │   ├── MessageHtmlRenderer.java   # Markdown → HTML/CSS 渲染器
+│       │   ├── ModelConfigActivity.java
+│       │   ├── ModelInfo.java
+│       │   ├── ProviderInfo.java
+│       │   ├── SettingsActivity.java
+│       │   └── StorageManager.java
+│       └── res/
+├── build.ps1
+├── build.sh
+├── settings.gradle
+└── .github/workflows/release.yml
+```
 
 ## 目标设备
 
@@ -54,35 +95,6 @@ armv7a Android 4.3 (API 18) 词典笔 AI 对话应用。纯原生 Android，零�
 - 系统: Android 4.3 (API 18)
 - 屏幕: 竖屏窄宽（词典笔）
 - TLS: 1.2（禁用 1.3，Android 4 不支持）
-
-## 项目结构
-
-```
-├── app/
-│   ├── build.gradle
-│   ├── keystore/mc.jks          # 签名密钥（加密存储）
-│   └── src/main/
-│       ├── AndroidManifest.xml
-│       ├── java/xyz/zip8919/app/aichat/
-│       │   ├── ApiClient.java         # HTTP/SSE/TLS
-│       │   ├── ConfigManager.java     # 配置管理
-│       │   ├── Conversation.java      # 对话模型
-│       │   ├── ConversationAdapter.java
-│       │   ├── ConversationManager.java
-│       │   ├── ConversationManagerActivity.java
-│       │   ├── MainActivity.java      # 主界面
-│       │   ├── Message.java
-│       │   ├── MessageAdapter.java    # 消息+思考展示
-│       │   ├── ModelInfo.java
-│       │   ├── ProviderInfo.java
-│       │   ├── SettingsActivity.java
-│       │   └── StorageManager.java
-│       └── res/
-├── build.gradle
-├── build.ps1                   # Windows 构建脚本
-├── build.sh                    # Linux/Mac 构建脚本
-└── settings.gradle
-```
 
 ## License
 

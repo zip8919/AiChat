@@ -84,16 +84,11 @@
             android:layout_weight="1"/>
     </LinearLayout>
 
-    <!-- Message list -->
-    <ListView
-        android:id="@+id/message_list"
-        android:padding="8dp"
+    <!-- Message display (WebView for rich HTML rendering) -->
+    <WebView
+        android:id="@+id/message_webview"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:stackFromBottom="true"
-        android:transcriptMode="alwaysScroll"
-        android:divider="@null"
-        android:dividerHeight="0dp"
         android:layout_weight="1"/>
 
     <!-- Bottom input bar -->

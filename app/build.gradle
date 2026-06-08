@@ -19,8 +19,8 @@ android {
         applicationId 'xyz.zip8919.app.aichat'
         minSdk 18
         targetSdk 18
-        versionCode 3
-        versionName "1.1.0"
+        versionCode 4
+        versionName "1.2.0"
 
         buildConfigField "String", "DEEPSEEK_KEY", "\"${project.findProperty('deepseekKey') ?: 'sk-xxx'}\""
         buildConfigField "String", "SILICONFLOW_KEY", "\"${project.findProperty('siliconflowKey') ?: 'sk-xxx'}\""
@@ -49,4 +49,8 @@ android {
 }
 
 dependencies {
+    implementation 'ru.noties:jlatexmath-android:0.2.0'
+    implementation 'org.commonmark:commonmark:0.21.0'
+    implementation 'org.commonmark:commonmark-ext-gfm-strikethrough:0.21.0'
+    implementation 'org.commonmark:commonmark-ext-gfm-tables:0.21.0'
 }

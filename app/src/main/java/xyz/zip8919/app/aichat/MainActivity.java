@@ -4,15 +4,15 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.ClipData;
 import android.content.ClipboardManager;
+import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
+import java.io.File;
 import android.content.SharedPreferences;
+import android.net.Uri;
 import java.net.HttpURLConnection;
 import android.os.Bundle;
 import android.os.Handler;
-import android.text.SpannableStringBuilder;
-import android.text.style.ForegroundColorSpan;
-import android.text.style.StyleSpan;
 import android.view.MotionEvent;
 import android.view.View;
 import android.widget.AdapterView;
@@ -20,10 +20,12 @@ import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
-import android.widget.ListView;
 import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
+import android.webkit.JavascriptInterface;
+import android.webkit.WebView;
+import android.webkit.WebViewClient;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -39,12 +41,11 @@ public class MainActivity extends Activity {
 
     private EditText inputEditText;
     private Button sendButton;
-    private ListView messageListView;
+    private WebView conversationWebView;
     private Spinner modelSpinner;
     private Spinner thinkingSpinner;
 
     private List<Message> messages;
-    private MessageAdapter messageAdapter;
     private List<ModelInfo> availableModels;
 
     private AtomicBoolean isRequestInProgress = new AtomicBoolean(false);
@@ -86,7 +87,20 @@ public class MainActivity extends Activity {
         sendButton = (Button) findViewById(R.id.send_button);
         modelSpinner = (Spinner) findViewById(R.id.model_spinner);
         thinkingSpinner = (Spinner) findViewById(R.id.thinking_spinner);
-        messageListView = (ListView) findViewById(R.id.message_list);
+        conversationWebView = (WebView) findViewById(R.id.message_webview);
+        conversationWebView.getSettings().setJavaScriptEnabled(true);
+        conversationWebView.getSettings().setDefaultTextEncodingName("UTF-8");
+        conversationWebView.getSettings().setBuiltInZoomControls(false);
+        conversationWebView.getSettings().setLoadWithOverviewMode(true);
+        conversationWebView.getSettings().setUseWideViewPort(true);
+        conversationWebView.getSettings().setAllowFileAccess(true);
+        conversationWebView.getSettings().setAllowFileAccessFromFileURLs(true);
+        conversationWebView.addJavascriptInterface(new JsBridge(), "Android");
+        conversationWebView.setWebViewClient(new WebViewClient() {
+            public boolean shouldOverrideUrlLoading(WebView view, String url) {
+                return true;
+            }
+        });
 
         // Buttons
         findViewById(R.id.new_conversation_button).setOnClickListener(new View.OnClickListener() {
@@ -141,7 +155,7 @@ public class MainActivity extends Activity {
 
         // Set current thinking level
         String level = configManager.getThinkingLevel();
-        int levelPos = 2; // default medium
+        int levelPos = 2;
         if ("off".equals(level)) levelPos = 0;
         else if ("low".equals(level)) levelPos = 1;
         else if ("high".equals(level)) levelPos = 3;
@@ -158,14 +172,6 @@ public class MainActivity extends Activity {
 
         // Model spinner
         refreshModelSpinner();
-
-        // Message long-press menu
-        messageListView.setOnItemLongClickListener(new AdapterView.OnItemLongClickListener() {
-            public boolean onItemLongClick(AdapterView<?> parent, View view, int pos, long id) {
-                showMessageMenu(pos);
-                return true;
-            }
-        });
     }
 
     private void refreshModelSpinner() {
@@ -215,21 +221,17 @@ public class MainActivity extends Activity {
     private void initConversation() {
         Conversation conv = conversationManager.getCurrentConversation();
         messages = conv.messages;
-        messageAdapter = new MessageAdapter(this, messages);
-        messageListView.setAdapter(messageAdapter);
+        refreshWebView();
     }
 
     private void createNewConversation() {
-        if (isRequestInProgress.get()) {
-            interruptRequest();
-        }
+        if (isRequestInProgress.get()) interruptRequest();
         loadSystemPrompt();
         Conversation conv = conversationManager.createNewConversation();
         conv.systemPrompt = systemPrompt;
         conv.model = currentModel;
         messages = conv.messages;
-        messageAdapter.setMessages(messages);
-        messageAdapter.notifyDataSetChanged();
+        refreshWebView();
         Toast.makeText(this, "已创建新对话", Toast.LENGTH_SHORT).show();
     }
 
@@ -248,12 +250,13 @@ public class MainActivity extends Activity {
                         String content = lastMsg.content;
                         if (content == null || content.isEmpty()) {
                             messages.remove(messages.size() - 1);
+                            removeDomFrom(messages.size());
                         } else {
                             lastMsg.content = content + " (已打断)";
+                            updateAiContent(lastMsg.content);
                         }
                     }
                 }
-                messageAdapter.notifyDataSetChanged();
                 Toast.makeText(MainActivity.this, "已打断请求", Toast.LENGTH_SHORT).show();
             }
         });
@@ -278,8 +281,7 @@ public class MainActivity extends Activity {
                 conversationManager.switchConversation(conversationId);
                 Conversation conv = conversationManager.getCurrentConversation();
                 messages = conv.messages;
-                messageAdapter.setMessages(messages);
-                messageAdapter.notifyDataSetChanged();
+                refreshWebView();
                 Toast.makeText(this, "已切换到: " + conv.title, Toast.LENGTH_SHORT).show();
             }
         }
@@ -317,10 +319,12 @@ public class MainActivity extends Activity {
         Message userMsg = new Message(Message.ROLE_USER, input);
         messages.add(userMsg);
         conversationManager.getCurrentConversation().touch();
-        messageAdapter.notifyDataSetChanged();
         inputEditText.setText("");
 
-        // Auto title generation for first message
+        // Append user message to WebView
+        String userHtml = MessageHtmlRenderer.renderMessageDiv(userMsg, messages.size() - 1, this);
+        appendHtml(userHtml);
+
         Conversation conv = conversationManager.getCurrentConversation();
         boolean isFirstMsg = conv.messages.size() == 1;
         boolean autoTitle = SettingsActivity.isAutoTitleEnabled(this);
@@ -328,7 +332,6 @@ public class MainActivity extends Activity {
             generateTitle(input);
         }
 
-        // Fire request
         ProviderInfo provider = configManager.getProvider(
                 availableModels.get(modelSpinner.getSelectedItemPosition()).provider);
         if (provider == null) {
@@ -337,9 +340,7 @@ public class MainActivity extends Activity {
         }
 
         String thinkingLevel = configManager.getThinkingLevel();
-        if (!configManager.isThinkingEnabled()) {
-            thinkingLevel = "off";
-        }
+        if (!configManager.isThinkingEnabled()) thinkingLevel = "off";
 
         sendStreamingRequest(provider, thinkingLevel);
     }
@@ -347,17 +348,22 @@ public class MainActivity extends Activity {
     private void sendStreamingRequest(final ProviderInfo provider, final String thinkingLevel) {
         isRequestInProgress.set(true);
 
+        final Message aiMsg = new Message(Message.ROLE_ASSISTANT, "");
+        messages.add(aiMsg);
+        final int aiIndex = messages.size() - 1;
+
+        // Append AI placeholder div
+        runOnUiThread(new Runnable() {
+            public void run() {
+                conversationWebView.loadUrl("javascript:appendAiDiv()");
+            }
+        });
+
         currentRequestThread = new Thread(new Runnable() {
             public void run() {
-                final SpannableStringBuilder aiResponse = new SpannableStringBuilder();
-                final StringBuilder thinkingBuf = new StringBuilder();
-                final StringBuilder contentBuf = new StringBuilder();
+                final StringBuilder rawContent = new StringBuilder();
                 final boolean[] thinkingActive = {false};
-                boolean[] thinkingFinished = {false};
-
-                final Message aiMsg = new Message(Message.ROLE_ASSISTANT, "");
-                messages.add(aiMsg);
-                final int aiIndex = messages.size() - 1;
+                final boolean[] thinkingFinished = {false};
 
                 HttpURLConnection conn = null;
                 try {
@@ -371,7 +377,6 @@ public class MainActivity extends Activity {
                     conn.setReadTimeout(0);
 
                     if (conn instanceof javax.net.ssl.HttpsURLConnection) {
-                        // Reuse ApiClient's TLS setup
                         javax.net.ssl.SSLContext ssl = javax.net.ssl.SSLContext.getInstance("TLSv1.2");
                         ssl.init(null, new javax.net.ssl.TrustManager[] {
                             new javax.net.ssl.X509TrustManager() {
@@ -388,7 +393,6 @@ public class MainActivity extends Activity {
 
                     currentConnection = conn;
 
-                    // Build body
                     org.json.JSONObject body = new org.json.JSONObject();
                     body.put("model", currentModel);
                     body.put("stream", true);
@@ -401,7 +405,7 @@ public class MainActivity extends Activity {
                         msgs.put(sm);
                     }
                     for (Message m : messages) {
-                        if (m == aiMsg) continue; // skip placeholder
+                        if (m == aiMsg) continue;
                         org.json.JSONObject mm = new org.json.JSONObject();
                         mm.put("role", m.role);
                         mm.put("content", m.isAssistant() ? ApiClient.removeThinkingContent(m.content) : m.content);
@@ -409,7 +413,6 @@ public class MainActivity extends Activity {
                     }
                     body.put("messages", msgs);
 
-                    // Thinking params
                     if ("boolean".equals(provider.thinkingType)) {
                         if (!"off".equals(thinkingLevel)) {
                             body.put(provider.thinkingParamName, true);
@@ -443,6 +446,7 @@ public class MainActivity extends Activity {
                     java.io.BufferedReader reader = new java.io.BufferedReader(
                             new java.io.InputStreamReader(conn.getInputStream(), "UTF-8"));
                     String line;
+                    long lastUpdate = 0;
                     while (isRequestInProgress.get() && (line = reader.readLine()) != null) {
                         line = line.trim();
                         if (!line.startsWith("data: ")) continue;
@@ -458,43 +462,48 @@ public class MainActivity extends Activity {
 
                             if (delta.has("reasoning_content") && !delta.isNull("reasoning_content")) {
                                 String rc = delta.getString("reasoning_content");
-                                thinkingBuf.append(rc);
                                 if (!thinkingActive[0]) {
                                     thinkingActive[0] = true;
-                                    aiResponse.append("[thinking]");
+                                    rawContent.append("[thinking]");
                                 }
-                                int s1 = aiResponse.length();
-                                aiResponse.append(rc);
-                                aiResponse.setSpan(new ForegroundColorSpan(0xFF888888), s1, aiResponse.length(), 0);
-                                aiResponse.setSpan(new StyleSpan(android.graphics.Typeface.ITALIC), s1, aiResponse.length(), 0);
+                                rawContent.append(rc);
                             }
 
                             if (delta.has("content") && !delta.isNull("content")) {
                                 String ct = delta.getString("content");
-                                contentBuf.append(ct);
                                 if (thinkingActive[0] && !thinkingFinished[0]) {
                                     thinkingFinished[0] = true;
-                                    aiResponse.append("[/thinking]");
-                                    // Mark the closing tag
-                                    int cs = aiResponse.length() - 11;
-                                    aiResponse.setSpan(new ForegroundColorSpan(0xFF888888), cs, aiResponse.length(), 0);
+                                    rawContent.append("[/thinking]");
                                 }
-                                aiResponse.append(ct);
+                                rawContent.append(ct);
                             }
 
-                            final String currentText = aiResponse.toString();
-                            runOnUiThread(new Runnable() {
-                                public void run() {
-                                    if (aiIndex < messages.size()) {
-                                        messages.get(aiIndex).content = currentText;
-                                        messageAdapter.notifyDataSetChanged();
+                            // Throttle: update WebView at most every 80ms
+                            long now = System.currentTimeMillis();
+                            if (now - lastUpdate > 80) {
+                                lastUpdate = now;
+                                final String content = rawContent.toString();
+                                runOnUiThread(new Runnable() {
+                                    public void run() {
+                                        if (aiIndex < messages.size()) {
+                                            messages.get(aiIndex).content = content;
+                                            updateAiContent(content);
+                                        }
                                     }
-                                }
-                            });
-                        } catch (Exception e) {
-                            // skip malformed SSE chunks
-                        }
+                                });
+                            }
+                        } catch (Exception e) { }
                     }
+                    // Final update
+                    final String finalContent = rawContent.toString();
+                    runOnUiThread(new Runnable() {
+                        public void run() {
+                            if (aiIndex < messages.size()) {
+                                messages.get(aiIndex).content = finalContent;
+                                updateAiContent(finalContent);
+                            }
+                        }
+                    });
                     reader.close();
                 } catch (final Exception e) {
                     runOnUiThread(new Runnable() {
@@ -506,8 +515,13 @@ public class MainActivity extends Activity {
                     if (conn != null) conn.disconnect();
                     currentConnection = null;
                     isRequestInProgress.set(false);
-                    // Save conversation on complete
                     conversationManager.saveCurrentConversation();
+                    final int finalIdx = aiIndex;
+                    runOnUiThread(new Runnable() {
+                        public void run() {
+                            conversationWebView.loadUrl("javascript:finalizeLast(" + finalIdx + ")");
+                        }
+                    });
                 }
             }
         });
@@ -567,6 +581,97 @@ public class MainActivity extends Activity {
         }).start();
     }
 
+    // ========== WebView helpers ==========
+
+    private void refreshWebView() {
+        String html = MessageHtmlRenderer.buildConversationHtml(messages, this);
+        File f = MessageHtmlRenderer.writeHtmlToCacheDir(html, this);
+        if (f != null)
+            conversationWebView.loadUrl("file://" + f.getAbsolutePath());
+        else
+            conversationWebView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null);
+    }
+
+    private void appendHtml(String msgHtml) {
+        String esc = jsEscape(msgHtml);
+        conversationWebView.loadUrl("javascript:appendMsg('" + esc + "')");
+    }
+
+    private void updateAiContent(String content) {
+        String html = MessageHtmlRenderer.contentToHtml(content, this);
+        String esc = jsEscape(html);
+        conversationWebView.loadUrl("javascript:updateLastMsg('" + esc + "')");
+    }
+
+    private void removeDomFrom(int pos) {
+        conversationWebView.loadUrl("javascript:removeFromIdx(" + pos + ")");
+    }
+
+    private static String jsEscape(String s) {
+        if (s == null) return "";
+        return s.replace("\\", "\\\\")
+                .replace("'", "\\'")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r");
+    }
+
+    // ========== JavaScript bridge ==========
+
+    class JsBridge {
+        @JavascriptInterface
+        public void copyCode(final String code) {
+            handler.post(new Runnable() {
+                public void run() {
+                    try {
+                        ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+                        cm.setPrimaryClip(ClipData.newPlainText("code", code));
+                        Toast.makeText(MainActivity.this, "代码已复制", Toast.LENGTH_SHORT).show();
+                    } catch (Exception e1) {
+                        try {
+                            android.text.ClipboardManager oldCm = (android.text.ClipboardManager)
+                                    getSystemService(Context.CLIPBOARD_SERVICE);
+                            oldCm.setText(code);
+                            Toast.makeText(MainActivity.this, "代码已复制", Toast.LENGTH_SHORT).show();
+                        } catch (Exception e2) {
+                            Toast.makeText(MainActivity.this, "复制失败: " + e2.getMessage(), Toast.LENGTH_SHORT).show();
+                        }
+                    }
+                }
+            });
+        }
+
+        @JavascriptInterface
+        public void openUrl(String url) {
+            try {
+                startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+            } catch (Exception e) {
+                Toast.makeText(MainActivity.this, "无法打开链接", Toast.LENGTH_SHORT).show();
+            }
+        }
+
+        @JavascriptInterface
+        public void messageMenu(final String idx) {
+            handler.post(new Runnable() {
+                public void run() {
+                    try {
+                        showMessageMenu(Integer.parseInt(idx));
+                    } catch (Exception e) { }
+                }
+            });
+        }
+
+        @JavascriptInterface
+        public void messageLongPress(final String idx) {
+            handler.post(new Runnable() {
+                public void run() {
+                    try {
+                        showMessageMenu(Integer.parseInt(idx));
+                    } catch (Exception e) { }
+                }
+            });
+        }
+    }
+
     // ========== 消息长按菜单 ==========
 
     private void showMessageMenu(final int pos) {
@@ -600,9 +705,23 @@ public class MainActivity extends Activity {
     // 1. 复制
     private void copyMessage(int pos) {
         String text = getMessageText(messages.get(pos));
-        ClipboardManager cm = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
-        cm.setPrimaryClip(ClipData.newPlainText("message", text));
-        Toast.makeText(this, "已复制", Toast.LENGTH_SHORT).show();
+        if (text == null || text.isEmpty()) {
+            Toast.makeText(this, "内容为空", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        try {
+            Object svc = getSystemService(Context.CLIPBOARD_SERVICE);
+            if (svc instanceof ClipboardManager) {
+                ClipboardManager cm = (ClipboardManager) svc;
+                cm.setPrimaryClip(ClipData.newPlainText("message", text));
+            } else {
+                // API 18 fallback: some devices return the old ClipboardManager
+                ((android.text.ClipboardManager) svc).setText(text);
+            }
+            Toast.makeText(this, "已复制", Toast.LENGTH_SHORT).show();
+        } catch (Exception e) {
+            Toast.makeText(this, "复制失败: " + e.getMessage(), Toast.LENGTH_LONG).show();
+        }
     }
 
     // 2. 选择文本
@@ -642,7 +761,7 @@ public class MainActivity extends Activity {
                         showConfirmDialog("确定修改本条消息？", new Runnable() {
                             public void run() {
                                 msg.content = newContent;
-                                messageAdapter.notifyDataSetChanged();
+                                refreshWebView();
                                 conversationManager.saveCurrentConversation();
                                 Toast.makeText(MainActivity.this, "已修改", Toast.LENGTH_SHORT).show();
                             }
@@ -661,7 +780,8 @@ public class MainActivity extends Activity {
         showConfirmDialog("确定删除本条消息？\n\n" + preview, new Runnable() {
             public void run() {
                 messages.remove(pos);
-                messageAdapter.notifyDataSetChanged();
+                // Rebuild all DOM - simpler than reindexing
+                refreshWebView();
                 conversationManager.saveCurrentConversation();
                 Toast.makeText(MainActivity.this, "已删除", Toast.LENGTH_SHORT).show();
             }
@@ -674,7 +794,6 @@ public class MainActivity extends Activity {
         final int n = messages.size() - pos;
 
         if (msg.isAssistant()) {
-            // Verify there's a user message before this AI
             boolean hasUserBefore = false;
             for (int i = pos - 1; i >= 0; i--) {
                 if (messages.get(i).isUser()) { hasUserBefore = true; break; }
@@ -686,8 +805,7 @@ public class MainActivity extends Activity {
             showConfirmDialog("将删除本条及之后共 " + n + " 条消息并重新生成回复，确定？", new Runnable() {
                 public void run() {
                     messages.subList(pos, messages.size()).clear();
-                    messageAdapter.notifyDataSetChanged();
-                    // User message already at end of list, send directly
+                    removeDomFrom(pos);
                     execStreamingRequest();
                 }
             });
@@ -696,12 +814,13 @@ public class MainActivity extends Activity {
             showConfirmDialog("将删除本条及之后共 " + n + " 条消息并重新发送，确定？", new Runnable() {
                 public void run() {
                     messages.subList(pos, messages.size()).clear();
-                    messageAdapter.notifyDataSetChanged();
-                    // Need to add user message back
+                    removeDomFrom(pos);
                     Message um = new Message(Message.ROLE_USER, uc);
                     messages.add(um);
                     conversationManager.getCurrentConversation().touch();
-                    messageAdapter.notifyDataSetChanged();
+                    // Append user message to DOM
+                    String userHtml = MessageHtmlRenderer.renderMessageDiv(um, messages.size() - 1, MainActivity.this);
+                    appendHtml(userHtml);
                     execStreamingRequest();
                 }
             });
@@ -731,7 +850,7 @@ public class MainActivity extends Activity {
         showConfirmDialog("将删除本条之后共 " + n + " 条消息（保留本条），确定？", new Runnable() {
             public void run() {
                 messages.subList(messages.size() - n, messages.size()).clear();
-                messageAdapter.notifyDataSetChanged();
+                refreshWebView();
                 conversationManager.saveCurrentConversation();
                 Toast.makeText(MainActivity.this, "已回溯", Toast.LENGTH_SHORT).show();
             }
@@ -764,8 +883,7 @@ public class MainActivity extends Activity {
 
                 conversationManager.setCurrentConversation(branch);
                 messages = branch.messages;
-                messageAdapter.setMessages(messages);
-                messageAdapter.notifyDataSetChanged();
+                refreshWebView();
                 Toast.makeText(MainActivity.this, "已创建分支: " + branch.title, Toast.LENGTH_SHORT).show();
             }
         });
