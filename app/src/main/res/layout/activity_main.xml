@@ -95,6 +95,17 @@
             android:layout_height="wrap_content"
             android:layout_marginLeft="8dp"
             android:layout_weight="1"/>
+        <Button
+            android:id="@+id/scan_button"
+            android:text="@string/scan"
+            android:textSize="12sp"
+            android:textColor="@android:color/white"
+            android:background="@color/primary"
+            android:paddingLeft="10dp"
+            android:paddingRight="10dp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginLeft="8dp"/>
     </LinearLayout>
 
     <!-- Message display (WebView for rich HTML rendering) -->

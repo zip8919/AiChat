@@ -19,6 +19,7 @@ armv7a Android 4.3 (API 18) 词典笔 AI 对话应用。基于 WebView + HTML/CS
 - **系统提示词预设** — 保存/管理/切换多个系统提示词预设
 - **打断请求** — 长按发送键可中断正在进行的请求
 - **屏幕旋转** — 右上角 ↻ 按钮切换横屏/竖屏
+- **扫描识别** — 横屏扫描界面，调用词典笔系统 OCR 识别文字，支持加载摘抄记录、编辑、复制、插入
 
 ## 构建
 
@@ -45,8 +46,8 @@ gradle assembleDebug
 推送 `v*` 标签触发 GitHub Actions 自动构建和发布：
 
 ```bash
-git tag v1.2.0
-git push origin v1.2.0
+git tag v1.3.5
+git push origin v1.3.5
 ```
 
 需配置 Secrets：`DEEPSEEK_KEY`、`SILICONFLOW_KEY`、`KEYSTORE_PASSWORD`、`KEY_ALIAS`
@@ -83,6 +84,7 @@ git push origin v1.2.0
 │       │   ├── ModelConfigActivity.java
 │       │   ├── ModelInfo.java
 │       │   ├── ProviderInfo.java
+│       │   ├── ScanActivity.java
 │       │   ├── SettingsActivity.java
 │       │   └── StorageManager.java
 │       └── res/

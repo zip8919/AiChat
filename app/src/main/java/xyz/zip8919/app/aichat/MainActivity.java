@@ -32,6 +32,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class MainActivity extends Activity {
     private static final String PREFS_NAME = "aichat_prefs";
     private static final int REQUEST_CONVERSATION_MANAGER = 1;
+    private static final int REQUEST_SCAN = 2;
 
     private ConfigManager configManager;
     private ConversationManager conversationManager;
@@ -151,6 +152,17 @@ public class MainActivity extends Activity {
                         return false;
                 }
                 return false;
+            }
+        });
+
+        // Scan button
+        findViewById(R.id.scan_button).setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                try {
+                    startActivityForResult(new Intent(MainActivity.this, ScanActivity.class), REQUEST_SCAN);
+                } catch (Exception e) {
+                    Toast.makeText(MainActivity.this, "无法启动扫描: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                }
             }
         });
 
@@ -291,6 +303,12 @@ public class MainActivity extends Activity {
                 messages = conv.messages;
                 refreshWebView();
                 Toast.makeText(this, "已切换到: " + conv.title, Toast.LENGTH_SHORT).show();
+            }
+        } else if (requestCode == REQUEST_SCAN && resultCode == RESULT_OK) {
+            String text = data.getStringExtra("scan_text");
+            if (text != null && !text.isEmpty()) {
+                inputEditText.setText(text);
+                inputEditText.setSelection(text.length());
             }
         }
     }

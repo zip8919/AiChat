@@ -36,6 +36,13 @@
             android:configChanges="screenSize|orientation|keyboardHidden"/>
 
         <activity
+            android:label="@string/scan_title"
+            android:name="xyz.zip8919.app.aichat.ScanActivity"
+            android:exported="false"
+            android:screenOrientation="landscape"
+            android:configChanges="screenSize|orientation|keyboardHidden"/>
+
+        <activity
             android:label="模型配置"
             android:name="xyz.zip8919.app.aichat.ModelConfigActivity"
             android:exported="false"

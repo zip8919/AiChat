@@ -6,7 +6,7 @@ param(
 )
 
 Write-Host "=========================================" -ForegroundColor Cyan
-Write-Host "  AiChat Build Script v1.3.0" -ForegroundColor Cyan
+Write-Host "  AiChat Build Script v1.3.5" -ForegroundColor Cyan
 Write-Host "=========================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -42,7 +42,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $timestamp = Get-Date -Format "yyyyMMdd-HHmm"
-$output = "AiChat-v1.3.0-$timestamp-release.apk"
+$output = "AiChat-v1.3.5-$timestamp-release.apk"
 Copy-Item "app\build\outputs\apk\release\app-release.apk" $output -Force
 
 Write-Host ""
