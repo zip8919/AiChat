@@ -32,7 +32,7 @@ jobs:
           chmod +x gradlew
           export KEYSTORE_PASSWORD="${{ secrets.KEYSTORE_PASSWORD }}"
           export KEY_ALIAS="${{ secrets.KEY_ALIAS }}"
-          ./gradlew assembleRelease --info \
+          ./gradlew assembleRelease \
             -PdeepseekKey="${{ secrets.DEEPSEEK_KEY }}" \
             -PsiliconflowKey="${{ secrets.SILICONFLOW_KEY }}"
 
