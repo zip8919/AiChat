@@ -32,9 +32,11 @@ jobs:
           chmod +x gradlew
           export KEYSTORE_PASSWORD="${{ secrets.KEYSTORE_PASSWORD }}"
           export KEY_ALIAS="${{ secrets.KEY_ALIAS }}"
-          ./gradlew assembleRelease \
+          ./gradlew assembleRelease --stacktrace \
             -PdeepseekKey="${{ secrets.DEEPSEEK_KEY }}" \
-            -PsiliconflowKey="${{ secrets.SILICONFLOW_KEY }}"
+            -PsiliconflowKey="${{ secrets.SILICONFLOW_KEY }}" \
+            -PkeystorePassword="${{ secrets.KEYSTORE_PASSWORD }}" \
+            -PkeyAlias="${{ secrets.KEY_ALIAS }}"
 
       - name: Upload APK to Release
         uses: softprops/action-gh-release@v2
