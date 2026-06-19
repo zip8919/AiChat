@@ -8,12 +8,16 @@ import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.res.Configuration;
+import android.graphics.Color;
+import android.graphics.drawable.ColorDrawable;
 import android.net.Uri;
 import java.net.HttpURLConnection;
 import android.os.Bundle;
 import android.os.Handler;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewGroup;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
@@ -29,6 +33,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 public class MainActivity extends Activity {
     private static final String PREFS_NAME = "aichat_prefs";
@@ -54,6 +60,15 @@ public class MainActivity extends Activity {
     private HttpURLConnection currentConnection;
     private Thread currentRequestThread;
     private Handler handler = new Handler();
+
+    // Image viewer dialog state
+    private AlertDialog imageViewerDialog;
+    private WebView imageViewerWebView;
+    private TextView imageCounterText;
+    private Button prevButton, nextButton, zoomOutBtn, zoomInBtn, rotateBtn;
+    private List<ImageInfo> currentImageList;
+    private int currentImageIndex;
+    private int currentRotation;
 
     private String currentModel;
     private String currentApiKey;
@@ -339,6 +354,17 @@ public class MainActivity extends Activity {
     protected void onStop() {
         super.onStop();
         conversationManager.saveCurrentConversation();
+    }
+
+    @Override
+    public void onConfigurationChanged(Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        // 旋转时重新适配图片查看器尺寸
+        if (imageViewerDialog != null && imageViewerDialog.isShowing()) {
+            imageViewerDialog.getWindow().setLayout(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT);
+        }
     }
 
     private void sendMessage() {
@@ -673,6 +699,13 @@ public class MainActivity extends Activity {
                 .replace("\r", "\\r");
     }
 
+    // ========== Image info ==========
+
+    private static class ImageInfo {
+        String src;
+        String alt;
+    }
+
     // ========== JavaScript bridge ==========
 
     class JsBridge {
@@ -728,6 +761,169 @@ public class MainActivity extends Activity {
                 }
             });
         }
+
+        @JavascriptInterface
+        public void showImageViewer(final String indexStr, final String imagesJson) {
+            handler.post(new Runnable() {
+                public void run() {
+                    try {
+                        showImageViewerDialog(Integer.parseInt(indexStr), imagesJson);
+                    } catch (Exception e) {
+                        Toast.makeText(MainActivity.this, "查看图片失败", Toast.LENGTH_SHORT).show();
+                    }
+                }
+            });
+        }
+    }
+
+    // ========== 图片查看器 ==========
+
+    private void showImageViewerDialog(int index, String imagesJson) {
+        if (imageViewerDialog != null && imageViewerDialog.isShowing()) {
+            imageViewerDialog.dismiss();
+        }
+
+        List<ImageInfo> images = new ArrayList<>();
+        try {
+            JSONArray arr = new JSONArray(imagesJson);
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject obj = arr.getJSONObject(i);
+                ImageInfo info = new ImageInfo();
+                info.src = obj.getString("src");
+                info.alt = obj.optString("alt", "");
+                images.add(info);
+            }
+        } catch (Exception e) {
+            Toast.makeText(this, "无法加载图片列表", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        if (images.isEmpty() || index < 0 || index >= images.size()) {
+            Toast.makeText(this, "图片不可用", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        currentImageList = images;
+        currentImageIndex = index;
+        currentRotation = 0;
+
+        View view = getLayoutInflater().inflate(R.layout.dialog_image_viewer, null);
+        imageViewerWebView = (WebView) view.findViewById(R.id.viewer_webview);
+        imageCounterText = (TextView) view.findViewById(R.id.viewer_counter);
+        prevButton = (Button) view.findViewById(R.id.viewer_prev);
+        nextButton = (Button) view.findViewById(R.id.viewer_next);
+        zoomOutBtn = (Button) view.findViewById(R.id.viewer_zoom_out);
+        zoomInBtn = (Button) view.findViewById(R.id.viewer_zoom_in);
+        rotateBtn = (Button) view.findViewById(R.id.viewer_rotate);
+        Button closeBtn = (Button) view.findViewById(R.id.viewer_close);
+
+        // Configure WebView for pinch-to-zoom and double-tap zoom
+        imageViewerWebView.getSettings().setJavaScriptEnabled(true);
+        imageViewerWebView.getSettings().setBuiltInZoomControls(true);
+        imageViewerWebView.getSettings().setDisplayZoomControls(false);
+        imageViewerWebView.getSettings().setUseWideViewPort(true);
+        imageViewerWebView.getSettings().setLoadWithOverviewMode(true);
+        imageViewerWebView.getSettings().setSupportZoom(true);
+        imageViewerWebView.setBackgroundColor(Color.BLACK);
+        imageViewerWebView.setWebViewClient(new WebViewClient() {
+            public boolean shouldOverrideUrlLoading(WebView view, String url) {
+                return true;
+            }
+        });
+
+        prevButton.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                if (currentImageIndex > 0) {
+                    currentImageIndex--;
+                    currentRotation = 0;
+                    loadCurrentImage();
+                }
+            }
+        });
+
+        nextButton.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                if (currentImageIndex < currentImageList.size() - 1) {
+                    currentImageIndex++;
+                    currentRotation = 0;
+                    loadCurrentImage();
+                }
+            }
+        });
+
+        zoomOutBtn.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                imageViewerWebView.zoomOut();
+            }
+        });
+
+        zoomInBtn.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                imageViewerWebView.zoomIn();
+            }
+        });
+
+        rotateBtn.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                currentRotation = (currentRotation + 90) % 360;
+                loadCurrentImage();
+            }
+        });
+
+        closeBtn.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                if (imageViewerDialog != null) imageViewerDialog.dismiss();
+            }
+        });
+
+        imageViewerDialog = new AlertDialog.Builder(this)
+                .setView(view)
+                .setCancelable(true)
+                .create();
+
+        imageViewerDialog.setOnDismissListener(new DialogInterface.OnDismissListener() {
+            public void onDismiss(DialogInterface dialog) {
+                if (imageViewerWebView != null) {
+                    imageViewerWebView.destroy();
+                    imageViewerWebView = null;
+                }
+                imageViewerDialog = null;
+            }
+        });
+
+        imageViewerDialog.getWindow().setLayout(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT);
+        imageViewerDialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.BLACK));
+
+        imageViewerDialog.show();
+        loadCurrentImage();
+    }
+
+    private void loadCurrentImage() {
+        if (currentImageList == null || imageCounterText == null) return;
+
+        ImageInfo info = currentImageList.get(currentImageIndex);
+        imageCounterText.setText((currentImageIndex + 1) + "/" + currentImageList.size());
+        prevButton.setEnabled(currentImageIndex > 0);
+        nextButton.setEnabled(currentImageIndex < currentImageList.size() - 1);
+
+        String src = jsEscape(info.src);
+        String rotateCss = currentRotation != 0
+                ? "-webkit-transform:rotate(" + currentRotation + "deg);transform:rotate(" + currentRotation + "deg);"
+                : "";
+
+        String html = "<!DOCTYPE html><html><head>" +
+                "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1.0,user-scalable=yes\">" +
+                "<style>" +
+                "*{margin:0;padding:0;}" +
+                "html,body{width:100%;height:100%;background:#000;display:flex;align-items:center;justify-content:center;}" +
+                "img{max-width:100%;max-height:100%;" + rotateCss + "}" +
+                "</style></head><body>" +
+                "<img src=\"" + src + "\" alt=\"" + jsEscape(info.alt) + "\">" +
+                "</body></html>";
+
+        imageViewerWebView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null);
     }
 
     // ========== 消息长按菜单 ==========

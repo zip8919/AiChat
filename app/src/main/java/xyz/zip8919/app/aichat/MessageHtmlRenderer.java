@@ -73,6 +73,7 @@ public class MessageHtmlRenderer {
             "th{background:#f0f0f0;font-weight:bold;}" +
             "a{color:#2196F3;text-decoration:none;}" +
             "img{max-width:100%;height:auto;}" +
+            ".math-block img,.math-inline,.msg img{-webkit-tap-highlight-color:rgba(255,255,255,0.3);}" +
             ".math-block{display:block;text-align:center;margin:12px 0;padding:8px;}" +
             ".math-block img{max-width:100%;height:auto;}" +
             ".math-inline{display:inline;vertical-align:middle;}" +
@@ -106,7 +107,10 @@ public class MessageHtmlRenderer {
             ".fn-ref a{color:#2196F3;text-decoration:none;}" +
             ".fn-def{font-size:12px;color:#888;border-top:1px solid #eee;" +
             "padding:4px 0;margin:6px 0;}" +
-            ".fn-def sup a{color:#888;text-decoration:none;}";
+            ".fn-def sup a{color:#888;text-decoration:none;}" +
+            ".chem{font-family:'Times New Roman',serif;font-style:normal;}" +
+            ".chem sub{font-size:0.8em;}" +
+            ".chem sup{font-size:0.8em;}";
 
     private static final String JS =
             "(function(){" +
@@ -146,11 +150,20 @@ public class MessageHtmlRenderer {
             "document.addEventListener('touchcancel',function(){" +
             "if(lpTimer){clearTimeout(lpTimer);lpTimer=null;}});" +
             "document.addEventListener('click',function(e){" +
-            "var t=e.target;" +
+            "var t=e.target,imgEl=null;" +
             "while(t&&t!==document.body){" +
-            "if(t.tagName==='A'){e.preventDefault();" +
+            "if(!imgEl&&t.tagName==='IMG')imgEl=t;" +
+            "if(!imgEl&&t.tagName==='A'){e.preventDefault();" +
             "if(window.Android)Android.openUrl(t.href);return false;}" +
             "t=t.parentElement;}" +
+            "if(imgEl){" +
+            "e.preventDefault();e.stopPropagation();" +
+            "var all=[],imgs=document.querySelectorAll('.msg img'),ci=-1;" +
+            "for(var i=0;i<imgs.length;i++){" +
+            "if(imgs[i]===imgEl)ci=all.length;" +
+            "all.push({src:imgs[i].src,alt:imgs[i].alt||''});}" +
+            "if(ci>=0&&window.Android)Android.showImageViewer(''+ci,JSON.stringify(all));" +
+            "return false;}" +
             "});" +
             "window.toggleThinking=function(btn){" +
             "var b=btn.nextElementSibling;if(!b)return;" +
@@ -282,18 +295,262 @@ public class MessageHtmlRenderer {
     private static String renderMarkdown(String text, Context ctx) {
         List<String> mathTags = new ArrayList<>();
         float density = ctx.getResources().getDisplayMetrics().density;
+        text = extractAndRenderCe(text, density, latexDir, mathTags);   // \ce → LaTeX → jlatexmath image
         text = extractAndRenderLatex(text, density, latexDir, mathTags);
         text = renderBareLatexCommands(text, density, latexDir, mathTags);
         text = preProcessExtensions(text);
         Node document = PARSER.parse(text);
         StringBuilder html = new StringBuilder();
         document.accept(new HtmlVisitor(html));
-        // Replace @@MATHn@@ placeholders with actual rendered HTML
         String result = html.toString();
         for (int i = 0; i < mathTags.size(); i++)
             result = result.replace("@@MATH" + i + "@@", mathTags.get(i));
         return result;
     }
+
+    // Strip leading $$ or $ from output buffer and return prefix length (0/1/2).
+    // Only strips if the math block contains only this command (just whitespace around it)
+    // and the matching closer immediately follows in text at cmdEnd.
+    private static int stripMathWrapOut(String text, int cmdEnd, StringBuilder out) {
+        int olen = out.length();
+        // Check for "$$" prefix
+        if (olen >= 2 && out.charAt(olen-2)=='$' && out.charAt(olen-1)=='$') {
+            int j = cmdEnd;
+            while (j < text.length() && (text.charAt(j)==' ' || text.charAt(j)=='\t')) j++;
+            if (j+1 < text.length() && text.charAt(j)=='$' && text.charAt(j+1)=='$') return 2;
+        }
+        // Check for single "$" prefix (but not "$$")
+        if (olen >= 1 && out.charAt(olen-1)=='$'
+                && (olen < 2 || out.charAt(olen-2)!='$')) {
+            int j = cmdEnd;
+            while (j < text.length() && (text.charAt(j)==' ' || text.charAt(j)=='\t')) j++;
+            if (j < text.length() && text.charAt(j)=='$'
+                    && (j+1 >= text.length() || text.charAt(j+1)!='$')) return 1;
+        }
+        return 0;
+    }
+
+    // Skip closing math delimiter in text at position i
+    private static int skipMathSuffix(String text, int i, int prefixLen) {
+        while (i < text.length() && (text.charAt(i)==' ' || text.charAt(i)=='\t')) i++;
+        if (prefixLen == 2 && i+1 < text.length() && text.charAt(i)=='$' && text.charAt(i+1)=='$') i+=2;
+        else if (prefixLen == 1 && i < text.length() && text.charAt(i)=='$') i++;
+        return i;
+    }
+
+    // Check if position pos is inside a backtick code span (odd number of ` before pos)
+    private static boolean insideBacktickSpan(StringBuilder out) {
+        int bt = 0;
+        for (int k = 0; k < out.length(); k++) {
+            if (out.charAt(k) == '`') bt++;
+        }
+        return (bt % 2) == 1;
+    }
+
+    // Extract \ce{...} → convert to LaTeX → render with jlatexmath → @@MATHn@@ image.
+    private static String extractAndRenderCe(String text, float density, File latexDir, List<String> mathTags) {
+        StringBuilder out = new StringBuilder();
+        int i = 0;
+        while (i < text.length()) {
+            if (text.charAt(i) == '\\' && i + 3 < text.length()
+                    && text.charAt(i + 1) == 'c' && text.charAt(i + 2) == 'e'
+                    && text.charAt(i + 3) == '{'
+                    && !insideBacktickSpan(out)) {
+                i += 4;
+                int depth = 1, cs = i;
+                while (i < text.length() && depth > 0) {
+                    if (text.charAt(i) == '{') depth++;
+                    else if (text.charAt(i) == '}') depth--;
+                    i++;
+                }
+                int ce = i;
+                String formula = text.substring(cs, ce - 1);
+
+                int pfx = stripMathWrapOut(text, ce, out);
+                if (pfx > 0) out.setLength(out.length() - pfx);
+
+                // Convert \ce content to proper LaTeX and render as image
+                String latex = ceToLatex(formula);
+                String imgHtml = renderLatexImg(latex, true, density, latexDir);
+                mathTags.add(imgHtml);
+                out.append("@@MATH").append(mathTags.size() - 1).append("@@");
+
+                if (pfx > 0) i = skipMathSuffix(text, i, pfx);
+            } else {
+                out.append(text.charAt(i));
+                i++;
+            }
+        }
+        return out.toString();
+    }
+
+    // Convert \ce{} formula content to jlatexmath-compatible LaTeX.
+    // - Subscripts: H2O → H_{2}O, C6H12O6 → C_{6}H_{12}O_{6}
+    // - Superscripts: Ca^2+ → Ca^{2+}
+    // - Isotopes: ^{227}_{90}Th → ^{227}_{90}Th (pass through)
+    // - Arrows: -> → \rightarrow, <- → \leftarrow
+    // - Arrow conditions: ->[above] → \xrightarrow{above}, ->[above][below] → \xrightarrow[below]{above}
+    // - <=> → \rightleftharpoons, <=>[above] → \xrightleftharpoons{above}
+    // - Bare \commands like \Delta pass through unchanged
+    static String ceToLatex(String formula) {
+        StringBuilder out = new StringBuilder();
+        int i = 0, len = formula.length();
+        boolean justHadLetter = false;
+
+        while (i < len) {
+            char c = formula.charAt(i);
+
+            // Pass through LaTeX commands like \Delta, \text{...}, etc.
+            if (c == '\\' && i + 1 < len && Character.isLetter(formula.charAt(i + 1))) {
+                int start = i;
+                i++;
+                while (i < len && Character.isLetter(formula.charAt(i))) i++;
+                String cmd = formula.substring(start, i);
+                // Handle \text{...} and other commands with braces
+                if (i < len && formula.charAt(i) == '{') {
+                    i++;
+                    int bd = 1, bs = i;
+                    while (i < len && bd > 0) {
+                        if (formula.charAt(i) == '{') bd++;
+                        else if (formula.charAt(i) == '}') bd--;
+                        i++;
+                    }
+                    String arg = formula.substring(bs, i - 1);
+                    if (cmd.equals("\\text")) {
+                        out.append("\\text{").append(arg).append("}");
+                    } else {
+                        out.append(cmd).append("{").append(arg).append("}");
+                    }
+                } else {
+                    out.append(cmd);
+                }
+                justHadLetter = false;
+                continue;
+            }
+
+            // Arrow with optional conditions: ->[above][below]
+            boolean isArrow = false;
+            String arrowCmd = null;
+            int arrowLen = 0;
+            boolean hasConditions = false;
+
+            if (c == '-' && i + 1 < len && formula.charAt(i + 1) == '>') {
+                // ->  — need to check if conditions follow
+                arrowLen = 2;
+                // Peek ahead
+                int j = i + 2;
+                if (j < len && formula.charAt(j) == '[') arrowCmd = "\\xrightarrow";
+                else arrowCmd = "\\rightarrow";
+                isArrow = true;
+            } else if (c == '<' && i + 1 < len && formula.charAt(i + 1) == '-') {
+                arrowLen = 2;
+                int j = i + 2;
+                if (j < len && formula.charAt(j) == '[') arrowCmd = "\\xleftarrow";
+                else arrowCmd = "\\leftarrow";
+                isArrow = true;
+            }
+
+            if (isArrow) {
+                i += arrowLen;
+                String above = null, below = null;
+                if (i < len && formula.charAt(i) == '[') {
+                    above = extractBracketArg(formula, i);
+                    i += above.length() + 2;
+                    // Recursively convert any \Delta etc inside the condition
+                    if (above.contains("\\")) above = ceToLatex(above);
+                }
+                if (i < len && formula.charAt(i) == '[') {
+                    below = extractBracketArg(formula, i);
+                    i += below.length() + 2;
+                    if (below.contains("\\")) below = ceToLatex(below);
+                }
+                if (above != null && below != null) {
+                    out.append("\\xrightarrow[").append(below).append("]{").append(above).append("}");
+                } else if (above != null) {
+                    out.append("\\xrightarrow{").append(above).append("}");
+                } else {
+                    out.append(arrowCmd);
+                }
+                justHadLetter = false;
+                continue;
+            }
+
+            // Superscript ^
+            if (c == '^') {
+                i++;
+                out.append("^{");
+                while (i < len && (Character.isDigit(formula.charAt(i))
+                        || formula.charAt(i) == '+' || formula.charAt(i) == '-')) {
+                    out.append(formula.charAt(i));
+                    i++;
+                }
+                out.append("}");
+                justHadLetter = false;
+                continue;
+            }
+
+            // Subscript with _ (already LaTeX-compatible, just pass through)
+            if (c == '_') {
+                i++;
+                out.append("_{");
+                if (i < len && formula.charAt(i) == '{') {
+                    i++;
+                    int bd = 1;
+                    while (i < len && bd > 0) {
+                        if (formula.charAt(i) == '{') bd++;
+                        else if (formula.charAt(i) == '}') bd--;
+                        if (bd > 0) out.append(formula.charAt(i));
+                        i++;
+                    }
+                } else {
+                    while (i < len && Character.isDigit(formula.charAt(i))) {
+                        out.append(formula.charAt(i));
+                        i++;
+                    }
+                }
+                out.append("}");
+                justHadLetter = false;
+                continue;
+            }
+
+            // Digit after element letter → subscript
+            if (Character.isDigit(c) && justHadLetter) {
+                out.append("_{");
+                while (i < len && Character.isDigit(formula.charAt(i))) {
+                    out.append(formula.charAt(i));
+                    i++;
+                }
+                out.append("}");
+                justHadLetter = false;
+                continue;
+            }
+
+            if (Character.isLetter(c)) {
+                out.append(c);
+                justHadLetter = true;
+                i++;
+            } else {
+                out.append(c);
+                justHadLetter = false;
+                i++;
+            }
+        }
+        return out.toString();
+    }
+
+    // Extract content inside [brackets], handling nested brackets
+    private static String extractBracketArg(String s, int start) {
+        // start is index of the opening '['
+        int depth = 1;
+        int i = start + 1;
+        while (i < s.length() && depth > 0) {
+            if (s.charAt(i) == '[') depth++;
+            else if (s.charAt(i) == ']') depth--;
+            i++;
+        }
+        return s.substring(start + 1, i - 1); // content between [ and ]
+    }
+
 
     // Detect and render bare \command or \command{args} that aren't inside $...$
     private static String renderBareLatexCommands(String text, float density, File dir, List<String> mathTags) {
