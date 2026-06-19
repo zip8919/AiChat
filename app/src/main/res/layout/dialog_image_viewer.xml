@@ -11,6 +11,7 @@
         android:layout_above="@+id/viewer_bottom_bar"
         android:layout_alignParentTop="true" />
 
+    <!-- 底部导航栏：prev / counter / next -->
     <LinearLayout
         android:id="@+id/viewer_bottom_bar"
         android:layout_width="match_parent"
@@ -26,33 +27,6 @@
             android:layout_height="match_parent"
             android:text="◀"
             android:textSize="20sp"
-            android:textColor="#FFFFFF"
-            android:background="@android:color/transparent" />
-
-        <Button
-            android:id="@+id/viewer_zoom_out"
-            android:layout_width="40dp"
-            android:layout_height="match_parent"
-            android:text="⊖"
-            android:textSize="20sp"
-            android:textColor="#FFFFFF"
-            android:background="@android:color/transparent" />
-
-        <Button
-            android:id="@+id/viewer_zoom_in"
-            android:layout_width="40dp"
-            android:layout_height="match_parent"
-            android:text="⊕"
-            android:textSize="20sp"
-            android:textColor="#FFFFFF"
-            android:background="@android:color/transparent" />
-
-        <Button
-            android:id="@+id/viewer_rotate"
-            android:layout_width="40dp"
-            android:layout_height="match_parent"
-            android:text="↻"
-            android:textSize="22sp"
             android:textColor="#FFFFFF"
             android:background="@android:color/transparent" />
 
@@ -76,16 +50,86 @@
             android:background="@android:color/transparent" />
     </LinearLayout>
 
+    <!-- 左上角按钮组：旋转 + 复位 + 背景色 -->
+    <LinearLayout
+        android:id="@+id/viewer_top_left"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_alignParentTop="true"
+        android:layout_alignParentLeft="true"
+        android:layout_margin="4dp"
+        android:orientation="horizontal"
+        android:background="#88000000">
+
+        <Button
+            android:id="@+id/viewer_rotate"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:text="↻"
+            android:textSize="22sp"
+            android:textColor="#FFFFFF"
+            android:background="@android:color/transparent" />
+
+        <Button
+            android:id="@+id/viewer_reset"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:text="#"
+            android:textSize="20sp"
+            android:textColor="#FFFFFF"
+            android:background="@android:color/transparent" />
+
+        <Button
+            android:id="@+id/viewer_bg_toggle"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:text="◐"
+            android:textSize="20sp"
+            android:textColor="#FFFFFF"
+            android:background="@android:color/transparent" />
+    </LinearLayout>
+
+    <!-- 右上角：关闭按钮 -->
     <Button
         android:id="@+id/viewer_close"
         android:layout_width="44dp"
         android:layout_height="44dp"
         android:layout_alignParentTop="true"
         android:layout_alignParentRight="true"
-        android:layout_margin="8dp"
+        android:layout_margin="4dp"
         android:text="✕"
         android:textSize="22sp"
         android:textColor="#FFFFFF"
-        android:background="@android:color/transparent" />
+        android:background="#88000000" />
+
+    <!-- 左侧下方：缩放按钮（竖向） -->
+    <LinearLayout
+        android:id="@+id/viewer_zoom_group"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_above="@+id/viewer_bottom_bar"
+        android:layout_alignParentLeft="true"
+        android:layout_margin="4dp"
+        android:orientation="vertical"
+        android:background="#88000000">
+
+        <Button
+            android:id="@+id/viewer_zoom_in"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:text="+"
+            android:textSize="24sp"
+            android:textColor="#FFFFFF"
+            android:background="@android:color/transparent" />
+
+        <Button
+            android:id="@+id/viewer_zoom_out"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:text="−"
+            android:textSize="26sp"
+            android:textColor="#FFFFFF"
+            android:background="@android:color/transparent" />
+    </LinearLayout>
 
 </RelativeLayout>

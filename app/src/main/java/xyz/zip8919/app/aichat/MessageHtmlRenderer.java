@@ -73,11 +73,13 @@ public class MessageHtmlRenderer {
             "-webkit-tap-highlight-color:rgba(100,180,255,0.3);}" +
             "a{color:#2196F3;text-decoration:none;}" +
             "img,svg{max-width:100%;height:auto;}" +
-            ".msg svg{display:block;overflow:visible;}" +
+            ".msg svg{display:block;overflow:hidden;}" +
+            ".svg-scroll{overflow:auto;-webkit-overflow-scrolling:touch;margin:8px 0;}" +
+            ".svg-scroll svg{width:100%;height:auto;display:block;overflow:visible;}" +
             ".math-block img,.math-block svg,.math-inline,.msg img,.msg svg{-webkit-tap-highlight-color:rgba(255,255,255,0.3);}" +
             ".math-block{display:block;text-align:center;margin:12px 0;padding:8px;}" +
             ".math-block img,.math-block svg{max-width:100%;height:auto;}" +
-            ".math-inline{display:inline;vertical-align:middle;}" +
+            "svg.math-inline{display:inline;vertical-align:middle;}" +
             ".math-inline img,.math-inline svg{height:1.6em;vertical-align:middle;}" +
             "ul,ol{padding-left:24px;margin:4px 0;}" +
             "li{margin:2px 0;}" +
@@ -326,17 +328,46 @@ public class MessageHtmlRenderer {
         for (int i = 0; i < mathTags.size(); i++)
             result = result.replace("@@MATH" + i + "@@", mathTags.get(i));
         for (int i = 0; i < svgBlocks.size(); i++)
-            result = result.replace("@@SVG" + i + "@@", svgBlocks.get(i));
+            result = result.replace("@@SVG" + i + "@@",
+                "<div class=\"svg-scroll\">" + svgBlocks.get(i) + "</div>");
         return result;
     }
 
     // Extract <svg ...>...</svg> blocks (case-insensitive) and replace with placeholders
-    // so commonmark doesn't mangle them (svg is not a recognized HTML block tag)
+    // so commonmark doesn't mangle them (svg is not a recognized HTML block tag).
+    // Skips SVGs inside fenced code blocks (```) and inline code spans (`).
     private static String extractAndProtectSvg(String text, List<String> svgBlocks) {
         StringBuilder out = new StringBuilder();
         int i = 0, len = text.length();
+        boolean inFence = false;
+        boolean inInlineCode = false;
         while (i < len) {
-            if (text.regionMatches(true, i, "<svg", 0, 4)
+            char c = text.charAt(i);
+            // Track fenced code block boundaries
+            if (text.startsWith("```", i)) {
+                inFence = !inFence;
+                out.append("```");
+                i += 3;
+                // skip language info on the same line
+                while (i < len && text.charAt(i) != '\n') { out.append(text.charAt(i)); i++; }
+                continue;
+            }
+            // Track inline code spans
+            if (c == '`' && !inFence) {
+                // Count consecutive backticks
+                int bt = 0, j = i;
+                while (j < len && text.charAt(j) == '`') { bt++; j++; }
+                if (bt == 1) {
+                    inInlineCode = !inInlineCode;
+                    out.append('`');
+                    i++;
+                    continue;
+                }
+                // Multi-backtick sequences (like ``) are rare inline code delimiters;
+                // just copy them through and don't toggle state for simplicity.
+            }
+            if (!inFence && !inInlineCode
+                    && text.regionMatches(true, i, "<svg", 0, 4)
                     && (i + 4 >= len || isTagBoundary(text.charAt(i + 4)))) {
                 int start = i;
                 i += 4;
@@ -354,7 +385,7 @@ public class MessageHtmlRenderer {
                 svgBlocks.add(text.substring(start, i));
                 out.append("@@SVG").append(svgBlocks.size() - 1).append("@@");
             } else {
-                out.append(text.charAt(i));
+                out.append(c);
                 i++;
             }
         }
@@ -365,32 +396,55 @@ public class MessageHtmlRenderer {
         return c == '>' || c == ' ' || c == '\n' || c == '\t' || c == '\r';
     }
 
-    // Strip leading $$ or $ from output buffer and return prefix length (0/1/2).
-    // Only strips if the math block contains only this command (just whitespace around it)
-    // and the matching closer immediately follows in text at cmdEnd.
+    // Strip leading $$, \[, or $ from output buffer and return prefix length (0/1/2).
+    // Only strips if the math wrapper contains only this command and the matching
+    // closer immediately follows in text at cmdEnd.
+    // Looks backward past whitespace/newlines to find the delimiter,
+    // and handles output buffer trimming internally.
     private static int stripMathWrapOut(String text, int cmdEnd, StringBuilder out) {
-        int olen = out.length();
+        int end = out.length();
+        // Skip trailing whitespace
+        while (end > 0) {
+            char c = out.charAt(end - 1);
+            if (c == ' ' || c == '\t' || c == '\n' || c == '\r') end--;
+            else break;
+        }
         // Check for "$$" prefix
-        if (olen >= 2 && out.charAt(olen-2)=='$' && out.charAt(olen-1)=='$') {
+        if (end >= 2 && out.charAt(end-2)=='$' && out.charAt(end-1)=='$') {
             int j = cmdEnd;
             while (j < text.length() && (text.charAt(j)==' ' || text.charAt(j)=='\t')) j++;
-            if (j+1 < text.length() && text.charAt(j)=='$' && text.charAt(j+1)=='$') return 2;
+            if (j+1 < text.length() && text.charAt(j)=='$' && text.charAt(j+1)=='$') {
+                out.setLength(end - 2);
+                return 2;
+            }
+        }
+        // Check for "\[" prefix (LaTeX display math)
+        if (end >= 2 && out.charAt(end-2)=='\\' && out.charAt(end-1)=='[') {
+            int j = cmdEnd;
+            while (j < text.length() && (text.charAt(j)==' ' || text.charAt(j)=='\t' || text.charAt(j)=='\n')) j++;
+            if (j+1 < text.length() && text.charAt(j)=='\\' && text.charAt(j+1)==']') {
+                out.setLength(end - 2);
+                return 2;
+            }
         }
         // Check for single "$" prefix (but not "$$")
-        if (olen >= 1 && out.charAt(olen-1)=='$'
-                && (olen < 2 || out.charAt(olen-2)!='$')) {
+        if (end >= 1 && out.charAt(end-1)=='$' && (end < 2 || out.charAt(end-2)!='$')) {
             int j = cmdEnd;
             while (j < text.length() && (text.charAt(j)==' ' || text.charAt(j)=='\t')) j++;
             if (j < text.length() && text.charAt(j)=='$'
-                    && (j+1 >= text.length() || text.charAt(j+1)!='$')) return 1;
+                    && (j+1 >= text.length() || text.charAt(j+1)!='$')) {
+                out.setLength(end - 1);
+                return 1;
+            }
         }
         return 0;
     }
 
     // Skip closing math delimiter in text at position i
     private static int skipMathSuffix(String text, int i, int prefixLen) {
-        while (i < text.length() && (text.charAt(i)==' ' || text.charAt(i)=='\t')) i++;
+        while (i < text.length() && (text.charAt(i)==' ' || text.charAt(i)=='\t' || text.charAt(i)=='\n')) i++;
         if (prefixLen == 2 && i+1 < text.length() && text.charAt(i)=='$' && text.charAt(i+1)=='$') i+=2;
+        else if (prefixLen == 2 && i+1 < text.length() && text.charAt(i)=='\\' && text.charAt(i+1)==']') i+=2;
         else if (prefixLen == 1 && i < text.length() && text.charAt(i)=='$') i++;
         return i;
     }
@@ -424,7 +478,7 @@ public class MessageHtmlRenderer {
                 String formula = text.substring(cs, ce - 1);
 
                 int pfx = stripMathWrapOut(text, ce, out);
-                if (pfx > 0) out.setLength(out.length() - pfx);
+                // stripMathWrapOut already trimmed the output buffer
 
                 // Convert \ce content to proper LaTeX and render as image
                 String latex = ceToLatex(formula);
@@ -636,12 +690,19 @@ public class MessageHtmlRenderer {
     }
 
 
-    // Detect and render bare \command or \command{args} that aren't inside $...$
+    // Detect and render bare \command or \command{args} that aren't inside $...$ or backticks
     private static String renderBareLatexCommands(String text, float density, List<String> mathTags) {
         StringBuilder out = new StringBuilder();
         int i = 0;
+        boolean inBacktick = false;
         while (i < text.length()) {
-            if (text.charAt(i) == '\\' && i + 1 < text.length()
+            if (text.charAt(i) == '`') {
+                inBacktick = !inBacktick;
+                out.append('`');
+                i++;
+                continue;
+            }
+            if (!inBacktick && text.charAt(i) == '\\' && i + 1 < text.length()
                     && Character.isLetter(text.charAt(i + 1))) {
                 int start = i;
                 i++;
@@ -685,8 +746,16 @@ public class MessageHtmlRenderer {
     private static String extractAndRenderLatex(String text, float density, List<String> mathTags) {
         StringBuilder out = new StringBuilder();
         int i = 0;
+        boolean inBacktick = false;
         while (i < text.length()) {
-            if (text.startsWith("$$", i)) {
+            // Track inline code spans — don't extract math inside backticks
+            if (text.charAt(i) == '`') {
+                inBacktick = !inBacktick;
+                out.append('`');
+                i++;
+                continue;
+            }
+            if (!inBacktick && text.startsWith("$$", i)) {
                 int end = text.indexOf("$$", i + 2);
                 if (end > i) {
                     String html = renderLatexImg(text.substring(i + 2, end).trim(), true, density);
@@ -695,7 +764,7 @@ public class MessageHtmlRenderer {
                     i = end + 2; continue;
                 }
             }
-            if (text.startsWith("\\[", i)) {
+            if (!inBacktick && text.startsWith("\\[", i)) {
                 int end = text.indexOf("\\]", i + 2);
                 if (end > i) {
                     String html = renderLatexImg(text.substring(i + 2, end).trim(), true, density);
@@ -704,7 +773,7 @@ public class MessageHtmlRenderer {
                     i = end + 2; continue;
                 }
             }
-            if (text.charAt(i) == '$' && i + 1 < text.length()
+            if (!inBacktick && text.charAt(i) == '$' && i + 1 < text.length()
                     && text.charAt(i + 1) != '$'
                     && (i == 0 || text.charAt(i - 1) != '$')) {
                 int end = text.indexOf('$', i + 1);
@@ -715,7 +784,7 @@ public class MessageHtmlRenderer {
                     i = end + 1; continue;
                 }
             }
-            if (text.startsWith("\\(", i)) {
+            if (!inBacktick && text.startsWith("\\(", i)) {
                 int end = text.indexOf("\\)", i + 2);
                 if (end > i + 2) {
                     String html = renderLatexImg(text.substring(i + 2, end), false, density);
@@ -736,7 +805,8 @@ public class MessageHtmlRenderer {
         if (cached != null) return cached;
 
         String imgTag = null;
-        float textSize = block ? 24f : 18f;
+        float scale = Math.max(density, 2.5f);
+        float textSize = (block ? 24f : 18f) * scale;
 
         try {
             JLatexMathDrawable d = JLatexMathDrawable.builder(formula)
@@ -745,7 +815,7 @@ public class MessageHtmlRenderer {
             int h = d.getIntrinsicHeight();
 
             if (w > 0 && h > 0) {
-                int maxW = (int)(280 * density);
+                int maxW = (int)(400 * density);
                 if (w > maxW) { float s = (float) maxW / w;
                     d = JLatexMathDrawable.builder(formula).textSize(textSize * s)
                             .background(0xFFFFFFFF).build();
@@ -765,13 +835,13 @@ public class MessageHtmlRenderer {
                 bmp.recycle();
 
                 String alt = escAttr(formula);
-                // Wrap PNG in SVG <image> — true SVG tag with pixel-perfect rendering
+                // SVG without width/height attrs — CSS controls display size,
+                // viewBox maps the high-res bitmap to the proper display dimensions.
                 String svgNs = "http://www.w3.org/2000/svg";
                 String xlinkNs = "http://www.w3.org/1999/xlink";
                 if (block) {
                     imgTag = "<div class=\"math-block\">" +
                         "<svg xmlns=\"" + svgNs + "\" xmlns:xlink=\"" + xlinkNs + "\"" +
-                        " width=\"" + w + "\" height=\"" + h + "\"" +
                         " viewBox=\"0 0 " + w + " " + h + "\"" +
                         " style=\"max-width:100%;height:auto;\">" +
                         "<image width=\"" + w + "\" height=\"" + h + "\"" +
@@ -780,7 +850,6 @@ public class MessageHtmlRenderer {
                 } else {
                     imgTag = "<svg xmlns=\"" + svgNs + "\" xmlns:xlink=\"" + xlinkNs + "\"" +
                         " class=\"math-inline\"" +
-                        " width=\"" + w + "\" height=\"" + h + "\"" +
                         " viewBox=\"0 0 " + w + " " + h + "\"" +
                         " style=\"height:1.6em;vertical-align:middle;\">" +
                         "<image width=\"" + w + "\" height=\"" + h + "\"" +

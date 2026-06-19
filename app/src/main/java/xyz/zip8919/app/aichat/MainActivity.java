@@ -65,15 +65,17 @@ public class MainActivity extends Activity {
     private AlertDialog imageViewerDialog;
     private WebView imageViewerWebView;
     private TextView imageCounterText;
-    private Button prevButton, nextButton, zoomOutBtn, zoomInBtn, rotateBtn;
+    private Button prevButton, nextButton, zoomOutBtn, zoomInBtn, rotateBtn, resetBtn, bgToggleBtn;
     private List<ImageInfo> currentImageList;
     private int currentImageIndex;
     private int currentRotation;
+    private int currentBgColor; // 0=white, 1=gray, 2=black
 
     // Table viewer dialog state
     private AlertDialog tableViewerDialog;
     private WebView tableViewerWebView;
     private int tableRotation;
+    private int tableBgColor; // 0=white, 1=gray, 2=black
 
     private String currentModel;
     private String currentApiKey;
@@ -828,6 +830,9 @@ public class MainActivity extends Activity {
         currentImageList = images;
         currentImageIndex = index;
         currentRotation = 0;
+        // Default bg: white for SVG (often dark lines on transparent), black for raster
+        ImageInfo firstInfo = images.get(index);
+        currentBgColor = ("svg".equals(firstInfo.type)) ? 0 : 2;
 
         View view = getLayoutInflater().inflate(R.layout.dialog_image_viewer, null);
         imageViewerWebView = (WebView) view.findViewById(R.id.viewer_webview);
@@ -837,6 +842,8 @@ public class MainActivity extends Activity {
         zoomOutBtn = (Button) view.findViewById(R.id.viewer_zoom_out);
         zoomInBtn = (Button) view.findViewById(R.id.viewer_zoom_in);
         rotateBtn = (Button) view.findViewById(R.id.viewer_rotate);
+        resetBtn = (Button) view.findViewById(R.id.viewer_reset);
+        bgToggleBtn = (Button) view.findViewById(R.id.viewer_bg_toggle);
         Button closeBtn = (Button) view.findViewById(R.id.viewer_close);
 
         // Configure WebView for pinch-to-zoom and double-tap zoom
@@ -858,6 +865,8 @@ public class MainActivity extends Activity {
                 if (currentImageIndex > 0) {
                     currentImageIndex--;
                     currentRotation = 0;
+                    ImageInfo info = currentImageList.get(currentImageIndex);
+                    currentBgColor = ("svg".equals(info.type)) ? 0 : 2;
                     loadCurrentImage();
                 }
             }
@@ -868,6 +877,8 @@ public class MainActivity extends Activity {
                 if (currentImageIndex < currentImageList.size() - 1) {
                     currentImageIndex++;
                     currentRotation = 0;
+                    ImageInfo info = currentImageList.get(currentImageIndex);
+                    currentBgColor = ("svg".equals(info.type)) ? 0 : 2;
                     loadCurrentImage();
                 }
             }
@@ -875,13 +886,13 @@ public class MainActivity extends Activity {
 
         zoomOutBtn.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
-                imageViewerWebView.loadUrl("javascript:viewerZoom(0.8)");
+                viewerEvalJs(imageViewerWebView, "viewerZoom(0.8)");
             }
         });
 
         zoomInBtn.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
-                imageViewerWebView.loadUrl("javascript:viewerZoom(1.25)");
+                viewerEvalJs(imageViewerWebView, "viewerZoom(1.25)");
             }
         });
 
@@ -889,6 +900,20 @@ public class MainActivity extends Activity {
             public void onClick(View v) {
                 currentRotation = (currentRotation + 90) % 360;
                 loadCurrentImage();
+            }
+        });
+
+        resetBtn.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                currentRotation = 0;
+                loadCurrentImage();
+            }
+        });
+
+        bgToggleBtn.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                currentBgColor = (currentBgColor + 1) % 3;
+                applyBgColor();
             }
         });
 
@@ -930,38 +955,49 @@ public class MainActivity extends Activity {
         prevButton.setEnabled(currentImageIndex > 0);
         nextButton.setEnabled(currentImageIndex < currentImageList.size() - 1);
 
+        String bgColor = getBgColorHex(currentBgColor);
+
         String rotateCss = currentRotation != 0
                 ? "-webkit-transform:rotate(" + currentRotation + "deg);transform:rotate(" + currentRotation + "deg);"
                 : "";
 
         String html;
         if ("svg".equals(info.type) && info.svg != null && !info.svg.isEmpty()) {
-            // Pure vector SVG (AI-generated) — embed directly for full fidelity
+            // Pure vector SVG — no flex centering, natural flow with scrolling
             String svgHtml = info.svg;
             html = "<!DOCTYPE html><html><head>" +
                     "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1.0,user-scalable=yes\">" +
                     "<style>" +
                     "*{margin:0;padding:0;}" +
-                    "html,body{width:100%;height:100%;background:#000;display:flex;align-items:center;justify-content:center;}" +
-                    ".svg-wrap{max-width:100%;max-height:100%;" + rotateCss + "}" +
-                    ".svg-wrap svg{max-width:100%;max-height:100%;display:block;}" +
+                    "html,body{width:100%;min-height:100%;background:" + bgColor + ";" +
+                    "overflow:auto;-webkit-transform-origin:0 0;transform-origin:0 0;}" +
+                    ".svg-wrap{width:100%;max-width:100%;" + rotateCss + "}" +
+                    ".svg-wrap svg{width:100%;height:auto;max-width:100%;display:block;}" +
                     "</style>" +
-                    "<script>var vZoom=1;function viewerZoom(f){vZoom=Math.min(5,Math.max(0.1,vZoom*f));document.body.style.zoom=vZoom;}</script>" +
+                    "<script>var vZoom=1;function viewerZoom(f){vZoom=Math.min(5,Math.max(0.1,vZoom*f));" +
+                    "var t='scale('+vZoom+')';" +
+                    "document.body.style.webkitTransform=t;document.body.style.transform=t;}" +
+                    "function viewerSetBg(c){document.body.style.backgroundColor=c;}</script>" +
                     "</head><body>" +
                     "<div class=\"svg-wrap\">" + svgHtml + "</div>" +
                     "</body></html>";
         } else {
-            // Raster image (PNG data URI or external URL)
+            // Raster image — flex centering for single image
             String src = MessageHtmlRenderer.escAttr(info.src);
             String alt = MessageHtmlRenderer.escAttr(info.alt);
             html = "<!DOCTYPE html><html><head>" +
                     "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1.0,user-scalable=yes\">" +
                     "<style>" +
                     "*{margin:0;padding:0;}" +
-                    "html,body{width:100%;height:100%;background:#000;display:flex;align-items:center;justify-content:center;}" +
+                    "html,body{width:100%;min-height:100%;background:" + bgColor + ";" +
+                    "display:flex;align-items:center;justify-content:center;" +
+                    "overflow:auto;-webkit-transform-origin:0 0;transform-origin:0 0;}" +
                     "img,svg{max-width:100%;max-height:100%;" + rotateCss + "}" +
                     "</style>" +
-                    "<script>var vZoom=1;function viewerZoom(f){vZoom=Math.min(5,Math.max(0.1,vZoom*f));document.body.style.zoom=vZoom;}</script>" +
+                    "<script>var vZoom=1;function viewerZoom(f){vZoom=Math.min(5,Math.max(0.1,vZoom*f));" +
+                    "var t='scale('+vZoom+')';" +
+                    "document.body.style.webkitTransform=t;document.body.style.transform=t;}" +
+                    "function viewerSetBg(c){document.body.style.backgroundColor=c;}</script>" +
                     "</head><body>" +
                     "<img src=\"" + src + "\" alt=\"" + alt + "\">" +
                     "</body></html>";
@@ -983,6 +1019,7 @@ public class MainActivity extends Activity {
         }
 
         tableRotation = 0;
+        tableBgColor = 0; // default white for table viewer
 
         View view = getLayoutInflater().inflate(R.layout.dialog_image_viewer, null);
         tableViewerWebView = (WebView) view.findViewById(R.id.viewer_webview);
@@ -995,6 +1032,8 @@ public class MainActivity extends Activity {
         Button zoomOutBtn = (Button) view.findViewById(R.id.viewer_zoom_out);
         Button zoomInBtn = (Button) view.findViewById(R.id.viewer_zoom_in);
         Button rotateBtn = (Button) view.findViewById(R.id.viewer_rotate);
+        Button resetBtn = (Button) view.findViewById(R.id.viewer_reset);
+        Button bgToggleBtn = (Button) view.findViewById(R.id.viewer_bg_toggle);
         Button closeBtn = (Button) view.findViewById(R.id.viewer_close);
 
         tableViewerWebView.getSettings().setJavaScriptEnabled(true);
@@ -1011,15 +1050,27 @@ public class MainActivity extends Activity {
         });
 
         zoomOutBtn.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) { tableViewerWebView.loadUrl("javascript:viewerZoom(0.8)"); }
+            public void onClick(View v) { viewerEvalJs(tableViewerWebView, "viewerZoom(0.8)"); }
         });
         zoomInBtn.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) { tableViewerWebView.loadUrl("javascript:viewerZoom(1.25)"); }
+            public void onClick(View v) { viewerEvalJs(tableViewerWebView, "viewerZoom(1.25)"); }
         });
         rotateBtn.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 tableRotation = (tableRotation + 90) % 360;
                 loadTableContent(tableHtml);
+            }
+        });
+        resetBtn.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                tableRotation = 0;
+                loadTableContent(tableHtml);
+            }
+        });
+        bgToggleBtn.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                tableBgColor = (tableBgColor + 1) % 3;
+                applyBgColor();
             }
         });
         closeBtn.setOnClickListener(new View.OnClickListener() {
@@ -1078,24 +1129,59 @@ public class MainActivity extends Activity {
                 "</script>";
         }
 
+        String bgColor = getBgColorHex(tableBgColor);
+
         String html = "<!DOCTYPE html><html><head>" +
                 "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1.0,user-scalable=yes\">" +
                 "<style>" +
                 "*{margin:0;padding:0;}" +
-                "html,body{background:#fff;padding:8px;overflow:auto;}" +
+                "html,body{background:" + bgColor + ";padding:8px;overflow:auto;" +
+                "-webkit-transform-origin:0 0;transform-origin:0 0;}" +
                 ".table-wrap{display:inline-block;" + rotateCss + "}" +
                 "table{border-collapse:collapse;font-size:14px;}" +
                 "th,td{border:1px solid #ddd;padding:8px 12px;text-align:left;}" +
                 "th{background:#f0f0f0;font-weight:bold;white-space:nowrap;}" +
                 "td{white-space:nowrap;}" +
                 "</style>" +
-                "<script>var vZoom=1;function viewerZoom(f){vZoom=Math.min(5,Math.max(0.1,vZoom*f));document.body.style.zoom=vZoom;}</script>" +
+                "<script>var vZoom=1;function viewerZoom(f){vZoom=Math.min(5,Math.max(0.1,vZoom*f));" +
+                "var t='scale('+vZoom+')';" +
+                "document.body.style.webkitTransform=t;document.body.style.transform=t;}" +
+                "function viewerSetBg(c){document.body.style.backgroundColor=c;}</script>" +
                 "</head><body>" +
                 "<div class=\"table-wrap\">" + tableHtml + "</div>" +
                 rotateJs +
                 "</body></html>";
 
         tableViewerWebView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null);
+    }
+
+    private String getBgColorHex(int state) {
+        switch (state) {
+            case 1: return "#888888";
+            case 2: return "#000000";
+            default: return "#FFFFFF";
+        }
+    }
+
+    private void applyBgColor() {
+        String color = getBgColorHex(currentBgColor);
+        if (imageViewerWebView != null) {
+            viewerEvalJs(imageViewerWebView, "viewerSetBg('" + color + "')");
+        }
+        if (tableViewerWebView != null) {
+            viewerEvalJs(tableViewerWebView, "viewerSetBg('" + color + "')");
+        }
+    }
+
+    // Execute JS in viewer WebView, using evaluateJavascript (API 19+) when available,
+    // falling back to loadUrl for API 18.
+    private void viewerEvalJs(WebView wv, String js) {
+        if (wv == null) return;
+        if (android.os.Build.VERSION.SDK_INT >= 19) {
+            wv.evaluateJavascript(js, null);
+        } else {
+            wv.loadUrl("javascript:" + js);
+        }
     }
 
     // ========== 消息长按菜单 ==========
