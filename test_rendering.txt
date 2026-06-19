@@ -1,0 +1,522 @@
+# 渲染测试全集
+
+此文件覆盖 AiChat 所有渲染功能，复制发送给 AI 即可模拟测试。
+
+---
+
+## 一、Markdown 基础
+
+### 标题
+# 一级标题
+## 二级标题
+### 三级标题
+#### 四级标题
+##### 五级标题
+###### 六级标题
+
+### 文本样式
+**粗体** *斜体* ~~删除线~~ ==高亮== `行内代码` [链接](https://example.com)
+
+### 列表
+- 无序列表项 1
+- 无序列表项 2
+  - 嵌套列表
+  - 嵌套列表 2
+- 无序列表项 3
+
+1. 有序列表项 1
+2. 有序列表项 2
+3. 有序列表项 3
+
+### 引用
+> 这是一段引用文字
+> 可以有多行
+>> 嵌套引用
+
+### 分割线
+---
+
+### 表格
+| 名称 | 符号 | 单位 |
+|------|------|------|
+| 质量 | m | kg |
+| 速度 | v | m/s |
+| 加速度 | a | m/s² |
+
+### 代码块
+```python
+def fibonacci(n):
+    if n <= 1:
+        return n
+    return fibonacci(n-1) + fibonacci(n-2)
+```
+
+```java
+public static void main(String[] args) {
+    System.out.println("Hello World");
+}
+```
+
+### 脚注
+这是一个带脚注的句子[^1]。
+[^1]: 这是脚注内容。
+
+### 上下标
+H^2^O ~subscript~ 正常文字 ^superscript^
+
+---
+
+## 二、数学公式 (LaTeX)
+
+### 行内公式
+质能方程 $E=mc^2$ 是爱因斯坦提出的。
+
+二次方程求根公式：$x = \frac{-b \pm \sqrt{b^2 - 4ac}}{2a}$
+
+欧拉公式：$e^{i\pi} + 1 = 0$
+
+### 块级公式
+
+$$
+\int_0^\infty e^{-x^2} dx = \frac{\sqrt{\pi}}{2}
+$$
+
+$$
+\sum_{n=1}^{\infty} \frac{1}{n^2} = \frac{\pi^2}{6}
+$$
+
+$$
+\lim_{x \to 0} \frac{\sin x}{x} = 1
+$$
+
+$$
+\frac{\partial^2 u}{\partial t^2} = c^2 \nabla^2 u
+$$
+
+### 矩阵
+$$
+\begin{pmatrix}
+a & b \\
+c & d
+\end{pmatrix}
+\begin{pmatrix}
+x \\
+y
+\end{pmatrix}
+=
+\begin{pmatrix}
+ax + by \\
+cx + dy
+\end{pmatrix}
+$$
+
+### 希腊字母
+$\alpha \beta \gamma \delta \epsilon \zeta \eta \theta \lambda \mu \nu \pi \rho \sigma \tau \phi \chi \psi \omega$
+
+$\Gamma \Delta \Theta \Lambda \Xi \Pi \Sigma \Upsilon \Phi \Psi \Omega$
+
+### 数学符号
+$\forall \exists \in \notin \subset \subseteq \cup \cap \emptyset \infty$
+
+$\pm \times \div \cdot \leq \geq \neq \approx \equiv \sim \propto$
+
+$\rightarrow \leftarrow \leftrightarrow \Rightarrow \Leftrightarrow \mapsto$
+
+---
+
+## 三、物理公式
+
+### 经典力学
+牛顿第二定律：$F = ma$
+
+万有引力：$F = G\frac{m_1 m_2}{r^2}$
+
+动能：$E_k = \frac{1}{2}mv^2$
+
+动量：$p = mv$
+
+胡克定律：$F = -kx$
+
+### 电磁学
+麦克斯韦方程组：
+
+$$
+\nabla \cdot \mathbf{E} = \frac{\rho}{\epsilon_0}
+$$
+
+$$
+\nabla \cdot \mathbf{B} = 0
+$$
+
+$$
+\nabla \times \mathbf{E} = -\frac{\partial \mathbf{B}}{\partial t}
+$$
+
+$$
+\nabla \times \mathbf{B} = \mu_0\mathbf{J} + \mu_0\epsilon_0\frac{\partial \mathbf{E}}{\partial t}
+$$
+
+库仑定律：$F = k\frac{q_1 q_2}{r^2}$
+
+欧姆定律：$V = IR$
+
+洛伦兹力：$\mathbf{F} = q(\mathbf{E} + \mathbf{v} \times \mathbf{B})$
+
+### 热力学
+理想气体状态方程：$PV = nRT$
+
+热力学第一定律：$\Delta U = Q - W$
+
+熵变：$\Delta S = \int \frac{dQ_{rev}}{T}$
+
+### 量子力学
+薛定谔方程：
+
+$$
+i\hbar\frac{\partial}{\partial t}\Psi(\mathbf{r}, t) = \hat{H}\Psi(\mathbf{r}, t)
+$$
+
+不确定性原理：$\Delta x \Delta p \geq \frac{\hbar}{2}$
+
+普朗克公式：$E = h\nu$
+
+德布罗意波长：$\lambda = \frac{h}{p}$
+
+### 相对论
+时间膨胀：$\Delta t = \frac{\Delta t_0}{\sqrt{1 - v^2/c^2}}$
+
+长度收缩：$L = L_0\sqrt{1 - v^2/c^2}$
+
+---
+
+## 四、化学公式
+
+### 基本化学反应
+\ce{H2 + 1/2O2 -> H2O}
+
+\ce{2H2 + O2 -> 2H2O}
+
+\ce{C6H12O6 + 6O2 -> 6CO2 + 6H2O}
+
+### 酸碱反应
+\ce{HCl + NaOH -> NaCl + H2O}
+
+\ce{CH3COOH + H2O <=> CH3COO- + H3O+}
+
+### 氧化还原
+\ce{2Na + Cl2 -> 2NaCl}
+
+\ce{Zn + CuSO4 -> ZnSO4 + Cu}
+
+### 有机反应
+\ce{CH3CH2OH + CH3COOH <=> CH3COOCH2CH3 + H2O}
+
+\ce{C6H6 + Br2 ->[FeBr3] C6H5Br + HBr}
+
+### 带反应条件（箭头上/下标注）
+\ce{C2H5OH ->[浓H2SO4][170^\circ C] C2H4 + H2O}
+
+\ce{N2 + 3H2 <=>[高温高压][催化剂] 2NH3}
+
+\ce{CaCO3 ->[\Delta] CaO + CO2}
+
+\ce{2KClO3 ->[MnO2][\Delta] 2KCl + 3O2}
+
+### 沉淀与气体
+\ce{AgNO3 + NaCl -> AgCl (白色沉淀) + NaNO3}
+
+\ce{BaCl2 + H2SO4 -> BaSO4 v + 2HCl}
+
+\ce{CaCO3 + 2HCl -> CaCl2 + H2O + CO2 ^}
+
+### 配位化学
+\ce{[Cu(NH3)4]^2+ + 4H+ -> Cu^2+ + 4NH4+}
+
+\ce{Fe^3+ + 6H2O <=> [Fe(H2O)6]^3+}
+
+### 同位素与核反应
+\ce{^{235}_{92}U + ^{1}_{0}n -> ^{141}_{56}Ba + ^{92}_{36}Kr + 3^{1}_{0}n}
+
+\ce{^{14}_{6}C -> ^{14}_{7}N + ^{0}_{-1}e}
+
+### 复杂示例
+\ce{C6H5OH + 3Br2 -> C6H2Br3OH (白色沉淀) + 3HBr}
+
+\ce{2KMnO4 + 16HCl -> 2KCl + 2MnCl2 + 5Cl2 ^ + 8H2O}
+
+---
+
+## 五、行内公式组合测试
+
+### 混合化学和数学
+在标准状况下，\ce{H2O} 的摩尔质量是 $M = 18.015\ \text{g/mol}$。
+
+反应 \ce{2H2 + O2 -> 2H2O} 释放的能量为 $\Delta H = -285.8\ \text{kJ/mol}$。
+
+### $包裹的 \ce{}
+$\ce{H2SO4 + 2NaOH -> Na2SO4 + 2H2O}$
+
+$$\ce{2Al + Fe2O3 ->[\Delta] Al2O3 + 2Fe}$$
+
+---
+
+## 六、SVG 图形
+
+### 简单几何
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 200" width="100%" height="auto">
+  <rect x="10" y="10" width="180" height="180" fill="#e74c3c" rx="10" />
+  <circle cx="300" cy="100" r="80" fill="#3498db" />
+  <polygon points="200,10 250,190 160,190" fill="#2ecc71" />
+  <text x="200" y="30" text-anchor="middle" font-family="sans-serif" font-size="18" fill="#333">基本几何图形</text>
+</svg>
+
+### 奥运五环
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 440 240" width="100%" height="auto">
+  <rect width="440" height="240" fill="#ffffff" />
+  <circle cx="330" cy="110" r="50" fill="none" stroke="#DF0024" stroke-width="12" />
+  <circle cx="275" cy="155" r="50" fill="none" stroke="#009F3D" stroke-width="12" />
+  <circle cx="220" cy="110" r="50" fill="none" stroke="#000000" stroke-width="12" />
+  <circle cx="165" cy="155" r="50" fill="none" stroke="#F4C300" stroke-width="12" />
+  <circle cx="110" cy="110" r="50" fill="none" stroke="#0085C7" stroke-width="12" />
+</svg>
+
+### 勾股定理图解
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 850" width="100%" height="auto">
+  <defs>
+    <style>
+      .p-title { font-family: sans-serif; font-size: 28px; font-weight: bold; fill: #333; text-anchor: middle; }
+      .p-sub { font-family: sans-serif; font-size: 16px; fill: #666; text-anchor: middle; }
+      .p-label { font-family: sans-serif; font-size: 20px; font-weight: bold; text-anchor: middle; }
+      .p-area { font-family: sans-serif; font-size: 18px; font-weight: bold; text-anchor: middle; }
+    </style>
+  </defs>
+  <rect width="800" height="850" fill="#f9f9f9" />
+
+  <text x="400" y="50" class="p-title">勾股定理（Pythagorean Theorem）</text>
+  <text x="400" y="85" class="p-sub">a² + b² = c²</text>
+
+  <!--  三角形 -->
+  <polygon points="50,300 350,300 50,500" fill="#e0f0ff" stroke="#007bff" stroke-width="2" />
+  <polygon points="350,300 550,300 550,600" fill="#fff3e0" stroke="#ff9800" stroke-width="2" />
+  <polygon points="550,600 250,800 550,800" fill="#e0f0ff" stroke="#007bff" stroke-width="2" />
+  <polygon points="250,800 50,500 50,800" fill="#fff3e0" stroke="#ff9800" stroke-width="2" />
+
+  <!--  正方形 a²（左侧） -->
+  <polygon points="50,500 350,500 350,800 50,800" fill="#fce4ec" stroke="#e91e63" stroke-width="2" />
+
+  <!--  正方形 b²（上侧） -->
+  <polygon points="350,300 550,300 550,500 350,500" fill="#e8f5e9" stroke="#4caf50" stroke-width="2" />
+
+  <!--  内部正方形 c²（斜边上的正方形） -->
+  <polygon points="50,500 350,300 550,600 250,800" fill="none" stroke="#9c27b0" stroke-width="3" stroke-dasharray="8,4" />
+
+  <!-- 直角标记 -->
+  <polygon points="50,300 70,300 70,320 50,320" fill="#333" />
+  <polygon points="550,300 530,300 530,320 550,320" fill="#333" />
+  <polygon points="550,800 530,800 530,780 550,780" fill="#333" />
+  <polygon points="50,800 70,800 70,780 50,780" fill="#333" />
+
+  <!-- 边长标注 -->
+  <text x="200" y="340" class="p-label" fill="#e91e63">a</text>
+  <text x="450" y="295" class="p-label" fill="#4caf50">b</text>
+  <text x="280" y="580" class="p-label" fill="#9c27b0">c</text>
+
+  <!-- 面积标注 -->
+  <text x="200" y="650" class="p-area" fill="#e91e63">面积 = a²</text>
+  <text x="450" y="400" class="p-area" fill="#4caf50">面积 = b²</text>
+  <text x="280" y="600" class="p-area" fill="#9c27b0">面积 = c²</text>
+
+  <text x="400" y="830" class="p-title" fill="#333">a² + b² = c²</text>
+</svg>
+
+### 流程图
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 300" width="100%" height="auto">
+  <defs>
+    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#555" />
+    </marker>
+  </defs>
+  <rect x="20" y="110" width="120" height="60" rx="8" fill="#e3f2fd" stroke="#1976d2" stroke-width="2" />
+  <text x="80" y="145" text-anchor="middle" font-family="sans-serif" font-size="14" font-weight="bold" fill="#333">用户输入</text>
+
+  <line x1="140" y1="140" x2="200" y2="140" stroke="#555" stroke-width="2" marker-end="url(#arrowhead)" />
+
+  <rect x="200" y="110" width="120" height="60" rx="8" fill="#f3e5f5" stroke="#7b1fa2" stroke-width="2" />
+  <text x="260" y="145" text-anchor="middle" font-family="sans-serif" font-size="14" font-weight="bold" fill="#333">AI 处理</text>
+
+  <line x1="320" y1="140" x2="380" y2="140" stroke="#555" stroke-width="2" marker-end="url(#arrowhead)" />
+
+  <rect x="380" y="110" width="120" height="60" rx="8" fill="#e8f5e9" stroke="#388e3c" stroke-width="2" />
+  <text x="440" y="145" text-anchor="middle" font-family="sans-serif" font-size="14" font-weight="bold" fill="#333">返回结果</text>
+
+  <rect x="250" y="220" width="100" height="36" rx="18" fill="#fff3e0" stroke="#f57c00" stroke-width="2" />
+  <text x="300" y="243" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#333">循环迭代</text>
+
+  <line x1="260" y1="170" x2="260" y2="220" stroke="#555" stroke-width="1.5" />
+  <line x1="340" y1="170" x2="340" y2="220" stroke="#555" stroke-width="1.5" marker-end="url(#arrowhead)" />
+</svg>
+
+### 柱状图
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 320" width="100%" height="auto">
+  <rect width="500" height="320" fill="#fafafa" />
+  <!-- Y 轴 -->
+  <line x1="60" y1="20" x2="60" y2="280" stroke="#333" stroke-width="2" />
+  <!-- X 轴 -->
+  <line x1="60" y1="280" x2="480" y2="280" stroke="#333" stroke-width="2" />
+  <!-- 柱状条 -->
+  <rect x="100" y="180" width="50" height="100" fill="#e74c3c" />
+  <text x="125" y="172" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#333">100</text>
+  <text x="125" y="298" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#666">Q1</text>
+
+  <rect x="200" y="120" width="50" height="160" fill="#3498db" />
+  <text x="225" y="112" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#333">160</text>
+  <text x="225" y="298" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#666">Q2</text>
+
+  <rect x="300" y="150" width="50" height="130" fill="#2ecc71" />
+  <text x="325" y="142" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#333">130</text>
+  <text x="325" y="298" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#666">Q3</text>
+
+  <rect x="400" y="80" width="50" height="200" fill="#f39c12" />
+  <text x="425" y="72" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#333">200</text>
+  <text x="425" y="298" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#666">Q4</text>
+
+  <text x="270" y="20" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="bold" fill="#333">季度销售数据</text>
+</svg>
+
+---
+
+## 七、HTML 内容
+
+### 文本样式
+<p style="color:#e74c3c;">这是红色文字</p>
+<p style="font-size:20px;font-weight:bold;">这是大号粗体文字</p>
+<p style="background:#f0f0f0;padding:10px;border-radius:5px;">这是带背景和内边距的文字</p>
+
+### 自定义结构
+<div style="background:#e3f2fd;padding:16px;border-left:4px solid #1976d2;border-radius:4px;margin:12px 0;">
+  <strong style="color:#1976d2;">⚠️ 提示：</strong>
+  <p style="color:#555;margin:8px 0 0 0;">这是一个自定义信息框，使用 HTML 和行内 CSS 创建。</p>
+</div>
+
+<div style="background:#fff3e0;padding:16px;border-left:4px solid #f57c00;border-radius:4px;margin:12px 0;">
+  <strong style="color:#f57c00;">⚠️ 警告：</strong>
+  <p style="color:#555;margin:8px 0 0 0;">请确认操作后再继续。</p>
+</div>
+
+### 折叠区域
+<details>
+  <summary style="cursor:pointer;color:#2196F3;font-weight:bold;">点击展开详细信息</summary>
+  <p style="padding:12px;background:#f5f5f5;border-radius:4px;">这是被折叠的内容。用户需要点击标题才能看到这部分信息。</p>
+</details>
+
+---
+
+## 八、混合内容测试
+
+### 混合 Markdown + LaTeX + 化学
+质能方程 $E=mc^2$ 表明质量和能量可以相互转换。
+
+水的电解反应 \ce{2H2O ->[电解] 2H2 ^ + O2 ^} 需要消耗电能。
+
+在标准状况下，1 mol 理想气体的体积为 $V_m = 22.4\ \text{L/mol}$。
+
+### 代码 + 公式
+时间复杂度 $O(n\log n)$ 的排序算法：
+
+```python
+def quicksort(arr):
+    if len(arr) <= 1:
+        return arr
+    pivot = arr[len(arr) // 2]
+    left = [x for x in arr if x < pivot]
+    middle = [x for x in arr if x == pivot]
+    right = [x for x in arr if x > pivot]
+    return quicksort(left) + middle + quicksort(right)
+```
+
+其递推公式为 $T(n) = 2T(n/2) + O(n)$。
+
+### 表格 + 公式
+| 定律 | 公式 | 适用条件 |
+|------|------|----------|
+| 牛顿第二定律 | $F = ma$ | 惯性参考系 |
+| 库仑定律 | $F = k\frac{q_1q_2}{r^2}$ | 真空/点电荷 |
+| 理想气体 | $PV = nRT$ | 高温低压 |
+| 欧姆定律 | $V = IR$ | 线性电阻 |
+
+---
+
+## 九、边界情况测试
+
+### 超长公式
+$$
+\begin{aligned}
+\nabla \times (\nabla \times \mathbf{E}) &= \nabla(\nabla \cdot \mathbf{E}) - \nabla^2\mathbf{E} \\
+&= -\nabla^2\mathbf{E} = -\mu_0\epsilon_0\frac{\partial^2\mathbf{E}}{\partial t^2}
+\end{aligned}
+$$
+
+### 嵌套数学
+$\displaystyle \lim_{n\to\infty} \sum_{k=1}^{n} \frac{1}{k^2} = \frac{\pi^2}{6}$
+
+$\sqrt{1 + \sqrt{1 + \sqrt{1 + \cdots}}} = \frac{1+\sqrt{5}}{2}$
+
+### 特殊符号
+温度：$T = 25^\circ\text{C} = 298.15\ \text{K}$
+
+角度：$\theta = 90^\circ = \frac{\pi}{2}\ \text{rad}$
+
+数值：$N_A = 6.022 \times 10^{23}\ \text{mol}^{-1}$
+
+### 多行对齐
+$$
+\begin{aligned}
+(a+b)^2 &= (a+b)(a+b) \\
+        &= a^2 + ab + ba + b^2 \\
+        &= a^2 + 2ab + b^2
+\end{aligned}
+$$
+
+### 分段函数
+$$
+f(x) = \begin{cases}
+x^2 & x \geq 0 \\
+-x^2 & x < 0
+\end{cases}
+$$
+
+### 反斜杠转义
+这是普通文字 \\\ 不是 LaTeX。这是 `\ce{}` 内不会被处理的代码。
+
+---
+
+## 十、中文内容测试
+
+### 中文 + 公式
+根据牛顿第二定律 $F = ma$，当质量 $m = 5\ \text{kg}$，加速度 $a = 10\ \text{m/s}^2$ 时，力 $F = 50\ \text{N}$。
+
+### 中文 + 化学
+二氧化碳的化学式为 \ce{CO2}，水和二氧化碳反应生成碳酸：\ce{CO2 + H2O <=> H2CO3}。
+
+### 中文 + 代码
+以下是一个简单的 Java 程序：
+
+```java
+public class HelloWorld {
+    public static void main(String[] args) {
+        System.out.println("你好，世界！");
+    }
+}
+```
+
+### 中文表格
+| 物质 | 化学式 | 摩尔质量 (g/mol) | 密度 (g/cm³) |
+|------|--------|-----------------|-------------|
+| 水 | \ce{H2O} | 18.015 | 1.00 |
+| 乙醇 | \ce{C2H5OH} | 46.069 | 0.789 |
+| 硫酸 | \ce{H2SO4} | 98.079 | 1.84 |
+| 氯化钠 | \ce{NaCl} | 58.443 | 2.16 |
+
+---
+
+> 测试完毕。将此文件内容发送给 AI，即可全面测试渲染效果。

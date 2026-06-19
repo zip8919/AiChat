@@ -7,8 +7,6 @@ import android.graphics.Color;
 import android.graphics.Typeface;
 import android.util.Base64;
 import java.io.ByteArrayOutputStream;
-import java.io.File;
-import java.io.FileOutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -68,16 +66,19 @@ public class MessageHtmlRenderer {
             "pre .copy-btn{position:absolute;top:4px;right:8px;padding:2px 8px;" +
             "font-size:11px;background:#e1e4e8;border:1px solid #ccc;border-radius:3px;" +
             "color:#555;font-family:Roboto,sans-serif;}" +
-            "table{border-collapse:collapse;width:100%;margin:8px 0;font-size:13px;}" +
+            "table{border-collapse:collapse;margin:8px 0;font-size:13px;white-space:nowrap;}" +
             "th,td{border:1px solid #ddd;padding:6px 10px;text-align:left;}" +
             "th{background:#f0f0f0;font-weight:bold;}" +
+            ".table-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;" +
+            "-webkit-tap-highlight-color:rgba(100,180,255,0.3);}" +
             "a{color:#2196F3;text-decoration:none;}" +
-            "img{max-width:100%;height:auto;}" +
-            ".math-block img,.math-inline,.msg img{-webkit-tap-highlight-color:rgba(255,255,255,0.3);}" +
+            "img,svg{max-width:100%;height:auto;}" +
+            ".msg svg{display:block;overflow:visible;}" +
+            ".math-block img,.math-block svg,.math-inline,.msg img,.msg svg{-webkit-tap-highlight-color:rgba(255,255,255,0.3);}" +
             ".math-block{display:block;text-align:center;margin:12px 0;padding:8px;}" +
-            ".math-block img{max-width:100%;height:auto;}" +
+            ".math-block img,.math-block svg{max-width:100%;height:auto;}" +
             ".math-inline{display:inline;vertical-align:middle;}" +
-            ".math-inline img{height:1.6em;vertical-align:middle;}" +
+            ".math-inline img,.math-inline svg{height:1.6em;vertical-align:middle;}" +
             "ul,ol{padding-left:24px;margin:4px 0;}" +
             "li{margin:2px 0;}" +
             "hr{border:none;border-top:1px solid #ddd;margin:12px 0;}" +
@@ -107,10 +108,7 @@ public class MessageHtmlRenderer {
             ".fn-ref a{color:#2196F3;text-decoration:none;}" +
             ".fn-def{font-size:12px;color:#888;border-top:1px solid #eee;" +
             "padding:4px 0;margin:6px 0;}" +
-            ".fn-def sup a{color:#888;text-decoration:none;}" +
-            ".chem{font-family:'Times New Roman',serif;font-style:normal;}" +
-            ".chem sub{font-size:0.8em;}" +
-            ".chem sup{font-size:0.8em;}";
+            ".fn-def sup a{color:#888;text-decoration:none;}";
 
     private static final String JS =
             "(function(){" +
@@ -150,18 +148,42 @@ public class MessageHtmlRenderer {
             "document.addEventListener('touchcancel',function(){" +
             "if(lpTimer){clearTimeout(lpTimer);lpTimer=null;}});" +
             "document.addEventListener('click',function(e){" +
-            "var t=e.target,imgEl=null;" +
+            "var t=e.target,imgEl=null,tableEl=null;" +
             "while(t&&t!==document.body){" +
-            "if(!imgEl&&t.tagName==='IMG')imgEl=t;" +
-            "if(!imgEl&&t.tagName==='A'){e.preventDefault();" +
+            "var tag=t.tagName.toUpperCase();" +
+            "if(!imgEl&&(tag==='IMG'||tag==='SVG'))imgEl=t;" +
+            "if(!tableEl&&tag==='TABLE')tableEl=t;" +
+            "if(!imgEl&&tag==='A'){e.preventDefault();" +
             "if(window.Android)Android.openUrl(t.href);return false;}" +
             "t=t.parentElement;}" +
+            "if(tableEl&&!imgEl){" +
+            "e.preventDefault();e.stopPropagation();" +
+            "var wrap=tableEl.parentElement;" +
+            "if(wrap&&wrap.className.indexOf('table-scroll')>=0)tableEl=wrap;" +
+            "var html='';" +
+            "try{html=new XMLSerializer().serializeToString(tableEl);}" +
+            "catch(e3){html=tableEl.outerHTML||'';}" +
+            "if(html&&window.Android)Android.showTableViewer(html);" +
+            "return false;}" +
             "if(imgEl){" +
             "e.preventDefault();e.stopPropagation();" +
-            "var all=[],imgs=document.querySelectorAll('.msg img'),ci=-1;" +
-            "for(var i=0;i<imgs.length;i++){" +
-            "if(imgs[i]===imgEl)ci=all.length;" +
-            "all.push({src:imgs[i].src,alt:imgs[i].alt||''});}" +
+            "var all=[],items=document.querySelectorAll('.msg img, .msg svg'),ci=-1;" +
+            "for(var i=0;i<items.length;i++){" +
+            "if(items[i]===imgEl)ci=all.length;" +
+            "var itag=items[i].tagName.toUpperCase();" +
+            "if(itag==='IMG'){" +
+            "all.push({src:items[i].src,alt:items[i].alt||'',type:'raster'});" +
+            "}else{" +
+            "var imgChild=items[i].querySelector('image');" +
+            "if(imgChild){" +
+            "var href=imgChild.getAttribute('href')||imgChild.getAttribute('xlink:href')||'';" +
+            "all.push({src:href,alt:items[i].getAttribute('aria-label')||'',type:'raster'});" +
+            "}else{" +
+            "var svgHtml='';" +
+            "try{svgHtml=new XMLSerializer().serializeToString(items[i]);}" +
+            "catch(e2){svgHtml=items[i].outerHTML||'';}" +
+            "all.push({src:'',alt:items[i].getAttribute('aria-label')||'',type:'svg',svg:svgHtml});" +
+            "}}}" +
             "if(ci>=0&&window.Android)Android.showImageViewer(''+ci,JSON.stringify(all));" +
             "return false;}" +
             "});" +
@@ -227,11 +249,6 @@ public class MessageHtmlRenderer {
             "})();";
 
     public static String buildConversationHtml(List<Message> messages, Context ctx) {
-        // Set up LaTeX cache directory
-        File dir = new File(ctx.getCacheDir(), "latex_cache");
-        if (!dir.exists()) dir.mkdirs();
-        latexDir = dir;
-
         StringBuilder body = new StringBuilder();
         for (int i = 0; i < messages.size(); i++) {
             body.append(renderMessageDiv(messages.get(i), i, ctx));
@@ -290,14 +307,17 @@ public class MessageHtmlRenderer {
         return html.toString();
     }
 
-    private static File latexDir = null;
-
     private static String renderMarkdown(String text, Context ctx) {
         List<String> mathTags = new ArrayList<>();
         float density = ctx.getResources().getDisplayMetrics().density;
-        text = extractAndRenderCe(text, density, latexDir, mathTags);   // \ce → LaTeX → jlatexmath image
-        text = extractAndRenderLatex(text, density, latexDir, mathTags);
-        text = renderBareLatexCommands(text, density, latexDir, mathTags);
+
+        // 0. Protect raw SVG blocks from markdown parsing — commonmark doesn't treat <svg> as HTML block
+        List<String> svgBlocks = new ArrayList<>();
+        text = extractAndProtectSvg(text, svgBlocks);
+
+        text = extractAndRenderCe(text, density, mathTags);   // \ce → LaTeX → jlatexmath image
+        text = extractAndRenderLatex(text, density, mathTags);
+        text = renderBareLatexCommands(text, density, mathTags);
         text = preProcessExtensions(text);
         Node document = PARSER.parse(text);
         StringBuilder html = new StringBuilder();
@@ -305,7 +325,44 @@ public class MessageHtmlRenderer {
         String result = html.toString();
         for (int i = 0; i < mathTags.size(); i++)
             result = result.replace("@@MATH" + i + "@@", mathTags.get(i));
+        for (int i = 0; i < svgBlocks.size(); i++)
+            result = result.replace("@@SVG" + i + "@@", svgBlocks.get(i));
         return result;
+    }
+
+    // Extract <svg ...>...</svg> blocks (case-insensitive) and replace with placeholders
+    // so commonmark doesn't mangle them (svg is not a recognized HTML block tag)
+    private static String extractAndProtectSvg(String text, List<String> svgBlocks) {
+        StringBuilder out = new StringBuilder();
+        int i = 0, len = text.length();
+        while (i < len) {
+            if (text.regionMatches(true, i, "<svg", 0, 4)
+                    && (i + 4 >= len || isTagBoundary(text.charAt(i + 4)))) {
+                int start = i;
+                i += 4;
+                int depth = 1;
+                while (i < len && depth > 0) {
+                    if (text.regionMatches(true, i, "<svg", 0, 4)
+                            && (i + 4 >= len || isTagBoundary(text.charAt(i + 4)))) {
+                        depth++;
+                    } else if (text.regionMatches(true, i, "</svg>", 0, 6)) {
+                        depth--;
+                        if (depth == 0) { i += 6; break; }
+                    }
+                    i++;
+                }
+                svgBlocks.add(text.substring(start, i));
+                out.append("@@SVG").append(svgBlocks.size() - 1).append("@@");
+            } else {
+                out.append(text.charAt(i));
+                i++;
+            }
+        }
+        return out.toString();
+    }
+
+    private static boolean isTagBoundary(char c) {
+        return c == '>' || c == ' ' || c == '\n' || c == '\t' || c == '\r';
     }
 
     // Strip leading $$ or $ from output buffer and return prefix length (0/1/2).
@@ -348,7 +405,7 @@ public class MessageHtmlRenderer {
     }
 
     // Extract \ce{...} → convert to LaTeX → render with jlatexmath → @@MATHn@@ image.
-    private static String extractAndRenderCe(String text, float density, File latexDir, List<String> mathTags) {
+    private static String extractAndRenderCe(String text, float density, List<String> mathTags) {
         StringBuilder out = new StringBuilder();
         int i = 0;
         while (i < text.length()) {
@@ -371,7 +428,8 @@ public class MessageHtmlRenderer {
 
                 // Convert \ce content to proper LaTeX and render as image
                 String latex = ceToLatex(formula);
-                String imgHtml = renderLatexImg(latex, true, density, latexDir);
+                boolean isBlock = (pfx == 2); // $$ → block, $ or bare → inline
+                String imgHtml = renderLatexImg(latex, isBlock, density);
                 mathTags.add(imgHtml);
                 out.append("@@MATH").append(mathTags.size() - 1).append("@@");
 
@@ -430,24 +488,31 @@ public class MessageHtmlRenderer {
 
             // Arrow with optional conditions: ->[above][below]
             boolean isArrow = false;
+            boolean isBidirectional = false;
             String arrowCmd = null;
             int arrowLen = 0;
-            boolean hasConditions = false;
 
             if (c == '-' && i + 1 < len && formula.charAt(i + 1) == '>') {
-                // ->  — need to check if conditions follow
+                // ->
                 arrowLen = 2;
-                // Peek ahead
                 int j = i + 2;
                 if (j < len && formula.charAt(j) == '[') arrowCmd = "\\xrightarrow";
                 else arrowCmd = "\\rightarrow";
                 isArrow = true;
             } else if (c == '<' && i + 1 < len && formula.charAt(i + 1) == '-') {
+                // <-
                 arrowLen = 2;
                 int j = i + 2;
                 if (j < len && formula.charAt(j) == '[') arrowCmd = "\\xleftarrow";
                 else arrowCmd = "\\leftarrow";
                 isArrow = true;
+            } else if (c == '<' && i + 2 < len
+                    && formula.charAt(i + 1) == '=' && formula.charAt(i + 2) == '>') {
+                // <=>  reversible reaction arrow
+                arrowLen = 3;
+                arrowCmd = "\\leftrightarrows";
+                isArrow = true;
+                isBidirectional = true;
             }
 
             if (isArrow) {
@@ -456,7 +521,6 @@ public class MessageHtmlRenderer {
                 if (i < len && formula.charAt(i) == '[') {
                     above = extractBracketArg(formula, i);
                     i += above.length() + 2;
-                    // Recursively convert any \Delta etc inside the condition
                     if (above.contains("\\")) above = ceToLatex(above);
                 }
                 if (i < len && formula.charAt(i) == '[') {
@@ -464,12 +528,32 @@ public class MessageHtmlRenderer {
                     i += below.length() + 2;
                     if (below.contains("\\")) below = ceToLatex(below);
                 }
-                if (above != null && below != null) {
-                    out.append("\\xrightarrow[").append(below).append("]{").append(above).append("}");
-                } else if (above != null) {
-                    out.append("\\xrightarrow{").append(above).append("}");
+                if (isBidirectional) {
+                    // <=>: stack conditions above/below with stackrel/underset.
+                    // (X^{a}_{b} puts them as super/subscripts in inline mode.)
+                    if (above != null && below != null) {
+                        out.append("\\underset{\\text{").append(below)
+                           .append("}}{\\stackrel{\\text{").append(above)
+                           .append("}}{\\leftrightarrows}}");
+                    } else if (above != null) {
+                        out.append("\\stackrel{\\text{").append(above)
+                           .append("}}{\\leftrightarrows}");
+                    } else if (below != null) {
+                        out.append("\\underset{\\text{").append(below)
+                           .append("}}{\\leftrightarrows}");
+                    } else {
+                        out.append("\\leftrightarrows");
+                    }
                 } else {
-                    out.append(arrowCmd);
+                    // -> or <-  — use extensible arrow with conditions
+                    if (above != null && below != null) {
+                        out.append(arrowCmd).append("[").append(below)
+                           .append("]{").append(above).append("}");
+                    } else if (above != null) {
+                        out.append(arrowCmd).append("{").append(above).append("}");
+                    } else {
+                        out.append(arrowCmd);
+                    }
                 }
                 justHadLetter = false;
                 continue;
@@ -553,7 +637,7 @@ public class MessageHtmlRenderer {
 
 
     // Detect and render bare \command or \command{args} that aren't inside $...$
-    private static String renderBareLatexCommands(String text, float density, File dir, List<String> mathTags) {
+    private static String renderBareLatexCommands(String text, float density, List<String> mathTags) {
         StringBuilder out = new StringBuilder();
         int i = 0;
         while (i < text.length()) {
@@ -571,7 +655,7 @@ public class MessageHtmlRenderer {
                         i++;
                     }
                 }
-                String html = renderLatexImg(text.substring(start, i), false, density, dir);
+                String html = renderLatexImg(text.substring(start, i), false, density);
                 mathTags.add(html);
                 out.append("@@MATH").append(mathTags.size() - 1).append("@@");
             } else {
@@ -598,14 +682,14 @@ public class MessageHtmlRenderer {
         return text;
     }
 
-    private static String extractAndRenderLatex(String text, float density, File latexDir, List<String> mathTags) {
+    private static String extractAndRenderLatex(String text, float density, List<String> mathTags) {
         StringBuilder out = new StringBuilder();
         int i = 0;
         while (i < text.length()) {
             if (text.startsWith("$$", i)) {
                 int end = text.indexOf("$$", i + 2);
                 if (end > i) {
-                    String html = renderLatexImg(text.substring(i + 2, end).trim(), true, density, latexDir);
+                    String html = renderLatexImg(text.substring(i + 2, end).trim(), true, density);
                     mathTags.add(html);
                     out.append('\n').append("@@MATH").append(mathTags.size() - 1).append("@@\n");
                     i = end + 2; continue;
@@ -614,7 +698,7 @@ public class MessageHtmlRenderer {
             if (text.startsWith("\\[", i)) {
                 int end = text.indexOf("\\]", i + 2);
                 if (end > i) {
-                    String html = renderLatexImg(text.substring(i + 2, end).trim(), true, density, latexDir);
+                    String html = renderLatexImg(text.substring(i + 2, end).trim(), true, density);
                     mathTags.add(html);
                     out.append('\n').append("@@MATH").append(mathTags.size() - 1).append("@@\n");
                     i = end + 2; continue;
@@ -625,7 +709,7 @@ public class MessageHtmlRenderer {
                     && (i == 0 || text.charAt(i - 1) != '$')) {
                 int end = text.indexOf('$', i + 1);
                 if (end > i + 1) {
-                    String html = renderLatexImg(text.substring(i + 1, end), false, density, latexDir);
+                    String html = renderLatexImg(text.substring(i + 1, end), false, density);
                     mathTags.add(html);
                     out.append("@@MATH").append(mathTags.size() - 1).append("@@");
                     i = end + 1; continue;
@@ -634,7 +718,7 @@ public class MessageHtmlRenderer {
             if (text.startsWith("\\(", i)) {
                 int end = text.indexOf("\\)", i + 2);
                 if (end > i + 2) {
-                    String html = renderLatexImg(text.substring(i + 2, end), false, density, latexDir);
+                    String html = renderLatexImg(text.substring(i + 2, end), false, density);
                     mathTags.add(html);
                     out.append("@@MATH").append(mathTags.size() - 1).append("@@");
                     i = end + 2; continue;
@@ -646,7 +730,7 @@ public class MessageHtmlRenderer {
         return out.toString();
     }
 
-    private static String renderLatexImg(String formula, boolean block, float density, File dir) {
+    private static String renderLatexImg(String formula, boolean block, float density) {
         String key = formula + (block ? "b" : "i");
         String cached = latexCache.get(key);
         if (cached != null) return cached;
@@ -681,12 +765,27 @@ public class MessageHtmlRenderer {
                 bmp.recycle();
 
                 String alt = escAttr(formula);
+                // Wrap PNG in SVG <image> — true SVG tag with pixel-perfect rendering
+                String svgNs = "http://www.w3.org/2000/svg";
+                String xlinkNs = "http://www.w3.org/1999/xlink";
                 if (block) {
-                    imgTag = "<div class=\"math-block\"><img src=\"data:image/png;base64," + b64
-                        + "\" alt=\"" + alt + "\" style=\"max-width:100%;height:auto;\"></div>";
+                    imgTag = "<div class=\"math-block\">" +
+                        "<svg xmlns=\"" + svgNs + "\" xmlns:xlink=\"" + xlinkNs + "\"" +
+                        " width=\"" + w + "\" height=\"" + h + "\"" +
+                        " viewBox=\"0 0 " + w + " " + h + "\"" +
+                        " style=\"max-width:100%;height:auto;\">" +
+                        "<image width=\"" + w + "\" height=\"" + h + "\"" +
+                        " xlink:href=\"data:image/png;base64," + b64 + "\"/>" +
+                        "</svg></div>";
                 } else {
-                    imgTag = "<img class=\"math-inline\" src=\"data:image/png;base64," + b64
-                        + "\" alt=\"" + alt + "\" style=\"height:1.6em;vertical-align:middle;\">";
+                    imgTag = "<svg xmlns=\"" + svgNs + "\" xmlns:xlink=\"" + xlinkNs + "\"" +
+                        " class=\"math-inline\"" +
+                        " width=\"" + w + "\" height=\"" + h + "\"" +
+                        " viewBox=\"0 0 " + w + " " + h + "\"" +
+                        " style=\"height:1.6em;vertical-align:middle;\">" +
+                        "<image width=\"" + w + "\" height=\"" + h + "\"" +
+                        " xlink:href=\"data:image/png;base64," + b64 + "\"/>" +
+                        "</svg>";
                 }
             }
         } catch (Exception e) {
@@ -731,7 +830,7 @@ public class MessageHtmlRenderer {
                 .replace("\"", "&quot;");
     }
 
-    private static String escAttr(String s) {
+    public static String escAttr(String s) {
         if (s == null) return "";
         return s.replace("&", "&amp;")
                 .replace("\"", "&quot;")
@@ -833,7 +932,9 @@ public class MessageHtmlRenderer {
         }
 
         private void visitTable(TableBlock tb) {
-            out.append("<table>"); visitChildren(tb); out.append("</table>");
+            out.append("<div class=\"table-scroll\"><table>");
+            visitChildren(tb);
+            out.append("</table></div>");
         }
         private void visitTableHead(TableHead th) {
             out.append("<thead>"); visitChildren(th); out.append("</thead>");

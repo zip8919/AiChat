@@ -70,6 +70,11 @@ public class MainActivity extends Activity {
     private int currentImageIndex;
     private int currentRotation;
 
+    // Table viewer dialog state
+    private AlertDialog tableViewerDialog;
+    private WebView tableViewerWebView;
+    private int tableRotation;
+
     private String currentModel;
     private String currentApiKey;
     private String currentApiUrl;
@@ -359,9 +364,13 @@ public class MainActivity extends Activity {
     @Override
     public void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
-        // 旋转时重新适配图片查看器尺寸
         if (imageViewerDialog != null && imageViewerDialog.isShowing()) {
             imageViewerDialog.getWindow().setLayout(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT);
+        }
+        if (tableViewerDialog != null && tableViewerDialog.isShowing()) {
+            tableViewerDialog.getWindow().setLayout(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.MATCH_PARENT);
         }
@@ -704,6 +713,8 @@ public class MainActivity extends Activity {
     private static class ImageInfo {
         String src;
         String alt;
+        String svg;   // raw SVG HTML for pure vector SVGs (AI-generated)
+        String type;  // "raster" or "svg"
     }
 
     // ========== JavaScript bridge ==========
@@ -774,6 +785,15 @@ public class MainActivity extends Activity {
                 }
             });
         }
+
+        @JavascriptInterface
+        public void showTableViewer(final String tableHtml) {
+            handler.post(new Runnable() {
+                public void run() {
+                    showTableViewerDialog(tableHtml);
+                }
+            });
+        }
     }
 
     // ========== 图片查看器 ==========
@@ -789,8 +809,10 @@ public class MainActivity extends Activity {
             for (int i = 0; i < arr.length(); i++) {
                 JSONObject obj = arr.getJSONObject(i);
                 ImageInfo info = new ImageInfo();
-                info.src = obj.getString("src");
+                info.src = obj.optString("src", "");
                 info.alt = obj.optString("alt", "");
+                info.type = obj.optString("type", "raster");
+                info.svg = obj.optString("svg", "");
                 images.add(info);
             }
         } catch (Exception e) {
@@ -853,13 +875,13 @@ public class MainActivity extends Activity {
 
         zoomOutBtn.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
-                imageViewerWebView.zoomOut();
+                imageViewerWebView.loadUrl("javascript:viewerZoom(0.8)");
             }
         });
 
         zoomInBtn.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
-                imageViewerWebView.zoomIn();
+                imageViewerWebView.loadUrl("javascript:viewerZoom(1.25)");
             }
         });
 
@@ -908,22 +930,172 @@ public class MainActivity extends Activity {
         prevButton.setEnabled(currentImageIndex > 0);
         nextButton.setEnabled(currentImageIndex < currentImageList.size() - 1);
 
-        String src = jsEscape(info.src);
         String rotateCss = currentRotation != 0
                 ? "-webkit-transform:rotate(" + currentRotation + "deg);transform:rotate(" + currentRotation + "deg);"
                 : "";
+
+        String html;
+        if ("svg".equals(info.type) && info.svg != null && !info.svg.isEmpty()) {
+            // Pure vector SVG (AI-generated) — embed directly for full fidelity
+            String svgHtml = info.svg;
+            html = "<!DOCTYPE html><html><head>" +
+                    "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1.0,user-scalable=yes\">" +
+                    "<style>" +
+                    "*{margin:0;padding:0;}" +
+                    "html,body{width:100%;height:100%;background:#000;display:flex;align-items:center;justify-content:center;}" +
+                    ".svg-wrap{max-width:100%;max-height:100%;" + rotateCss + "}" +
+                    ".svg-wrap svg{max-width:100%;max-height:100%;display:block;}" +
+                    "</style>" +
+                    "<script>var vZoom=1;function viewerZoom(f){vZoom=Math.min(5,Math.max(0.1,vZoom*f));document.body.style.zoom=vZoom;}</script>" +
+                    "</head><body>" +
+                    "<div class=\"svg-wrap\">" + svgHtml + "</div>" +
+                    "</body></html>";
+        } else {
+            // Raster image (PNG data URI or external URL)
+            String src = MessageHtmlRenderer.escAttr(info.src);
+            String alt = MessageHtmlRenderer.escAttr(info.alt);
+            html = "<!DOCTYPE html><html><head>" +
+                    "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1.0,user-scalable=yes\">" +
+                    "<style>" +
+                    "*{margin:0;padding:0;}" +
+                    "html,body{width:100%;height:100%;background:#000;display:flex;align-items:center;justify-content:center;}" +
+                    "img,svg{max-width:100%;max-height:100%;" + rotateCss + "}" +
+                    "</style>" +
+                    "<script>var vZoom=1;function viewerZoom(f){vZoom=Math.min(5,Math.max(0.1,vZoom*f));document.body.style.zoom=vZoom;}</script>" +
+                    "</head><body>" +
+                    "<img src=\"" + src + "\" alt=\"" + alt + "\">" +
+                    "</body></html>";
+        }
+
+        imageViewerWebView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null);
+    }
+
+    // ========== 表格查看器 ==========
+
+    private void showTableViewerDialog(String tableHtml) {
+        if (tableViewerDialog != null && tableViewerDialog.isShowing()) {
+            tableViewerDialog.dismiss();
+        }
+
+        if (tableHtml == null || tableHtml.isEmpty()) {
+            Toast.makeText(this, "表格内容为空", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        tableRotation = 0;
+
+        View view = getLayoutInflater().inflate(R.layout.dialog_image_viewer, null);
+        tableViewerWebView = (WebView) view.findViewById(R.id.viewer_webview);
+
+        // Hide image-specific controls
+        view.findViewById(R.id.viewer_prev).setVisibility(View.GONE);
+        view.findViewById(R.id.viewer_next).setVisibility(View.GONE);
+        view.findViewById(R.id.viewer_counter).setVisibility(View.GONE);
+
+        Button zoomOutBtn = (Button) view.findViewById(R.id.viewer_zoom_out);
+        Button zoomInBtn = (Button) view.findViewById(R.id.viewer_zoom_in);
+        Button rotateBtn = (Button) view.findViewById(R.id.viewer_rotate);
+        Button closeBtn = (Button) view.findViewById(R.id.viewer_close);
+
+        tableViewerWebView.getSettings().setJavaScriptEnabled(true);
+        tableViewerWebView.getSettings().setBuiltInZoomControls(true);
+        tableViewerWebView.getSettings().setDisplayZoomControls(false);
+        tableViewerWebView.getSettings().setUseWideViewPort(true);
+        tableViewerWebView.getSettings().setLoadWithOverviewMode(true);
+        tableViewerWebView.getSettings().setSupportZoom(true);
+        tableViewerWebView.setBackgroundColor(Color.WHITE);
+        tableViewerWebView.setWebViewClient(new WebViewClient() {
+            public boolean shouldOverrideUrlLoading(WebView view, String url) {
+                return true;
+            }
+        });
+
+        zoomOutBtn.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { tableViewerWebView.loadUrl("javascript:viewerZoom(0.8)"); }
+        });
+        zoomInBtn.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { tableViewerWebView.loadUrl("javascript:viewerZoom(1.25)"); }
+        });
+        rotateBtn.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                tableRotation = (tableRotation + 90) % 360;
+                loadTableContent(tableHtml);
+            }
+        });
+        closeBtn.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                if (tableViewerDialog != null) tableViewerDialog.dismiss();
+            }
+        });
+
+        tableViewerDialog = new AlertDialog.Builder(this)
+                .setView(view)
+                .setCancelable(true)
+                .create();
+
+        tableViewerDialog.setOnDismissListener(new DialogInterface.OnDismissListener() {
+            public void onDismiss(DialogInterface dialog) {
+                if (tableViewerWebView != null) {
+                    tableViewerWebView.destroy();
+                    tableViewerWebView = null;
+                }
+                tableViewerDialog = null;
+            }
+        });
+
+        tableViewerDialog.getWindow().setLayout(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT);
+        tableViewerDialog.show();
+
+        loadTableContent(tableHtml);
+    }
+
+    private void loadTableContent(String tableHtml) {
+        if (tableViewerWebView == null) return;
+
+        String rotateCss = "";
+        String rotateJs = "";
+        if (tableRotation != 0) {
+            rotateCss = "-webkit-transform:rotate(" + tableRotation + "deg);"
+                      + "transform:rotate(" + tableRotation + "deg);";
+            // Make wrapper a square large enough to hold the rotated table,
+            // so the layout box covers the full visual area (API 18 doesn't
+            // add scroll overflow for CSS transforms).
+            rotateJs = "<script>" +
+                "(function fix(a){" +
+                "var w=document.querySelector('.table-wrap');" +
+                "var t=w&&w.querySelector('table');" +
+                "if(!t)return;" +
+                "var ow=t.offsetWidth,oh=t.offsetHeight;" +
+                "if((!ow||!oh)&&a<20){setTimeout(function(){fix(a+1);},50);return;}" +
+                "var s=Math.max(ow,oh);" +
+                "w.style.width=s+'px';" +
+                "w.style.height=s+'px';" +
+                "var m=document.querySelector('meta[name=viewport]');" +
+                "if(m)m.setAttribute('content','width='+s+',user-scalable=yes');" +
+                "})(0);" +
+                "</script>";
+        }
 
         String html = "<!DOCTYPE html><html><head>" +
                 "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1.0,user-scalable=yes\">" +
                 "<style>" +
                 "*{margin:0;padding:0;}" +
-                "html,body{width:100%;height:100%;background:#000;display:flex;align-items:center;justify-content:center;}" +
-                "img{max-width:100%;max-height:100%;" + rotateCss + "}" +
-                "</style></head><body>" +
-                "<img src=\"" + src + "\" alt=\"" + jsEscape(info.alt) + "\">" +
+                "html,body{background:#fff;padding:8px;overflow:auto;}" +
+                ".table-wrap{display:inline-block;" + rotateCss + "}" +
+                "table{border-collapse:collapse;font-size:14px;}" +
+                "th,td{border:1px solid #ddd;padding:8px 12px;text-align:left;}" +
+                "th{background:#f0f0f0;font-weight:bold;white-space:nowrap;}" +
+                "td{white-space:nowrap;}" +
+                "</style>" +
+                "<script>var vZoom=1;function viewerZoom(f){vZoom=Math.min(5,Math.max(0.1,vZoom*f));document.body.style.zoom=vZoom;}</script>" +
+                "</head><body>" +
+                "<div class=\"table-wrap\">" + tableHtml + "</div>" +
+                rotateJs +
                 "</body></html>";
 
-        imageViewerWebView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null);
+        tableViewerWebView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null);
     }
 
     // ========== 消息长按菜单 ==========
