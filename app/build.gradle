@@ -19,8 +19,8 @@ android {
         applicationId 'xyz.zip8919.app.aichat'
         minSdk 18
         targetSdk 18
-        versionCode 20
-        versionName "1.4.0"
+        versionCode 21
+        versionName "1.4.1"
 
         buildConfigField "String", "DEEPSEEK_KEY", "\"${project.findProperty('deepseekKey') ?: 'sk-xxx'}\""
         buildConfigField "String", "SILICONFLOW_KEY", "\"${project.findProperty('siliconflowKey') ?: 'sk-xxx'}\""

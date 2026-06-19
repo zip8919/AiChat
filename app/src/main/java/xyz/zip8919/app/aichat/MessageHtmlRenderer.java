@@ -270,6 +270,13 @@ public class MessageHtmlRenderer {
             "var all=msgs.querySelectorAll('.msg');" +
             "for(var i=all.length-1;i>=0;i--){" +
             "var attr=all[i].getAttribute('data-idx');" +
+            "if(attr&&parseInt(attr)==idx){all[i].parentNode.removeChild(all[i]);return;}}" +
+            "};" +
+            "window.removeRangeFrom=function(idx){" +
+            "var msgs=document.getElementById('msgs');" +
+            "var all=msgs.querySelectorAll('.msg');" +
+            "for(var i=all.length-1;i>=0;i--){" +
+            "var attr=all[i].getAttribute('data-idx');" +
             "if(attr&&parseInt(attr)>=idx)all[i].parentNode.removeChild(all[i]);}" +
             "};" +
             "addCopyBtns();" +

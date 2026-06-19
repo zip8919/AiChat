@@ -341,7 +341,7 @@ public class MainActivity extends Activity {
                         String content = lastMsg.content;
                         if (content == null || content.isEmpty()) {
                             messages.remove(messages.size() - 1);
-                            removeDomFrom(messages.size());
+                            removeDomRange(messages.size());
                         } else {
                             lastMsg.content = content + " (已打断)";
                             updateAiContent(lastMsg.content);
@@ -793,6 +793,10 @@ public class MainActivity extends Activity {
 
     private void removeDomFrom(int pos) {
         conversationWebView.loadUrl("javascript:removeFromIdx(" + pos + ")");
+    }
+
+    private void removeDomRange(int fromPos) {
+        conversationWebView.loadUrl("javascript:removeRangeFrom(" + fromPos + ")");
     }
 
     private static String jsEscape(String s) {
@@ -1639,7 +1643,7 @@ public class MainActivity extends Activity {
             showConfirmDialog("将删除本条及之后共 " + n + " 条消息并重新生成回复，确定？", new Runnable() {
                 public void run() {
                     messages.subList(pos, messages.size()).clear();
-                    removeDomFrom(pos);
+                    removeDomRange(pos);
                     execStreamingRequest();
                 }
             });
@@ -1648,7 +1652,7 @@ public class MainActivity extends Activity {
             showConfirmDialog("将删除本条及之后共 " + n + " 条消息并重新发送，确定？", new Runnable() {
                 public void run() {
                     messages.subList(pos, messages.size()).clear();
-                    removeDomFrom(pos);
+                    removeDomRange(pos);
                     Message um = new Message(Message.ROLE_USER, uc);
                     messages.add(um);
                     conversationManager.getCurrentConversation().touch();
@@ -1685,7 +1689,7 @@ public class MainActivity extends Activity {
         showConfirmDialog("将删除本条之后共 " + n + " 条消息（保留本条），确定？", new Runnable() {
             public void run() {
                 messages.subList(messages.size() - n, messages.size()).clear();
-                removeDomFrom(messages.size());
+                removeDomRange(messages.size());
                 conversationManager.saveCurrentConversation();
                 Toast.makeText(MainActivity.this, "已回溯", Toast.LENGTH_SHORT).show();
             }
