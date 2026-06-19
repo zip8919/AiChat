@@ -66,19 +66,24 @@ public class MessageHtmlRenderer {
             "pre .copy-btn{position:absolute;top:4px;right:8px;padding:2px 8px;" +
             "font-size:11px;background:#e1e4e8;border:1px solid #ccc;border-radius:3px;" +
             "color:#555;font-family:Roboto,sans-serif;}" +
+            "pre .preview-btn{position:absolute;top:4px;right:56px;padding:2px 8px;" +
+            "font-size:11px;background:#e1f5fe;border:1px solid #81d4fa;border-radius:3px;" +
+            "color:#0277bd;font-family:Roboto,sans-serif;}" +
             "table{border-collapse:collapse;margin:8px 0;font-size:13px;white-space:nowrap;}" +
             "th,td{border:1px solid #ddd;padding:6px 10px;text-align:left;}" +
             "th{background:#f0f0f0;font-weight:bold;}" +
             ".table-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;" +
             "-webkit-tap-highlight-color:rgba(100,180,255,0.3);}" +
             "a{color:#2196F3;text-decoration:none;}" +
-            "img,svg{max-width:100%;height:auto;}" +
+            "img{max-width:100%;height:auto;}" +
+            "svg{max-width:100%;}" +
             ".msg svg{display:block;overflow:hidden;}" +
             ".svg-scroll{overflow:auto;-webkit-overflow-scrolling:touch;margin:8px 0;}" +
             ".svg-scroll svg{width:100%;height:auto;display:block;overflow:visible;}" +
             ".math-block img,.math-block svg,.math-inline,.msg img,.msg svg{-webkit-tap-highlight-color:rgba(255,255,255,0.3);}" +
-            ".math-block{display:block;text-align:center;margin:12px 0;padding:8px;}" +
-            ".math-block img,.math-block svg{max-width:100%;height:auto;}" +
+            ".math-block{display:block;text-align:center;margin:8px 0;padding:4px 8px;}" +
+            ".math-block img,.math-block svg{max-width:100%;}" +
+            ".math-block img{height:auto;}" +
             "svg.math-inline{display:inline;vertical-align:middle;}" +
             ".math-inline img,.math-inline svg{height:1.6em;vertical-align:middle;}" +
             "ul,ol{padding-left:24px;margin:4px 0;}" +
@@ -126,7 +131,19 @@ public class MessageHtmlRenderer {
             "if(window.Android)Android.copyCode(text);" +
             "btn.textContent='已复制';" +
             "setTimeout(function(){btn.textContent='复制';},2000);};" +
-            "pre.appendChild(btn);})(pres[i]);}}" +
+            "pre.appendChild(btn);" +
+            "var langTag=pre.querySelector('.lang-tag');" +
+            "if(langTag){" +
+            "var lang=langTag.textContent.trim().toLowerCase();" +
+            "if((lang==='html'||lang==='svg')&&!pre.querySelector('.preview-btn')){" +
+            "var pbtn=document.createElement('button');" +
+            "pbtn.className='preview-btn';pbtn.textContent='预览';" +
+            "pbtn.onclick=function(e){e.stopPropagation();e.preventDefault();" +
+            "var code=pre.querySelector('code');" +
+            "var text=code?code.textContent:'';" +
+            "if(window.Android)Android.previewCode(lang,text);};" +
+            "pre.appendChild(pbtn);}}})" +
+            "(pres[i]);}}" +
             "var lpTimer=null,lpStartX=0,lpStartY=0,lpEl=null;" +
             "document.addEventListener('touchstart',function(e){" +
             "if(!e.touches||e.touches.length!==1)return;" +
@@ -195,19 +212,37 @@ public class MessageHtmlRenderer {
             "btn.textContent='── 折叠思考 ──';}" +
             "else{b.style.display='none';" +
             "btn.textContent='── 展开思考（'+b.textContent.length+'字）──';}};" +
+            "window.userScrolledUp=false;" +
+            "window._userTouching=false;" +
+            "document.addEventListener('touchstart',function(){" +
+            "_userTouching=true;});" +
+            "document.addEventListener('touchend',function(){" +
+            "setTimeout(function(){" +
+            "var st=document.documentElement.scrollTop||document.body.scrollTop;" +
+            "var sh=Math.max(document.documentElement.scrollHeight,document.body.scrollHeight);" +
+            "var ch=document.documentElement.clientHeight||document.body.clientHeight;" +
+            "var dist=sh-st-ch;" +
+            "if(dist<40)userScrolledUp=false;" +           // 松手时在底部 → 恢复跟随
+            "else if(dist>80)userScrolledUp=true;" +       // 松手时距底 >80px → 不跟随
+            "_userTouching=false;},100);});" +
+            "window.smartScrollToBottom=function(force){" +
+            "if(!force&&userScrolledUp)return;" +           // 用户上翻了，不滚动
+            "window.scrollTo(0,Math.max(" +
+            "document.documentElement.scrollHeight," +
+            "document.body.scrollHeight));};" +
             "window.appendMsg=function(html){" +
             "var d=document.createElement('div');d.innerHTML=html;" +
             "var el=d.firstElementChild;" +
             "if(el)document.getElementById('msgs').appendChild(el);" +
-            "addCopyBtns();window.scrollTo(0,document.body.scrollHeight);};" +
+            "addCopyBtns();smartScrollToBottom();};" +
             "window.updateLastMsg=function(html){" +
             "var ms=document.querySelectorAll('.msg.ai .content');" +
             "if(ms.length>0){ms[ms.length-1].innerHTML=html;}" +
-            "addCopyBtns();window.scrollTo(0,document.body.scrollHeight);};" +
+            "addCopyBtns();smartScrollToBottom();};" +
             "window.updateLastText=function(text){" +
             "var ms=document.querySelectorAll('.msg.ai .content');" +
             "if(ms.length>0){ms[ms.length-1].textContent=text;}" +
-            "window.scrollTo(0,document.body.scrollHeight);};" +
+            "smartScrollToBottom();};" +
             "window.appendAiDiv=function(){" +
             "var d=document.createElement('div');" +
             "d.className='msg ai';d.setAttribute('data-idx','-1');" +
@@ -216,7 +251,7 @@ public class MessageHtmlRenderer {
             "onclick=\"if(window.Android)Android.messageMenu(\\'-1\\');" +
             "event.stopPropagation();return false;\">⋯</button></div>';" +
             "document.getElementById('msgs').appendChild(d);" +
-            "window.scrollTo(0,document.body.scrollHeight);};" +
+            "smartScrollToBottom();};" +
             "window.updateMsgAt=function(idx,html){" +
             "var all=document.querySelectorAll('.msg');" +
             "for(var i=0;i<all.length;i++){" +
@@ -327,9 +362,18 @@ public class MessageHtmlRenderer {
         String result = html.toString();
         for (int i = 0; i < mathTags.size(); i++)
             result = result.replace("@@MATH" + i + "@@", mathTags.get(i));
-        for (int i = 0; i < svgBlocks.size(); i++)
+        for (int i = 0; i < svgBlocks.size(); i++) {
+            // Inject width constraint directly on the SVG element so API 18
+            // respects it even when CSS doesn't override presentational attrs
+            String svgHtml = svgBlocks.get(i);
+            if (svgHtml.toLowerCase().contains(" style=\"")) {
+                svgHtml = svgHtml.replaceFirst("(?i) style=\"", " style=\"max-width:100%;width:100%;height:auto;");
+            } else {
+                svgHtml = svgHtml.replaceFirst("(?i)<svg", "<svg style=\"max-width:100%;width:100%;height:auto;\"");
+            }
             result = result.replace("@@SVG" + i + "@@",
-                "<div class=\"svg-scroll\">" + svgBlocks.get(i) + "</div>");
+                "<div class=\"svg-scroll\">" + svgHtml + "</div>");
+        }
         return result;
     }
 
@@ -484,8 +528,12 @@ public class MessageHtmlRenderer {
                 String latex = ceToLatex(formula);
                 boolean isBlock = (pfx == 2); // $$ → block, $ or bare → inline
                 String imgHtml = renderLatexImg(latex, isBlock, density);
-                mathTags.add(imgHtml);
-                out.append("@@MATH").append(mathTags.size() - 1).append("@@");
+                if (isBlock) {
+                    out.append('\n').append(imgHtml).append("\n\n");
+                } else {
+                    mathTags.add(imgHtml);
+                    out.append("@@MATH").append(mathTags.size() - 1).append("@@");
+                }
 
                 if (pfx > 0) i = skipMathSuffix(text, i, pfx);
             } else {
@@ -759,8 +807,7 @@ public class MessageHtmlRenderer {
                 int end = text.indexOf("$$", i + 2);
                 if (end > i) {
                     String html = renderLatexImg(text.substring(i + 2, end).trim(), true, density);
-                    mathTags.add(html);
-                    out.append('\n').append("@@MATH").append(mathTags.size() - 1).append("@@\n");
+                    out.append('\n').append(html).append("\n\n");
                     i = end + 2; continue;
                 }
             }
@@ -768,8 +815,7 @@ public class MessageHtmlRenderer {
                 int end = text.indexOf("\\]", i + 2);
                 if (end > i) {
                     String html = renderLatexImg(text.substring(i + 2, end).trim(), true, density);
-                    mathTags.add(html);
-                    out.append('\n').append("@@MATH").append(mathTags.size() - 1).append("@@\n");
+                    out.append('\n').append(html).append("\n\n");
                     i = end + 2; continue;
                 }
             }
@@ -835,15 +881,22 @@ public class MessageHtmlRenderer {
                 bmp.recycle();
 
                 String alt = escAttr(formula);
-                // SVG without width/height attrs — CSS controls display size,
-                // viewBox maps the high-res bitmap to the proper display dimensions.
+                // Block: explicit display dimensions (w/scale) so API 18
+                // doesn't fall back to 300×150 default. viewBox maps the
+                // high-res bitmap to display size.
+                // Inline: no width/height attrs — CSS height:1.6em;width:auto
                 String svgNs = "http://www.w3.org/2000/svg";
                 String xlinkNs = "http://www.w3.org/1999/xlink";
                 if (block) {
+                    int dispW = Math.round((float) w / scale);
+                    int dispH = Math.round((float) h / scale);
+                    if (dispW < 1) dispW = 1;
+                    if (dispH < 1) dispH = 1;
                     imgTag = "<div class=\"math-block\">" +
                         "<svg xmlns=\"" + svgNs + "\" xmlns:xlink=\"" + xlinkNs + "\"" +
+                        " width=\"" + dispW + "\" height=\"" + dispH + "\"" +
                         " viewBox=\"0 0 " + w + " " + h + "\"" +
-                        " style=\"max-width:100%;height:auto;\">" +
+                        " style=\"max-width:100%;\">" +
                         "<image width=\"" + w + "\" height=\"" + h + "\"" +
                         " xlink:href=\"data:image/png;base64," + b64 + "\"/>" +
                         "</svg></div>";
@@ -851,7 +904,7 @@ public class MessageHtmlRenderer {
                     imgTag = "<svg xmlns=\"" + svgNs + "\" xmlns:xlink=\"" + xlinkNs + "\"" +
                         " class=\"math-inline\"" +
                         " viewBox=\"0 0 " + w + " " + h + "\"" +
-                        " style=\"height:1.6em;vertical-align:middle;\">" +
+                        " style=\"height:1.6em;width:auto;vertical-align:middle;\">" +
                         "<image width=\"" + w + "\" height=\"" + h + "\"" +
                         " xlink:href=\"data:image/png;base64," + b64 + "\"/>" +
                         "</svg>";

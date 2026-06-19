@@ -13,6 +13,7 @@ import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
 import android.net.Uri;
 import java.net.HttpURLConnection;
+import java.util.regex.Matcher;
 import android.os.Bundle;
 import android.os.Handler;
 import android.view.MotionEvent;
@@ -76,6 +77,14 @@ public class MainActivity extends Activity {
     private WebView tableViewerWebView;
     private int tableRotation;
     private int tableBgColor; // 0=white, 1=gray, 2=black
+
+    // Code preview dialog state (HTML / SVG)
+    private AlertDialog codePreviewDialog;
+    private WebView codePreviewWebView;
+    private int codePreviewRotation;
+    private int codePreviewBgColor;
+    private String currentPreviewLang;
+    private String currentPreviewCode;
 
     private String currentModel;
     private String currentApiKey;
@@ -187,6 +196,39 @@ public class MainActivity extends Activity {
                 } catch (Exception e) {
                     Toast.makeText(MainActivity.this, "无法启动扫描: " + e.getMessage(), Toast.LENGTH_LONG).show();
                 }
+            }
+        });
+
+        // Scroll-to-bottom button: tap = scroll to bottom, long-press = clear input
+        final Button scrollBtn = (Button) findViewById(R.id.scroll_to_bottom_button);
+        scrollBtn.setOnTouchListener(new View.OnTouchListener() {
+            private Runnable longPressRunnable;
+            private boolean longPressed = false;
+            @Override
+            public boolean onTouch(View v, MotionEvent event) {
+                switch (event.getAction()) {
+                    case MotionEvent.ACTION_DOWN:
+                        longPressed = false;
+                        longPressRunnable = new Runnable() {
+                            public void run() {
+                                longPressed = true;
+                                inputEditText.setText("");
+                            }
+                        };
+                        handler.postDelayed(longPressRunnable, 600);
+                        return false;
+                    case MotionEvent.ACTION_UP:
+                        handler.removeCallbacks(longPressRunnable);
+                        if (!longPressed) {
+                            conversationWebView.loadUrl(
+                                "javascript:smartScrollToBottom(true)");
+                        }
+                        return false;
+                    case MotionEvent.ACTION_CANCEL:
+                        handler.removeCallbacks(longPressRunnable);
+                        return false;
+                }
+                return false;
             }
         });
 
@@ -373,6 +415,11 @@ public class MainActivity extends Activity {
         }
         if (tableViewerDialog != null && tableViewerDialog.isShowing()) {
             tableViewerDialog.getWindow().setLayout(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT);
+        }
+        if (codePreviewDialog != null && codePreviewDialog.isShowing()) {
+            codePreviewDialog.getWindow().setLayout(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.MATCH_PARENT);
         }
@@ -796,6 +843,15 @@ public class MainActivity extends Activity {
                 }
             });
         }
+
+        @JavascriptInterface
+        public void previewCode(final String lang, final String code) {
+            handler.post(new Runnable() {
+                public void run() {
+                    showCodePreviewDialog(lang, code);
+                }
+            });
+        }
     }
 
     // ========== 图片查看器 ==========
@@ -1028,6 +1084,7 @@ public class MainActivity extends Activity {
         view.findViewById(R.id.viewer_prev).setVisibility(View.GONE);
         view.findViewById(R.id.viewer_next).setVisibility(View.GONE);
         view.findViewById(R.id.viewer_counter).setVisibility(View.GONE);
+        view.findViewById(R.id.viewer_bg_toggle).setVisibility(View.GONE);
 
         Button zoomOutBtn = (Button) view.findViewById(R.id.viewer_zoom_out);
         Button zoomInBtn = (Button) view.findViewById(R.id.viewer_zoom_in);
@@ -1153,6 +1210,194 @@ public class MainActivity extends Activity {
                 "</body></html>";
 
         tableViewerWebView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null);
+    }
+
+    // ========== HTML / SVG 代码预览 ==========
+
+    private void showCodePreviewDialog(String lang, String code) {
+        if (codePreviewDialog != null && codePreviewDialog.isShowing()) {
+            codePreviewDialog.dismiss();
+        }
+
+        if (code == null || code.isEmpty()) {
+            Toast.makeText(this, "代码内容为空", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        codePreviewRotation = 0;
+        codePreviewBgColor = 0;
+        currentPreviewLang = lang;
+        currentPreviewCode = code;
+
+        View view = getLayoutInflater().inflate(R.layout.dialog_image_viewer, null);
+        codePreviewWebView = (WebView) view.findViewById(R.id.viewer_webview);
+
+        // Hide image-specific controls
+        view.findViewById(R.id.viewer_prev).setVisibility(View.GONE);
+        view.findViewById(R.id.viewer_next).setVisibility(View.GONE);
+        view.findViewById(R.id.viewer_counter).setVisibility(View.GONE);
+
+        Button zoomOutBtn = (Button) view.findViewById(R.id.viewer_zoom_out);
+        Button zoomInBtn = (Button) view.findViewById(R.id.viewer_zoom_in);
+        Button rotateBtn = (Button) view.findViewById(R.id.viewer_rotate);
+        Button resetBtn = (Button) view.findViewById(R.id.viewer_reset);
+        Button bgToggleBtn = (Button) view.findViewById(R.id.viewer_bg_toggle);
+        Button closeBtn = (Button) view.findViewById(R.id.viewer_close);
+
+        codePreviewWebView.getSettings().setJavaScriptEnabled(true);
+        codePreviewWebView.getSettings().setBuiltInZoomControls(true);
+        codePreviewWebView.getSettings().setDisplayZoomControls(false);
+        codePreviewWebView.getSettings().setUseWideViewPort(true);
+        codePreviewWebView.getSettings().setLoadWithOverviewMode(true);
+        codePreviewWebView.getSettings().setSupportZoom(true);
+        codePreviewWebView.setBackgroundColor(Color.WHITE);
+        codePreviewWebView.setWebViewClient(new WebViewClient() {
+            public boolean shouldOverrideUrlLoading(WebView view, String url) {
+                return true;
+            }
+        });
+
+        zoomOutBtn.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { viewerEvalJs(codePreviewWebView, "viewerZoom(0.8)"); }
+        });
+        zoomInBtn.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { viewerEvalJs(codePreviewWebView, "viewerZoom(1.25)"); }
+        });
+        rotateBtn.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                codePreviewRotation = (codePreviewRotation + 90) % 360;
+                loadCodePreview();
+            }
+        });
+        resetBtn.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                codePreviewRotation = 0;
+                loadCodePreview();
+            }
+        });
+        bgToggleBtn.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                codePreviewBgColor = (codePreviewBgColor + 1) % 3;
+                applyCodePreviewBg();
+            }
+        });
+        closeBtn.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                if (codePreviewDialog != null) codePreviewDialog.dismiss();
+            }
+        });
+
+        codePreviewDialog = new AlertDialog.Builder(this)
+                .setView(view)
+                .setCancelable(true)
+                .create();
+
+        codePreviewDialog.setOnDismissListener(new DialogInterface.OnDismissListener() {
+            public void onDismiss(DialogInterface dialog) {
+                if (codePreviewWebView != null) {
+                    codePreviewWebView.destroy();
+                    codePreviewWebView = null;
+                }
+                codePreviewDialog = null;
+            }
+        });
+
+        codePreviewDialog.getWindow().setLayout(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT);
+        codePreviewDialog.show();
+
+        loadCodePreview();
+    }
+
+    private void loadCodePreview() {
+        if (codePreviewWebView == null || currentPreviewCode == null) return;
+
+        String bgColor = getBgColorHex(codePreviewBgColor);
+
+        String rotateCss = codePreviewRotation != 0
+                ? "-webkit-transform:rotate(" + codePreviewRotation + "deg);"
+                + "transform:rotate(" + codePreviewRotation + "deg);"
+                : "";
+
+        String html;
+        if ("svg".equals(currentPreviewLang)) {
+            html = buildCodePreviewHtml(currentPreviewCode, currentPreviewLang,
+                    bgColor, rotateCss, false);
+        } else {
+            // HTML: detect if it's a full document or fragment
+            String trimmed = currentPreviewCode.trim().toLowerCase();
+            boolean isFullDoc = trimmed.startsWith("<!doctype") || trimmed.startsWith("<html");
+            html = buildCodePreviewHtml(currentPreviewCode, currentPreviewLang,
+                    bgColor, rotateCss, isFullDoc);
+        }
+
+        codePreviewWebView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null);
+    }
+
+    private String buildCodePreviewHtml(String code, String lang,
+            String bgColor, String rotateCss, boolean isFullHtmlDoc) {
+        String zoomJs =
+                "var vZoom=1;" +
+                "function viewerZoom(f){vZoom=Math.min(5,Math.max(0.1,vZoom*f));" +
+                "var t='scale('+vZoom+')';" +
+                "document.body.style.webkitTransform=t;document.body.style.transform=t;}" +
+                "function viewerSetBg(c){document.body.style.backgroundColor=c;}";
+
+        if ("svg".equals(lang)) {
+            // Wrap SVG code in a minimal HTML page
+            return "<!DOCTYPE html><html><head>" +
+                    "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1.0,user-scalable=yes\">" +
+                    "<style>" +
+                    "*{margin:0;padding:0;}" +
+                    "html,body{width:100%;min-height:100%;background:" + bgColor + ";" +
+                    "overflow:auto;-webkit-transform-origin:0 0;transform-origin:0 0;}" +
+                    ".preview-wrap{" + rotateCss + "}" +
+                    ".preview-wrap svg{max-width:100%;height:auto;display:block;}" +
+                    "</style>" +
+                    "<script>" + zoomJs + "</script>" +
+                    "</head><body>" +
+                    "<div class=\"preview-wrap\">" + code + "</div>" +
+                    "</body></html>";
+        }
+
+        if (isFullHtmlDoc) {
+            // Inject zoom/rotate/bg scripts into existing HTML document
+            String inject = "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1.0,user-scalable=yes\">"
+                    + "<style>" +
+                    "html,body{" + rotateCss + "-webkit-transform-origin:0 0;transform-origin:0 0;}"
+                    + "</style>"
+                    + "<script>" + zoomJs + "</script>";
+            // Insert after <head> or after <html>
+            if (code.toLowerCase().contains("<head>")) {
+                return code.replaceFirst("(?i)<head[^>]*>", "$0" + Matcher.quoteReplacement(inject));
+            } else if (code.toLowerCase().contains("<html>")) {
+                return code.replaceFirst("(?i)<html[^>]*>", "$0<head>" + inject + "</head>");
+            } else {
+                return "<!DOCTYPE html><html><head>" + inject + "</head><body>" + code + "</body></html>";
+            }
+        }
+
+        // HTML fragment — wrap in minimal page
+        return "<!DOCTYPE html><html><head>" +
+                "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1.0,user-scalable=yes\">" +
+                "<style>" +
+                "*{margin:0;padding:0;}" +
+                "html,body{width:100%;min-height:100%;background:" + bgColor + ";" +
+                "overflow:auto;-webkit-transform-origin:0 0;transform-origin:0 0;}" +
+                ".preview-wrap{" + rotateCss + "}" +
+                "</style>" +
+                "<script>" + zoomJs + "</script>" +
+                "</head><body>" +
+                "<div class=\"preview-wrap\">" + code + "</div>" +
+                "</body></html>";
+    }
+
+    private void applyCodePreviewBg() {
+        String color = getBgColorHex(codePreviewBgColor);
+        if (codePreviewWebView != null) {
+            viewerEvalJs(codePreviewWebView, "viewerSetBg('" + color + "')");
+        }
     }
 
     private String getBgColorHex(int state) {

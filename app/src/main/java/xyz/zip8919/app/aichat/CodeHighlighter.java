@@ -11,7 +11,7 @@ import java.util.regex.Pattern;
 public class CodeHighlighter {
     private static final Set<String> SUPPORTED = new HashSet<>(Arrays.asList(
         "java", "py", "python", "js", "javascript", "ts", "typescript",
-        "bash", "sh", "shell", "json", "xml", "html", "cpp", "c++", "c",
+        "bash", "sh", "shell", "json", "xml", "html", "svg", "cpp", "c++", "c",
         "sql", "go", "rust", "kt", "kotlin", "swift", "cs", "csharp"
     ));
 
@@ -179,6 +179,68 @@ public class CodeHighlighter {
             new Rule("num", "\\b\\d+\\.?\\d*\\b"),
         };
 
+        // ---- SVG ----
+        LANG_KEYWORDS.put("svg", setOf(
+            "svg", "g", "defs", "symbol", "use", "a", "switch", "foreignObject",
+            "path", "circle", "ellipse", "rect", "line", "polyline", "polygon",
+            "text", "tspan", "tref", "textPath", "title", "desc", "metadata",
+            "image", "clipPath", "mask", "pattern", "marker", "view",
+            "linearGradient", "radialGradient", "stop",
+            "filter", "feGaussianBlur", "feOffset", "feMerge", "feMergeNode",
+            "feColorMatrix", "feBlend", "feComposite", "feFlood", "feImage",
+            "feComponentTransfer", "feFuncR", "feFuncG", "feFuncB", "feFuncA",
+            "feTurbulence", "feDisplacementMap", "feMorphology",
+            "feConvolveMatrix", "feDiffuseLighting", "feSpecularLighting",
+            "fePointLight", "feSpotLight", "feDistantLight",
+            "animate", "animateTransform", "animateMotion", "set",
+            "style", "script"
+        ));
+        LANG_KEYWORDS.put("svg_attrs", setOf(
+            "id", "class", "style", "xmlns", "xmlns:xlink", "version",
+            "x", "y", "width", "height", "viewBox",
+            "preserveAspectRatio", "transform",
+            "cx", "cy", "r", "rx", "ry",
+            "x1", "y1", "x2", "y2",
+            "d", "pathLength", "points",
+            "fill", "fill-opacity", "fill-rule",
+            "stroke", "stroke-width", "stroke-linecap", "stroke-linejoin",
+            "stroke-dasharray", "stroke-dashoffset", "stroke-opacity",
+            "stroke-miterlimit",
+            "font-family", "font-size", "font-weight", "font-style",
+            "text-anchor", "dominant-baseline", "letter-spacing",
+            "text-decoration", "textLength", "lengthAdjust",
+            "offset", "stop-color", "stop-opacity",
+            "gradientUnits", "gradientTransform", "spreadMethod",
+            "stdDeviation", "in", "out", "result",
+            "type", "operator", "mode",
+            "dx", "dy", "radius",
+            "opacity", "visibility", "display",
+            "clip-path", "clip-rule",
+            "href", "xlink:href",
+            "marker-start", "marker-mid", "marker-end",
+            "markerWidth", "markerHeight", "orient", "refX", "refY",
+            "dur", "begin", "end", "repeatCount",
+            "attributeName", "from", "to", "by", "values",
+            "keyTimes", "keySplines", "calcMode",
+            "requiredFeatures", "requiredExtensions", "systemLanguage",
+            "baseProfile", "contentScriptType", "contentStyleType",
+            "externalResourcesRequired", "preserveAlpha",
+            "viewTarget", "zoomAndPan"
+        ));
+        LANG_KEYWORDS.put("xml_attrs", setOf(
+            "xmlns", "xmlns:xsi", "xmlns:xsd", "xsi:schemaLocation",
+            "version", "encoding", "standalone", "id", "name", "type",
+            "href", "src", "alt", "lang", "dir", "title"
+        ));
+        LANG_KEYWORDS.put("html_attrs", setOf(
+            "id", "class", "style", "href", "src", "alt", "title",
+            "type", "name", "value", "placeholder", "disabled", "readonly",
+            "checked", "selected", "required", "maxlength", "minlength",
+            "width", "height", "target", "rel", "charset", "content",
+            "http-equiv", "lang", "dir", "onclick", "onchange", "oninput",
+            "onload", "onerror", "onsubmit", "data-"
+        ));
+
         LANG_RULES.put("java", cStyleRules);
         LANG_RULES.put("cpp", cStyleRules);
         LANG_RULES.put("c", cStyleRules);
@@ -201,6 +263,7 @@ public class CodeHighlighter {
         LANG_RULES.put("json", jsRules);
         LANG_RULES.put("xml", xmlRules);
         LANG_RULES.put("html", xmlRules);
+        LANG_RULES.put("svg", xmlRules);
         LANG_RULES.put("sql", sqlRules);
     }
 
@@ -258,16 +321,106 @@ public class CodeHighlighter {
                 continue;
             }
 
-            // 3. XML tags
-            if (("xml".equals(lang) || "html".equals(lang)) && code.charAt(i) == '<') {
-                int start = i;
-                while (i < len && code.charAt(i) != '>' && code.charAt(i) != ' ') i++;
-                if (i < len) {
-                    String tag = code.substring(start, i);
-                    out.append("<span class=\"tk-kw\">").append(esc(tag)).append("</span>");
+            // 3. XML / SVG / HTML tags — highlight element names and attributes
+            if (("xml".equals(lang) || "html".equals(lang) || "svg".equals(lang))
+                    && code.charAt(i) == '<') {
+                Set<String> attrSet = LANG_KEYWORDS.get(lang + "_attrs");
+
+                // Handle CDATA section
+                if (i + 9 < len && code.startsWith("<![CDATA[", i)) {
+                    int end = code.indexOf("]]>", i + 9);
+                    if (end > i) {
+                        out.append("<span class=\"tk-cmt\">");
+                        out.append(esc(code.substring(i, end + 3)));
+                        out.append("</span>");
+                        i = end + 3; continue;
+                    }
+                }
+
+                // Handle DOCTYPE / processing instructions <?...?>
+                if (i + 1 < len && (code.charAt(i + 1) == '!' || code.charAt(i + 1) == '?')) {
+                    int start = i; i++;
+                    while (i < len && code.charAt(i) != '>') i++;
+                    if (i < len) i++;
+                    out.append("<span class=\"tk-cmt\">");
+                    out.append(esc(code.substring(start, i)));
+                    out.append("</span>");
                     continue;
                 }
-                i = start;
+
+                // Closing tag: </tagname>
+                if (i + 1 < len && code.charAt(i + 1) == '/') {
+                    int start = i;
+                    i += 2; // skip </
+                    while (i < len && code.charAt(i) != '>') i++;
+                    if (i < len) i++; // skip >
+                    out.append("<span class=\"tk-kw\">");
+                    out.append(esc(code.substring(start, i)));
+                    out.append("</span>");
+                    continue;
+                }
+
+                // Opening / self-closing tag: <tagname ...>
+                int tagStart = i;
+                i++; // skip <
+                // Tag name
+                int nameStart = i;
+                while (i < len && !Character.isWhitespace(code.charAt(i))
+                        && code.charAt(i) != '>' && code.charAt(i) != '/') i++;
+                String tagName = code.substring(nameStart, i);
+                out.append("&lt;<span class=\"tk-kw\">").append(esc(tagName)).append("</span>");
+
+                // Parse attributes
+                while (i < len && code.charAt(i) != '>' && code.charAt(i) != '/') {
+                    // Whitespace before attribute
+                    int wsStart = i;
+                    while (i < len && Character.isWhitespace(code.charAt(i))) i++;
+                    if (wsStart < i) out.append(code, wsStart, i);
+                    if (i >= len || code.charAt(i) == '>' || code.charAt(i) == '/') break;
+
+                    // Attribute name — stop at =, >, /, or whitespace
+                    int attrStart = i;
+                    while (i < len && code.charAt(i) != '=' && code.charAt(i) != '>'
+                            && code.charAt(i) != '/' && !Character.isWhitespace(code.charAt(i))) i++;
+                    String attrName = code.substring(attrStart, i);
+                    if (attrName.isEmpty()) { out.append(code.charAt(i)); i++; continue; }
+                    if (attrSet != null && (attrSet.contains(attrName) || attrName.startsWith("data-")))
+                        out.append("<span class=\"tk-type\">").append(esc(attrName)).append("</span>");
+                    else
+                        out.append(esc(attrName));
+
+                    // Skip whitespace before =
+                    while (i < len && Character.isWhitespace(code.charAt(i))) { out.append(' '); i++; }
+
+                    // = and value
+                    if (i < len && code.charAt(i) == '=') {
+                        out.append('='); i++;
+                        if (i < len && code.charAt(i) == '"') {
+                            int valStart = i; i++;
+                            while (i < len && code.charAt(i) != '"') {
+                                if (code.charAt(i) == '\\') i++;
+                                i++;
+                            }
+                            if (i < len) i++; // closing "
+                            String raw = code.substring(valStart, i);
+                            String inner = code.substring(valStart + 1, i - 1);
+                            // Color / number detection for SVG attr values
+                            if ((lang.equals("svg") || lang.equals("xml")) &&
+                                    (inner.matches("#[0-9a-fA-F]{3,8}") ||
+                                     inner.matches("rgb\\(\\s*\\d+\\s*,\\s*\\d+\\s*,\\s*\\d+\\s*(,\\s*[\\d.]+\\s*)?\\)") ||
+                                     inner.matches("url\\([^)]*\\)") ||
+                                     inner.matches("[\\d.]+(px|em|rem|pt|%|cm|mm|in)?")))
+                                out.append("<span class=\"tk-num\">").append(esc(raw)).append("</span>");
+                            else
+                                out.append("<span class=\"tk-str\">").append(esc(raw)).append("</span>");
+                        }
+                    }
+                }
+
+                // Self-closing /> or closing >
+                if (i < len && code.charAt(i) == '/') { out.append('/'); i++; }
+                if (i < len && code.charAt(i) == '>') { out.append("&gt;"); i++; }
+                continue;
             }
 
             // 4. Operators
