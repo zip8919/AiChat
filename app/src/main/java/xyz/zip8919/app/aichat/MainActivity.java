@@ -28,6 +28,7 @@ import android.webkit.WebViewClient;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class MainActivity extends Activity {
     private static final String PREFS_NAME = "aichat_prefs";
@@ -49,6 +50,7 @@ public class MainActivity extends Activity {
     private List<ModelInfo> availableModels;
 
     private AtomicBoolean isRequestInProgress = new AtomicBoolean(false);
+    private AtomicInteger requestGeneration = new AtomicInteger(0);
     private HttpURLConnection currentConnection;
     private Thread currentRequestThread;
     private Handler handler = new Handler();
@@ -257,13 +259,20 @@ public class MainActivity extends Activity {
 
     private void interruptRequest() {
         if (!isRequestInProgress.get()) return;
+        requestGeneration.incrementAndGet(); // 作废当前请求代数，防止旧线程 finally 污染新请求
         isRequestInProgress.set(false);
         if (currentConnection != null) {
             currentConnection.disconnect();
             currentConnection = null;
         }
+        final int msgCountAtInterrupt = messages.size();
         runOnUiThread(new Runnable() {
             public void run() {
+                // 如果消息数已变化，说明新请求已启动，跳过清理防止误删
+                if (messages.size() != msgCountAtInterrupt) {
+                    Toast.makeText(MainActivity.this, "已打断请求", Toast.LENGTH_SHORT).show();
+                    return;
+                }
                 if (!messages.isEmpty()) {
                     Message lastMsg = messages.get(messages.size() - 1);
                     if (lastMsg.isAssistant()) {
@@ -335,6 +344,12 @@ public class MainActivity extends Activity {
     private void sendMessage() {
         if (isRequestInProgress.get()) {
             interruptRequest();
+            // 延迟重发，等旧请求线程完全退出后再执行，避免竞态崩溃
+            handler.postDelayed(new Runnable() {
+                public void run() {
+                    sendMessage();
+                }
+            }, 150);
             return;
         }
         String input = inputEditText.getText().toString().trim();
@@ -368,10 +383,11 @@ public class MainActivity extends Activity {
         String thinkingLevel = configManager.getThinkingLevel();
         if (!configManager.isThinkingEnabled()) thinkingLevel = "off";
 
-        sendStreamingRequest(provider, thinkingLevel);
+        int gen = requestGeneration.incrementAndGet();
+        sendStreamingRequest(provider, thinkingLevel, gen);
     }
 
-    private void sendStreamingRequest(final ProviderInfo provider, final String thinkingLevel) {
+    private void sendStreamingRequest(final ProviderInfo provider, final String thinkingLevel, final int generation) {
         isRequestInProgress.set(true);
 
         final Message aiMsg = new Message(Message.ROLE_ASSISTANT, "");
@@ -511,7 +527,7 @@ public class MainActivity extends Activity {
                                 final String content = rawContent.toString();
                                 runOnUiThread(new Runnable() {
                                     public void run() {
-                                        if (aiIndex < messages.size()) {
+                                        if (requestGeneration.get() == generation && aiIndex < messages.size()) {
                                             messages.get(aiIndex).content = content;
                                             String esc = jsEscape(content);
                                             conversationWebView.loadUrl("javascript:updateLastText('" + esc + "')");
@@ -528,7 +544,8 @@ public class MainActivity extends Activity {
                             final String html = MessageHtmlRenderer.contentToHtml(finalContent, MainActivity.this);
                             runOnUiThread(new Runnable() {
                                 public void run() {
-                                    if (aiIndex < messages.size()) {
+                                    // 代数匹配且索引有效时才更新，防止旧请求覆盖新请求
+                                    if (requestGeneration.get() == generation && aiIndex < messages.size()) {
                                         messages.get(aiIndex).content = finalContent;
                                         String esc = jsEscape(html);
                                         conversationWebView.loadUrl("javascript:updateLastMsg('" + esc + "')");
@@ -547,15 +564,18 @@ public class MainActivity extends Activity {
                     });
                 } finally {
                     if (conn != null) conn.disconnect();
-                    currentConnection = null;
-                    isRequestInProgress.set(false);
-                    conversationManager.saveCurrentConversation();
-                    final int finalIdx = aiIndex;
-                    runOnUiThread(new Runnable() {
-                        public void run() {
-                            conversationWebView.loadUrl("javascript:finalizeLast(" + finalIdx + ")");
-                        }
-                    });
+                    // 只有当前请求代数匹配时才清理状态，防止旧线程污染新请求
+                    if (requestGeneration.get() == generation) {
+                        currentConnection = null;
+                        isRequestInProgress.set(false);
+                        conversationManager.saveCurrentConversation();
+                        final int finalIdx = aiIndex;
+                        runOnUiThread(new Runnable() {
+                            public void run() {
+                                conversationWebView.loadUrl("javascript:finalizeLast(" + finalIdx + ")");
+                            }
+                        });
+                    }
                 }
             }
         });
@@ -881,7 +901,8 @@ public class MainActivity extends Activity {
         }
         String thinkingLevel = configManager.getThinkingLevel();
         if (!configManager.isThinkingEnabled()) thinkingLevel = "off";
-        sendStreamingRequest(provider, thinkingLevel);
+        int gen = requestGeneration.incrementAndGet();
+        sendStreamingRequest(provider, thinkingLevel, gen);
     }
 
     // 6. 回溯到此处
