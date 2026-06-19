@@ -27,4 +27,5 @@
     <string name="copy_to_clipboard">复制到剪贴板</string>
     <string name="insert_to_input">插入到输入框</string>
     <string name="copy_and_insert">复制并插入</string>
+    <string name="quick_scan_mode">快速搜题模式</string>
 </resources>

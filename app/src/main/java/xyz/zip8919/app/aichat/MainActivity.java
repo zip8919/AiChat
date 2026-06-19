@@ -9,6 +9,7 @@ import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.res.Configuration;
+import android.database.Cursor;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
 import android.net.Uri;
@@ -16,6 +17,7 @@ import java.net.HttpURLConnection;
 import java.util.regex.Matcher;
 import android.os.Bundle;
 import android.os.Handler;
+import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
@@ -85,6 +87,9 @@ public class MainActivity extends Activity {
     private int codePreviewBgColor;
     private String currentPreviewLang;
     private String currentPreviewCode;
+
+    // Quick scan mode state
+    private boolean expectingQuickScanResult = false;
 
     private String currentModel;
     private String currentApiKey;
@@ -190,13 +195,7 @@ public class MainActivity extends Activity {
 
         // Scan button
         findViewById(R.id.scan_button).setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) {
-                try {
-                    startActivityForResult(new Intent(MainActivity.this, ScanActivity.class), REQUEST_SCAN);
-                } catch (Exception e) {
-                    Toast.makeText(MainActivity.this, "无法启动扫描: " + e.getMessage(), Toast.LENGTH_LONG).show();
-                }
-            }
+            public void onClick(View v) { launchScan(); }
         });
 
         // Scroll-to-bottom button: tap = scroll to bottom, long-press = clear input
@@ -323,20 +322,19 @@ public class MainActivity extends Activity {
 
     private void interruptRequest() {
         if (!isRequestInProgress.get()) return;
-        requestGeneration.incrementAndGet(); // 作废当前请求代数，防止旧线程 finally 污染新请求
+        requestGeneration.incrementAndGet();
         isRequestInProgress.set(false);
         if (currentConnection != null) {
-            currentConnection.disconnect();
+            try { currentConnection.disconnect(); } catch (Exception ignored) {}
             currentConnection = null;
         }
+        // Safety: skip UI cleanup if activity is finishing
+        if (isFinishing()) return;
         final int msgCountAtInterrupt = messages.size();
         runOnUiThread(new Runnable() {
             public void run() {
-                // 如果消息数已变化，说明新请求已启动，跳过清理防止误删
-                if (messages.size() != msgCountAtInterrupt) {
-                    Toast.makeText(MainActivity.this, "已打断请求", Toast.LENGTH_SHORT).show();
-                    return;
-                }
+                if (isFinishing()) return;
+                if (messages.size() != msgCountAtInterrupt) return;
                 if (!messages.isEmpty()) {
                     Message lastMsg = messages.get(messages.size() - 1);
                     if (lastMsg.isAssistant()) {
@@ -350,7 +348,6 @@ public class MainActivity extends Activity {
                         }
                     }
                 }
-                Toast.makeText(MainActivity.this, "已打断请求", Toast.LENGTH_SHORT).show();
             }
         });
     }
@@ -391,6 +388,10 @@ public class MainActivity extends Activity {
         super.onResume();
         loadSystemPrompt();
         refreshModelSpinner();
+        if (expectingQuickScanResult) {
+            expectingQuickScanResult = false;
+            loadQuickScanResult();
+        }
     }
 
     @Override
@@ -425,15 +426,60 @@ public class MainActivity extends Activity {
         }
     }
 
+    // Scan key codes (same as ScanActivity)
+    private static final int[] SCAN_KEY_CODES = {5, 27, 131, 137, 286};
+
+    @Override
+    public boolean onKeyDown(int keyCode, KeyEvent event) {
+        for (int code : SCAN_KEY_CODES) {
+            if (keyCode == code) {
+                launchScan();
+                return true;
+            }
+        }
+        return super.onKeyDown(keyCode, event);
+    }
+
+    private void launchScan() {
+        if (SettingsActivity.isQuickScanEnabled(this)) {
+            expectingQuickScanResult = true;
+            try {
+                Intent si = new Intent();
+                si.setClassName("com.jxw.launcher", "com.jxw.launcher.SPWBZCActivity");
+                startActivity(si);
+                return;
+            } catch (Exception e) {}
+            try {
+                Intent si = new Intent();
+                si.setClassName("com.jxw.wbzc", "com.jxw.wbzc.MainActivity");
+                startActivity(si);
+                return;
+            } catch (Exception e) {}
+            Toast.makeText(this, "请手动打开文本摘抄应用扫描", Toast.LENGTH_SHORT).show();
+            expectingQuickScanResult = false;
+        } else {
+            try {
+                startActivityForResult(new Intent(this, ScanActivity.class), REQUEST_SCAN);
+            } catch (Exception e) {
+                Toast.makeText(this, "无法启动扫描: " + e.getMessage(), Toast.LENGTH_LONG).show();
+            }
+        }
+    }
+
+    private boolean sendMessagePending = false;
+
     private void sendMessage() {
         if (isRequestInProgress.get()) {
             interruptRequest();
-            // 延迟重发，等旧请求线程完全退出后再执行，避免竞态崩溃
-            handler.postDelayed(new Runnable() {
-                public void run() {
-                    sendMessage();
-                }
-            }, 150);
+            if (!sendMessagePending) {
+                sendMessagePending = true;
+                handler.postDelayed(new Runnable() {
+                    public void run() {
+                        sendMessagePending = false;
+                        sendMessage();
+                    }
+                }, 150);
+            }
             return;
         }
         String input = inputEditText.getText().toString().trim();
@@ -1415,6 +1461,31 @@ public class MainActivity extends Activity {
         }
         if (tableViewerWebView != null) {
             viewerEvalJs(tableViewerWebView, "viewerSetBg('" + color + "')");
+        }
+    }
+
+    // ========== 快速搜题 ==========
+
+    private void loadQuickScanResult() {
+        Cursor cursor = null;
+        try {
+            cursor = getContentResolver().query(
+                Uri.parse("content://com.jxw.wbzc/query"),
+                null, null, null, "_id DESC");
+            if (cursor != null && cursor.moveToFirst()) {
+                int idx = cursor.getColumnIndex("content");
+                if (idx >= 0) {
+                    String text = cursor.getString(idx);
+                    if (text != null && !text.isEmpty()) {
+                        inputEditText.setText(text);
+                        inputEditText.setSelection(text.length());
+                    }
+                }
+            }
+        } catch (Exception e) {
+            // ignore
+        } finally {
+            if (cursor != null) cursor.close();
         }
     }
 

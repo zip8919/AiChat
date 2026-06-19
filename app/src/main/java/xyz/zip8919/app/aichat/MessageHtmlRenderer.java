@@ -212,24 +212,15 @@ public class MessageHtmlRenderer {
             "btn.textContent='── 折叠思考 ──';}" +
             "else{b.style.display='none';" +
             "btn.textContent='── 展开思考（'+b.textContent.length+'字）──';}};" +
-            "window.userScrolledUp=false;" +
-            "window._userTouching=false;" +
-            "document.addEventListener('touchstart',function(){" +
-            "_userTouching=true;});" +
-            "document.addEventListener('touchend',function(){" +
-            "setTimeout(function(){" +
-            "var st=document.documentElement.scrollTop||document.body.scrollTop;" +
-            "var sh=Math.max(document.documentElement.scrollHeight,document.body.scrollHeight);" +
-            "var ch=document.documentElement.clientHeight||document.body.clientHeight;" +
-            "var dist=sh-st-ch;" +
-            "if(dist<40)userScrolledUp=false;" +           // 松手时在底部 → 恢复跟随
-            "else if(dist>80)userScrolledUp=true;" +       // 松手时距底 >80px → 不跟随
-            "_userTouching=false;},100);});" +
             "window.smartScrollToBottom=function(force){" +
-            "if(!force&&userScrolledUp)return;" +           // 用户上翻了，不滚动
+            "if(!force){" +
+            "var st=document.documentElement.scrollTop||document.body.scrollTop||window.pageYOffset||0;" +
+            "var sh=Math.max(document.documentElement.scrollHeight||0,document.body.scrollHeight||0);" +
+            "var ch=document.documentElement.clientHeight||document.body.clientHeight||window.innerHeight||0;" +
+            "if(sh-st-ch>80)return;}" +                     // 距底 >80px → 用户上翻了，不滚动
             "window.scrollTo(0,Math.max(" +
-            "document.documentElement.scrollHeight," +
-            "document.body.scrollHeight));};" +
+            "document.documentElement.scrollHeight||0," +
+            "document.body.scrollHeight||0));};" +
             "window.appendMsg=function(html){" +
             "var d=document.createElement('div');d.innerHTML=html;" +
             "var el=d.firstElementChild;" +

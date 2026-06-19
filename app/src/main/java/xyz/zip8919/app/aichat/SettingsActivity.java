@@ -29,13 +29,14 @@ public class SettingsActivity extends Activity {
     private static final String KEY_AUTO_TITLE_ENABLED = "auto_title_enabled";
     private static final String KEY_TITLE_MODEL = "title_model";
     private static final String KEY_TITLE_PROMPT = "title_prompt";
+    private static final String KEY_QUICK_SCAN_ENABLED = "quick_scan_enabled";
     private static final String KEY_PRESETS = "system_presets";
     private static final String DEFAULT_TITLE_MODEL = "Qwen/Qwen3.5-397B-A17B";
     private static final String DEFAULT_TITLE_PROMPT = "你是一个标题生成助手。根据用户消息生成3-15字标题。只输出标题本身，禁止输出任何其他文字、解释、标点或换行。";
 
     private SharedPreferences prefs;
     private EditText systemPromptEdit, titlePromptEdit;
-    private Switch autoTitleSwitch;
+    private Switch autoTitleSwitch, quickScanSwitch;
     private Spinner titleModelSpinner, presetSpinner;
     private Button saveButton, cancelButton, balanceButton, manageModelsButton;
     private Button managePresetsButton, savePresetButton;
@@ -56,6 +57,7 @@ public class SettingsActivity extends Activity {
         systemPromptEdit = (EditText) findViewById(R.id.system_prompt_edit);
         titlePromptEdit = (EditText) findViewById(R.id.title_prompt_edit);
         autoTitleSwitch = (Switch) findViewById(R.id.auto_title_switch);
+        quickScanSwitch = (Switch) findViewById(R.id.quick_scan_switch);
         titleModelSpinner = (Spinner) findViewById(R.id.title_model_spinner);
         saveButton = (Button) findViewById(R.id.save_button);
         cancelButton = (Button) findViewById(R.id.cancel_button);
@@ -99,6 +101,7 @@ public class SettingsActivity extends Activity {
         systemPromptEdit.setText(prefs.getString(KEY_SYSTEM_PROMPT, ""));
         titlePromptEdit.setText(prefs.getString(KEY_TITLE_PROMPT, DEFAULT_TITLE_PROMPT));
         autoTitleSwitch.setChecked(prefs.getBoolean(KEY_AUTO_TITLE_ENABLED, true));
+        quickScanSwitch.setChecked(prefs.getBoolean(KEY_QUICK_SCAN_ENABLED, false));
         refreshTitleModelSpinner();
         refreshPresetSpinner();
     }
@@ -134,6 +137,7 @@ public class SettingsActivity extends Activity {
         editor.putString(KEY_SYSTEM_PROMPT, prompt);
         editor.putString(KEY_TITLE_PROMPT, titlePrompt);
         editor.putBoolean(KEY_AUTO_TITLE_ENABLED, autoTitle);
+        editor.putBoolean(KEY_QUICK_SCAN_ENABLED, quickScanSwitch.isChecked());
 
         int pos = titleModelSpinner.getSelectedItemPosition();
         if (pos >= 0) {
@@ -215,6 +219,11 @@ public class SettingsActivity extends Activity {
     public static boolean isAutoTitleEnabled(Context context) {
         SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, 0);
         return prefs.getBoolean(KEY_AUTO_TITLE_ENABLED, true);
+    }
+
+    public static boolean isQuickScanEnabled(Context context) {
+        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, 0);
+        return prefs.getBoolean(KEY_QUICK_SCAN_ENABLED, false);
     }
 
     public static String getTitleModel(Context context) {
