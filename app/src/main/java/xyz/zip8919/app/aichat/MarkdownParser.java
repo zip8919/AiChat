@@ -32,6 +32,8 @@ import org.commonmark.ext.gfm.tables.TablesExtension;
 import ru.noties.jlatexmath.JLatexMathDrawable;
 
 public class MarkdownParser {
+    private static final String TAG = "MarkdownParser";
+
     private static final Parser PARSER = Parser.builder()
             .extensions(Arrays.asList(
                     StrikethroughExtension.create(),
@@ -50,7 +52,11 @@ public class MarkdownParser {
 
     public static SpannableStringBuilder parse(String text, Context ctx) {
         if (text == null || text.isEmpty()) return new SpannableStringBuilder();
-        if (!hasMarkdownFeatures(text)) return new SpannableStringBuilder(text);
+        long startTs = System.currentTimeMillis();
+        if (!hasMarkdownFeatures(text)) {
+            LogUtil.v(TAG, "parse: %d chars, no markdown features -> plain", text.length());
+            return new SpannableStringBuilder(text);
+        }
 
         // 1. Extract LaTeX → replace with placeholder tokens
         List<MathToken> mathTokens = new ArrayList<MathToken>();
@@ -63,6 +69,7 @@ public class MarkdownParser {
 
         // 3. Replace math placeholder tokens with rendered bitmaps
         float density = ctx.getResources().getDisplayMetrics().density;
+        int missing = 0;
         for (int i = 0; i < mathTokens.size(); i++) {
             MathToken mt = mathTokens.get(i);
             String placeholder = "" + (char)('A' + i % 26) + (char)('a' + i / 26);
@@ -70,12 +77,19 @@ public class MarkdownParser {
             if (idx >= 0) {
                 SpannableStringBuilder rendered = renderMath(mt, ctx, density);
                 out.replace(idx, idx + placeholder.length(), rendered != null ? rendered : new SpannableStringBuilder(mt.formula));
+            } else {
+                missing++;
             }
+        }
+        if (missing > 0) {
+            LogUtil.w(TAG, "parse: %d math placeholders not found in output", missing);
         }
 
         // Trim trailing newline
         if (out.length() > 0 && out.charAt(out.length() - 1) == '\n')
             out.delete(out.length() - 1, out.length());
+        LogUtil.v(TAG, "parse: %d chars -> %d chars, %d math in %d ms",
+                text.length(), out.length(), mathTokens.size(), System.currentTimeMillis() - startTs);
         return out;
     }
 
@@ -92,6 +106,7 @@ public class MarkdownParser {
     // Extract $$block$$ and $inline$ math, replace with placeholders
     private static String extractMath(String text, List<MathToken> tokens) {
         StringBuilder out = new StringBuilder();
+        LogUtil.v(TAG, "extractMath: %d chars", text.length());
         int i = 0;
         while (i < text.length()) {
             // Block math $$
@@ -136,7 +151,10 @@ public class MarkdownParser {
         try {
             String key = mt.formula + (mt.block ? "b" : "i");
             Bitmap cached = latexCache.get(key);
-            if (cached == null) {
+            if (cached != null) {
+                LogUtil.v(TAG, "markdown latex CACHE hit: block=%s %s", mt.block, LogUtil.preview(mt.formula, 80));
+            } else {
+                LogUtil.v(TAG, "markdown latex render: block=%s %s", mt.block, LogUtil.preview(mt.formula, 80));
                 float textSize = mt.block ? 18f : 14f;
                 JLatexMathDrawable d = JLatexMathDrawable.builder(mt.formula)
                         .textSize(textSize)
@@ -145,7 +163,10 @@ public class MarkdownParser {
 
                 int w = d.getIntrinsicWidth();
                 int h = d.getIntrinsicHeight();
-                if (w <= 0 || h <= 0) return null;
+                if (w <= 0 || h <= 0) {
+                    LogUtil.w(TAG, "markdown latex: zero size for '%s'", LogUtil.preview(mt.formula, 80));
+                    return null;
+                }
 
                 int maxW = (int)(240 * density);
                 if (w > maxW) {
@@ -169,6 +190,7 @@ public class MarkdownParser {
                     String first = latexCache.keySet().iterator().next();
                     Bitmap old = latexCache.remove(first);
                     if (old != null) old.recycle();
+                    LogUtil.v(TAG, "markdown latex cache EVICT oldest (size now %d)", latexCache.size());
                 }
                 latexCache.put(key, cached);
             }
@@ -180,7 +202,8 @@ public class MarkdownParser {
             if (mt.block) sb.append("\n");
             return sb;
         } catch (Exception e) {
-            e.printStackTrace();
+            LogUtil.w(TAG, "markdown latex FAILED '%s': %s -> text fallback",
+                    LogUtil.preview(mt.formula, 80), e.getMessage());
         }
         // Fallback: show formula text
         SpannableStringBuilder sb = new SpannableStringBuilder();

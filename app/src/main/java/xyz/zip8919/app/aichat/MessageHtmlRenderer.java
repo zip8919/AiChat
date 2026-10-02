@@ -25,6 +25,8 @@ import org.commonmark.ext.gfm.tables.TablesExtension;
 import ru.noties.jlatexmath.JLatexMathDrawable;
 
 public class MessageHtmlRenderer {
+    private static final String TAG = "HtmlRenderer";
+
     private static final Parser PARSER = Parser.builder()
             .extensions(Arrays.asList(
                     StrikethroughExtension.create(),
@@ -284,15 +286,28 @@ public class MessageHtmlRenderer {
             "})();";
 
     public static String buildConversationHtml(List<Message> messages, Context ctx) {
+        long startTs = System.currentTimeMillis();
+        LogUtil.d(TAG, "buildConversationHtml: %d messages (cache=%d)",
+                messages == null ? -1 : messages.size(), latexCache.size());
+
         StringBuilder body = new StringBuilder();
         for (int i = 0; i < messages.size(); i++) {
             body.append(renderMessageDiv(messages.get(i), i, ctx));
         }
-        return buildPage(body.toString());
+        String page = buildPage(body.toString());
+        LogUtil.d(TAG, "buildConversationHtml done: body=%d chars, page=%d chars in %d ms",
+                body.length(), page.length(), System.currentTimeMillis() - startTs);
+        return page;
     }
 
     public static String renderMessageDiv(Message msg, int index, Context ctx) {
         String idx = String.valueOf(index);
+        if (msg == null) {
+            LogUtil.w(TAG, "renderMessageDiv: null message at index=%d", index);
+            return "";
+        }
+        LogUtil.v(TAG, "renderMessageDiv: idx=%d role=%s len=%d", index,
+                msg.role, msg.content == null ? 0 : msg.content.length());
         if (msg.isUser()) {
             return "<div class=\"msg user\" data-idx=\"" + idx + "\">" +
                    "<div class=\"bubble\">" + esc(msg.content) + "</div>" +
@@ -306,14 +321,20 @@ public class MessageHtmlRenderer {
 
     public static String contentToHtml(String text, Context ctx) {
         if (text == null || text.isEmpty()) return "";
-        if (text.contains("[thinking]"))
-            return contentWithThinking(text, ctx);
-        return renderMarkdown(text, ctx);
+        long startTs = System.currentTimeMillis();
+        String html = text.contains("[thinking]")
+                ? contentWithThinking(text, ctx)
+                : renderMarkdown(text, ctx);
+        LogUtil.v(TAG, "contentToHtml: in=%d chars -> %d chars html in %d ms (thinking=%s)",
+                text.length(), html.length(), System.currentTimeMillis() - startTs,
+                text.contains("[thinking]"));
+        return html;
     }
 
     private static String contentWithThinking(String text, Context ctx) {
         StringBuilder html = new StringBuilder();
         int start = 0;
+        int blocks = 0;
         while (start < text.length()) {
             int ts = text.indexOf("[thinking]", start);
             if (ts == -1) {
@@ -325,12 +346,14 @@ public class MessageHtmlRenderer {
             int te = text.indexOf("[/thinking]", ts + 10);
             if (te == -1) {
                 // Streaming: thinking not yet closed
+                LogUtil.v(TAG, "thinking block UNCLOSED at %d, tail=%d chars", ts, text.length() - ts - 10);
                 html.append("<div class=\"thinking-block\">")
                     .append(esc(text.substring(ts + 10)))
                     .append("</div>");
                 break;
             }
             String thinking = text.substring(ts + 10, te);
+            blocks++;
             html.append("<div class=\"thinking-wrap\">")
                 .append("<div class=\"thinking-toggle\" onclick=\"toggleThinking(this)\">── 展开思考（")
                 .append(String.valueOf(thinking.length())).append("字）──</div>")
@@ -339,6 +362,7 @@ public class MessageHtmlRenderer {
                 .append("</div></div>");
             start = te + 11;
         }
+        LogUtil.v(TAG, "contentWithThinking: %d thinking blocks rendered", blocks);
         return html.toString();
     }
 
@@ -372,6 +396,8 @@ public class MessageHtmlRenderer {
             result = result.replace("@@SVG" + i + "@@",
                 "<div class=\"svg-scroll\">" + svgHtml + "</div>");
         }
+        LogUtil.v(TAG, "renderMarkdown: %d -> %d chars, %d math formulas",
+                text.length(), result.length(), mathTags.size());
         return result;
     }
 
@@ -379,6 +405,7 @@ public class MessageHtmlRenderer {
     // so commonmark doesn't mangle them (svg is not a recognized HTML block tag).
     // Skips SVGs inside fenced code blocks (```) and inline code spans (`).
     private static String extractAndProtectSvg(String text, List<String> svgBlocks) {
+        int svgStart = svgBlocks.size();
         StringBuilder out = new StringBuilder();
         int i = 0, len = text.length();
         boolean inFence = false;
@@ -430,6 +457,9 @@ public class MessageHtmlRenderer {
                 out.append(c);
                 i++;
             }
+        }
+        if (svgBlocks.size() > svgStart) {
+            LogUtil.v(TAG, "extractAndProtectSvg: extracted %d svg block(s)", svgBlocks.size() - svgStart);
         }
         return out.toString();
     }
@@ -846,7 +876,11 @@ public class MessageHtmlRenderer {
     private static String renderLatexImg(String formula, boolean block, float density) {
         String key = formula + (block ? "b" : "i");
         String cached = latexCache.get(key);
-        if (cached != null) return cached;
+        if (cached != null) {
+            LogUtil.v(TAG, "latex CACHE hit: block=%s %s", block, LogUtil.preview(formula, 80));
+            return cached;
+        }
+        LogUtil.v(TAG, "latex render: block=%s %s", block, LogUtil.preview(formula, 80));
 
         String imgTag = null;
         float scale = Math.max(density, 2.5f);
@@ -909,7 +943,7 @@ public class MessageHtmlRenderer {
                 }
             }
         } catch (Exception e) {
-            e.printStackTrace();
+            LogUtil.w(TAG, "latex render FAILED for '%s': %s -> fallback", LogUtil.preview(formula, 80), e.getMessage());
         }
 
         // Clean fallback — monospace code-style, not debug-yellow
@@ -926,8 +960,10 @@ public class MessageHtmlRenderer {
         if (latexCache.size() >= 50) {
             String first = latexCache.keySet().iterator().next();
             latexCache.remove(first);
+            LogUtil.v(TAG, "latex cache EVICT oldest (size now %d)", latexCache.size());
         }
         latexCache.put(key, imgTag);
+        LogUtil.v(TAG, "latex cached (size=%d): %d chars html", latexCache.size(), imgTag.length());
         return imgTag;
     }
 
@@ -989,6 +1025,7 @@ public class MessageHtmlRenderer {
             out.append("<code>").append(esc(c.getLiteral())).append("</code>");
         }
         @Override public void visit(FencedCodeBlock fcb) {
+            LogUtil.v(TAG, "visit FencedCodeBlock: lang=%s", fcb.getInfo());
             out.append("<pre>");
             String info = fcb.getInfo();
             if (info != null && !info.isEmpty())
@@ -1043,6 +1080,11 @@ public class MessageHtmlRenderer {
             else visitChildren(cb);
         }
         @Override public void visit(CustomNode cn) {
+            if (!(cn instanceof TableHead) && !(cn instanceof TableBody)
+                    && !(cn instanceof TableRow) && !(cn instanceof TableCell)
+                    && !(cn instanceof Strikethrough)) {
+                LogUtil.v(TAG, "visit CustomNode: unknown %s", cn == null ? "null" : cn.getClass().getSimpleName());
+            }
             if (cn instanceof TableHead) visitTableHead((TableHead) cn);
             else if (cn instanceof TableBody) visitTableBody((TableBody) cn);
             else if (cn instanceof TableRow) visitTableRow((TableRow) cn);

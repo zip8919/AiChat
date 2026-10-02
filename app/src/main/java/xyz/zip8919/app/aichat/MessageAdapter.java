@@ -17,6 +17,7 @@ import android.widget.TextView;
 import java.util.List;
 
 public class MessageAdapter extends BaseAdapter {
+    private static final String TAG = "MessageAdapter";
     private static final int VIEW_TYPE_USER = 0;
     private static final int VIEW_TYPE_AI = 1;
 
@@ -32,6 +33,7 @@ public class MessageAdapter extends BaseAdapter {
     }
 
     public void setMessages(List<Message> messages) {
+        LogUtil.d(TAG, "setMessages: %d messages", messages == null ? -1 : messages.size());
         this.messages = messages;
         this.thoughtExpanded = new SparseBooleanArray();
     }
@@ -83,6 +85,8 @@ public class MessageAdapter extends BaseAdapter {
         Message msg = messages.get(position);
         String content = msg.content;
         Context ctx = context;
+        LogUtil.v(TAG, "getView: pos=%d type=%s len=%d", position,
+                viewType == VIEW_TYPE_USER ? "user" : "ai", content == null ? 0 : content.length());
 
         if (content != null && content.contains("[thinking]")) {
             SpannableStringBuilder formatted = formatThinkingContent(content, position, ctx);
@@ -93,6 +97,7 @@ public class MessageAdapter extends BaseAdapter {
             holder.textView.setText(parsed);
             boolean hasLinks = hasClickableLinks(parsed);
             holder.textView.setMovementMethod(hasLinks ? LinkMovementMethod.getInstance() : null);
+            LogUtil.v(TAG, "getView: pos=%d parsed len=%d hasLinks=%s", position, parsed.length(), hasLinks);
         }
 
         return convertView;
@@ -106,6 +111,7 @@ public class MessageAdapter extends BaseAdapter {
     private SpannableStringBuilder formatThinkingContent(String content, final int position, Context ctx) {
         SpannableStringBuilder builder = new SpannableStringBuilder();
         boolean isExpanded = thoughtExpanded.get(position, false);
+        LogUtil.v(TAG, "formatThinkingContent: pos=%d expanded=%s len=%d", position, isExpanded, content.length());
 
         int start = 0;
         while (start < content.length()) {
@@ -145,6 +151,7 @@ public class MessageAdapter extends BaseAdapter {
                     builder.setSpan(new ClickableSpan() {
                         @Override
                         public void onClick(View widget) {
+                            LogUtil.d(TAG, "collapse thinking: pos=%d", position);
                             thoughtExpanded.put(position, false);
                             notifyDataSetChanged();
                         }
@@ -159,6 +166,7 @@ public class MessageAdapter extends BaseAdapter {
                     builder.setSpan(new ClickableSpan() {
                         @Override
                         public void onClick(View widget) {
+                            LogUtil.d(TAG, "expand thinking: pos=%d", position);
                             thoughtExpanded.put(position, true);
                             notifyDataSetChanged();
                         }

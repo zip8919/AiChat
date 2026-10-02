@@ -16,6 +16,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class ModelConfigActivity extends Activity {
+    private static final String TAG = "ModelConfig";
     private ConfigManager configManager;
     private ListView providerList, modelList;
     private ArrayAdapter<String> providerAdapter, modelAdapter;
@@ -37,20 +38,31 @@ public class ModelConfigActivity extends Activity {
         refreshProviderList();
         refreshModelList();
 
+        LogUtil.i(TAG, "========== onCreate ========== (%s) providers=%d models=%d",
+                LogUtil.thread(), providers.size(), models.size());
+
         findViewById(R.id.add_provider_btn).setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) { showProviderDialog(null); }
+            public void onClick(View v) {
+                LogUtil.d(TAG, "click: add provider");
+                showProviderDialog(null);
+            }
         });
         findViewById(R.id.add_model_btn).setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) { showModelDialog(null); }
+            public void onClick(View v) {
+                LogUtil.d(TAG, "click: add model");
+                showModelDialog(null);
+            }
         });
 
         providerList.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             public void onItemClick(AdapterView<?> p, View v, int pos, long id) {
+                LogUtil.d(TAG, "provider item click: pos=%d", pos);
                 showProviderActionDialog(pos);
             }
         });
         modelList.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             public void onItemClick(AdapterView<?> p, View v, int pos, long id) {
+                LogUtil.d(TAG, "model item click: pos=%d", pos);
                 showModelActionDialog(pos);
             }
         });
@@ -70,6 +82,7 @@ public class ModelConfigActivity extends Activity {
             providerAdapter.addAll(items);
             providerAdapter.notifyDataSetChanged();
         }
+        LogUtil.d(TAG, "refreshProviderList: %d providers", providers.size());
     }
 
     private void refreshModelList() {
@@ -86,6 +99,7 @@ public class ModelConfigActivity extends Activity {
             modelAdapter.addAll(items);
             modelAdapter.notifyDataSetChanged();
         }
+        LogUtil.d(TAG, "refreshModelList: %d models", models.size());
     }
 
     // ---- Provider dialogs ----
@@ -96,6 +110,8 @@ public class ModelConfigActivity extends Activity {
                 .setTitle(providers.get(pos).name)
                 .setItems(items, new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
+                        LogUtil.d(TAG, "provider action: pos=%d which=%d (%s)", pos, w,
+                                w == 0 ? "编辑" : "删除");
                         if (w == 0) showProviderDialog(pos);
                         else showDeleteProviderDialog(pos);
                     }
@@ -105,6 +121,7 @@ public class ModelConfigActivity extends Activity {
     private void showProviderDialog(final Integer editPos) {
         final ProviderInfo p = editPos != null ? providers.get(editPos) : null;
         final boolean isEdit = p != null;
+        LogUtil.d(TAG, "showProviderDialog: editPos=%s isEdit=%s", editPos, isEdit);
 
         LinearLayout layout = new LinearLayout(this);
         layout.setOrientation(LinearLayout.VERTICAL);
@@ -140,6 +157,7 @@ public class ModelConfigActivity extends Activity {
                         String path = pathEt.getText().toString().trim();
                         String key = keyEt.getText().toString().trim();
                         if (name.isEmpty() || url.isEmpty()) {
+                            LogUtil.w(TAG, "provider save rejected: name='%s' url='%s' (empty)", name, url);
                             Toast.makeText(ModelConfigActivity.this, "名称和URL不能为空", Toast.LENGTH_SHORT).show();
                             return;
                         }
@@ -154,6 +172,9 @@ public class ModelConfigActivity extends Activity {
                         configManager.setProviders(providers);
                         configManager.save();
                         refreshProviderList();
+                        LogUtil.i(TAG, "provider saved: name=%s url=%s path=%s keyLen=%d (isEdit=%s), total=%d",
+                                info.name, info.apiUrl, info.chatPath,
+                                info.apiKey == null ? 0 : info.apiKey.length(), isEdit, providers.size());
                     }
                 }).setNegativeButton("取消", null).show();
     }
@@ -165,11 +186,14 @@ public class ModelConfigActivity extends Activity {
                 .setMessage("确定删除 " + p.name + "？关联的模型也将失效。")
                 .setPositiveButton("删除", new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
+                        LogUtil.i(TAG, "provider delete confirmed: pos=%d name=%s", pos, p.name);
                         providers.remove(pos);
                         configManager.setProviders(providers);
                         configManager.save();
                         refreshProviderList();
                         refreshModelList();
+                        LogUtil.d(TAG, "provider deleted: remaining providers=%d models=%d",
+                                providers.size(), models.size());
                     }
                 }).setNegativeButton("取消", null).show();
     }
@@ -182,6 +206,8 @@ public class ModelConfigActivity extends Activity {
                 .setTitle(models.get(pos).name)
                 .setItems(items, new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
+                        LogUtil.d(TAG, "model action: pos=%d which=%d (%s)", pos, w,
+                                w == 0 ? "编辑" : "删除");
                         if (w == 0) showModelDialog(pos);
                         else showDeleteModelDialog(pos);
                     }
@@ -191,6 +217,7 @@ public class ModelConfigActivity extends Activity {
     private void showModelDialog(final Integer editPos) {
         final ModelInfo m = editPos != null ? models.get(editPos) : null;
         final boolean isEdit = m != null;
+        LogUtil.d(TAG, "showModelDialog: editPos=%s isEdit=%s", editPos, isEdit);
 
         LinearLayout layout = new LinearLayout(this);
         layout.setOrientation(LinearLayout.VERTICAL);
@@ -215,6 +242,7 @@ public class ModelConfigActivity extends Activity {
                         String name = nameEt.getText().toString().trim();
                         String prov = provEt.getText().toString().trim();
                         if (name.isEmpty() || prov.isEmpty()) {
+                            LogUtil.w(TAG, "model save rejected: name='%s' provider='%s' (empty)", name, prov);
                             Toast.makeText(ModelConfigActivity.this, "名称和提供商不能为空", Toast.LENGTH_SHORT).show();
                             return;
                         }
@@ -226,6 +254,8 @@ public class ModelConfigActivity extends Activity {
                         configManager.setModels(models);
                         configManager.save();
                         refreshModelList();
+                        LogUtil.i(TAG, "model saved: name=%s provider=%s (isEdit=%s), total=%d",
+                                info.name, info.provider, isEdit, models.size());
                     }
                 }).setNegativeButton("取消", null).show();
     }
@@ -237,10 +267,12 @@ public class ModelConfigActivity extends Activity {
                 .setMessage("确定删除 " + m.name + "？")
                 .setPositiveButton("删除", new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
+                        LogUtil.i(TAG, "model delete confirmed: pos=%d name=%s provider=%s", pos, m.name, m.provider);
                         models.remove(pos);
                         configManager.setModels(models);
                         configManager.save();
                         refreshModelList();
+                        LogUtil.d(TAG, "model deleted: remaining=%d", models.size());
                     }
                 }).setNegativeButton("取消", null).show();
     }

@@ -9,6 +9,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class CodeHighlighter {
+    private static final String TAG = "CodeHighlighter";
+
     private static final Set<String> SUPPORTED = new HashSet<>(Arrays.asList(
         "java", "py", "python", "js", "javascript", "ts", "typescript",
         "bash", "sh", "shell", "json", "xml", "html", "svg", "cpp", "c++", "c",
@@ -275,7 +277,12 @@ public class CodeHighlighter {
     public static String highlight(String code, String lang) {
         if (code == null || lang == null) return esc(code);
         lang = lang.trim().toLowerCase();
-        if (!SUPPORTED.contains(lang)) return esc(code);
+        if (!SUPPORTED.contains(lang)) {
+            LogUtil.v(TAG, "highlight: lang '%s' not supported -> plain esc (%d chars)",
+                    lang, code.length());
+            return esc(code);
+        }
+        LogUtil.v(TAG, "highlight: lang=%s %d chars", lang, code.length());
 
         Rule[] rules = LANG_RULES.get(lang);
         Set<String> keywords = LANG_KEYWORDS.get(lang);
@@ -437,6 +444,7 @@ public class CodeHighlighter {
             i++;
         }
 
+        LogUtil.v(TAG, "highlight done: lang=%s %d chars -> %d chars", lang, len, out.length());
         return out.toString();
     }
 

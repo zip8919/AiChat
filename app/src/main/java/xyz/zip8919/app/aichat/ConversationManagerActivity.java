@@ -15,6 +15,7 @@ import android.widget.Toast;
 import java.util.List;
 
 public class ConversationManagerActivity extends Activity {
+    private static final String TAG = "ConvMgrActivity";
     private static final String PREFS_NAME = "aichat_ui_state";
     private static final String KEY_SCROLL_POS = "history_scroll_pos";
 
@@ -39,6 +40,8 @@ public class ConversationManagerActivity extends Activity {
         loadConversations();
 
         int savedPos = uiState.getInt(KEY_SCROLL_POS, 0);
+        LogUtil.i(TAG, "========== onCreate ========== (%s) conversations=%d savedPos=%d",
+                LogUtil.thread(), conversations == null ? -1 : conversations.size(), savedPos);
         if (savedPos > 0 && savedPos < conversations.size()) {
             listView.setSelection(savedPos);
         }
@@ -47,13 +50,17 @@ public class ConversationManagerActivity extends Activity {
     @Override
     protected void onPause() {
         super.onPause();
-        uiState.edit().putInt(KEY_SCROLL_POS, listView.getFirstVisiblePosition()).commit();
+        int first = listView.getFirstVisiblePosition();
+        boolean ok = uiState.edit().putInt(KEY_SCROLL_POS, first).commit();
+        LogUtil.d(TAG, "onPause: saved scroll pos=%d ok=%s", first, ok);
     }
 
     private void initButtons() {
         findViewById(R.id.new_conversation_button).setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
+                LogUtil.d(TAG, "click: new conversation");
                 Conversation conv = conversationManager.createNewConversation();
+                LogUtil.i(TAG, "new conversation created: id=%s -> return to main", conv.id);
                 Intent result = new Intent();
                 result.putExtra("conversation_id", conv.id);
                 setResult(RESULT_OK, result);
@@ -64,9 +71,11 @@ public class ConversationManagerActivity extends Activity {
         findViewById(R.id.clear_history_button).setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 if (conversations == null || conversations.isEmpty()) {
+                    LogUtil.w(TAG, "click: clear history but list empty");
                     Toast.makeText(ConversationManagerActivity.this, "没有历史记录", Toast.LENGTH_SHORT).show();
                     return;
                 }
+                LogUtil.d(TAG, "click: clear history, %d conversations -> confirm dialog", conversations.size());
                 new AlertDialog.Builder(ConversationManagerActivity.this)
                         .setTitle("清空历史")
                         .setMessage("确定要清空所有历史对话吗？\n\n此操作不可恢复！")
@@ -82,7 +91,12 @@ public class ConversationManagerActivity extends Activity {
 
         listView.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             public void onItemClick(AdapterView<?> parent, View view, int pos, long id) {
+                if (pos < 0 || pos >= conversations.size()) {
+                    LogUtil.w(TAG, "item click out of range: pos=%d size=%d", pos, conversations.size());
+                    return;
+                }
                 Conversation conv = conversations.get(pos);
+                LogUtil.i(TAG, "item click: pos=%d id=%s title=%s", pos, conv.id, conv.title);
                 Intent result = new Intent();
                 result.putExtra("conversation_id", conv.id);
                 setResult(RESULT_OK, result);
@@ -92,6 +106,7 @@ public class ConversationManagerActivity extends Activity {
 
         listView.setOnItemLongClickListener(new AdapterView.OnItemLongClickListener() {
             public boolean onItemLongClick(AdapterView<?> parent, View view, int pos, long id) {
+                LogUtil.d(TAG, "item long click: pos=%d", pos);
                 showActionDialog(conversations.get(pos));
                 return true;
             }
@@ -106,6 +121,7 @@ public class ConversationManagerActivity extends Activity {
         } else {
             adapter.setConversations(conversations);
         }
+        LogUtil.d(TAG, "loadConversations: %d conversations", conversations == null ? -1 : conversations.size());
     }
 
     private void showActionDialog(final Conversation conv) {
@@ -114,6 +130,8 @@ public class ConversationManagerActivity extends Activity {
                 .setTitle("对话操作: " + conv.title)
                 .setItems(items, new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface dialog, int which) {
+                        LogUtil.d(TAG, "action dialog: id=%s which=%d (%s)", conv.id, which,
+                                which == 0 ? "重命名" : "删除");
                         if (which == 0) {
                             showRenameDialog(conv);
                         } else {
@@ -136,6 +154,7 @@ public class ConversationManagerActivity extends Activity {
                 .setPositiveButton("确定", new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface dialog, int which) {
                         String newTitle = input.getText().toString().trim();
+                        LogUtil.d(TAG, "rename: id=%s newTitle='%s'", conv.id, newTitle);
                         if (!newTitle.isEmpty()) {
                             conv.title = newTitle;
                             conv.touch();
@@ -150,6 +169,7 @@ public class ConversationManagerActivity extends Activity {
                             String json = ConversationManager.toJson(conv);
                             storageManager.saveConversation(conv.id, json);
                             Toast.makeText(ConversationManagerActivity.this, "已重命名", Toast.LENGTH_SHORT).show();
+                            LogUtil.i(TAG, "rename ok: id=%s -> '%s'", conv.id, newTitle);
                         } else {
                             Toast.makeText(ConversationManagerActivity.this, "名称不能为空", Toast.LENGTH_SHORT).show();
                         }
@@ -165,9 +185,11 @@ public class ConversationManagerActivity extends Activity {
                 .setMessage("确定要删除\"" + conv.title + "\"吗？")
                 .setPositiveButton("删除", new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface dialog, int which) {
+                        LogUtil.i(TAG, "delete confirmed: id=%s title=%s", conv.id, conv.title);
                         conversationManager.deleteConversation(conv.id);
                         conversations.remove(conv);
                         adapter.notifyDataSetChanged();
+                        LogUtil.d(TAG, "delete done: remaining=%d", conversations.size());
                         Toast.makeText(ConversationManagerActivity.this, "已删除", Toast.LENGTH_SHORT).show();
                     }
                 })
@@ -176,16 +198,19 @@ public class ConversationManagerActivity extends Activity {
     }
 
     private void clearAllHistory() {
+        LogUtil.i(TAG, "clearAllHistory: deleting %d conversations", conversations.size());
         for (Conversation conv : conversations) {
             storageManager.deleteConversation(conv.id);
         }
         conversations.clear();
         adapter.notifyDataSetChanged();
+        LogUtil.i(TAG, "clearAllHistory done: %d remaining", conversations.size());
         Toast.makeText(this, "已清空所有历史对话", Toast.LENGTH_SHORT).show();
     }
 
     @Override
     protected void onResume() {
         super.onResume();
+        LogUtil.d(TAG, "onResume");
     }
 }

@@ -26,6 +26,7 @@ import java.util.List;
 
 public class ScanActivity extends Activity {
 
+    private static final String TAG = "ScanActivity";
     private static final Uri CONTENT_URI = Uri.parse("content://com.jxw.wbzc/query");
 
     private EditText scanEditText;
@@ -46,9 +47,12 @@ public class ScanActivity extends Activity {
         scanHintText = (TextView) findViewById(R.id.scan_hint_text);
         scanTriggerButton = (Button) findViewById(R.id.scan_trigger_button);
 
+        LogUtil.i(TAG, "========== onCreate ========== (%s)", LogUtil.thread());
+
         scanTriggerButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
+                LogUtil.d(TAG, "click: trigger scan");
                 launchSystemScan();
             }
         });
@@ -59,6 +63,7 @@ public class ScanActivity extends Activity {
                 Editable editable = scanEditText.getText();
                 int selStart = scanEditText.getSelectionStart();
                 int selEnd = scanEditText.getSelectionEnd();
+                LogUtil.v(TAG, "backspace: sel=[%d,%d] len=%d", selStart, selEnd, editable.length());
                 if (selStart != selEnd) {
                     editable.delete(selStart, selEnd);
                 } else if (selStart > 0) {
@@ -71,6 +76,7 @@ public class ScanActivity extends Activity {
             @Override
             public void onClick(View v) {
                 int start = scanEditText.getSelectionStart();
+                LogUtil.v(TAG, "newline: insert at %d", start);
                 scanEditText.getText().insert(start, "\n");
             }
         });
@@ -78,6 +84,7 @@ public class ScanActivity extends Activity {
         findViewById(R.id.clear_button).setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
+                LogUtil.d(TAG, "click: clear (%d chars discarded)", scanEditText.getText().length());
                 scanEditText.setText("");
                 scanEditText.setVisibility(View.GONE);
                 scanHintText.setVisibility(View.VISIBLE);
@@ -89,6 +96,7 @@ public class ScanActivity extends Activity {
         findViewById(R.id.load_button).setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
+                LogUtil.d(TAG, "click: load excerpts");
                 showExcerptPicker();
             }
         });
@@ -96,6 +104,7 @@ public class ScanActivity extends Activity {
         findViewById(R.id.cancel_button).setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
+                LogUtil.d(TAG, "click: cancel -> finish");
                 finish();
             }
         });
@@ -105,9 +114,11 @@ public class ScanActivity extends Activity {
             public void onClick(View v) {
                 final String text = scanEditText.getText().toString().trim();
                 if (text.isEmpty()) {
+                    LogUtil.d(TAG, "click: done with empty text -> finish");
                     finish();
                     return;
                 }
+                LogUtil.i(TAG, "click: done, %d chars: %s", text.length(), LogUtil.preview(text, 120));
                 showDoneDialog(text);
             }
         });
@@ -133,23 +144,29 @@ public class ScanActivity extends Activity {
 
     private void launchSystemScan() {
         expectingScanResult = true;
+        LogUtil.i(TAG, "launchSystemScan: trying system scan activities");
         // Try system scan activity first (same as scan key behavior)
         try {
             Intent intent = new Intent();
             intent.setClassName("com.jxw.launcher", "com.jxw.launcher.SPWBZCActivity");
             startActivity(intent);
+            LogUtil.d(TAG, "launchSystemScan: started SPWBZCActivity");
             return;
         } catch (Exception e) {
             Log.d("ScanActivity", "SPWBZCActivity failed: " + e.getMessage());
+            LogUtil.d(TAG, "launchSystemScan: SPWBZCActivity unavailable: %s", e.getMessage());
         }
         try {
             Intent intent = new Intent();
             intent.setClassName("com.jxw.wbzc", "com.jxw.wbzc.MainActivity");
             startActivity(intent);
+            LogUtil.d(TAG, "launchSystemScan: started wbzc.MainActivity");
             return;
         } catch (Exception e) {
             Log.d("ScanActivity", "wbzc.MainActivity failed: " + e.getMessage());
+            LogUtil.d(TAG, "launchSystemScan: wbzc.MainActivity unavailable: %s", e.getMessage());
         }
+        LogUtil.w(TAG, "launchSystemScan: no system scan activity found");
         Toast.makeText(this, "请手动打开文本摘抄应用扫描", Toast.LENGTH_LONG).show();
     }
 
@@ -157,6 +174,7 @@ public class ScanActivity extends Activity {
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         for (int code : SCAN_KEY_CODES) {
             if (keyCode == code) {
+                LogUtil.d(TAG, "scan key detected: %d", keyCode);
                 Toast.makeText(this, "检测到扫描键: " + keyCode, Toast.LENGTH_SHORT).show();
                 expectingScanResult = true;
                 try {
@@ -164,7 +182,9 @@ public class ScanActivity extends Activity {
                     intent.setClassName("com.jxw.launcher", "com.jxw.launcher.SPWBZCActivity");
                     intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
                     startActivity(intent);
+                    LogUtil.d(TAG, "scan key: started SPWBZCActivity");
                 } catch (Exception e) {
+                    LogUtil.w(TAG, "scan key: SPWBZCActivity start failed (%s), fallback to excerpt picker", e.getMessage());
                     scanEditText.postDelayed(new Runnable() {
                         @Override
                         public void run() {
@@ -181,6 +201,7 @@ public class ScanActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        LogUtil.d(TAG, "onResume: expectingScanResult=%s", expectingScanResult);
         if (expectingScanResult) {
             expectingScanResult = false;
             loadLatestExcerpt();
@@ -192,6 +213,7 @@ public class ScanActivity extends Activity {
      */
     private void loadLatestExcerpt() {
         Cursor cursor = null;
+        LogUtil.d(TAG, "loadLatestExcerpt: querying %s", CONTENT_URI);
         try {
             cursor = getContentResolver().query(CONTENT_URI, null, null, null, "_id DESC");
             if (cursor != null && cursor.moveToFirst()) {
@@ -204,11 +226,18 @@ public class ScanActivity extends Activity {
                         scanEditText.setVisibility(View.VISIBLE);
                         scanHintText.setVisibility(View.GONE);
                         scanTriggerButton.setVisibility(View.GONE);
+                        LogUtil.i(TAG, "loadLatestExcerpt: loaded %d chars: %s", content.length(), LogUtil.preview(content, 120));
+                    } else {
+                        LogUtil.w(TAG, "loadLatestExcerpt: latest row content empty");
                     }
+                } else {
+                    LogUtil.w(TAG, "loadLatestExcerpt: no 'content' column");
                 }
+            } else {
+                LogUtil.w(TAG, "loadLatestExcerpt: cursor empty");
             }
         } catch (Exception e) {
-            // ignore
+            LogUtil.e(TAG, "loadLatestExcerpt query failed: " + e.getMessage(), e);
         } finally {
             if (cursor != null) {
                 try { cursor.close(); } catch (Exception ignored) {}
@@ -222,6 +251,7 @@ public class ScanActivity extends Activity {
     private void showExcerptPicker() {
         final List<ExcerptItem> items = new ArrayList<ExcerptItem>();
         Cursor cursor = null;
+        LogUtil.d(TAG, "showExcerptPicker: querying %s", CONTENT_URI);
         try {
             cursor = getContentResolver().query(CONTENT_URI, null, null, null, "_id DESC");
             if (cursor != null) {
@@ -240,9 +270,10 @@ public class ScanActivity extends Activity {
                         items.add(item);
                     }
                 }
+                LogUtil.d(TAG, "showExcerptPicker: %d rows -> %d usable", cursor.getCount(), items.size());
             }
         } catch (Exception e) {
-            // ignore
+            LogUtil.e(TAG, "showExcerptPicker query failed: " + e.getMessage(), e);
         } finally {
             if (cursor != null) {
                 try { cursor.close(); } catch (Exception ignored) {}
@@ -250,6 +281,7 @@ public class ScanActivity extends Activity {
         }
 
         if (items.isEmpty()) {
+            LogUtil.w(TAG, "showExcerptPicker: no excerpts found");
             Toast.makeText(this, "没有找到摘抄记录，请先在文本摘抄中扫描并保存", Toast.LENGTH_LONG).show();
             return;
         }
@@ -270,6 +302,8 @@ public class ScanActivity extends Activity {
                 @Override
                 public void onClick(DialogInterface dialog, int which) {
                     String content = items.get(which).content;
+                    LogUtil.i(TAG, "excerpt picked: which=%d id=%d %d chars", which,
+                            items.get(which).id, content == null ? 0 : content.length());
                     scanEditText.setText(content);
                     scanEditText.setSelection(content.length());
                     scanEditText.setVisibility(View.VISIBLE);
@@ -300,6 +334,7 @@ public class ScanActivity extends Activity {
             .setItems(options, new DialogInterface.OnClickListener() {
                 @Override
                 public void onClick(DialogInterface dialog, int which) {
+                    LogUtil.i(TAG, "done action: which=%d (%s)", which, options[which]);
                     if (which == 0 || which == 2) {
                         copyToClipboard(text);
                     }

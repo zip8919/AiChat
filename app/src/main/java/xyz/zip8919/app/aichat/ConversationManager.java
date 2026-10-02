@@ -8,6 +8,7 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 public class ConversationManager {
+    private static final String TAG = "ConversationMgr";
     private static ConversationManager instance;
     private StorageManager storageManager;
     private List<Conversation> conversations;
@@ -29,36 +30,46 @@ public class ConversationManager {
         if (this.currentConversation == null) {
             this.currentConversation = new Conversation();
             this.conversations.add(0, this.currentConversation);
+            LogUtil.d(TAG, "getCurrentConversation: created fallback '%s' (%s)",
+                    this.currentConversation.id, this.currentConversation.title);
         }
         return this.currentConversation;
     }
 
     public void setCurrentConversation(Conversation conv) {
+        LogUtil.d(TAG, "setCurrentConversation: %s", conv == null ? "null" : conv.id);
         this.currentConversation = conv;
     }
 
     public Conversation createNewConversation() {
         if (this.currentConversation != null && !this.currentConversation.messages.isEmpty()) {
+            LogUtil.d(TAG, "createNewConversation: saving previous '%s' first", this.currentConversation.id);
             saveCurrentConversation();
         }
         this.currentConversation = new Conversation();
         this.conversations.add(0, this.currentConversation);
+        LogUtil.i(TAG, "createNewConversation: id=%s, total=%d", this.currentConversation.id, this.conversations.size());
         return this.currentConversation;
     }
 
     public void saveCurrentConversation() {
         if (this.currentConversation == null || this.currentConversation.messages.isEmpty()) {
+            LogUtil.v(TAG, "saveCurrentConversation skipped: empty conversation");
             return;
         }
         String json = toJson(this.currentConversation);
-        storageManager.saveConversation(this.currentConversation.id, json);
+        boolean ok = storageManager.saveConversation(this.currentConversation.id, json);
+        LogUtil.d(TAG, "saveCurrentConversation: id=%s msgs=%d jsonLen=%d ok=%s",
+                this.currentConversation.id, this.currentConversation.messages.size(), json.length(), ok);
     }
 
     public void switchConversation(String conversationId) {
+        LogUtil.i(TAG, "switchConversation -> %s", conversationId);
         // Try to find in memory
         for (Conversation c : this.conversations) {
             if (c.id.equals(conversationId)) {
                 this.currentConversation = c;
+                LogUtil.d(TAG, "switchConversation: found in memory, msgs=%d", c.messages.size());
                 return;
             }
         }
@@ -69,13 +80,16 @@ public class ConversationManager {
             Conversation conv = fromJson(content);
             this.currentConversation = conv;
             this.conversations.add(0, conv);
+            LogUtil.d(TAG, "switchConversation: loaded from disk, msgs=%d", conv.messages.size());
         } else {
             this.currentConversation = new Conversation(conversationId);
             this.conversations.add(0, this.currentConversation);
+            LogUtil.w(TAG, "switchConversation: '%s' not on disk, created empty", conversationId);
         }
     }
 
     public void deleteConversation(String conversationId) {
+        LogUtil.i(TAG, "deleteConversation: id=%s, before=%d", conversationId, this.conversations.size());
         if (this.currentConversation != null && this.currentConversation.id.equals(conversationId)) {
             this.currentConversation = null;
         }
@@ -85,13 +99,16 @@ public class ConversationManager {
                 break;
             }
         }
-        storageManager.deleteConversation(conversationId);
+        boolean ok = storageManager.deleteConversation(conversationId);
+        LogUtil.d(TAG, "deleteConversation: file deleted=%s, remaining=%d", ok, this.conversations.size());
     }
 
     public List<Conversation> loadConversations() {
+        LogUtil.i(TAG, "loadConversations (%s)", LogUtil.thread());
         List<Conversation> loaded = new ArrayList<Conversation>();
         String[] files = storageManager.getConversationFiles();
         if (files != null) {
+            LogUtil.d(TAG, "loadConversations: %d files on disk", files.length);
             for (String file : files) {
                 if (!file.endsWith(".json")) continue;
                 String conversationId = file.substring(0, file.length() - 5);
@@ -100,9 +117,11 @@ public class ConversationManager {
                 try {
                     loaded.add(fromJson(content));
                 } catch (Exception e) {
-                    e.printStackTrace();
+                    LogUtil.e(TAG, "loadConversations: failed to parse '%s': %s", file, e.getMessage(), e);
                 }
             }
+        } else {
+            LogUtil.w(TAG, "loadConversations: file list is null");
         }
 
         // Sort: newest updatedAt first
@@ -113,6 +132,7 @@ public class ConversationManager {
         });
 
         this.conversations = loaded;
+        LogUtil.i(TAG, "loadConversations done: %d conversations", this.conversations.size());
         return this.conversations;
     }
 
@@ -145,7 +165,7 @@ public class ConversationManager {
 
             return json.toString();
         } catch (Exception e) {
-            e.printStackTrace();
+            LogUtil.e(TAG, "toJson failed: " + e.getMessage(), e);
             return "{}";
         }
     }
@@ -175,8 +195,9 @@ public class ConversationManager {
                 }
             }
         } catch (Exception e) {
-            e.printStackTrace();
+            LogUtil.e(TAG, "fromJson failed: " + e.getMessage(), e);
         }
+        LogUtil.v(TAG, "fromJson: id=%s title=%s msgs=%d", conv.id, conv.title, conv.messages.size());
         return conv;
     }
 }

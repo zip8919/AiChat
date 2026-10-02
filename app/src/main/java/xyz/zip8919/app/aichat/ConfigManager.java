@@ -6,6 +6,7 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 public class ConfigManager {
+    private static final String TAG = "ConfigManager";
     private static ConfigManager instance;
     private StorageManager storageManager;
     private List<ProviderInfo> providers;
@@ -31,25 +32,32 @@ public class ConfigManager {
     }
 
     public void load() {
+        LogUtil.i(TAG, "load: reading config (%s)", LogUtil.thread());
         String content = storageManager.loadConfig();
         if (content == null || content.length() == 0) {
+            LogUtil.i(TAG, "load: no config found, creating defaults");
             createDefault();
         } else {
+            LogUtil.d(TAG, "load: config found, %d chars", content.length());
             try {
                 parse(new JSONObject(content));
             } catch (Exception e) {
-                e.printStackTrace();
+                LogUtil.e(TAG, "load: parse failed, falling back to defaults: " + e.getMessage(), e);
                 createDefault();
             }
         }
+        LogUtil.i(TAG, "load done: providers=%d models=%d default=%s thinking=%s/%s",
+                providers.size(), models.size(), defaultModel, enableThinking, thinkingLevel);
     }
 
     public void save() {
         try {
             JSONObject json = toJson();
-            storageManager.saveConfig(json.toString());
+            String s = json.toString();
+            boolean ok = storageManager.saveConfig(s);
+            LogUtil.i(TAG, "save: %d chars ok=%s", s.length(), ok);
         } catch (Exception e) {
-            e.printStackTrace();
+            LogUtil.e(TAG, "save failed: " + e.getMessage(), e);
         }
     }
 
@@ -92,8 +100,19 @@ public class ConfigManager {
         this.defaultModel = "deepseek-v4-flash";
         this.enableThinking = true;
         this.thinkingLevel = "medium";
+        LogUtil.i(TAG, "createDefault: providers=%s models=%d default=%s",
+                providerNames(), models.size(), defaultModel);
 
         save();
+    }
+
+    private String providerNames() {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < providers.size(); i++) {
+            if (i > 0) sb.append(",");
+            sb.append(providers.get(i).name);
+        }
+        return sb.toString();
     }
 
     private void addModel(String name, String provider, boolean supportsThinking) {
@@ -102,6 +121,7 @@ public class ConfigManager {
         m.provider = provider;
         m.supportsThinking = supportsThinking;
         models.add(m);
+        LogUtil.d(TAG, "addModel: %s <- %s (thinking=%s)", name, provider, supportsThinking);
     }
 
     private JSONObject toJson() throws Exception {
@@ -170,6 +190,8 @@ public class ConfigManager {
                 models.isEmpty() ? "" : models.get(0).name);
         this.enableThinking = json.optBoolean("enable_thinking", true);
         this.thinkingLevel = json.optString("thinking_level", "medium");
+        LogUtil.i(TAG, "parse: providers=%d models=%d default=%s thinking=%s/%s",
+                providers.size(), models.size(), defaultModel, enableThinking, thinkingLevel);
     }
 
     // ---- accessors ----
@@ -180,6 +202,7 @@ public class ConfigManager {
         for (ProviderInfo p : providers) {
             if (p.name.equals(name)) return p;
         }
+        LogUtil.w(TAG, "getProvider('%s') -> null (known: %s)", name, providerNames());
         return null;
     }
 
@@ -189,18 +212,34 @@ public class ConfigManager {
         for (ModelInfo m : models) {
             if (m.name.equals(name)) return m;
         }
+        LogUtil.w(TAG, "getModel('%s') -> null", name);
         return null;
     }
 
     public String getDefaultModel() { return defaultModel; }
-    public void setDefaultModel(String model) { this.defaultModel = model; }
+    public void setDefaultModel(String model) {
+        LogUtil.d(TAG, "setDefaultModel: %s -> %s", this.defaultModel, model);
+        this.defaultModel = model;
+    }
 
     public boolean isThinkingEnabled() { return enableThinking; }
-    public void setThinkingEnabled(boolean v) { this.enableThinking = v; }
+    public void setThinkingEnabled(boolean v) {
+        LogUtil.d(TAG, "setThinkingEnabled: %s -> %s", this.enableThinking, v);
+        this.enableThinking = v;
+    }
 
     public String getThinkingLevel() { return thinkingLevel; }
-    public void setThinkingLevel(String level) { this.thinkingLevel = level; }
+    public void setThinkingLevel(String level) {
+        LogUtil.d(TAG, "setThinkingLevel: %s -> %s", this.thinkingLevel, level);
+        this.thinkingLevel = level;
+    }
 
-    public void setProviders(List<ProviderInfo> list) { this.providers = list; }
-    public void setModels(List<ModelInfo> list) { this.models = list; }
+    public void setProviders(List<ProviderInfo> list) {
+        this.providers = list;
+        LogUtil.d(TAG, "setProviders: %d entries", list == null ? 0 : list.size());
+    }
+    public void setModels(List<ModelInfo> list) {
+        this.models = list;
+        LogUtil.d(TAG, "setModels: %d entries", list == null ? 0 : list.size());
+    }
 }

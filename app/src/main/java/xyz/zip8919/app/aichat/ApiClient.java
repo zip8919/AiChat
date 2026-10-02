@@ -19,6 +19,8 @@ import org.json.JSONObject;
 
 public class ApiClient {
 
+    private static final String TAG = "ApiClient";
+
     public interface StreamCallback {
         void onContent(String text);
         void onThinking(String thinkingText);
@@ -38,14 +40,21 @@ public class ApiClient {
             List<Message> messages, String systemPrompt, String thinkingLevel) {
 
         CallResult result = new CallResult();
+        LogUtil.i(TAG, "callWithError -> model=%s provider=%s stream=false", model, provider.name);
         try {
             JSONObject body = buildRequestBody(model, messages, systemPrompt, thinkingLevel,
                     provider.thinkingType, provider.thinkingParamName, false);
             body.put("max_tokens", 50);
+            LogUtil.v(TAG, "callWithError body(%d): %s", body.toString().length(), LogUtil.preview(body.toString(), 1200));
             result = doRequestWithError(provider.apiUrl + provider.chatPath, provider.apiKey, body, 20000);
         } catch (Exception e) {
+            LogUtil.e(TAG, "callWithError build/request exception: " + e.getMessage(), e);
             result.error = e.getMessage();
         }
+        LogUtil.i(TAG, "callWithError <- ok=%s response=%s error=%s",
+                (result != null && result.response != null),
+                (result != null && result.response != null) ? LogUtil.preview(result.response, 500) : "null",
+                (result != null && result.error != null) ? LogUtil.preview(result.error, 500) : "null");
         return result;
     }
 
@@ -59,6 +68,7 @@ public class ApiClient {
 
         JSONObject body = buildRequestBody(model, messages, systemPrompt, thinkingLevel,
                 provider.thinkingType, provider.thinkingParamName, false);
+        LogUtil.d(TAG, "call -> %s%s model=%s bodyLen=%d", provider.apiUrl, provider.chatPath, model, body.toString().length());
 
         return doRequest(provider.apiUrl + provider.chatPath, provider.apiKey, body, 60000);
     }
@@ -71,11 +81,17 @@ public class ApiClient {
             String thinkingLevel, AtomicBoolean runningFlag, StreamCallback callback) {
 
         HttpURLConnection conn = null;
+        long startTs = System.currentTimeMillis();
+        int chunks = 0;
+        LogUtil.i(TAG, "callStream START -> %s%s model=%s thinking=%s (%s)",
+                provider.apiUrl, provider.chatPath, model, thinkingLevel, LogUtil.thread());
         try {
             JSONObject body = buildRequestBody(model, messages, systemPrompt, thinkingLevel,
                     provider.thinkingType, provider.thinkingParamName, true);
 
-            URL url = new URL(provider.apiUrl + provider.chatPath);
+            String urlStr = provider.apiUrl + provider.chatPath;
+            LogUtil.d(TAG, "callStream opening connection: %s bodyLen=%d", urlStr, body.toString().length());
+            URL url = new URL(urlStr);
             conn = (HttpURLConnection) url.openConnection();
             conn.setRequestMethod("POST");
             conn.setRequestProperty("Content-Type", "application/json");
@@ -93,19 +109,34 @@ public class ApiClient {
             os.close();
 
             int code = conn.getResponseCode();
+            LogUtil.i(TAG, "callStream HTTP response: code=%d in %d ms", code, System.currentTimeMillis() - startTs);
             if (code != 200) {
+                String errBody = "";
+                try {
+                    BufferedReader er = new BufferedReader(new InputStreamReader(conn.getErrorStream(), "UTF-8"));
+                    StringBuilder esb = new StringBuilder();
+                    String el;
+                    while ((el = er.readLine()) != null) esb.append(el);
+                    er.close();
+                    errBody = esb.toString();
+                } catch (Exception ignore) {}
+                LogUtil.e(TAG, "callStream FAILED: HTTP %d, body=%s", code, LogUtil.preview(errBody, 800));
                 callback.onError("HTTP " + code);
                 return;
             }
 
             BufferedReader reader = new BufferedReader(
                     new InputStreamReader(conn.getInputStream(), "UTF-8"));
+            LogUtil.d(TAG, "callStream SSE started");
             String line;
             while (runningFlag.get() && (line = reader.readLine()) != null) {
                 line = line.trim();
                 if (line.startsWith("data: ")) {
                     String data = line.substring(6);
-                    if ("[DONE]".equals(data)) break;
+                    if ("[DONE]".equals(data)) {
+                        LogUtil.d(TAG, "callStream received [DONE] after %d chunks", chunks);
+                        break;
+                    }
                     try {
                         JSONObject json = new JSONObject(data);
                         JSONArray choices = json.optJSONArray("choices");
@@ -118,26 +149,35 @@ public class ApiClient {
                                 if (delta.has("content") && !delta.isNull("content")) {
                                     callback.onContent(delta.getString("content"));
                                 }
+                            } else {
+                                LogUtil.v(TAG, "callStream chunk#%d: no delta object", chunks);
                             }
+                        } else {
+                            LogUtil.v(TAG, "callStream chunk#%d: no choices array", chunks);
                         }
                     } catch (Exception e) {
-                        // skip malformed chunks
+                        LogUtil.w(TAG, "callStream malformed chunk skipped: %s", LogUtil.preview(data, 200));
                     }
+                    chunks++;
                 }
             }
             reader.close();
 
             if (!runningFlag.get()) {
+                LogUtil.i(TAG, "callStream INTERRUPTED after %d chunks", chunks);
                 callback.onError("interrupted");
             } else {
+                LogUtil.i(TAG, "callStream COMPLETE: %d chunks in %d ms", chunks, System.currentTimeMillis() - startTs);
                 callback.onComplete();
             }
         } catch (Exception e) {
+            LogUtil.e(TAG, "callStream EXCEPTION: " + e.getMessage(), e);
             callback.onError(e.getMessage());
         } finally {
             if (conn != null) {
                 conn.disconnect();
             }
+            LogUtil.i(TAG, "callStream END: elapsed=%d ms chunks=%d", System.currentTimeMillis() - startTs, chunks);
         }
     }
 
@@ -147,8 +187,11 @@ public class ApiClient {
      */
     public static String queryBalance(ProviderInfo provider) {
         HttpURLConnection conn = null;
+        long startTs = System.currentTimeMillis();
+        String balanceUrl = provider.apiUrl + "/user/balance";
+        LogUtil.i(TAG, "queryBalance -> %s (%s)", balanceUrl, LogUtil.thread());
         try {
-            URL url = new URL(provider.apiUrl + "/user/balance");
+            URL url = new URL(balanceUrl);
             conn = (HttpURLConnection) url.openConnection();
             conn.setRequestMethod("GET");
             conn.setRequestProperty("Accept", "application/json");
@@ -161,7 +204,9 @@ public class ApiClient {
             }
 
             int code = conn.getResponseCode();
+            LogUtil.d(TAG, "queryBalance HTTP code=%d in %d ms", code, System.currentTimeMillis() - startTs);
             if (code != 200) {
+                LogUtil.w(TAG, "queryBalance non-200: HTTP %d", code);
                 return null;
             }
 
@@ -173,9 +218,10 @@ public class ApiClient {
                 sb.append(line);
             }
             reader.close();
+            LogUtil.i(TAG, "queryBalance <- len=%d body=%s", sb.length(), LogUtil.preview(sb.toString(), 500));
             return sb.toString();
         } catch (Exception e) {
-            e.printStackTrace();
+            LogUtil.e(TAG, "queryBalance EXCEPTION: " + e.getMessage(), e);
             return null;
         } finally {
             if (conn != null) conn.disconnect();
@@ -187,6 +233,8 @@ public class ApiClient {
     private static String doRequest(String urlStr, String apiKey,
             JSONObject body, int readTimeout) throws Exception {
         HttpURLConnection conn = null;
+        long startTs = System.currentTimeMillis();
+        LogUtil.d(TAG, "doRequest -> %s (readTimeout=%d)", urlStr, readTimeout);
         try {
             URL url = new URL(urlStr);
             conn = (HttpURLConnection) url.openConnection();
@@ -201,12 +249,16 @@ public class ApiClient {
                 setupTLS((HttpsURLConnection) conn);
             }
 
+            String payload = body.toString();
+            LogUtil.v(TAG, "doRequest body (%d chars): %s", payload.length(), LogUtil.preview(payload, 1500));
             OutputStream os = conn.getOutputStream();
-            os.write(body.toString().getBytes("UTF-8"));
+            os.write(payload.getBytes("UTF-8"));
             os.close();
 
             int code = conn.getResponseCode();
+            LogUtil.d(TAG, "doRequest HTTP code=%d in %d ms", code, System.currentTimeMillis() - startTs);
             if (code != 200) {
+                LogUtil.e(TAG, "doRequest FAILED: HTTP %d", code);
                 throw new Exception("HTTP " + code);
             }
 
@@ -218,7 +270,12 @@ public class ApiClient {
                 sb.append(line);
             }
             reader.close();
+            LogUtil.d(TAG, "doRequest <- %d chars in %d ms: %s", sb.length(),
+                    System.currentTimeMillis() - startTs, LogUtil.preview(sb.toString(), 500));
             return sb.toString();
+        } catch (Exception e) {
+            LogUtil.e(TAG, "doRequest EXCEPTION: " + e.getMessage(), e);
+            throw e;
         } finally {
             if (conn != null) conn.disconnect();
         }
@@ -228,6 +285,8 @@ public class ApiClient {
             JSONObject body, int readTimeout) {
         CallResult result = new CallResult();
         HttpURLConnection conn = null;
+        long startTs = System.currentTimeMillis();
+        LogUtil.d(TAG, "doRequestWithError -> %s (readTimeout=%d)", urlStr, readTimeout);
         try {
             URL url = new URL(urlStr);
             conn = (HttpURLConnection) url.openConnection();
@@ -242,11 +301,14 @@ public class ApiClient {
                 setupTLS((HttpsURLConnection) conn);
             }
 
+            String payload = body.toString();
+            LogUtil.v(TAG, "doRequestWithError body (%d chars): %s", payload.length(), LogUtil.preview(payload, 1500));
             OutputStream os = conn.getOutputStream();
-            os.write(body.toString().getBytes("UTF-8"));
+            os.write(payload.getBytes("UTF-8"));
             os.close();
 
             int code = conn.getResponseCode();
+            LogUtil.d(TAG, "doRequestWithError HTTP code=%d in %d ms", code, System.currentTimeMillis() - startTs);
             if (code != 200) {
                 // Read error body
                 try {
@@ -259,8 +321,10 @@ public class ApiClient {
                     }
                     errReader.close();
                     result.error = "HTTP " + code + ": " + errBody.toString();
+                    LogUtil.e(TAG, "doRequestWithError FAILED: HTTP %d body=%s", code, LogUtil.preview(errBody.toString(), 800));
                 } catch (Exception e) {
                     result.error = "HTTP " + code;
+                    LogUtil.e(TAG, "doRequestWithError FAILED: HTTP %d (error body unreadable: %s)", code, e.getMessage());
                 }
                 return result;
             }
@@ -274,7 +338,10 @@ public class ApiClient {
             }
             reader.close();
             result.response = sb.toString();
+            LogUtil.d(TAG, "doRequestWithError <- %d chars in %d ms: %s", sb.length(),
+                    System.currentTimeMillis() - startTs, LogUtil.preview(sb.toString(), 500));
         } catch (Exception e) {
+            LogUtil.e(TAG, "doRequestWithError EXCEPTION: " + e.getMessage(), e);
             result.error = e.getMessage();
         } finally {
             if (conn != null) conn.disconnect();
@@ -314,6 +381,9 @@ public class ApiClient {
         }
 
         json.put("messages", msgs);
+        LogUtil.d(TAG, "buildRequestBody: model=%s stream=%s msgs=%d(+system=%s) thinking=%s type=%s param=%s",
+                model, stream, messages == null ? 0 : messages.size(),
+                (systemPrompt != null && !systemPrompt.isEmpty()), thinkingLevel, thinkingType, thinkingParamName);
 
         // Thinking parameters (null = skip entirely, for title gen etc.)
         if (thinkingLevel != null && !"off".equals(thinkingLevel)) {
@@ -378,16 +448,7 @@ public class ApiClient {
         return result.toString().trim();
     }
 
-    private static void setupTLS(HttpsURLConnection conn) throws Exception {
-        SSLContext sslContext = SSLContext.getInstance("TLSv1.2");
-        sslContext.init(null, new TrustManager[] { new X509TrustManager() {
-            public void checkClientTrusted(X509Certificate[] chain, String authType) {}
-            public void checkServerTrusted(X509Certificate[] chain, String authType) {}
-            public X509Certificate[] getAcceptedIssuers() { return new X509Certificate[0]; }
-        } }, null);
-        conn.setSSLSocketFactory(sslContext.getSocketFactory());
-        conn.setHostnameVerifier(new HostnameVerifier() {
-            public boolean verify(String hostname, SSLSession session) { return true; }
-        });
+    private static void setupTLS(HttpsURLConnection conn) {
+        TlsCompat.apply(conn);
     }
 }

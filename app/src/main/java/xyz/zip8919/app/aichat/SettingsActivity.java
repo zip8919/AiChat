@@ -24,19 +24,21 @@ import java.util.List;
 import org.json.JSONObject;
 
 public class SettingsActivity extends Activity {
+    private static final String TAG = "SettingsActivity";
     private static final String PREFS_NAME = "aichat_settings";
     private static final String KEY_SYSTEM_PROMPT = "system_prompt";
     private static final String KEY_AUTO_TITLE_ENABLED = "auto_title_enabled";
     private static final String KEY_TITLE_MODEL = "title_model";
     private static final String KEY_TITLE_PROMPT = "title_prompt";
     private static final String KEY_QUICK_SCAN_ENABLED = "quick_scan_enabled";
+    private static final String KEY_LOG_ENABLED = "log_enabled";
     private static final String KEY_PRESETS = "system_presets";
     private static final String DEFAULT_TITLE_MODEL = "Qwen/Qwen3.5-397B-A17B";
     private static final String DEFAULT_TITLE_PROMPT = "你是一个标题生成助手。根据用户消息生成3-15字标题。只输出标题本身，禁止输出任何其他文字、解释、标点或换行。";
 
     private SharedPreferences prefs;
     private EditText systemPromptEdit, titlePromptEdit;
-    private Switch autoTitleSwitch, quickScanSwitch;
+    private Switch autoTitleSwitch, quickScanSwitch, logSwitch;
     private Spinner titleModelSpinner, presetSpinner;
     private Button saveButton, cancelButton, balanceButton, manageModelsButton;
     private Button managePresetsButton, savePresetButton;
@@ -49,8 +51,12 @@ public class SettingsActivity extends Activity {
         setContentView(R.layout.activity_settings);
 
         this.prefs = getSharedPreferences(PREFS_NAME, 0);
+        LogUtil.i(TAG, "========== onCreate ========== (%s)", LogUtil.thread());
         initViews();
         loadSettings();
+        LogUtil.i(TAG, "onCreate done: systemPrompt=%d chars, autoTitle=%s, titleModel=%s",
+                systemPromptEdit.getText().length(), autoTitleSwitch.isChecked(),
+                prefs.getString(KEY_TITLE_MODEL, DEFAULT_TITLE_MODEL));
     }
 
     private void initViews() {
@@ -58,6 +64,7 @@ public class SettingsActivity extends Activity {
         titlePromptEdit = (EditText) findViewById(R.id.title_prompt_edit);
         autoTitleSwitch = (Switch) findViewById(R.id.auto_title_switch);
         quickScanSwitch = (Switch) findViewById(R.id.quick_scan_switch);
+        logSwitch = (Switch) findViewById(R.id.log_switch);
         titleModelSpinner = (Spinner) findViewById(R.id.title_model_spinner);
         saveButton = (Button) findViewById(R.id.save_button);
         cancelButton = (Button) findViewById(R.id.cancel_button);
@@ -68,33 +75,36 @@ public class SettingsActivity extends Activity {
         savePresetButton = (Button) findViewById(R.id.save_preset_button);
 
         saveButton.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) { saveSettings(); }
+            public void onClick(View v) { LogUtil.d(TAG, "click: save"); saveSettings(); }
         });
         cancelButton.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) { finish(); }
+            public void onClick(View v) { LogUtil.d(TAG, "click: cancel"); finish(); }
         });
         balanceButton.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) { queryBalance(); }
+            public void onClick(View v) { LogUtil.d(TAG, "click: query balance"); queryBalance(); }
         });
         manageModelsButton.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
+                LogUtil.d(TAG, "click: manage models -> ModelConfigActivity");
                 startActivity(new Intent(SettingsActivity.this, ModelConfigActivity.class));
             }
         });
         managePresetsButton.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) { showManagePresetsDialog(); }
+            public void onClick(View v) { LogUtil.d(TAG, "click: manage presets"); showManagePresetsDialog(); }
         });
         savePresetButton.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) { saveCurrentAsPreset(); }
+            public void onClick(View v) { LogUtil.d(TAG, "click: save as preset"); saveCurrentAsPreset(); }
         });
         presetSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             public void onItemSelected(AdapterView<?> parent, View view, int pos, long id) {
                 if (pos > 0 && pos - 1 < presetList.size()) {
+                    LogUtil.d(TAG, "preset selected: pos=%d name=%s", pos, presetList.get(pos - 1)[0]);
                     systemPromptEdit.setText(presetList.get(pos - 1)[1]);
                 }
             }
             public void onNothingSelected(AdapterView<?> parent) {}
         });
+        LogUtil.d(TAG, "initViews done");
     }
 
     private void loadSettings() {
@@ -102,8 +112,13 @@ public class SettingsActivity extends Activity {
         titlePromptEdit.setText(prefs.getString(KEY_TITLE_PROMPT, DEFAULT_TITLE_PROMPT));
         autoTitleSwitch.setChecked(prefs.getBoolean(KEY_AUTO_TITLE_ENABLED, true));
         quickScanSwitch.setChecked(prefs.getBoolean(KEY_QUICK_SCAN_ENABLED, false));
+        logSwitch.setChecked(prefs.getBoolean(KEY_LOG_ENABLED, true));
+        LogUtil.ENABLED = logSwitch.isChecked();
         refreshTitleModelSpinner();
         refreshPresetSpinner();
+        LogUtil.d(TAG, "loadSettings: autoTitle=%s, quickScan=%s, log=%s, titleModel=%s",
+                autoTitleSwitch.isChecked(), quickScanSwitch.isChecked(), logSwitch.isChecked(),
+                prefs.getString(KEY_TITLE_MODEL, DEFAULT_TITLE_MODEL));
     }
 
     private void refreshTitleModelSpinner() {
@@ -119,25 +134,32 @@ public class SettingsActivity extends Activity {
         titleModelSpinner.setAdapter(adapter);
 
         String saved = prefs.getString(KEY_TITLE_MODEL, DEFAULT_TITLE_MODEL);
+        LogUtil.d(TAG, "refreshTitleModelSpinner: %d models, saved=%s", models.size(), saved);
         for (int i = 0; i < models.size(); i++) {
             if (models.get(i).name.equals(saved)) {
                 titleModelSpinner.setSelection(i);
+                LogUtil.d(TAG, "refreshTitleModelSpinner: selected pos=%d", i);
                 return;
             }
         }
+        LogUtil.w(TAG, "refreshTitleModelSpinner: saved model '%s' not found", saved);
     }
 
     private void saveSettings() {
         String prompt = systemPromptEdit.getText().toString().trim();
         boolean autoTitle = autoTitleSwitch.isChecked();
+        boolean logEnabled = logSwitch.isChecked();
 
         String titlePrompt = titlePromptEdit.getText().toString().trim();
+        LogUtil.i(TAG, "saveSettings: promptLen=%d autoTitle=%s quickScan=%s log=%s titlePromptLen=%d",
+                prompt.length(), autoTitle, quickScanSwitch.isChecked(), logEnabled, titlePrompt.length());
 
         SharedPreferences.Editor editor = prefs.edit();
         editor.putString(KEY_SYSTEM_PROMPT, prompt);
         editor.putString(KEY_TITLE_PROMPT, titlePrompt);
         editor.putBoolean(KEY_AUTO_TITLE_ENABLED, autoTitle);
         editor.putBoolean(KEY_QUICK_SCAN_ENABLED, quickScanSwitch.isChecked());
+        editor.putBoolean(KEY_LOG_ENABLED, logEnabled);
 
         int pos = titleModelSpinner.getSelectedItemPosition();
         if (pos >= 0) {
@@ -145,9 +167,14 @@ public class SettingsActivity extends Activity {
             List<ModelInfo> models = cm.getModels();
             if (pos < models.size()) {
                 editor.putString(KEY_TITLE_MODEL, models.get(pos).name);
+                LogUtil.d(TAG, "saveSettings: titleModel=%s", models.get(pos).name);
+            } else {
+                LogUtil.w(TAG, "saveSettings: title model pos=%d out of range (%d)", pos, models.size());
             }
         }
         editor.commit();
+        LogUtil.ENABLED = logEnabled;
+        LogUtil.i(TAG, "saveSettings: prefs committed, logging %s", logEnabled ? "enabled" : "DISABLED");
 
         Toast.makeText(this, "设置已保存", Toast.LENGTH_SHORT).show();
         finish();
@@ -157,9 +184,11 @@ public class SettingsActivity extends Activity {
         ConfigManager configManager = ConfigManager.getInstance();
         final ProviderInfo dsProvider = configManager.getProvider("DeepSeek");
         if (dsProvider == null || dsProvider.apiKey.isEmpty()) {
+            LogUtil.w(TAG, "queryBalance aborted: DeepSeek provider=%s", dsProvider == null ? "null" : "empty key");
             Toast.makeText(this, "未配置 DeepSeek API Key", Toast.LENGTH_SHORT).show();
             return;
         }
+        LogUtil.i(TAG, "queryBalance: provider=%s url=%s keyLen=%d", dsProvider.name, dsProvider.apiUrl, dsProvider.apiKey.length());
 
         balanceButton.setEnabled(false);
         balanceButton.setText("查询中...");
@@ -173,6 +202,7 @@ public class SettingsActivity extends Activity {
                         balanceButton.setText("查询 DeepSeek 余额");
 
                         if (result == null) {
+                            LogUtil.w(TAG, "queryBalance: result is null");
                             Toast.makeText(SettingsActivity.this, "查询失败", Toast.LENGTH_SHORT).show();
                             return;
                         }
@@ -190,6 +220,7 @@ public class SettingsActivity extends Activity {
                                 sb.append("充值余额: ").append(info.optString("topped_up_balance", "0")).append("\n");
                                 sb.append("赠送余额: ").append(info.optString("granted_balance", "0")).append("\n");
                             }
+                            LogUtil.i(TAG, "queryBalance OK: %s", sb.toString().replace("\n", " | "));
 
                             new AlertDialog.Builder(SettingsActivity.this)
                                     .setTitle("DeepSeek 余额")
@@ -197,6 +228,7 @@ public class SettingsActivity extends Activity {
                                     .setPositiveButton("确定", null)
                                     .show();
                         } catch (Exception e) {
+                            LogUtil.e(TAG, "queryBalance parse failed: " + e.getMessage(), e);
                             Toast.makeText(SettingsActivity.this, "解析余额失败", Toast.LENGTH_SHORT).show();
                         }
                     }
@@ -208,6 +240,7 @@ public class SettingsActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        LogUtil.d(TAG, "onResume");
         refreshTitleModelSpinner();
     }
 
@@ -224,6 +257,11 @@ public class SettingsActivity extends Activity {
     public static boolean isQuickScanEnabled(Context context) {
         SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, 0);
         return prefs.getBoolean(KEY_QUICK_SCAN_ENABLED, false);
+    }
+
+    public static boolean isLogEnabled(Context context) {
+        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, 0);
+        return prefs.getBoolean(KEY_LOG_ENABLED, true);
     }
 
     public static String getTitleModel(Context context) {
@@ -247,7 +285,11 @@ public class SettingsActivity extends Activity {
                 org.json.JSONObject obj = arr.getJSONObject(i);
                 presetList.add(new String[]{obj.getString("name"), obj.getString("prompt")});
             }
-        } catch (Exception e) { presetList = new ArrayList<>(); }
+            LogUtil.d(TAG, "loadPresets: %d presets", presetList.size());
+        } catch (Exception e) {
+            LogUtil.e(TAG, "loadPresets parse failed: " + e.getMessage(), e);
+            presetList = new ArrayList<>();
+        }
     }
 
     private void savePresets() {
@@ -259,8 +301,11 @@ public class SettingsActivity extends Activity {
                 obj.put("prompt", p[1]);
                 arr.put(obj);
             }
-            prefs.edit().putString(KEY_PRESETS, arr.toString()).commit();
-        } catch (Exception e) { e.printStackTrace(); }
+            boolean ok = prefs.edit().putString(KEY_PRESETS, arr.toString()).commit();
+            LogUtil.d(TAG, "savePresets: %d presets ok=%s", presetList.size(), ok);
+        } catch (Exception e) {
+            LogUtil.e(TAG, "savePresets failed: " + e.getMessage(), e);
+        }
     }
 
     private void refreshPresetSpinner() {
@@ -273,14 +318,17 @@ public class SettingsActivity extends Activity {
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         presetSpinner.setAdapter(adapter);
         presetSpinner.setSelection(0);
+        LogUtil.d(TAG, "refreshPresetSpinner: %d presets", presetList.size());
     }
 
     private void saveCurrentAsPreset() {
         final String prompt = systemPromptEdit.getText().toString().trim();
         if (prompt.isEmpty()) {
+            LogUtil.w(TAG, "saveCurrentAsPreset aborted: prompt empty");
             Toast.makeText(this, "系统提示词为空", Toast.LENGTH_SHORT).show();
             return;
         }
+        LogUtil.d(TAG, "saveCurrentAsPreset: promptLen=%d", prompt.length());
         final EditText input = new EditText(this);
         input.setHint("预设名称");
         input.setSingleLine(true);
@@ -291,19 +339,23 @@ public class SettingsActivity extends Activity {
                     public void onClick(DialogInterface d, int w) {
                         String name = input.getText().toString().trim();
                         if (name.isEmpty()) {
+                            LogUtil.w(TAG, "saveCurrentAsPreset aborted: name empty");
                             Toast.makeText(SettingsActivity.this, "名称不能为空", Toast.LENGTH_SHORT).show();
                             return;
                         }
                         for (String[] p : presetList) {
                             if (p[0].equals(name)) {
+                                LogUtil.w(TAG, "saveCurrentAsPreset aborted: duplicate name '%s'", name);
                                 Toast.makeText(SettingsActivity.this, "名称已存在", Toast.LENGTH_SHORT).show();
                                 return;
                             }
                         }
                         if (presetList.size() >= 20) {
+                            LogUtil.w(TAG, "saveCurrentAsPreset aborted: limit reached (%d)", presetList.size());
                             Toast.makeText(SettingsActivity.this, "最多20个预设", Toast.LENGTH_SHORT).show();
                             return;
                         }
+                        LogUtil.i(TAG, "saveCurrentAsPreset: adding '%s'", name);
                         presetList.add(new String[]{name, prompt});
                         savePresets();
                         refreshPresetSpinner();
@@ -316,9 +368,11 @@ public class SettingsActivity extends Activity {
 
     private void showManagePresetsDialog() {
         if (presetList.isEmpty()) {
+            LogUtil.d(TAG, "showManagePresetsDialog: no presets");
             Toast.makeText(this, "暂无预设", Toast.LENGTH_SHORT).show();
             return;
         }
+        LogUtil.d(TAG, "showManagePresetsDialog: %d presets", presetList.size());
         final String[] names = new String[presetList.size()];
         for (int i = 0; i < presetList.size(); i++)
             names[i] = presetList.get(i)[0] + "  — " + (presetList.get(i)[1].length() > 15
@@ -329,6 +383,7 @@ public class SettingsActivity extends Activity {
         lv.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_list_item_1, names));
         lv.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             public void onItemClick(AdapterView<?> p, View v, int pos, long id) {
+                LogUtil.d(TAG, "preset clicked: pos=%d name=%s", pos, presetList.get(pos)[0]);
                 presetSpinner.setSelection(pos + 1);
                 systemPromptEdit.setText(presetList.get(pos)[1]);
                 if (manageDialog != null) manageDialog.dismiss();
@@ -342,9 +397,11 @@ public class SettingsActivity extends Activity {
                         .setItems(new String[]{"修改", "删除"}, new DialogInterface.OnClickListener() {
                             public void onClick(DialogInterface d, int w) {
                                 if (w == 0) {
+                                    LogUtil.d(TAG, "preset long-press action: edit pos=%d", pos);
                                     if (manageDialog != null) manageDialog.dismiss();
                                     showEditPresetDialog(pos);
                                 } else {
+                                    LogUtil.i(TAG, "preset long-press action: delete pos=%d name=%s", pos, presetList.get(pos)[0]);
                                     presetList.remove(pos);
                                     savePresets();
                                     refreshPresetSpinner();
@@ -370,6 +427,7 @@ public class SettingsActivity extends Activity {
 
     private void showEditPresetDialog(final int pos) {
         final boolean isNew = pos < 0;
+        LogUtil.d(TAG, "showEditPresetDialog: pos=%d isNew=%s", pos, isNew);
         final String oldName = isNew ? "" : presetList.get(pos)[0];
         final String oldPrompt = isNew ? "" : presetList.get(pos)[1];
 
@@ -404,30 +462,36 @@ public class SettingsActivity extends Activity {
                         String name = nameEdit.getText().toString().trim();
                         String prompt = promptEdit.getText().toString().trim();
                         if (name.isEmpty() || prompt.isEmpty()) {
+                            LogUtil.w(TAG, "editPreset aborted: empty name or prompt");
                             Toast.makeText(SettingsActivity.this, "名称和提示词不能为空", Toast.LENGTH_SHORT).show();
                             return;
                         }
                         if (isNew) {
                             for (String[] p : presetList) {
                                 if (p[0].equals(name)) {
+                                    LogUtil.w(TAG, "editPreset aborted: duplicate name '%s'", name);
                                     Toast.makeText(SettingsActivity.this, "名称已存在", Toast.LENGTH_SHORT).show();
                                     return;
                                 }
                             }
                             if (presetList.size() >= 20) {
+                                LogUtil.w(TAG, "editPreset aborted: limit reached (%d)", presetList.size());
                                 Toast.makeText(SettingsActivity.this, "最多20个预设", Toast.LENGTH_SHORT).show();
                                 return;
                             }
+                            LogUtil.i(TAG, "editPreset: create '%s' (%d chars)", name, prompt.length());
                             presetList.add(new String[]{name, prompt});
                         } else {
                             if (!name.equals(oldName)) {
                                 for (String[] p : presetList) {
                                     if (p[0].equals(name)) {
+                                        LogUtil.w(TAG, "editPreset aborted: duplicate name '%s'", name);
                                         Toast.makeText(SettingsActivity.this, "名称已存在", Toast.LENGTH_SHORT).show();
                                         return;
                                     }
                                 }
                             }
+                            LogUtil.i(TAG, "editPreset: update pos=%d '%s' -> '%s'", pos, oldName, name);
                             presetList.get(pos)[0] = name;
                             presetList.get(pos)[1] = prompt;
                         }

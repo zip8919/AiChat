@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Locale;
 
 public class ConversationAdapter extends BaseAdapter {
+    private static final String TAG = "ConvAdapter";
     private Context context;
     private List<Conversation> conversations;
     private LayoutInflater inflater;
@@ -24,6 +25,7 @@ public class ConversationAdapter extends BaseAdapter {
     }
 
     public void setConversations(List<Conversation> conversations) {
+        LogUtil.d(TAG, "setConversations: %d", conversations == null ? -1 : conversations.size());
         this.conversations = conversations;
         notifyDataSetChanged();
     }
@@ -57,6 +59,7 @@ public class ConversationAdapter extends BaseAdapter {
         }
 
         Conversation conv = conversations.get(position);
+        LogUtil.v(TAG, "getView: pos=%d id=%s title=%s", position, conv.id, conv.title);
         holder.titleView.setText(conv.title);
         holder.timeView.setText(dateFormat.format(new Date(conv.updatedAt)));
         return convertView;

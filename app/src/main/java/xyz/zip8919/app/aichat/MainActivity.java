@@ -40,6 +40,7 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 public class MainActivity extends Activity {
+    private static final String TAG = "MainActivity";
     private static final String PREFS_NAME = "aichat_prefs";
     private static final int REQUEST_CONVERSATION_MANAGER = 1;
     private static final int REQUEST_SCAN = 2;
@@ -99,28 +100,50 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        LogUtil.ENABLED = SettingsActivity.isLogEnabled(this);
+        LogUtil.i(TAG, "========== onCreate: savedInstanceState=%s, thread=%s ==========",
+                savedInstanceState, LogUtil.thread());
         setContentView(R.layout.activity_main);
 
         this.prefs = getSharedPreferences(PREFS_NAME, 0);
         this.storageManager = StorageManager.getInstance(this);
         this.configManager = ConfigManager.getInstance();
         this.conversationManager = ConversationManager.getInstance();
+        LogUtil.d(TAG, "managers initialized: storage=%s, config=%s, conv=%s",
+                storageManager, configManager, conversationManager);
 
         if (!storageManager.createDirectories()) {
+            LogUtil.e(TAG, "createDirectories FAILED, basePath=%s", storageManager.getBasePath());
             Toast.makeText(this, "无法访问外部存储", Toast.LENGTH_LONG).show();
         } else {
+            LogUtil.i(TAG, "storage ready: %s (conversations=%s)",
+                    storageManager.getStorageInfo(), storageManager.getConversationsPath());
             Toast.makeText(this, storageManager.getStorageInfo(), Toast.LENGTH_LONG).show();
         }
 
         configManager.load();
-        conversationManager.loadConversations();
+        LogUtil.i(TAG, "config loaded: providers=%d, models=%d, defaultModel=%s, thinking=%s/%s",
+                configManager.getProviders().size(), configManager.getModels().size(),
+                configManager.getDefaultModel(), configManager.isThinkingEnabled(),
+                configManager.getThinkingLevel());
+
+        List<Conversation> loaded = conversationManager.loadConversations();
+        LogUtil.i(TAG, "conversations loaded: count=%d", loaded == null ? -1 : loaded.size());
 
         initViews();
         loadSystemPrompt();
         initConversation();
+        LogUtil.i(TAG, "========== onCreate done ==========");
+    }
+
+    @Override
+    protected void onDestroy() {
+        LogUtil.i(TAG, "onDestroy");
+        super.onDestroy();
     }
 
     private void initViews() {
+        LogUtil.d(TAG, "initViews");
         inputEditText = (EditText) findViewById(R.id.input_edit_text);
         sendButton = (Button) findViewById(R.id.send_button);
         modelSpinner = (Spinner) findViewById(R.id.model_spinner);
@@ -142,17 +165,18 @@ public class MainActivity extends Activity {
 
         // Buttons
         findViewById(R.id.new_conversation_button).setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) { createNewConversation(); }
+            public void onClick(View v) { LogUtil.d(TAG, "click: new_conversation"); createNewConversation(); }
         });
         findViewById(R.id.history_button).setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) { openConversationManager(); }
+            public void onClick(View v) { LogUtil.d(TAG, "click: history"); openConversationManager(); }
         });
         findViewById(R.id.settings_button).setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) { openSettings(); }
+            public void onClick(View v) { LogUtil.d(TAG, "click: settings"); openSettings(); }
         });
         findViewById(R.id.rotate_button).setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 int orient = getResources().getConfiguration().orientation;
+                LogUtil.d(TAG, "click: rotate, current orientation=%d", orient);
                 if (orient == android.content.res.Configuration.ORIENTATION_LANDSCAPE)
                     setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
                 else
@@ -162,7 +186,7 @@ public class MainActivity extends Activity {
 
         // Send button
         sendButton.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) { sendMessage(); }
+            public void onClick(View v) { LogUtil.d(TAG, "click: send"); sendMessage(); }
         });
         sendButton.setOnTouchListener(new View.OnTouchListener() {
             private boolean longPressed = false;
@@ -176,6 +200,7 @@ public class MainActivity extends Activity {
                         longPressRunnable = new Runnable() {
                             public void run() {
                                 longPressed = true;
+                                LogUtil.d(TAG, "sendButton LONG press -> interruptRequest");
                                 interruptRequest();
                             }
                         };
@@ -185,6 +210,7 @@ public class MainActivity extends Activity {
                     case MotionEvent.ACTION_CANCEL:
                         handler.removeCallbacks(longPressRunnable);
                         if (!longPressed && isRequestInProgress.get()) {
+                            LogUtil.d(TAG, "sendButton short tap during request -> interruptRequest");
                             interruptRequest();
                         }
                         return false;
@@ -195,7 +221,10 @@ public class MainActivity extends Activity {
 
         // Scan button
         findViewById(R.id.scan_button).setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) { launchScan(); }
+            public void onClick(View v) {
+                LogUtil.d(TAG, "click: scan -> launchScan");
+                launchScan();
+            }
         });
 
         // Scroll-to-bottom button: tap = scroll to bottom, long-press = clear input
@@ -245,10 +274,13 @@ public class MainActivity extends Activity {
         else if ("low".equals(level)) levelPos = 1;
         else if ("high".equals(level)) levelPos = 3;
         thinkingSpinner.setSelection(levelPos);
+        LogUtil.d(TAG, "thinking level restored: %s -> pos=%d (thinkingEnabled=%s)",
+                level, levelPos, configManager.isThinkingEnabled());
 
         thinkingSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             public void onItemSelected(AdapterView<?> parent, View view, int pos, long id) {
                 String[] levels = {"off", "low", "medium", "high"};
+                LogUtil.d(TAG, "thinking level selected: pos=%d -> %s", pos, levels[pos]);
                 configManager.setThinkingLevel(levels[pos]);
                 configManager.save();
             }
@@ -260,6 +292,7 @@ public class MainActivity extends Activity {
     }
 
     private void refreshModelSpinner() {
+        LogUtil.d(TAG, "refreshModelSpinner");
         availableModels = configManager.getModels();
         List<String> names = new ArrayList<String>();
         for (ModelInfo m : availableModels) {
@@ -269,19 +302,26 @@ public class MainActivity extends Activity {
                 android.R.layout.simple_spinner_item, names);
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         modelSpinner.setAdapter(adapter);
+        LogUtil.d(TAG, "model spinner items=%d: %s", names.size(), names);
 
         // Select default
         String defaultModel = configManager.getDefaultModel();
+        boolean matched = false;
         for (int i = 0; i < availableModels.size(); i++) {
             if (availableModels.get(i).name.equals(defaultModel)) {
                 modelSpinner.setSelection(i);
                 selectModel(i);
+                matched = true;
                 break;
             }
+        }
+        if (!matched) {
+            LogUtil.w(TAG, "default model '%s' not found in %d models", defaultModel, availableModels.size());
         }
 
         modelSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             public void onItemSelected(AdapterView<?> parent, View view, int pos, long id) {
+                LogUtil.d(TAG, "model selected: pos=%d", pos);
                 selectModel(pos);
             }
             public void onNothingSelected(AdapterView<?> parent) {}
@@ -289,33 +329,48 @@ public class MainActivity extends Activity {
     }
 
     private void selectModel(int pos) {
-        if (pos < 0 || pos >= availableModels.size()) return;
+        if (pos < 0 || pos >= availableModels.size()) {
+            LogUtil.w(TAG, "selectModel: invalid pos=%d (size=%d)", pos,
+                    availableModels == null ? -1 : availableModels.size());
+            return;
+        }
         ModelInfo model = availableModels.get(pos);
         ProviderInfo provider = configManager.getProvider(model.provider);
         if (provider != null) {
             currentModel = model.name;
             currentApiKey = provider.apiKey;
             currentApiUrl = provider.apiUrl;
+            LogUtil.i(TAG, "selectModel: pos=%d model=%s provider=%s url=%s keyLen=%d",
+                    pos, model.name, provider.name, provider.apiUrl,
+                    provider.apiKey == null ? 0 : provider.apiKey.length());
+        } else {
+            LogUtil.w(TAG, "selectModel: provider '%s' not found for model '%s'", model.provider, model.name);
         }
     }
 
     private void loadSystemPrompt() {
         systemPrompt = SettingsActivity.getSystemPrompt(this);
+        LogUtil.d(TAG, "loadSystemPrompt: len=%d preview=%s",
+                systemPrompt == null ? 0 : systemPrompt.length(), LogUtil.preview(systemPrompt, 120));
     }
 
     private void initConversation() {
         Conversation conv = conversationManager.getCurrentConversation();
         messages = conv.messages;
+        LogUtil.i(TAG, "initConversation: id=%s title=%s messages=%d",
+                conv.id, conv.title, messages.size());
         refreshWebView();
     }
 
     private void createNewConversation() {
+        LogUtil.i(TAG, "createNewConversation (requestInProgress=%s)", isRequestInProgress.get());
         if (isRequestInProgress.get()) interruptRequest();
         loadSystemPrompt();
         Conversation conv = conversationManager.createNewConversation();
         conv.systemPrompt = systemPrompt;
         conv.model = currentModel;
         messages = conv.messages;
+        LogUtil.i(TAG, "new conversation created: id=%s model=%s", conv.id, conv.model);
         refreshWebView();
         Toast.makeText(this, "已创建新对话", Toast.LENGTH_SHORT).show();
     }
@@ -323,6 +378,7 @@ public class MainActivity extends Activity {
     private void interruptRequest() {
         if (!isRequestInProgress.get()) return;
         requestGeneration.incrementAndGet();
+        LogUtil.i(TAG, "interruptRequest: disconnecting current connection");
         isRequestInProgress.set(false);
         if (currentConnection != null) {
             try { currentConnection.disconnect(); } catch (Exception ignored) {}
@@ -340,12 +396,16 @@ public class MainActivity extends Activity {
                     if (lastMsg.isAssistant()) {
                         String content = lastMsg.content;
                         if (content == null || content.isEmpty()) {
+                            LogUtil.d(TAG, "interrupt: removing empty AI placeholder, size=%d", messages.size());
                             messages.remove(messages.size() - 1);
                             removeDomRange(messages.size());
                         } else {
                             lastMsg.content = content + " (已打断)";
+                            LogUtil.d(TAG, "interrupt: marking AI msg as interrupted, len=%d", content.length());
                             updateAiContent(lastMsg.content);
                         }
+                    } else {
+                        LogUtil.d(TAG, "interrupt: last message is not assistant, nothing to mark");
                     }
                 }
             }
@@ -353,55 +413,71 @@ public class MainActivity extends Activity {
     }
 
     private void openSettings() {
+        LogUtil.d(TAG, "openSettings -> SettingsActivity");
         startActivity(new Intent(this, SettingsActivity.class));
     }
 
     private void openConversationManager() {
+        LogUtil.d(TAG, "openConversationManager -> ConversationManagerActivity");
         startActivityForResult(new Intent(this, ConversationManagerActivity.class),
                 REQUEST_CONVERSATION_MANAGER);
     }
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        LogUtil.d(TAG, "onActivityResult: requestCode=%d resultCode=%d data=%s", requestCode, resultCode, data);
         if (requestCode == REQUEST_CONVERSATION_MANAGER && resultCode == RESULT_OK) {
-            String conversationId = data.getStringExtra("conversation_id");
+            String conversationId = data == null ? null : data.getStringExtra("conversation_id");
             if (conversationId != null) {
+                LogUtil.i(TAG, "switching to conversation: %s", conversationId);
                 if (isRequestInProgress.get()) interruptRequest();
                 conversationManager.saveCurrentConversation();
                 conversationManager.switchConversation(conversationId);
                 Conversation conv = conversationManager.getCurrentConversation();
                 messages = conv.messages;
+                LogUtil.i(TAG, "switched: id=%s title=%s messages=%d", conv.id, conv.title, messages.size());
                 refreshWebView();
                 Toast.makeText(this, "已切换到: " + conv.title, Toast.LENGTH_SHORT).show();
+            } else {
+                LogUtil.w(TAG, "REQUEST_CONVERSATION_MANAGER returned null conversation_id");
             }
         } else if (requestCode == REQUEST_SCAN && resultCode == RESULT_OK) {
-            String text = data.getStringExtra("scan_text");
+            String text = data == null ? null : data.getStringExtra("scan_text");
             if (text != null && !text.isEmpty()) {
+                LogUtil.i(TAG, "scan result: len=%d preview=%s", text.length(), LogUtil.preview(text, 120));
                 inputEditText.setText(text);
                 inputEditText.setSelection(text.length());
+            } else {
+                LogUtil.w(TAG, "REQUEST_SCAN returned empty/null text");
             }
+        } else {
+            LogUtil.d(TAG, "onActivityResult unhandled: requestCode=%d resultCode=%d", requestCode, resultCode);
         }
     }
 
     @Override
     protected void onResume() {
         super.onResume();
+        LogUtil.d(TAG, "onResume");
         loadSystemPrompt();
         refreshModelSpinner();
         if (expectingQuickScanResult) {
             expectingQuickScanResult = false;
+            LogUtil.d(TAG, "onResume: quick-scan result expected -> loadQuickScanResult");
             loadQuickScanResult();
         }
     }
 
     @Override
     protected void onPause() {
+        LogUtil.d(TAG, "onPause");
         super.onPause();
         conversationManager.saveCurrentConversation();
     }
 
     @Override
     protected void onStop() {
+        LogUtil.d(TAG, "onStop");
         super.onStop();
         conversationManager.saveCurrentConversation();
     }
@@ -409,6 +485,8 @@ public class MainActivity extends Activity {
     @Override
     public void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
+        LogUtil.d(TAG, "onConfigurationChanged: orient=%s",
+                newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE ? "landscape" : "portrait");
         if (imageViewerDialog != null && imageViewerDialog.isShowing()) {
             imageViewerDialog.getWindow().setLayout(
                     ViewGroup.LayoutParams.MATCH_PARENT,
@@ -433,6 +511,7 @@ public class MainActivity extends Activity {
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         for (int code : SCAN_KEY_CODES) {
             if (keyCode == code) {
+                LogUtil.i(TAG, "onKeyDown: scan key %d -> launchScan", keyCode);
                 launchScan();
                 return true;
             }
@@ -443,24 +522,34 @@ public class MainActivity extends Activity {
     private void launchScan() {
         if (SettingsActivity.isQuickScanEnabled(this)) {
             expectingQuickScanResult = true;
+            LogUtil.d(TAG, "launchScan: quick-scan mode, trying external scan apps");
             try {
                 Intent si = new Intent();
                 si.setClassName("com.jxw.launcher", "com.jxw.launcher.SPWBZCActivity");
                 startActivity(si);
+                LogUtil.i(TAG, "quick scan launched: com.jxw.launcher/.SPWBZCActivity");
                 return;
-            } catch (Exception e) {}
+            } catch (Exception e) {
+                LogUtil.w(TAG, "quick scan launcher unavailable: com.jxw.launcher (%s)", e.getMessage());
+            }
             try {
                 Intent si = new Intent();
                 si.setClassName("com.jxw.wbzc", "com.jxw.wbzc.MainActivity");
                 startActivity(si);
+                LogUtil.i(TAG, "quick scan launched: com.jxw.wbzc/.MainActivity");
                 return;
-            } catch (Exception e) {}
+            } catch (Exception e) {
+                LogUtil.w(TAG, "quick scan launcher unavailable: com.jxw.wbzc (%s)", e.getMessage());
+            }
+            LogUtil.w(TAG, "quick scan: no external launcher available, aborted");
             Toast.makeText(this, "请手动打开文本摘抄应用扫描", Toast.LENGTH_SHORT).show();
             expectingQuickScanResult = false;
         } else {
+            LogUtil.d(TAG, "launchScan: builtin ScanActivity mode");
             try {
                 startActivityForResult(new Intent(this, ScanActivity.class), REQUEST_SCAN);
             } catch (Exception e) {
+                LogUtil.e(TAG, "launch ScanActivity failed", e);
                 Toast.makeText(this, "无法启动扫描: " + e.getMessage(), Toast.LENGTH_LONG).show();
             }
         }
@@ -470,6 +559,7 @@ public class MainActivity extends Activity {
 
     private void sendMessage() {
         if (isRequestInProgress.get()) {
+            LogUtil.w(TAG, "sendMessage ignored: request already in progress -> interrupt instead");
             interruptRequest();
             if (!sendMessagePending) {
                 sendMessagePending = true;
@@ -483,7 +573,12 @@ public class MainActivity extends Activity {
             return;
         }
         String input = inputEditText.getText().toString().trim();
-        if (input.isEmpty()) return;
+        if (input.isEmpty()) {
+            LogUtil.w(TAG, "sendMessage ignored: empty input");
+            return;
+        }
+        LogUtil.i(TAG, "========== sendMessage: len=%d preview=%s ==========",
+                input.length(), LogUtil.preview(input, 200));
 
         loadSystemPrompt();
 
@@ -491,6 +586,7 @@ public class MainActivity extends Activity {
         messages.add(userMsg);
         conversationManager.getCurrentConversation().touch();
         inputEditText.setText("");
+        LogUtil.d(TAG, "user message appended, total messages=%d", messages.size());
 
         // Append user message to WebView
         String userHtml = MessageHtmlRenderer.renderMessageDiv(userMsg, messages.size() - 1, this);
@@ -499,34 +595,52 @@ public class MainActivity extends Activity {
         Conversation conv = conversationManager.getCurrentConversation();
         boolean isFirstMsg = conv.messages.size() == 1;
         boolean autoTitle = SettingsActivity.isAutoTitleEnabled(this);
+        LogUtil.d(TAG, "title check: isFirstMsg=%s autoTitle=%s titleGenerated=%s",
+                isFirstMsg, autoTitle, conv.titleGenerated);
         if (isFirstMsg && autoTitle && !conv.titleGenerated) {
             generateTitle(input);
         }
 
-        ProviderInfo provider = configManager.getProvider(
-                availableModels.get(modelSpinner.getSelectedItemPosition()).provider);
+        int selPos = modelSpinner.getSelectedItemPosition();
+        if (selPos < 0 || availableModels == null || selPos >= availableModels.size()) {
+            LogUtil.e(TAG, "sendMessage aborted: invalid model selection pos=%d, models=%d",
+                    selPos, availableModels == null ? -1 : availableModels.size());
+            Toast.makeText(this, "未选择模型", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        ProviderInfo provider = configManager.getProvider(availableModels.get(selPos).provider);
         if (provider == null) {
+            LogUtil.e(TAG, "sendMessage aborted: provider null for model '%s'",
+                    availableModels.get(selPos).name);
             Toast.makeText(this, "未选择模型", Toast.LENGTH_SHORT).show();
             return;
         }
 
         String thinkingLevel = configManager.getThinkingLevel();
         if (!configManager.isThinkingEnabled()) thinkingLevel = "off";
+        LogUtil.i(TAG, "request params: model=%s provider=%s url=%s thinking=%s",
+                currentModel, provider.name, provider.apiUrl, thinkingLevel);
 
         int gen = requestGeneration.incrementAndGet();
         sendStreamingRequest(provider, thinkingLevel, gen);
     }
 
     private void sendStreamingRequest(final ProviderInfo provider, final String thinkingLevel, final int generation) {
+        final long startMs = System.currentTimeMillis();
+        LogUtil.i(TAG, ">>> sendStreamingRequest START: gen=%d url=%s%s model=%s thinking=%s (type=%s, param=%s)",
+                generation, provider.apiUrl, provider.chatPath, currentModel, thinkingLevel,
+                provider.thinkingType, provider.thinkingParamName);
         isRequestInProgress.set(true);
 
         final Message aiMsg = new Message(Message.ROLE_ASSISTANT, "");
         messages.add(aiMsg);
         final int aiIndex = messages.size() - 1;
+        LogUtil.d(TAG, "AI placeholder added at index=%d, total=%d", aiIndex, messages.size());
 
         // Append AI placeholder div
         runOnUiThread(new Runnable() {
             public void run() {
+                LogUtil.v(TAG, "webview js: appendAiDiv()");
                 conversationWebView.loadUrl("javascript:appendAiDiv()");
             }
         });
@@ -536,10 +650,15 @@ public class MainActivity extends Activity {
                 final StringBuilder rawContent = new StringBuilder();
                 final boolean[] thinkingActive = {false};
                 final boolean[] thinkingFinished = {false};
+                final int[] chunkCount = {0};
+                final int[] thinkingChunks = {0};
+                final int[] contentChunks = {0};
 
                 HttpURLConnection conn = null;
                 try {
-                    java.net.URL url = new java.net.URL(provider.apiUrl + provider.chatPath);
+                    String endpoint = provider.apiUrl + provider.chatPath;
+                    java.net.URL url = new java.net.URL(endpoint);
+                    LogUtil.d(TAG, "opening connection: %s (thread=%s)", endpoint, LogUtil.thread());
                     conn = (HttpURLConnection) url.openConnection();
                     conn.setRequestMethod("POST");
                     conn.setRequestProperty("Content-Type", "application/json");
@@ -549,18 +668,7 @@ public class MainActivity extends Activity {
                     conn.setReadTimeout(0);
 
                     if (conn instanceof javax.net.ssl.HttpsURLConnection) {
-                        javax.net.ssl.SSLContext ssl = javax.net.ssl.SSLContext.getInstance("TLSv1.2");
-                        ssl.init(null, new javax.net.ssl.TrustManager[] {
-                            new javax.net.ssl.X509TrustManager() {
-                                public void checkClientTrusted(java.security.cert.X509Certificate[] c, String a) {}
-                                public void checkServerTrusted(java.security.cert.X509Certificate[] c, String a) {}
-                                public java.security.cert.X509Certificate[] getAcceptedIssuers() { return new java.security.cert.X509Certificate[0]; }
-                            }
-                        }, null);
-                        ((javax.net.ssl.HttpsURLConnection) conn).setSSLSocketFactory(ssl.getSocketFactory());
-                        ((javax.net.ssl.HttpsURLConnection) conn).setHostnameVerifier(new javax.net.ssl.HostnameVerifier() {
-                            public boolean verify(String h, javax.net.ssl.SSLSession s) { return true; }
-                        });
+                        TlsCompat.apply((javax.net.ssl.HttpsURLConnection) conn);
                     }
 
                     currentConnection = conn;
@@ -602,12 +710,30 @@ public class MainActivity extends Activity {
                         }
                     }
 
+                    LogUtil.d(TAG, "request body built: len=%d", body.toString().length());
+                    LogUtil.v(TAG, "request body: %s", LogUtil.preview(body.toString(), 1500));
+
+                    long reqMs = System.currentTimeMillis();
                     java.io.OutputStream os = conn.getOutputStream();
                     os.write(body.toString().getBytes("UTF-8"));
                     os.close();
+                    LogUtil.d(TAG, "request body written in %d ms", System.currentTimeMillis() - reqMs);
 
                     int code = conn.getResponseCode();
+                    LogUtil.i(TAG, "HTTP response: code=%d in %d ms", code, System.currentTimeMillis() - reqMs);
                     if (code != 200) {
+                        String errBody = null;
+                        try {
+                            java.io.InputStream es = conn.getErrorStream();
+                            if (es != null) {
+                                java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+                                byte[] buf = new byte[2048];
+                                int n;
+                                while ((n = es.read(buf)) > 0) bos.write(buf, 0, n);
+                                errBody = new String(bos.toByteArray(), "UTF-8");
+                            }
+                        } catch (Exception ignored) {}
+                        LogUtil.e(TAG, "request FAILED: HTTP %d, body=%s", code, LogUtil.preview(errBody, 800));
                         final String err = "HTTP " + code;
                         runOnUiThread(new Runnable() {
                             public void run() { Toast.makeText(MainActivity.this, "请求失败: " + err, Toast.LENGTH_SHORT).show(); }
@@ -619,35 +745,62 @@ public class MainActivity extends Activity {
                             new java.io.InputStreamReader(conn.getInputStream(), "UTF-8"));
                     String line;
                     long lastUpdate = 0;
+                    LogUtil.i(TAG, "SSE stream started, begin reading chunks");
                     while (isRequestInProgress.get() && (line = reader.readLine()) != null) {
                         line = line.trim();
-                        if (!line.startsWith("data: ")) continue;
+                        if (!line.startsWith("data: ")) {
+                            if (line.length() > 0) {
+                                LogUtil.v(TAG, "skip non-data line: %s", LogUtil.preview(line, 120));
+                            }
+                            continue;
+                        }
                         String data = line.substring(6);
-                        if ("[DONE]".equals(data)) break;
+                        if ("[DONE]".equals(data)) {
+                            LogUtil.i(TAG, "SSE [DONE] received after %d chunks", chunkCount[0]);
+                            break;
+                        }
+                        chunkCount[0]++;
 
                         try {
                             org.json.JSONObject json = new org.json.JSONObject(data);
                             org.json.JSONArray choices = json.optJSONArray("choices");
-                            if (choices == null || choices.length() == 0) continue;
+                            if (choices == null || choices.length() == 0) {
+                                LogUtil.v(TAG, "chunk#%d has no choices: %s", chunkCount[0], LogUtil.preview(data, 200));
+                                continue;
+                            }
                             org.json.JSONObject delta = choices.getJSONObject(0).optJSONObject("delta");
-                            if (delta == null) continue;
+                            if (delta == null) {
+                                LogUtil.v(TAG, "chunk#%d has no delta", chunkCount[0]);
+                                continue;
+                            }
 
                             if (delta.has("reasoning_content") && !delta.isNull("reasoning_content")) {
                                 String rc = delta.getString("reasoning_content");
+                                thinkingChunks[0]++;
                                 if (!thinkingActive[0]) {
                                     thinkingActive[0] = true;
                                     rawContent.append("[thinking]");
+                                    LogUtil.d(TAG, "thinking phase START at chunk#%d", chunkCount[0]);
                                 }
                                 rawContent.append(rc);
+                                if (LogUtil.ENABLED) {
+                                    LogUtil.v(TAG, "reasoning chunk#%d: %s", thinkingChunks[0], LogUtil.preview(rc, 150));
+                                }
                             }
 
                             if (delta.has("content") && !delta.isNull("content")) {
                                 String ct = delta.getString("content");
+                                contentChunks[0]++;
                                 if (thinkingActive[0] && !thinkingFinished[0]) {
                                     thinkingFinished[0] = true;
                                     rawContent.append("[/thinking]");
+                                    LogUtil.d(TAG, "thinking phase END at chunk#%d (thinkingChunks=%d)",
+                                            chunkCount[0], thinkingChunks[0]);
                                 }
                                 rawContent.append(ct);
+                                if (LogUtil.ENABLED) {
+                                    LogUtil.v(TAG, "content chunk#%d: %s", contentChunks[0], LogUtil.preview(ct, 150));
+                                }
                             }
 
                             // Throttle: light text update at most every 200ms
@@ -661,17 +814,29 @@ public class MainActivity extends Activity {
                                             messages.get(aiIndex).content = content;
                                             String esc = jsEscape(content);
                                             conversationWebView.loadUrl("javascript:updateLastText('" + esc + "')");
+                                        } else {
+                                            LogUtil.w(TAG, "throttled update skipped: aiIndex=%d >= size=%d",
+                                                    aiIndex, messages.size());
                                         }
                                     }
                                 });
                             }
-                        } catch (Exception e) { }
+                        } catch (Exception e) {
+                            LogUtil.w(TAG, "failed to parse SSE chunk#%d: %s | raw=%s",
+                                    chunkCount[0], e.getMessage(), LogUtil.preview(data, 300));
+                        }
                     }
                     // Final update: full render with markdown/LaTeX/highlighting
                     final String finalContent = rawContent.toString();
+                    LogUtil.i(TAG, "stream finished: chunks=%d (thinking=%d, content=%d), finalLen=%d, elapsed=%d ms",
+                            chunkCount[0], thinkingChunks[0], contentChunks[0],
+                            finalContent.length(), System.currentTimeMillis() - startMs);
                     new Thread(new Runnable() {
                         public void run() {
+                            long renderMs = System.currentTimeMillis();
                             final String html = MessageHtmlRenderer.contentToHtml(finalContent, MainActivity.this);
+                            LogUtil.d(TAG, "html rendered: len=%d in %d ms", html.length(),
+                                    System.currentTimeMillis() - renderMs);
                             runOnUiThread(new Runnable() {
                                 public void run() {
                                     // 代数匹配且索引有效时才更新，防止旧请求覆盖新请求
@@ -680,6 +845,9 @@ public class MainActivity extends Activity {
                                         String esc = jsEscape(html);
                                         conversationWebView.loadUrl("javascript:updateLastMsg('" + esc + "')");
                                         conversationWebView.loadUrl("javascript:finalizeLast(" + aiIndex + ")");
+                                    } else {
+                                        LogUtil.w(TAG, "final update skipped: aiIndex=%d >= size=%d",
+                                                aiIndex, messages.size());
                                     }
                                 }
                             });
@@ -687,12 +855,15 @@ public class MainActivity extends Activity {
                     }).start();
                     reader.close();
                 } catch (final Exception e) {
+                    LogUtil.e(TAG, "streaming request EXCEPTION: %s", e.getMessage(), e);
                     runOnUiThread(new Runnable() {
                         public void run() {
                             Toast.makeText(MainActivity.this, "请求失败: " + e.getMessage(), Toast.LENGTH_SHORT).show();
                         }
                     });
                 } finally {
+                    LogUtil.i(TAG, "<<< sendStreamingRequest END: elapsed=%d ms, chunks=%d, interrupted=%s",
+                            System.currentTimeMillis() - startMs, chunkCount[0], !isRequestInProgress.get());
                     if (conn != null) conn.disconnect();
                     // 只有当前请求代数匹配时才清理状态，防止旧线程污染新请求
                     if (requestGeneration.get() == generation) {
@@ -709,19 +880,30 @@ public class MainActivity extends Activity {
                 }
             }
         });
+        currentRequestThread.setName("aichat-stream-" + System.currentTimeMillis());
         currentRequestThread.start();
+        LogUtil.d(TAG, "request thread started: %s", currentRequestThread.getName());
     }
 
     private void generateTitle(final String firstMessage) {
+        LogUtil.d(TAG, "generateTitle called for message: %s", LogUtil.preview(firstMessage, 100));
         new Thread(new Runnable() {
             public void run() {
                 try {
                     // Get title model from settings, then find its provider
                     String titleModel = SettingsActivity.getTitleModel(MainActivity.this);
+                    LogUtil.d(TAG, "generateTitle: titleModel=%s", titleModel);
                     ModelInfo tmi = configManager.getModel(titleModel);
-                    if (tmi == null) return;
+                    if (tmi == null) {
+                        LogUtil.w(TAG, "generateTitle aborted: model '%s' not found", titleModel);
+                        return;
+                    }
                     ProviderInfo titleProvider = configManager.getProvider(tmi.provider);
-                    if (titleProvider == null) return;
+                    if (titleProvider == null) {
+                        LogUtil.w(TAG, "generateTitle aborted: provider '%s' not found", tmi.provider);
+                        return;
+                    }
+                    LogUtil.d(TAG, "generateTitle: using %s @ %s", tmi.name, titleProvider.name);
 
                     String titlePrompt = SettingsActivity.getTitlePrompt(MainActivity.this);
                     List<Message> titleMsgs = new ArrayList<Message>();
@@ -731,8 +913,13 @@ public class MainActivity extends Activity {
                     titleMsgs.add(sysMsg);
                     titleMsgs.add(userMsg);
 
+                    long titleMs = System.currentTimeMillis();
                     ApiClient.CallResult result = ApiClient.callWithError(titleProvider,
                             titleModel, titleMsgs, "", "off");
+                    LogUtil.d(TAG, "generateTitle: api returned in %d ms, response=%s, error=%s",
+                            System.currentTimeMillis() - titleMs,
+                            LogUtil.preview(result == null ? null : result.response, 400),
+                            result == null ? "null-result" : result.error);
 
                     if (result.response != null) {
                         org.json.JSONObject json = new org.json.JSONObject(result.response);
@@ -740,9 +927,12 @@ public class MainActivity extends Activity {
                         if (choices != null && choices.length() > 0) {
                             org.json.JSONObject msg = choices.getJSONObject(0).optJSONObject("message");
                             if (msg != null) {
-                                String title = msg.optString("content", "").trim()
+                                String raw = msg.optString("content", "");
+                                String title = raw.trim()
                                         .replaceAll("[\"''\"'.:;,!，。：；！？]", "").trim();
                                 if (title.length() > 20) title = title.substring(0, 20);
+                                LogUtil.i(TAG, "generateTitle: raw=%s -> title=%s",
+                                        LogUtil.preview(raw, 120), title);
 
                                 final String finalTitle = title.length() > 0 ? title : "新对话";
                                 runOnUiThread(new Runnable() {
@@ -752,50 +942,67 @@ public class MainActivity extends Activity {
                                             conv.title = finalTitle;
                                             conv.titleGenerated = true;
                                             conversationManager.saveCurrentConversation();
+                                            LogUtil.i(TAG, "conversation title set to: %s", finalTitle);
+                                        } else {
+                                            LogUtil.d(TAG, "title not applied (conv=%s, generated=%s)",
+                                                    conv, conv == null ? "-" : conv.titleGenerated);
                                         }
                                     }
                                 });
+                            } else {
+                                LogUtil.w(TAG, "generateTitle: response has no message object");
                             }
+                        } else {
+                            LogUtil.w(TAG, "generateTitle: response has no choices");
                         }
                     }
                 } catch (final Exception e) {
-                    e.printStackTrace();
+                    LogUtil.e(TAG, "generateTitle EXCEPTION: " + e.getMessage(), e);
                 }
             }
-        }).start();
+        }) {{ setName("aichat-title-" + System.currentTimeMillis()); }}.start();
     }
 
     // ========== WebView helpers ==========
 
     private void refreshWebView() {
+        LogUtil.d(TAG, "refreshWebView: messages=%d", messages == null ? -1 : messages.size());
+        final long t0 = System.currentTimeMillis();
         new Thread(new Runnable() {
             public void run() {
                 final String html = MessageHtmlRenderer.buildConversationHtml(messages, MainActivity.this);
+                LogUtil.d(TAG, "conversation html built: len=%d in %d ms",
+                        html == null ? -1 : html.length(), System.currentTimeMillis() - t0);
                 runOnUiThread(new Runnable() {
                     public void run() {
                         conversationWebView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null);
+                        LogUtil.d(TAG, "webview reloaded with full conversation html");
                     }
                 });
             }
-        }).start();
+        }) {{ setName("aichat-render-" + System.currentTimeMillis()); }}.start();
     }
 
     private void appendHtml(String msgHtml) {
         String esc = jsEscape(msgHtml);
+        LogUtil.v(TAG, "webview js: appendMsg(len=%d)", esc.length());
         conversationWebView.loadUrl("javascript:appendMsg('" + esc + "')");
     }
 
     private void updateAiContent(String content) {
         String html = MessageHtmlRenderer.contentToHtml(content, this);
         String esc = jsEscape(html);
+        LogUtil.v(TAG, "webview js: updateLastMsg(htmlLen=%d)", esc.length());
         conversationWebView.loadUrl("javascript:updateLastMsg('" + esc + "')");
     }
 
     private void removeDomFrom(int pos) {
+        LogUtil.v(TAG, "webview js: removeFromIdx(%d)", pos);
         conversationWebView.loadUrl("javascript:removeFromIdx(" + pos + ")");
     }
 
     private void removeDomRange(int fromPos) {
+        LogUtil.v(TAG, "webview js: removeRangeFrom(%d)", fromPos);
         conversationWebView.loadUrl("javascript:removeRangeFrom(" + fromPos + ")");
     }
 
@@ -821,6 +1028,7 @@ public class MainActivity extends Activity {
     class JsBridge {
         @JavascriptInterface
         public void copyCode(final String code) {
+            LogUtil.d(TAG, "JsBridge.copyCode: len=%s", code == null ? "null" : code.length());
             handler.post(new Runnable() {
                 public void run() {
                     try {
@@ -828,12 +1036,14 @@ public class MainActivity extends Activity {
                         cm.setPrimaryClip(ClipData.newPlainText("code", code));
                         Toast.makeText(MainActivity.this, "代码已复制", Toast.LENGTH_SHORT).show();
                     } catch (Exception e1) {
+                        LogUtil.w(TAG, "copyCode via ClipboardManager failed: %s, trying legacy API", e1.getMessage());
                         try {
                             android.text.ClipboardManager oldCm = (android.text.ClipboardManager)
                                     getSystemService(Context.CLIPBOARD_SERVICE);
                             oldCm.setText(code);
                             Toast.makeText(MainActivity.this, "代码已复制", Toast.LENGTH_SHORT).show();
                         } catch (Exception e2) {
+                            LogUtil.e(TAG, "copyCode failed entirely: " + e2.getMessage(), e2);
                             Toast.makeText(MainActivity.this, "复制失败: " + e2.getMessage(), Toast.LENGTH_SHORT).show();
                         }
                     }
@@ -843,31 +1053,39 @@ public class MainActivity extends Activity {
 
         @JavascriptInterface
         public void openUrl(String url) {
+            LogUtil.d(TAG, "JsBridge.openUrl: %s", url);
             try {
                 startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
             } catch (Exception e) {
+                LogUtil.e(TAG, "openUrl failed: " + e.getMessage(), e);
                 Toast.makeText(MainActivity.this, "无法打开链接", Toast.LENGTH_SHORT).show();
             }
         }
 
         @JavascriptInterface
         public void messageMenu(final String idx) {
+            LogUtil.d(TAG, "JsBridge.messageMenu: idx=%s", idx);
             handler.post(new Runnable() {
                 public void run() {
                     try {
                         showMessageMenu(Integer.parseInt(idx));
-                    } catch (Exception e) { }
+                    } catch (Exception e) {
+                        LogUtil.w(TAG, "messageMenu parse failed: idx=%s err=%s", idx, e.getMessage());
+                    }
                 }
             });
         }
 
         @JavascriptInterface
         public void messageLongPress(final String idx) {
+            LogUtil.d(TAG, "JsBridge.messageLongPress: idx=%s", idx);
             handler.post(new Runnable() {
                 public void run() {
                     try {
                         showMessageMenu(Integer.parseInt(idx));
-                    } catch (Exception e) { }
+                    } catch (Exception e) {
+                        LogUtil.w(TAG, "messageLongPress parse failed: idx=%s err=%s", idx, e.getMessage());
+                    }
                 }
             });
         }
@@ -907,6 +1125,8 @@ public class MainActivity extends Activity {
     // ========== 图片查看器 ==========
 
     private void showImageViewerDialog(int index, String imagesJson) {
+        LogUtil.i(TAG, "showImageViewerDialog: open idx=%d imagesJson len=%d",
+                index, imagesJson == null ? -1 : imagesJson.length());
         if (imageViewerDialog != null && imageViewerDialog.isShowing()) {
             imageViewerDialog.dismiss();
         }
@@ -1057,6 +1277,8 @@ public class MainActivity extends Activity {
         if (currentImageList == null || imageCounterText == null) return;
 
         ImageInfo info = currentImageList.get(currentImageIndex);
+        LogUtil.d(TAG, "loadCurrentImage: idx=%d/%d type=%s src=%s",
+                currentImageIndex, currentImageList.size(), info.type, LogUtil.preview(info.src, 120));
         imageCounterText.setText((currentImageIndex + 1) + "/" + currentImageList.size());
         prevButton.setEnabled(currentImageIndex > 0);
         nextButton.setEnabled(currentImageIndex < currentImageList.size() - 1);
@@ -1115,6 +1337,8 @@ public class MainActivity extends Activity {
     // ========== 表格查看器 ==========
 
     private void showTableViewerDialog(String tableHtml) {
+        LogUtil.i(TAG, "showTableViewerDialog: open, html len=%d",
+                tableHtml == null ? -1 : tableHtml.length());
         if (tableViewerDialog != null && tableViewerDialog.isShowing()) {
             tableViewerDialog.dismiss();
         }
@@ -1212,6 +1436,7 @@ public class MainActivity extends Activity {
     private void loadTableContent(String tableHtml) {
         if (tableViewerWebView == null) return;
 
+        LogUtil.d(TAG, "loadTableContent: len=%d rot=%d", tableHtml.length(), tableRotation);
         String rotateCss = "";
         String rotateJs = "";
         if (tableRotation != 0) {
@@ -1265,6 +1490,8 @@ public class MainActivity extends Activity {
     // ========== HTML / SVG 代码预览 ==========
 
     private void showCodePreviewDialog(String lang, String code) {
+        LogUtil.i(TAG, "showCodePreviewDialog: open lang=%s code len=%d",
+                lang, code == null ? -1 : code.length());
         if (codePreviewDialog != null && codePreviewDialog.isShowing()) {
             codePreviewDialog.dismiss();
         }
@@ -1363,6 +1590,8 @@ public class MainActivity extends Activity {
     private void loadCodePreview() {
         if (codePreviewWebView == null || currentPreviewCode == null) return;
 
+        LogUtil.d(TAG, "loadCodePreview: lang=%s code len=%d rot=%d",
+                currentPreviewLang, currentPreviewCode.length(), codePreviewRotation);
         String bgColor = getBgColorHex(codePreviewBgColor);
 
         String rotateCss = codePreviewRotation != 0
@@ -1473,6 +1702,7 @@ public class MainActivity extends Activity {
     private void loadQuickScanResult() {
         Cursor cursor = null;
         try {
+            LogUtil.d(TAG, "loadQuickScanResult: querying content://com.jxw.wbzc/query");
             cursor = getContentResolver().query(
                 Uri.parse("content://com.jxw.wbzc/query"),
                 null, null, null, "_id DESC");
@@ -1481,13 +1711,21 @@ public class MainActivity extends Activity {
                 if (idx >= 0) {
                     String text = cursor.getString(idx);
                     if (text != null && !text.isEmpty()) {
+                        LogUtil.i(TAG, "quick scan result: len=%d preview=%s",
+                                text.length(), LogUtil.preview(text, 100));
                         inputEditText.setText(text);
                         inputEditText.setSelection(text.length());
+                    } else {
+                        LogUtil.w(TAG, "quick scan result: content column empty");
                     }
+                } else {
+                    LogUtil.w(TAG, "quick scan result: no 'content' column in cursor");
                 }
+            } else {
+                LogUtil.w(TAG, "quick scan result: no row returned");
             }
         } catch (Exception e) {
-            // ignore
+            LogUtil.e(TAG, "quick scan result query failed", e);
         } finally {
             if (cursor != null) cursor.close();
         }
@@ -1500,6 +1738,7 @@ public class MainActivity extends Activity {
         if (android.os.Build.VERSION.SDK_INT >= 19) {
             wv.evaluateJavascript(js, null);
         } else {
+            LogUtil.v(TAG, "viewerEvalJs: API<19 fallback loadUrl: %s", LogUtil.preview(js, 120));
             wv.loadUrl("javascript:" + js);
         }
     }
@@ -1509,11 +1748,14 @@ public class MainActivity extends Activity {
     private void showMessageMenu(final int pos) {
         final Message msg = messages.get(pos);
         String[] items = {"复制", "选择文本", "修改", "删除", "重试", "回溯到此处", "创建分支"};
+        LogUtil.d(TAG, "showMessageMenu: pos=%d role=%s len=%s", pos, msg.role,
+                msg.content == null ? "null" : msg.content.length());
 
         new AlertDialog.Builder(this)
                 .setTitle("操作消息")
                 .setItems(items, new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface dialog, int which) {
+                        LogUtil.i(TAG, "message menu action: pos=%d which=%d (%s)", pos, which, items[which]);
                         switch (which) {
                             case 0: copyMessage(pos); break;
                             case 1: selectText(pos); break;
@@ -1538,6 +1780,7 @@ public class MainActivity extends Activity {
     private void copyMessage(int pos) {
         String text = getMessageText(messages.get(pos));
         if (text == null || text.isEmpty()) {
+            LogUtil.w(TAG, "copyMessage: empty content at pos=%d", pos);
             Toast.makeText(this, "内容为空", Toast.LENGTH_SHORT).show();
             return;
         }
@@ -1546,12 +1789,15 @@ public class MainActivity extends Activity {
             if (svc instanceof ClipboardManager) {
                 ClipboardManager cm = (ClipboardManager) svc;
                 cm.setPrimaryClip(ClipData.newPlainText("message", text));
+                LogUtil.d(TAG, "copyMessage: copied %d chars via ClipboardManager", text.length());
             } else {
                 // API 18 fallback: some devices return the old ClipboardManager
                 ((android.text.ClipboardManager) svc).setText(text);
+                LogUtil.d(TAG, "copyMessage: copied %d chars via legacy ClipboardManager", text.length());
             }
             Toast.makeText(this, "已复制", Toast.LENGTH_SHORT).show();
         } catch (Exception e) {
+            LogUtil.e(TAG, "copyMessage failed: " + e.getMessage(), e);
             Toast.makeText(this, "复制失败: " + e.getMessage(), Toast.LENGTH_LONG).show();
         }
     }
@@ -1559,6 +1805,7 @@ public class MainActivity extends Activity {
     // 2. 选择文本
     private void selectText(int pos) {
         String text = getMessageText(messages.get(pos));
+        LogUtil.d(TAG, "selectText: pos=%d len=%s", pos, text == null ? "null" : text.length());
         final TextView tv = new TextView(this);
         tv.setText(text);
         tv.setTextIsSelectable(true);
@@ -1589,7 +1836,12 @@ public class MainActivity extends Activity {
                 .setPositiveButton("确定", new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         final String newContent = input.getText().toString().trim();
-                        if (newContent.isEmpty()) return;
+                        if (newContent.isEmpty()) {
+                            LogUtil.w(TAG, "editMessage: empty new content, ignored");
+                            return;
+                        }
+                        LogUtil.i(TAG, "editMessage: pos=%d oldLen=%d newLen=%d", pos,
+                                oldContent == null ? 0 : oldContent.length(), newContent.length());
                         showConfirmDialog("确定修改本条消息？", new Runnable() {
                             public void run() {
                                 msg.content = newContent;
@@ -1616,6 +1868,7 @@ public class MainActivity extends Activity {
         if (preview.length() > 30) preview = preview.substring(0, 30) + "...";
         showConfirmDialog("确定删除本条消息？\n\n" + preview, new Runnable() {
             public void run() {
+                LogUtil.i(TAG, "deleteMessage: pos=%d, size %d -> %d", pos, messages.size(), messages.size() - 1);
                 messages.remove(pos);
                 removeDomFrom(pos);
                 // Reindex DOM: update data-idx of remaining messages after pos
@@ -1630,6 +1883,7 @@ public class MainActivity extends Activity {
     private void retryMessage(final int pos) {
         final Message msg = messages.get(pos);
         final int n = messages.size() - pos;
+        LogUtil.i(TAG, "retryMessage: pos=%d role=%s, will drop %d messages", pos, msg.role, n);
 
         if (msg.isAssistant()) {
             boolean hasUserBefore = false;
@@ -1637,11 +1891,13 @@ public class MainActivity extends Activity {
                 if (messages.get(i).isUser()) { hasUserBefore = true; break; }
             }
             if (!hasUserBefore) {
+                LogUtil.w(TAG, "retryMessage aborted: no user message before pos=%d", pos);
                 Toast.makeText(this, "无法找到对应的用户消息", Toast.LENGTH_SHORT).show();
                 return;
             }
             showConfirmDialog("将删除本条及之后共 " + n + " 条消息并重新生成回复，确定？", new Runnable() {
                 public void run() {
+                    LogUtil.i(TAG, "retry(regenerate): truncating from pos=%d", pos);
                     messages.subList(pos, messages.size()).clear();
                     removeDomRange(pos);
                     execStreamingRequest();
@@ -1651,6 +1907,7 @@ public class MainActivity extends Activity {
             final String uc = msg.content;
             showConfirmDialog("将删除本条及之后共 " + n + " 条消息并重新发送，确定？", new Runnable() {
                 public void run() {
+                    LogUtil.i(TAG, "retry(resend): truncating from pos=%d then resending", pos);
                     messages.subList(pos, messages.size()).clear();
                     removeDomRange(pos);
                     Message um = new Message(Message.ROLE_USER, uc);
@@ -1666,10 +1923,18 @@ public class MainActivity extends Activity {
     }
 
     private void execStreamingRequest() {
+        LogUtil.d(TAG, "execStreamingRequest: selectedPos=%d", modelSpinner.getSelectedItemPosition());
         loadSystemPrompt();
-        ProviderInfo provider = configManager.getProvider(
-                availableModels.get(modelSpinner.getSelectedItemPosition()).provider);
+        int selPos = modelSpinner.getSelectedItemPosition();
+        if (selPos < 0 || availableModels == null || selPos >= availableModels.size()) {
+            LogUtil.e(TAG, "execStreamingRequest aborted: invalid selection pos=%d", selPos);
+            Toast.makeText(this, "未选择模型", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        ProviderInfo provider = configManager.getProvider(availableModels.get(selPos).provider);
         if (provider == null) {
+            LogUtil.e(TAG, "execStreamingRequest aborted: provider null for '%s'",
+                    availableModels.get(selPos).name);
             Toast.makeText(this, "未选择模型", Toast.LENGTH_SHORT).show();
             return;
         }
@@ -1682,12 +1947,14 @@ public class MainActivity extends Activity {
     // 6. 回溯到此处
     private void rollbackTo(int pos) {
         if (pos >= messages.size() - 1) {
+            LogUtil.d(TAG, "rollbackTo: already latest (pos=%d, size=%d)", pos, messages.size());
             Toast.makeText(this, "已在最新位置", Toast.LENGTH_SHORT).show();
             return;
         }
         final int n = messages.size() - pos - 1;
         showConfirmDialog("将删除本条之后共 " + n + " 条消息（保留本条），确定？", new Runnable() {
             public void run() {
+                LogUtil.i(TAG, "rollbackTo: removing %d messages after pos=%d", n, pos);
                 messages.subList(messages.size() - n, messages.size()).clear();
                 removeDomRange(messages.size());
                 conversationManager.saveCurrentConversation();
@@ -1706,6 +1973,7 @@ public class MainActivity extends Activity {
                 branch.title = current.title + "-分支";
                 branch.systemPrompt = current.systemPrompt;
                 branch.model = current.model;
+                LogUtil.i(TAG, "branchAt: copying %d messages into branch '%s'", n, branch.title);
 
                 for (int i = 0; i <= pos; i++) {
                     Message src = messages.get(i);
