@@ -21,6 +21,7 @@ import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewTreeObserver;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
@@ -1279,11 +1280,14 @@ public class MainActivity extends Activity {
         imageViewerDialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.BLACK));
 
         imageViewerDialog.show();
-        loadCurrentImage();
+        loadAfterLayout(imageViewerWebView, new Runnable() {
+            public void run() { loadCurrentImage(); }
+        });
     }
 
     private void loadCurrentImage() {
-        if (currentImageList == null || imageCounterText == null) return;
+        if (currentImageList == null || imageCounterText == null
+                || imageViewerWebView == null) return;
 
         ImageInfo info = currentImageList.get(currentImageIndex);
         LogUtil.d(TAG, "loadCurrentImage: idx=%d/%d type=%s src=%s",
@@ -1439,7 +1443,9 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT);
         tableViewerDialog.show();
 
-        loadTableContent(tableHtml);
+        loadAfterLayout(tableViewerWebView, new Runnable() {
+            public void run() { loadTableContent(tableHtml); }
+        });
     }
 
     private void loadTableContent(String tableHtml) {
@@ -1593,7 +1599,29 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT);
         codePreviewDialog.show();
 
-        loadCodePreview();
+        loadAfterLayout(codePreviewWebView, new Runnable() {
+            public void run() { loadCodePreview(); }
+        });
+    }
+
+    /**
+     * Run the initial viewer load only after the dialog WebView has been laid
+     * out. Loading before the first layout pass renders the page into a 0×0
+     * viewport (blank/garbled preview until the user hits reset "#", which
+     * reloads at the correct size).
+     */
+    private void loadAfterLayout(final WebView wv, final Runnable load) {
+        if (wv.getWidth() > 0 && wv.getHeight() > 0) {
+            load.run();
+            return;
+        }
+        wv.getViewTreeObserver().addOnGlobalLayoutListener(
+                new ViewTreeObserver.OnGlobalLayoutListener() {
+            public void onGlobalLayout() {
+                wv.getViewTreeObserver().removeOnGlobalLayoutListener(this);
+                load.run();
+            }
+        });
     }
 
     private void loadCodePreview() {
