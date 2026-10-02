@@ -41,8 +41,9 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
+$versionName = if ((Get-Content "app\build.gradle" | Select-String 'versionName\s+"([^"]+)"').Matches) { (Get-Content "app\build.gradle" | Select-String 'versionName\s+"([^"]+)"').Matches[0].Groups[1].Value } else { "unknown" }
 $timestamp = Get-Date -Format "yyyyMMdd-HHmm"
-$output = "AiChat-v1.3.5-$timestamp-release.apk"
+$output = "AiChat-v$versionName-$timestamp-release.apk"
 Copy-Item "app\build\outputs\apk\release\app-release.apk" $output -Force
 
 Write-Host ""
