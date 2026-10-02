@@ -927,7 +927,7 @@ public class MainActivity extends Activity {
                         if (choices != null && choices.length() > 0) {
                             org.json.JSONObject msg = choices.getJSONObject(0).optJSONObject("message");
                             if (msg != null) {
-                                String raw = msg.optString("content", "");
+                                String raw = stripThinkTags(msg.optString("content", ""));
                                 String title = raw.trim()
                                         .replaceAll("[\"''\"'.:;,!，。：；！？]", "").trim();
                                 if (title.length() > 20) title = title.substring(0, 20);
@@ -961,6 +961,15 @@ public class MainActivity extends Activity {
                 }
             }
         }) {{ setName("aichat-title-" + System.currentTimeMillis()); }}.start();
+    }
+
+    /** Remove inline <think>...</think> blocks some models emit in content. */
+    private static String stripThinkTags(String s) {
+        if (s == null) return "";
+        String out = s.replaceAll("(?s)<think>.*?</think>", "");
+        int open = out.indexOf("<think>");
+        if (open != -1) out = out.substring(0, open); // unclosed block: drop the tail
+        return out;
     }
 
     // ========== WebView helpers ==========

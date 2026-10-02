@@ -44,7 +44,9 @@ public class ApiClient {
         try {
             JSONObject body = buildRequestBody(model, messages, systemPrompt, thinkingLevel,
                     provider.thinkingType, provider.thinkingParamName, false);
-            body.put("max_tokens", 50);
+            // 512: models that ignore all thinking-off switches burn tokens on
+            // reasoning first; 50 left no room for the actual title (empty content)
+            body.put("max_tokens", 512);
             LogUtil.v(TAG, "callWithError body(%d): %s", body.toString().length(), LogUtil.preview(body.toString(), 1200));
             result = doRequestWithError(provider.apiUrl + provider.chatPath, provider.apiKey, body, 20000);
         } catch (Exception e) {
@@ -405,11 +407,16 @@ public class ApiClient {
             if ("boolean".equals(thinkingType)) {
                 json.put(thinkingParamName, false);
             } else {
-                // DeepSeek: send disabled
+                // DeepSeek style: send disabled
                 JSONObject thinkingObj = new JSONObject();
                 thinkingObj.put("type", "disabled");
                 json.put(thinkingParamName, thinkingObj);
             }
+            // Fallback params for providers that ignore the primary switch
+            // (e.g. SCNet GLM-5 ignores thinking.type=disabled but honors
+            // reasoning_effort=none / chat_template_kwargs.enable_thinking)
+            json.put("reasoning_effort", "none");
+            json.put("chat_template_kwargs", new JSONObject().put("enable_thinking", false));
         }
         // thinkingLevel == null: skip all thinking params
 
