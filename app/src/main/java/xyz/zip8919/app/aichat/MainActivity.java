@@ -1298,9 +1298,7 @@ public class MainActivity extends Activity {
 
         String bgColor = getBgColorHex(currentBgColor);
 
-        String rotateCss = currentRotation != 0
-                ? "-webkit-transform:rotate(" + currentRotation + "deg);transform:rotate(" + currentRotation + "deg);"
-                : "";
+        String rotateCss = rotateTransform(currentRotation);
 
         String html;
         if ("svg".equals(info.type) && info.svg != null && !info.svg.isEmpty()) {
@@ -1631,10 +1629,7 @@ public class MainActivity extends Activity {
                 currentPreviewLang, currentPreviewCode.length(), codePreviewRotation);
         String bgColor = getBgColorHex(codePreviewBgColor);
 
-        String rotateCss = codePreviewRotation != 0
-                ? "-webkit-transform:rotate(" + codePreviewRotation + "deg);"
-                + "transform:rotate(" + codePreviewRotation + "deg);"
-                : "";
+        String rotateCss = rotateTransform(codePreviewRotation);
 
         String html;
         if ("svg".equals(currentPreviewLang)) {
@@ -1681,7 +1676,7 @@ public class MainActivity extends Activity {
             // Inject zoom/rotate/bg scripts into existing HTML document
             String inject = "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1.0,user-scalable=yes\">"
                     + "<style>" +
-                    "html,body{" + rotateCss + "-webkit-transform-origin:0 0;transform-origin:0 0;}"
+                    "body{" + rotateCss + "-webkit-transform-origin:0 0;transform-origin:0 0;}"
                     + "</style>"
                     + "<script>" + zoomJs + "</script>";
             // Insert after <head> or after <html>
@@ -1721,6 +1716,32 @@ public class MainActivity extends Activity {
             case 1: return "#888888";
             case 2: return "#000000";
             default: return "#FFFFFF";
+        }
+    }
+
+    /**
+     * Rotation CSS that keeps the rotated content inside positive coordinates.
+     * A plain rotate() spins around the element center (or 0 0 without
+     * compensation), pushing part of the content into negative x/y where it is
+     * clipped and NOT scroll-reachable — the "truncated after rotate" bug.
+     * translate percentages are relative to the element's own box (W×H).
+     */
+    private String rotateTransform(int deg) {
+        switch (deg) {
+            case 90:
+                return "-webkit-transform:rotate(90deg) translateY(-100%);" +
+                        "transform:rotate(90deg) translateY(-100%);" +
+                        "-webkit-transform-origin:0 0;transform-origin:0 0;";
+            case 180:
+                return "-webkit-transform:translate(100%,100%) rotate(180deg);" +
+                        "transform:translate(100%,100%) rotate(180deg);" +
+                        "-webkit-transform-origin:0 0;transform-origin:0 0;";
+            case 270:
+                return "-webkit-transform:translateY(100%) rotate(270deg);" +
+                        "transform:translateY(100%) rotate(270deg);" +
+                        "-webkit-transform-origin:0 0;transform-origin:0 0;";
+            default:
+                return "";
         }
     }
 
