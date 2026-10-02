@@ -305,19 +305,34 @@ public class MainActivity extends Activity {
         modelSpinner.setAdapter(adapter);
         LogUtil.d(TAG, "model spinner items=%d: %s", names.size(), names);
 
-        // Select default
-        String defaultModel = configManager.getDefaultModel();
-        boolean matched = false;
-        for (int i = 0; i < availableModels.size(); i++) {
-            if (availableModels.get(i).name.equals(defaultModel)) {
-                modelSpinner.setSelection(i);
-                selectModel(i);
-                matched = true;
-                break;
+        // Preserve the user's selection: onResume() refreshes the spinner after
+        // returning from settings/history/scan — re-selecting the default here
+        // reset the user's manual choice. Keep currentModel when it still
+        // exists; fall back to default on first init or if it was removed.
+        int targetPos = -1;
+        if (currentModel != null) {
+            for (int i = 0; i < availableModels.size(); i++) {
+                if (availableModels.get(i).name.equals(currentModel)) {
+                    targetPos = i;
+                    break;
+                }
             }
         }
-        if (!matched) {
-            LogUtil.w(TAG, "default model '%s' not found in %d models", defaultModel, availableModels.size());
+        if (targetPos < 0) {
+            String defaultModel = configManager.getDefaultModel();
+            for (int i = 0; i < availableModels.size(); i++) {
+                if (availableModels.get(i).name.equals(defaultModel)) {
+                    targetPos = i;
+                    break;
+                }
+            }
+        }
+        if (targetPos >= 0) {
+            modelSpinner.setSelection(targetPos);
+            selectModel(targetPos);
+        } else {
+            LogUtil.w(TAG, "neither current nor default model found in %d models",
+                    availableModels.size());
         }
 
         modelSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
