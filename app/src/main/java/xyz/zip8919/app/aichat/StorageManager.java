@@ -13,6 +13,7 @@ public class StorageManager {
     private static final String TAG = "StorageManager";
     private static final String CONFIG_FILE = "config.json";
     private static final String CONVERSATIONS_DIR = "conversations";
+    private static final String EXPORTS_DIR = "exports";
     private static final String DATA_SUBDIR = "Android/data/xyz.zip8919.app.aichat/files";
 
     private static StorageManager instance;
@@ -127,6 +128,26 @@ public class StorageManager {
         String content = readFile(this.configPath);
         LogUtil.d(TAG, "loadConfig: %s, len=%d", this.configPath, content == null ? 0 : content.length());
         return content;
+    }
+
+    // ---- exports ----
+
+    /**
+     * Saves a code block export under basePath/exports.
+     *
+     * @return the absolute path written, or null on failure.
+     */
+    public String saveExport(String fileName, String content) {
+        File dir = new File(this.basePath + File.separator + EXPORTS_DIR);
+        if (!dir.exists() && !dir.mkdirs()) {
+            LogUtil.e(TAG, "saveExport failed: cannot mkdir %s", dir.getAbsolutePath());
+            return null;
+        }
+        String filePath = dir.getAbsolutePath() + File.separator + fileName;
+        boolean ok = writeFile(filePath, content);
+        LogUtil.i(TAG, "saveExport: %d chars -> %s ok=%s",
+                content == null ? 0 : content.length(), filePath, ok);
+        return ok ? filePath : null;
     }
 
     // ---- conversations ----

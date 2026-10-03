@@ -1197,6 +1197,17 @@ public class MainActivity extends Activity {
         }
 
         @JavascriptInterface
+        public void saveCode(final String lang, final String code) {
+            LogUtil.d(TAG, "JsBridge.saveCode: lang=%s len=%s",
+                    lang, code == null ? "null" : code.length());
+            handler.post(new Runnable() {
+                public void run() {
+                    saveCodeToExport(lang, code);
+                }
+            });
+        }
+
+        @JavascriptInterface
         public void previewCode(final String lang, final String code) {
             handler.post(new Runnable() {
                 public void run() {
@@ -1584,6 +1595,29 @@ public class MainActivity extends Activity {
                 "</body></html>";
 
         tableViewerWebView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null);
+    }
+
+    // ========== 代码块导出 ==========
+
+    private void saveCodeToExport(String lang, String code) {
+        if (code == null || code.trim().isEmpty()) {
+            Toast.makeText(this, "代码内容为空，无法保存", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        String ext = "txt";
+        if ("html".equals(lang)) {
+            ext = "html";
+        } else if ("svg".equals(lang)) {
+            ext = "svg";
+        }
+        String fileName = "code_" + System.currentTimeMillis() + "." + ext;
+        String path = StorageManager.getInstance().saveExport(fileName, code);
+        LogUtil.i(TAG, "saveCodeToExport: lang=%s ext=%s path=%s", lang, ext, path);
+        if (path == null) {
+            Toast.makeText(this, "保存失败", Toast.LENGTH_SHORT).show();
+        } else {
+            Toast.makeText(this, "已保存到 " + path, Toast.LENGTH_LONG).show();
+        }
     }
 
     // ========== HTML / SVG 代码预览 ==========

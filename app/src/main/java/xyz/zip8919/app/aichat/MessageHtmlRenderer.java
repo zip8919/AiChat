@@ -84,7 +84,10 @@ public class MessageHtmlRenderer {
             "pre .copy-btn{position:absolute;top:4px;right:8px;padding:2px 8px;" +
             "font-size:11px;background:#e1e4e8;border:1px solid #ccc;border-radius:3px;" +
             "color:#555;font-family:Roboto,sans-serif;}" +
-            "pre .preview-btn{position:absolute;top:4px;right:56px;padding:2px 8px;" +
+            "pre .save-btn{position:absolute;top:4px;right:56px;padding:2px 8px;" +
+            "font-size:11px;background:#e8f5e9;border:1px solid #a5d6a7;border-radius:3px;" +
+            "color:#2e7d32;font-family:Roboto,sans-serif;}" +
+            "pre .preview-btn{position:absolute;top:4px;right:104px;padding:2px 8px;" +
             "font-size:11px;background:#e1f5fe;border:1px solid #81d4fa;border-radius:3px;" +
             "color:#0277bd;font-family:Roboto,sans-serif;}" +
             "table{border-collapse:collapse;margin:8px 0;font-size:13px;white-space:nowrap;}" +
@@ -151,6 +154,14 @@ public class MessageHtmlRenderer {
             "setTimeout(function(){btn.textContent='复制';},2000);};" +
             "pre.appendChild(btn);" +
             "var langTag=pre.querySelector('.lang-tag');" +
+            "var sbtn=document.createElement('button');" +
+            "sbtn.className='save-btn';sbtn.textContent='保存';" +
+            "sbtn.onclick=function(e){e.stopPropagation();e.preventDefault();" +
+            "var code=pre.querySelector('code');" +
+            "var text=code?code.textContent:pre.textContent;" +
+            "var saveLang=langTag?langTag.textContent.trim().toLowerCase():'';" +
+            "if(window.Android)Android.saveCode(saveLang,text);};" +
+            "pre.appendChild(sbtn);" +
             "if(langTag){" +
             "var lang=langTag.textContent.trim().toLowerCase();" +
             "if((lang==='html'||lang==='svg')&&!pre.querySelector('.preview-btn')){" +
