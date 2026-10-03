@@ -13,9 +13,15 @@ public class Conversation {
     public List<Message> messages;
     public boolean titleGenerated;
 
+    private static long lastId = 0;
+
     public Conversation() {
-        this.id = String.valueOf(System.currentTimeMillis());
-        this.createdAt = System.currentTimeMillis();
+        long now = System.currentTimeMillis();
+        long idValue = now;
+        if (idValue <= lastId) idValue = lastId + 1;
+        lastId = idValue;
+        this.id = String.valueOf(idValue);
+        this.createdAt = now;
         this.updatedAt = this.createdAt;
         this.messages = new ArrayList<Message>();
         this.title = "新对话";

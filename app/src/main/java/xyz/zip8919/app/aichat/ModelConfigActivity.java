@@ -161,6 +161,19 @@ public class ModelConfigActivity extends Activity {
                             Toast.makeText(ModelConfigActivity.this, "名称和URL不能为空", Toast.LENGTH_SHORT).show();
                             return;
                         }
+                        // URL 必须以 http:// 或 https:// 开头（不区分大小写）
+                        String lowerUrl = url.toLowerCase();
+                        if (!lowerUrl.startsWith("http://") && !lowerUrl.startsWith("https://")) {
+                            LogUtil.w(TAG, "provider save rejected: url '%s' must start with http(s)://", url);
+                            Toast.makeText(ModelConfigActivity.this, "URL必须以 http:// 或 https:// 开头", Toast.LENGTH_SHORT).show();
+                            return;
+                        }
+                        // chatPath 非空则必须以 "/" 开头
+                        if (!path.isEmpty() && !path.startsWith("/")) {
+                            LogUtil.w(TAG, "provider save rejected: chatPath '%s' must start with '/'", path);
+                            Toast.makeText(ModelConfigActivity.this, "Chat Path必须以 / 开头", Toast.LENGTH_SHORT).show();
+                            return;
+                        }
                         // 重名校验：同名 provider 会让 getProvider 的首个匹配产生二义
                         for (int i = 0; i < providers.size(); i++) {
                             if ((!isEdit || i != editPos.intValue()) && name.equals(providers.get(i).name)) {
@@ -203,6 +216,19 @@ public class ModelConfigActivity extends Activity {
                         }
                         configManager.setProviders(providers);
                         configManager.setModels(models);
+                        // 默认模型指向已删除 provider 的模型时回退：剩余模型非空→第一个，为空→""
+                        String curDefault = configManager.getDefaultModel();
+                        if (!curDefault.isEmpty()) {
+                            boolean stillExists = false;
+                            for (ModelInfo m : models) {
+                                if (curDefault.equals(m.name)) { stillExists = true; break; }
+                            }
+                            if (!stillExists) {
+                                String fallback = models.isEmpty() ? "" : models.get(0).name;
+                                LogUtil.i(TAG, "default model '%s' removed with provider, fallback to '%s'", curDefault, fallback);
+                                configManager.setDefaultModel(fallback);
+                            }
+                        }
                         configManager.save();
                         refreshProviderList();
                         refreshModelList();
