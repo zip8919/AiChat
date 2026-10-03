@@ -8,7 +8,9 @@ import android.content.Context;
 import android.content.DialogInterface;
 import android.graphics.Color;
 import android.os.Bundle;
+import android.text.Editable;
 import android.text.InputType;
+import android.text.TextWatcher;
 import android.util.SparseBooleanArray;
 import android.view.Gravity;
 import android.view.View;
@@ -29,6 +31,7 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 
 /**
@@ -42,8 +45,10 @@ public class ToolsActivity extends Activity {
     private EditText jsInput;
     private final List<File> files = new ArrayList<File>();
     private String currentJsFileName = "";
+    private boolean loadingFile = false;
 
     private boolean selectionMode = false;
+    private final HashSet<String> checkedNames = new HashSet<String>();
     private LinearLayout selectionActions;
     private TextView selectionCount;
     private Button selectButton;
@@ -63,6 +68,16 @@ public class ToolsActivity extends Activity {
         jsInput.setInputType(InputType.TYPE_CLASS_TEXT
                 | InputType.TYPE_TEXT_FLAG_MULTI_LINE
                 | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        // 用户手动改写输入框后旧文件名不再代表内容语言，否则 JS 会被当 HTML 渲染而静默无输出
+        jsInput.addTextChangedListener(new TextWatcher() {
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) { }
+            public void onTextChanged(CharSequence s, int start, int before, int count) { }
+            public void afterTextChanged(Editable s) {
+                if (!loadingFile) {
+                    currentJsFileName = "";
+                }
+            }
+        });
 
         fileList.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             public void onItemClick(AdapterView<?> p, View v, int pos, long id) {
@@ -127,10 +142,21 @@ public class ToolsActivity extends Activity {
     }
 
     private File exportsDir() {
-        return new File(StorageManager.getInstance().getBasePath(), "exports");
+        // 传入 Context：本页可能是进程重建后的栈顶，惰性初始化必须带上 appContext，
+        // 否则 StorageManager 会以 null context 固化基础路径，且后续无法再被 MainActivity 纠正
+        return new File(StorageManager.getInstance(getApplicationContext()).getBasePath(), "exports");
     }
 
     private void refreshFiles() {
+        // 重建 adapter 前先按文件名记录勾选，否则 onResume 会丢掉用户已选中的项
+        if (selectionMode) {
+            checkedNames.clear();
+            for (int i = 0; i < files.size(); i++) {
+                if (fileList.isItemChecked(i)) {
+                    checkedNames.add(files.get(i).getName());
+                }
+            }
+        }
         files.clear();
         File dir = exportsDir();
         File[] list = dir.listFiles();
@@ -143,7 +169,9 @@ public class ToolsActivity extends Activity {
         }
         Collections.sort(files, new Comparator<File>() {
             public int compare(File a, File b) {
-                return Long.compare(b.lastModified(), a.lastModified());
+                long x = b.lastModified();
+                long y = a.lastModified();
+                return (x < y) ? -1 : ((x == y) ? 0 : 1);
             }
         });
         LogUtil.i(TAG, "refreshFiles: dir=%s count=%d", dir.getAbsolutePath(), files.size());
@@ -161,6 +189,13 @@ public class ToolsActivity extends Activity {
                 ? R.layout.item_tools_file_sel : android.R.layout.simple_list_item_1;
         fileList.setAdapter(new ArrayAdapter<String>(this, itemLayout, labels));
         fileList.clearChoices();
+        if (selectionMode) {
+            for (int i = 0; i < files.size(); i++) {
+                if (checkedNames.contains(files.get(i).getName())) {
+                    fileList.setItemChecked(i, true);
+                }
+            }
+        }
         updateSelectionBar();
     }
 
@@ -299,25 +334,46 @@ public class ToolsActivity extends Activity {
     }
 
     private String readFile(File f) {
-        return StorageManager.getInstance().readFile(f.getAbsolutePath());
+        return StorageManager.getInstance(getApplicationContext()).readFile(f.getAbsolutePath());
     }
 
     private void viewFile(final File f) {
-        final String content = readFile(f);
-        if (content == null) {
-            Toast.makeText(this, "读取失败", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        final String lang = MainActivity.detectLang(content);
-        LogUtil.i(TAG, "viewFile: %s lang=%s len=%d", f.getName(), lang, content.length());
-        WebView wv = new WebView(this);
+        // 读文件与整篇正则高亮都放到后台线程，避免点击「查看」时阻塞主线程
+        new Thread(new Runnable() {
+            public void run() {
+                final String content = readFile(f);
+                if (content == null) {
+                    runOnUiThread(new Runnable() {
+                        public void run() {
+                            Toast.makeText(ToolsActivity.this, "读取失败", Toast.LENGTH_SHORT).show();
+                        }
+                    });
+                    return;
+                }
+                final String lang = MainActivity.detectLang(content);
+                final String html = buildHighlightHtml(content, lang);
+                LogUtil.i(TAG, "viewFile: %s lang=%s len=%d", f.getName(), lang, content.length());
+                runOnUiThread(new Runnable() {
+                    public void run() {
+                        if (isFinishing()) {
+                            return;
+                        }
+                        showContentDialog(f, content, lang, html);
+                    }
+                });
+            }
+        }).start();
+    }
+
+    private void showContentDialog(File f, final String content, String lang, String html) {
+        final WebView wv = new WebView(this);
         wv.getSettings().setJavaScriptEnabled(false);
         wv.setBackgroundColor(Color.WHITE);
         int viewH = (int) (getResources().getDisplayMetrics().density * 380);
         wv.setLayoutParams(new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, viewH));
-        wv.loadDataWithBaseURL(null, buildHighlightHtml(content, lang), "text/html", "UTF-8", null);
-        new AlertDialog.Builder(this)
+        wv.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null);
+        AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle(f.getName() + "  [" + lang + "]")
                 .setView(wv)
                 .setPositiveButton("复制全部", new DialogInterface.OnClickListener() {
@@ -326,7 +382,14 @@ public class ToolsActivity extends Activity {
                     }
                 })
                 .setNegativeButton("关闭", null)
-                .show();
+                .create();
+        // 弹窗关闭即销毁 WebView，否则每次查看都泄漏一个 WebView 及渲染资源
+        dialog.setOnDismissListener(new DialogInterface.OnDismissListener() {
+            public void onDismiss(DialogInterface d) {
+                wv.destroy();
+            }
+        });
+        dialog.show();
     }
 
     private String buildHighlightHtml(String content, String lang) {
@@ -358,22 +421,40 @@ public class ToolsActivity extends Activity {
                 .setView(input)
                 .setPositiveButton("确定", new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
-                        String name = MainActivity.sanitizeExportName(input.getText().toString());
+                        final String name = MainActivity.sanitizeExportName(input.getText().toString());
                         if (name.isEmpty()) {
                             Toast.makeText(ToolsActivity.this, "文件名不能为空", Toast.LENGTH_SHORT).show();
                             return;
                         }
-                        File target = new File(exportsDir(), name);
-                        boolean ok = f.renameTo(target);
-                        LogUtil.i(TAG, "renameFile: %s -> %s ok=%s", f.getName(), name, ok);
-                        if (!ok) {
-                            Toast.makeText(ToolsActivity.this, "重命名失败", Toast.LENGTH_SHORT).show();
+                        final File target = new File(exportsDir(), name);
+                        if (!target.equals(f) && target.exists()) {
+                            // rename(2) 会静默覆盖已存在的目标文件，先确认避免数据丢失
+                            new AlertDialog.Builder(ToolsActivity.this)
+                                    .setTitle("文件已存在")
+                                    .setMessage(name + " 已存在，是否覆盖？")
+                                    .setPositiveButton("覆盖", new DialogInterface.OnClickListener() {
+                                        public void onClick(DialogInterface d2, int w2) {
+                                            performRename(f, target, name);
+                                        }
+                                    })
+                                    .setNegativeButton("取消", null)
+                                    .show();
+                            return;
                         }
-                        refreshFiles();
+                        performRename(f, target, name);
                     }
                 })
                 .setNegativeButton("取消", null)
                 .show();
+    }
+
+    private void performRename(File f, File target, String name) {
+        boolean ok = f.renameTo(target);
+        LogUtil.i(TAG, "renameFile: %s -> %s ok=%s", f.getName(), name, ok);
+        if (!ok) {
+            Toast.makeText(ToolsActivity.this, "重命名失败", Toast.LENGTH_SHORT).show();
+        }
+        refreshFiles();
     }
 
     private void editFile(final File f) {
@@ -393,7 +474,7 @@ public class ToolsActivity extends Activity {
                 .setView(input)
                 .setPositiveButton("保存", new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
-                        String ok = StorageManager.getInstance()
+                        String ok = StorageManager.getInstance(getApplicationContext())
                                 .saveExport(f.getName(), input.getText().toString());
                         LogUtil.i(TAG, "editFile: save %s ok=%s", f.getName(), (ok != null));
                         if (ok == null) {
@@ -460,8 +541,10 @@ public class ToolsActivity extends Activity {
                     public void onClick(DialogInterface d, int which) {
                         String content = readFile(files.get(which));
                         if (content != null) {
-                            currentJsFileName = files.get(which).getName();
+                            loadingFile = true;
                             jsInput.setText(content);
+                            loadingFile = false;
+                            currentJsFileName = files.get(which).getName();
                         }
                     }
                 })

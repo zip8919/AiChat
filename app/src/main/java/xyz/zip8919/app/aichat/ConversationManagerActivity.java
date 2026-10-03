@@ -14,6 +14,7 @@ import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.TextView;
 import android.widget.Toast;
+import java.util.ArrayList;
 import java.util.List;
 
 public class ConversationManagerActivity extends Activity {
@@ -23,7 +24,10 @@ public class ConversationManagerActivity extends Activity {
 
     private ConversationManager conversationManager;
     private StorageManager storageManager;
-    private List<Conversation> conversations;
+    // 进入本页时缓存「当前会话」引用：onCreate 时它必然已存在（由主界面建立），
+    // 之后重命名用它同步标题，避免再调用有副作用的 getCurrentConversation() 造出幽灵会话
+    private Conversation currentConversationRef;
+    private List<Conversation> conversations = new ArrayList<Conversation>();
     private ConversationAdapter adapter;
     private ListView listView;
     private SharedPreferences uiState;
@@ -41,6 +45,9 @@ public class ConversationManagerActivity extends Activity {
         this.uiState = getSharedPreferences(PREFS_NAME, 0);
         this.conversationManager = ConversationManager.getInstance();
         this.storageManager = StorageManager.getInstance();
+        // 此刻「当前会话」必已由主界面建立，缓存引用即可安全同步标题；
+        // 之后即使在本页删掉当前会话，也不会再触发 getCurrentConversation() 的惰性创建
+        this.currentConversationRef = this.conversationManager.getCurrentConversation();
         this.listView = (ListView) findViewById(R.id.conversation_list);
         this.selectionActions = (LinearLayout) findViewById(R.id.selection_actions);
         this.selectionCount = (TextView) findViewById(R.id.selection_count);
@@ -50,13 +57,6 @@ public class ConversationManagerActivity extends Activity {
         initButtons();
         loadConversations();
         updateSelectionBar();
-
-        int savedPos = uiState.getInt(KEY_SCROLL_POS, 0);
-        LogUtil.i(TAG, "========== onCreate ========== (%s) conversations=%d savedPos=%d",
-                LogUtil.thread(), conversations == null ? -1 : conversations.size(), savedPos);
-        if (savedPos > 0 && savedPos < conversations.size()) {
-            listView.setSelection(savedPos);
-        }
     }
 
     @Override
@@ -199,7 +199,7 @@ public class ConversationManagerActivity extends Activity {
         selectModeButton.setVisibility(selectionMode ? View.GONE : View.VISIBLE);
         selectionCancelButton.setVisibility(selectionMode ? View.VISIBLE : View.GONE);
         selectionCount.setText(selectionMode
-                ? ("已选 " + adapter.getSelectedCount() + " / " + conversations.size())
+                ? ("已选 " + (adapter == null ? 0 : adapter.getSelectedCount()) + " / " + conversations.size())
                 : "点击多选可批量删除");
     }
 
@@ -224,13 +224,13 @@ public class ConversationManagerActivity extends Activity {
 
     private void deleteSelected(List<String> ids) {
         LogUtil.i(TAG, "deleteSelected: %d ids=%s", ids.size(), ids.toString());
-        for (int i = 0; i < ids.size(); i++) {
-            conversationManager.deleteConversation(ids.get(i));
-        }
+        // conversationManager.deleteConversation 会就地移除它持有的同一个 List 实例（即本页的
+        // conversations），所以必须在删除前计数，不能删完再扫（那样恒为 0）
         int removed = 0;
-        for (int i = conversations.size() - 1; i >= 0; i--) {
-            if (ids.contains(conversations.get(i).id)) {
-                conversations.remove(i);
+        for (int i = 0; i < ids.size(); i++) {
+            int sizeBefore = conversations.size();
+            conversationManager.deleteConversation(ids.get(i));
+            if (conversations.size() < sizeBefore) {
                 removed++;
             }
         }
@@ -241,14 +241,31 @@ public class ConversationManagerActivity extends Activity {
     }
 
     private void loadConversations() {
-        conversations = conversationManager.loadConversations();
-        if (adapter == null) {
-            adapter = new ConversationAdapter(this, conversations);
-            listView.setAdapter(adapter);
-        } else {
-            adapter.setConversations(conversations);
-        }
-        LogUtil.d(TAG, "loadConversations: %d conversations", conversations == null ? -1 : conversations.size());
+        // 会话文件可能很多/很大，逐文件读盘 + 解析 JSON 放后台线程，避免主线程 ANR
+        new Thread(new Runnable() {
+            public void run() {
+                final List<Conversation> loaded = conversationManager.loadConversations();
+                LogUtil.d(TAG, "loadConversations(background): %d conversations",
+                        loaded == null ? -1 : loaded.size());
+                runOnUiThread(new Runnable() {
+                    public void run() {
+                        if (isFinishing()) return;
+                        conversations = loaded;
+                        if (adapter == null) {
+                            adapter = new ConversationAdapter(ConversationManagerActivity.this, conversations);
+                            listView.setAdapter(adapter);
+                        } else {
+                            adapter.setConversations(conversations);
+                        }
+                        updateSelectionBar();
+                        int savedPos = uiState.getInt(KEY_SCROLL_POS, 0);
+                        if (savedPos > 0 && savedPos < conversations.size()) {
+                            listView.setSelection(savedPos);
+                        }
+                    }
+                });
+            }
+        }).start();
     }
 
     private void showActionDialog(final Conversation conv) {
@@ -286,10 +303,10 @@ public class ConversationManagerActivity extends Activity {
                             conv.title = newTitle;
                             conv.touch();
                             conversationManager.saveCurrentConversation();
-                            // Also update current conversation if it's the same
-                            Conversation current = conversationManager.getCurrentConversation();
-                            if (current != null && current.id.equals(conv.id)) {
-                                current.title = newTitle;
+                            // conv 与缓存引用是同一对象时标题已一并更新；不再调用有副作用的
+                            // getCurrentConversation()（current 为 null 时会凭空造出「新对话」）
+                            if (currentConversationRef != null && currentConversationRef.id.equals(conv.id)) {
+                                currentConversationRef.title = newTitle;
                             }
                             adapter.notifyDataSetChanged();
                             // Re-save to disk
@@ -326,8 +343,15 @@ public class ConversationManagerActivity extends Activity {
 
     private void clearAllHistory() {
         LogUtil.i(TAG, "clearAllHistory: deleting %d conversations", conversations.size());
-        for (Conversation conv : conversations) {
-            storageManager.deleteConversation(conv.id);
+        // 先收集 id，避免遍历时被 ConversationManager.deleteConversation 就地修改同一 List
+        List<String> ids = new ArrayList<String>();
+        for (int i = 0; i < conversations.size(); i++) {
+            ids.add(conversations.get(i).id);
+        }
+        // 必须走 ConversationManager.deleteConversation：它会同步把 currentConversation 置空，
+        // 否则回主界面后任一次保存都会把被清空的对话重新写回磁盘
+        for (int i = 0; i < ids.size(); i++) {
+            conversationManager.deleteConversation(ids.get(i));
         }
         conversations.clear();
         adapter.notifyDataSetChanged();

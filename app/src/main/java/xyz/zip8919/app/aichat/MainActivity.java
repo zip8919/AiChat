@@ -61,6 +61,8 @@ public class MainActivity extends Activity {
 
     private EditText inputEditText;
     private Button sendButton;
+    // 发送键长按打断后，本次抬手的 click 不再触发发送
+    private boolean sendButtonLongPressed = false;
     private WebView conversationWebView;
     private Spinner modelSpinner;
     private Spinner thinkingSpinner;
@@ -72,7 +74,10 @@ public class MainActivity extends Activity {
 
     private AtomicBoolean isRequestInProgress = new AtomicBoolean(false);
     private AtomicInteger requestGeneration = new AtomicInteger(0);
-    private HttpURLConnection currentConnection;
+    // 渲染代数守卫：refreshWebView 可能被连续触发，过期渲染必须丢弃
+    private final AtomicInteger renderGeneration = new AtomicInteger(0);
+    // volatile：请求线程写、UI 线程读，打断时才能可靠 disconnect
+    private volatile HttpURLConnection currentConnection;
     private Thread currentRequestThread;
     private Handler handler = new Handler();
 
@@ -150,7 +155,19 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
-        LogUtil.i(TAG, "onDestroy");
+        LogUtil.i(TAG, "onDestroy: cleaning up handler / connection / webview");
+        // 清空主线程消息队列里挂起的回调（消息菜单、长按等），避免销毁后弹窗
+        handler.removeCallbacksAndMessages(null);
+        if (currentConnection != null) {
+            try { currentConnection.disconnect(); } catch (Exception ignored) {}
+            currentConnection = null;
+        }
+        // 令在途渲染失效，避免其 runOnUiThread 作用在已置空的 WebView 上
+        renderGeneration.incrementAndGet();
+        if (conversationWebView != null) {
+            conversationWebView.destroy();
+            conversationWebView = null;
+        }
         super.onDestroy();
     }
 
@@ -206,7 +223,16 @@ public class MainActivity extends Activity {
 
         // Send button
         sendButton.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) { LogUtil.d(TAG, "click: send"); sendMessage(); }
+            public void onClick(View v) {
+                // 长按已执行打断，这次抬手的 click 直接吞掉，避免把草稿立刻发出去
+                if (sendButtonLongPressed) {
+                    sendButtonLongPressed = false;
+                    LogUtil.d(TAG, "click: send suppressed after long-press interrupt");
+                    return;
+                }
+                LogUtil.d(TAG, "click: send");
+                sendMessage();
+            }
         });
         sendButton.setOnTouchListener(new View.OnTouchListener() {
             private boolean longPressed = false;
@@ -217,9 +243,11 @@ public class MainActivity extends Activity {
                 switch (event.getAction()) {
                     case MotionEvent.ACTION_DOWN:
                         longPressed = false;
+                        sendButtonLongPressed = false;
                         longPressRunnable = new Runnable() {
                             public void run() {
                                 longPressed = true;
+                                sendButtonLongPressed = true;
                                 LogUtil.d(TAG, "sendButton LONG press -> interruptRequest");
                                 interruptRequest();
                             }
@@ -441,7 +469,15 @@ public class MainActivity extends Activity {
                             LogUtil.d(TAG, "interrupt: removing empty AI placeholder, size=%d", messages.size());
                             messages.remove(messages.size() - 1);
                             removeDomRange(messages.size());
+                            // finalizeLast 被代数守卫跳过时占位 div 的 data-idx 仍为 -1，
+                            // removeRangeFrom(idx>=0) 删不掉它，这里补删未定稿的占位 div
+                            removeUnfinalizedAiDiv();
                         } else {
+                            // 思考阶段被打断时要补 [/thinking] 收尾，否则未闭合内容
+                            // 会被 removeThinkingContent 整段剥离，模型像没收到过该回复
+                            if (content.indexOf("[thinking]") >= 0 && content.indexOf("[/thinking]") < 0) {
+                                content = content + "[/thinking]";
+                            }
                             lastMsg.content = content + " (已打断)";
                             LogUtil.d(TAG, "interrupt: marking AI msg as interrupted, len=%d", content.length());
                             updateAiContent(lastMsg.content);
@@ -477,6 +513,13 @@ public class MainActivity extends Activity {
             String conversationId = data == null ? null : data.getStringExtra("conversation_id");
             if (conversationId != null) {
                 LogUtil.i(TAG, "switching to conversation: %s", conversationId);
+                // 排队消息属于旧会话：在 interruptRequest 派发的 drain 之前丢弃，避免发进新会话
+                if (!pendingQueue.isEmpty()) {
+                    LogUtil.i(TAG, "onActivityResult: dropping %d queued message(s)", pendingQueue.size());
+                    pendingQueue.clear();
+                    dismissQueueManager();
+                    updateQueueBar();
+                }
                 if (isRequestInProgress.get()) interruptRequest();
                 conversationManager.saveCurrentConversation();
                 conversationManager.switchConversation(conversationId);
@@ -942,6 +985,22 @@ public class MainActivity extends Activity {
 
         loadSystemPrompt();
 
+        // 模型校验提前到入列/渲染之前：校验失败不应留下永不回复的孤儿用户消息
+        int selPos = modelSpinner.getSelectedItemPosition();
+        if (selPos < 0 || availableModels == null || selPos >= availableModels.size()) {
+            LogUtil.e(TAG, "sendMessage aborted: invalid model selection pos=%d, models=%d",
+                    selPos, availableModels == null ? -1 : availableModels.size());
+            Toast.makeText(this, "未选择模型", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        ProviderInfo provider = configManager.getProvider(availableModels.get(selPos).provider);
+        if (provider == null) {
+            LogUtil.e(TAG, "sendMessage aborted: provider null for model '%s'",
+                    availableModels.get(selPos).name);
+            Toast.makeText(this, "未选择模型", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
         Message userMsg = new Message(Message.ROLE_USER, input);
         messages.add(userMsg);
         conversationManager.getCurrentConversation().touch();
@@ -958,21 +1017,6 @@ public class MainActivity extends Activity {
                 isFirstMsg, autoTitle, conv.titleGenerated);
         if (isFirstMsg && autoTitle && !conv.titleGenerated) {
             generateTitle(input);
-        }
-
-        int selPos = modelSpinner.getSelectedItemPosition();
-        if (selPos < 0 || availableModels == null || selPos >= availableModels.size()) {
-            LogUtil.e(TAG, "sendMessage aborted: invalid model selection pos=%d, models=%d",
-                    selPos, availableModels == null ? -1 : availableModels.size());
-            Toast.makeText(this, "未选择模型", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        ProviderInfo provider = configManager.getProvider(availableModels.get(selPos).provider);
-        if (provider == null) {
-            LogUtil.e(TAG, "sendMessage aborted: provider null for model '%s'",
-                    availableModels.get(selPos).name);
-            Toast.makeText(this, "未选择模型", Toast.LENGTH_SHORT).show();
-            return;
         }
 
         String thinkingLevel = configManager.getThinkingLevel();
@@ -995,6 +1039,9 @@ public class MainActivity extends Activity {
         final Message aiMsg = new Message(Message.ROLE_ASSISTANT, "");
         messages.add(aiMsg);
         final int aiIndex = messages.size() - 1;
+        // 在 UI 线程做一次快照：请求线程遍历时 UI 线程可能结构性修改 messages，
+        // 直接遍历会抛 ConcurrentModificationException
+        final List<Message> requestSnapshot = new ArrayList<Message>(messages);
         LogUtil.d(TAG, "AI placeholder added at index=%d, total=%d", aiIndex, messages.size());
 
         // Append AI placeholder div
@@ -1018,6 +1065,8 @@ public class MainActivity extends Activity {
                 final java.util.concurrent.atomic.AtomicInteger renderSeq =
                         new java.util.concurrent.atomic.AtomicInteger();
                 final boolean[] renderInFlight = {false};
+                // 请求是否失败（HTTP 非 200 / 解析失败 / 异常）：失败时 finally 需回滚空占位
+                final boolean[] requestFailed = {false};
 
                 HttpURLConnection conn = null;
                 try {
@@ -1050,7 +1099,7 @@ public class MainActivity extends Activity {
                         sm.put("content", systemPrompt);
                         msgs.put(sm);
                     }
-                    for (Message m : messages) {
+                    for (Message m : requestSnapshot) {
                         if (m == aiMsg) continue;
                         org.json.JSONObject mm = new org.json.JSONObject();
                         mm.put("role", m.role);
@@ -1101,6 +1150,7 @@ public class MainActivity extends Activity {
                         } catch (Exception ignored) {}
                         LogUtil.e(TAG, "request FAILED: HTTP %d, body=%s", code, LogUtil.preview(errBody, 800));
                         final String err = "HTTP " + code;
+                        requestFailed[0] = true;
                         runOnUiThread(new Runnable() {
                             public void run() { Toast.makeText(MainActivity.this, "请求失败: " + err, Toast.LENGTH_SHORT).show(); }
                         });
@@ -1122,42 +1172,30 @@ public class MainActivity extends Activity {
                                 sb.length(), fullContent == null ? 0 : fullContent.length());
                         if (fullContent == null) {
                             final String err = "响应解析失败";
+                            requestFailed[0] = true;
                             runOnUiThread(new Runnable() {
                                 public void run() { Toast.makeText(MainActivity.this, err, Toast.LENGTH_SHORT).show(); }
                             });
                             return;
                         }
-                        final String done = fullContent;
-                        new Thread(new Runnable() {
-                            public void run() {
-                                final String html = MessageHtmlRenderer.contentToHtml(done, MainActivity.this);
-                                runOnUiThread(new Runnable() {
-                                    public void run() {
-                                        if (requestGeneration.get() == generation && aiIndex < messages.size()) {
-                                            messages.get(aiIndex).content = done;
-                                            webViewEvalJs("updateLastMsg('" + jsEscape(html) + "')");
-                                            webViewEvalJs("finalizeLast(" + aiIndex + ")");
-                                        } else {
-                                            LogUtil.w(TAG, "non-stream update skipped: aiIndex=%d >= size=%d",
-                                                    aiIndex, messages.size());
-                                        }
-                                    }
-                                });
-                            }
-                        }).start();
+                        // 内容交给 finally 统一提交（先写回 messages 并完成 DOM 收尾，再放行队列），
+                        // 避免这里的异步提交被 drain 引发的代数自增挡掉
+                        rawContent.setLength(0);
+                        rawContent.append(fullContent);
                         return;
                     }
 
                     LogUtil.i(TAG, "SSE stream started, begin reading chunks");
                     while (isRequestInProgress.get() && (line = reader.readLine()) != null) {
                         line = line.trim();
-                        if (!line.startsWith("data: ")) {
+                        // SSE 规范里冒号后的空格可选，兼容 "data:" 与 "data: "
+                        if (!line.startsWith("data:")) {
                             if (line.length() > 0) {
                                 LogUtil.v(TAG, "skip non-data line: %s", LogUtil.preview(line, 120));
                             }
                             continue;
                         }
-                        String data = line.substring(6);
+                        String data = line.substring(5).trim();
                         if ("[DONE]".equals(data)) {
                             LogUtil.i(TAG, "SSE [DONE] received after %d chunks", chunkCount[0]);
                             break;
@@ -1250,42 +1288,27 @@ public class MainActivity extends Activity {
                                     chunkCount[0], e.getMessage(), LogUtil.preview(data, 300));
                         }
                     }
-                    // Final update: full render with markdown/LaTeX/highlighting
-                    final String finalContent = rawContent.toString();
+                    // Final commit happens in finally: content is written back to
+                    // messages (and saved) before the pending queue is released, so a
+                    // drained follow-up request cannot invalidate it via the generation guard.
                     LogUtil.i(TAG, "stream finished: chunks=%d (thinking=%d, content=%d), finalLen=%d, elapsed=%d ms",
                             chunkCount[0], thinkingChunks[0], contentChunks[0],
-                            finalContent.length(), System.currentTimeMillis() - startMs);
+                            rawContent.length(), System.currentTimeMillis() - startMs);
                     renderSeq.incrementAndGet(); // invalidate any in-flight stream render
-                    new Thread(new Runnable() {
-                        public void run() {
-                            long renderMs = System.currentTimeMillis();
-                            final String html = MessageHtmlRenderer.contentToHtml(finalContent, MainActivity.this);
-                            LogUtil.d(TAG, "html rendered: len=%d in %d ms", html.length(),
-                                    System.currentTimeMillis() - renderMs);
-                            runOnUiThread(new Runnable() {
-                                public void run() {
-                                    // 代数匹配且索引有效时才更新，防止旧请求覆盖新请求
-                                    if (requestGeneration.get() == generation && aiIndex < messages.size()) {
-                                        messages.get(aiIndex).content = finalContent;
-                                        String esc = jsEscape(html);
-                                        webViewEvalJs("updateLastMsg('" + esc + "')");
-                                        webViewEvalJs("finalizeLast(" + aiIndex + ")");
-                                    } else {
-                                        LogUtil.w(TAG, "final update skipped: aiIndex=%d >= size=%d",
-                                                aiIndex, messages.size());
-                                    }
-                                }
-                            });
-                        }
-                    }).start();
                     reader.close();
                 } catch (final Exception e) {
+                    requestFailed[0] = true;
                     LogUtil.e(TAG, "streaming request EXCEPTION: %s", e.getMessage(), e);
-                    runOnUiThread(new Runnable() {
-                        public void run() {
-                            Toast.makeText(MainActivity.this, "请求失败: " + e.getMessage(), Toast.LENGTH_SHORT).show();
-                        }
-                    });
+                    // 用户主动打断（打断已自增代数）导致的 Socket closed 不算请求失败，不弹提示
+                    if (requestGeneration.get() == generation) {
+                        runOnUiThread(new Runnable() {
+                            public void run() {
+                                Toast.makeText(MainActivity.this, "请求失败: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+                            }
+                        });
+                    } else {
+                        LogUtil.i(TAG, "stream exception ignored: request was interrupted by user");
+                    }
                 } finally {
                     LogUtil.i(TAG, "<<< sendStreamingRequest END: elapsed=%d ms, chunks=%d, interrupted=%s",
                             System.currentTimeMillis() - startMs, chunkCount[0], !isRequestInProgress.get());
@@ -1293,15 +1316,42 @@ public class MainActivity extends Activity {
                     // 只有当前请求代数匹配时才清理状态，防止旧线程污染新请求
                     if (requestGeneration.get() == generation) {
                         currentConnection = null;
-                        isRequestInProgress.set(false);
-                        conversationManager.saveCurrentConversation();
                         final int finalIdx = aiIndex;
-                        runOnUiThread(new Runnable() {
+                        final boolean failed = requestFailed[0];
+                        final String commitContent = rawContent.toString();
+                        renderSeq.incrementAndGet(); // invalidate any in-flight stream render
+                        // 先渲染（离开主线程）→ 提交内容与 DOM 收尾 → 落盘 → 最后才放行队列。
+                        // 若先 drain，新请求会自增代数，使这条最终回复被代数守卫丢弃。
+                        new Thread(new Runnable() {
                             public void run() {
-                                webViewEvalJs("finalizeLast(" + finalIdx + ")");
-                                drainPendingQueue();
+                                try {
+                                    if (failed) {
+                                        // 请求失败：移除空 assistant 占位，避免空气泡落盘/进入后续请求体
+                                        rollbackEmptyAssistantPlaceholder(finalIdx, generation);
+                                        return;
+                                    }
+                                    final String html =
+                                            MessageHtmlRenderer.contentToHtml(commitContent, MainActivity.this);
+                                    if (requestGeneration.get() != generation) return;
+                                    if (finalIdx >= 0 && finalIdx < messages.size()
+                                            && messages.get(finalIdx).isAssistant()) {
+                                        messages.get(finalIdx).content = commitContent;
+                                    }
+                                    runOnUiThread(new Runnable() {
+                                        public void run() {
+                                            if (requestGeneration.get() != generation) return;
+                                            webViewEvalJs("updateLastMsg('" + jsEscape(html) + "')");
+                                            webViewEvalJs("finalizeLast(" + finalIdx + ")");
+                                        }
+                                    });
+                                    conversationManager.saveCurrentConversation();
+                                } catch (Exception e) {
+                                    LogUtil.e(TAG, "final commit failed: %s", e.getMessage(), e);
+                                } finally {
+                                    if (requestGeneration.get() == generation) finishRequestAndDrain();
+                                }
                             }
-                        });
+                        }).start();
                     }
                 }
             }
@@ -1313,6 +1363,9 @@ public class MainActivity extends Activity {
 
     private void generateTitle(final String firstMessage) {
         LogUtil.d(TAG, "generateTitle called for message: %s", LogUtil.preview(firstMessage, 100));
+        // 记录发起标题生成时的会话 id：异步回调回来时若已切会话，丢弃，
+        // 否则会把上一个会话的标题写到当前会话
+        final String titleConvId = conversationManager.getCurrentConversation().id;
         new Thread(new Runnable() {
             public void run() {
                 try {
@@ -1364,7 +1417,12 @@ public class MainActivity extends Activity {
                                 runOnUiThread(new Runnable() {
                                     public void run() {
                                         Conversation conv = conversationManager.getCurrentConversation();
-                                        if (conv != null && !conv.titleGenerated) {
+                                        if (conv == null || !titleConvId.equals(conv.id)) {
+                                            LogUtil.d(TAG, "title dropped: conversation changed (started=%s, now=%s)",
+                                                    titleConvId, conv == null ? "-" : conv.id);
+                                            return;
+                                        }
+                                        if (!conv.titleGenerated) {
                                             conv.title = finalTitle;
                                             conv.titleGenerated = true;
                                             conversationManager.saveCurrentConversation();
@@ -1403,13 +1461,24 @@ public class MainActivity extends Activity {
     private void refreshWebView() {
         LogUtil.d(TAG, "refreshWebView: messages=%d", messages == null ? -1 : messages.size());
         final long t0 = System.currentTimeMillis();
+        // 渲染代数守卫 + 列表快照：两次刷新可能乱序落地，且渲染线程不能直接遍历
+        // 可能被 UI 线程结构性修改的 messages
+        final int myRenderGen = renderGeneration.incrementAndGet();
+        final List<Message> snapshot =
+                messages == null ? new ArrayList<Message>() : new ArrayList<Message>(messages);
         new Thread(new Runnable() {
             public void run() {
-                final String html = MessageHtmlRenderer.buildConversationHtml(messages, MainActivity.this);
+                final String html = MessageHtmlRenderer.buildConversationHtml(snapshot, MainActivity.this);
                 LogUtil.d(TAG, "conversation html built: len=%d in %d ms",
                         html == null ? -1 : html.length(), System.currentTimeMillis() - t0);
                 runOnUiThread(new Runnable() {
                     public void run() {
+                        if (renderGeneration.get() != myRenderGen) {
+                            LogUtil.d(TAG, "refreshWebView: stale render dropped (gen=%d, current=%d)",
+                                    myRenderGen, renderGeneration.get());
+                            return;
+                        }
+                        if (conversationWebView == null) return;
                         conversationWebView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null);
                         LogUtil.d(TAG, "webview reloaded with full conversation html");
                     }
@@ -1441,13 +1510,53 @@ public class MainActivity extends Activity {
         webViewEvalJs("removeRangeFrom(" + fromPos + ")");
     }
 
+    // 最终回复提交完成后再收尾：先置请求结束，再放行排队消息。
+    // 顺序不可颠倒——否则 drain 派发的新请求会自增代数，把本请求的最终渲染挡掉。
+    private void finishRequestAndDrain() {
+        runOnUiThread(new Runnable() {
+            public void run() {
+                isRequestInProgress.set(false);
+                drainPendingQueue();
+            }
+        });
+    }
+
+    // 移除最后一个尚未 finalize 的 AI 占位 div（其 data-idx 仍为 -1，
+    // removeRangeFrom 只处理 >=0 的索引，删不掉它）。ES5，Chromium 30 兼容。
+    private void removeUnfinalizedAiDiv() {
+        LogUtil.v(TAG, "webview js: remove unfinalized .msg.ai");
+        webViewEvalJs("(function(){var a=document.querySelectorAll('.msg.ai');"
+                + "if(a.length>0){var l=a[a.length-1];"
+                + "if(l.getAttribute('data-idx')==='-1'&&l.parentNode)l.parentNode.removeChild(l);}})()");
+    }
+
+    // 请求失败时回滚仍为空的 assistant 占位：从 messages 移除并删掉对应 DOM div，
+    // 避免空气泡被落盘、并出现在后续请求体里（对照 interruptRequest 的清理写法）。
+    private void rollbackEmptyAssistantPlaceholder(final int aiIndex, final int generation) {
+        runOnUiThread(new Runnable() {
+            public void run() {
+                if (requestGeneration.get() != generation) return;
+                if (aiIndex >= 0 && aiIndex < messages.size()
+                        && messages.get(aiIndex).isAssistant()
+                        && (messages.get(aiIndex).content == null || messages.get(aiIndex).content.isEmpty())) {
+                    LogUtil.d(TAG, "rollback empty AI placeholder at index=%d", aiIndex);
+                    messages.remove(aiIndex);
+                    removeUnfinalizedAiDiv();
+                }
+            }
+        });
+    }
+
     // Execute JS in the conversation WebView: evaluateJavascript (API 19+) avoids a
     // full page navigation per call; loadUrl fallback for API 18.
     private void webViewEvalJs(String js) {
+        // onDestroy 后 WebView 已 destroy 并置空，迟到的回调直接丢弃
+        WebView wv = conversationWebView;
+        if (wv == null) return;
         if (android.os.Build.VERSION.SDK_INT >= 19) {
-            conversationWebView.evaluateJavascript(js, null);
+            wv.evaluateJavascript(js, null);
         } else {
-            conversationWebView.loadUrl("javascript:" + js);
+            wv.loadUrl("javascript:" + js);
         }
     }
 
@@ -1456,7 +1565,10 @@ public class MainActivity extends Activity {
         return s.replace("\\", "\\\\")
                 .replace("'", "\\'")
                 .replace("\n", "\\n")
-                .replace("\r", "\\r");
+                .replace("\r", "\\r")
+                // ES5 里 U+2028/U+2029 仍是行终止符，直接出现在字符串字面量中是语法错误
+                .replace("\u2028", "\\u2028")
+                .replace("\u2029", "\\u2029");
     }
 
     // ========== Image info ==========
@@ -2538,6 +2650,8 @@ public class MainActivity extends Activity {
             }
         } catch (Exception e) {
             LogUtil.e(TAG, "quick scan result query failed", e);
+            // 补用户反馈：此前异常被静默吞掉，用户只看到输入框依旧为空
+            Toast.makeText(this, "读取搜题结果失败: " + e.getMessage(), Toast.LENGTH_LONG).show();
         } finally {
             if (cursor != null) cursor.close();
         }
@@ -2567,15 +2681,22 @@ public class MainActivity extends Activity {
                 .setTitle("操作消息")
                 .setItems(items, new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface dialog, int which) {
-                        LogUtil.i(TAG, "message menu action: pos=%d which=%d (%s)", pos, which, items[which]);
+                        // 菜单挂起期间列表可能被删除/新增/打断清理移动，按对象标识重新定位
+                        int cur = messages.indexOf(msg);
+                        if (cur < 0) {
+                            LogUtil.w(TAG, "message menu action dropped: target message no longer present");
+                            Toast.makeText(MainActivity.this, "该消息已变化，操作已取消", Toast.LENGTH_SHORT).show();
+                            return;
+                        }
+                        LogUtil.i(TAG, "message menu action: curPos=%d which=%d (%s)", cur, which, items[which]);
                         switch (which) {
-                            case 0: copyMessage(pos); break;
-                            case 1: selectText(pos); break;
-                            case 2: editMessage(pos); break;
-                            case 3: deleteMessage(pos); break;
-                            case 4: retryMessage(pos); break;
-                            case 5: rollbackTo(pos); break;
-                            case 6: branchAt(pos); break;
+                            case 0: copyMessage(cur); break;
+                            case 1: selectText(cur); break;
+                            case 2: editMessage(cur); break;
+                            case 3: deleteMessage(cur); break;
+                            case 4: retryMessage(cur); break;
+                            case 5: rollbackTo(cur); break;
+                            case 6: branchAt(cur); break;
                         }
                     }
                 })
@@ -2696,6 +2817,13 @@ public class MainActivity extends Activity {
         final Message msg = messages.get(pos);
         final int n = messages.size() - pos;
         LogUtil.i(TAG, "retryMessage: pos=%d role=%s, will drop %d messages", pos, msg.role, n);
+
+        // 流式进行中不允许重试，否则第二个请求线程会与在途请求并发共享 currentConnection / messages
+        if (isRequestInProgress.get()) {
+            LogUtil.w(TAG, "retryMessage aborted: request in progress, interrupt first");
+            Toast.makeText(this, "当前回复进行中，请先打断再重试", Toast.LENGTH_SHORT).show();
+            return;
+        }
 
         if (msg.isAssistant()) {
             boolean hasUserBefore = false;

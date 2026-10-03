@@ -44,6 +44,10 @@ public class MessageHtmlRenderer {
     // settings changes / page returns; unchanged contents hit the cache instead of
     // re-running the full markdown pipeline. Keys are the message content strings
     // already held in memory, so no extra key copies. Bounded LRU.
+    // Streaming throttling produces a new key every tick with near-full text, so
+    // oversized renders (e.g. base64 math images) are not cached — otherwise up
+    // to 24 near-identical full-message copies stay in memory for good.
+    private static final int RENDER_CACHE_MAX_HTML = 256 * 1024;
     private static final Map<String, String> renderCache =
             Collections.synchronizedMap(new LinkedHashMap<String, String>(32, 0.75f, true) {
                 protected boolean removeEldestEntry(Map.Entry<String, String> eldest) {
@@ -368,7 +372,7 @@ public class MessageHtmlRenderer {
         LogUtil.v(TAG, "contentToHtml: in=%d chars -> %d chars html in %d ms (thinking=%s)",
                 text.length(), html.length(), System.currentTimeMillis() - startTs,
                 text.contains("[thinking]"));
-        renderCache.put(text, html);
+        if (html.length() <= RENDER_CACHE_MAX_HTML) renderCache.put(text, html);
         return html;
     }
 
@@ -586,6 +590,11 @@ public class MessageHtmlRenderer {
                     if (text.charAt(i) == '{') depth++;
                     else if (text.charAt(i) == '}') depth--;
                     i++;
+                }
+                if (depth > 0) {
+                    // 未找到配对 } (流式分片/截断)：原样输出剩余文本，避免 substring 越界
+                    out.append(text, cs - 4, text.length());
+                    break;
                 }
                 int ce = i;
                 String formula = text.substring(cs, ce - 1);
@@ -1047,6 +1056,24 @@ public class MessageHtmlRenderer {
                 .replace("'", "&#39;");
     }
 
+    // Active-content tags / attributes stripped from model-authored raw HTML before it
+    // reaches the JS-enabled conversation WebView. Benign tags (br/sub/mark/div/...) pass.
+    // Removing the tags (open and close) leaves any inner JS as inert plain text.
+    private static final Pattern P_DANGER_TAG = Pattern.compile(
+            "(?is)<\\s*/?\\s*(script|iframe|object|embed|applet|frame|frameset|noscript|base|link|meta|form)\\b[^>]*>");
+    private static final Pattern P_EVENT_ATTR = Pattern.compile(
+            "(?i)\\son[a-z]+\\s*=\\s*(\"[^\"]*\"|'[^']*'|[^\\s>]+)");
+    private static final Pattern P_JS_URL = Pattern.compile(
+            "(?i)(href|src|xlink:href|action|formaction|background)\\s*=\\s*(\"|')?\\s*(javascript|vbscript|livescript)\\s*:[^\"'>\\s]*");
+
+    static String sanitizeRawHtml(String html) {
+        if (html == null || html.isEmpty()) return "";
+        html = P_DANGER_TAG.matcher(html).replaceAll("");
+        html = P_EVENT_ATTR.matcher(html).replaceAll("");
+        html = P_JS_URL.matcher(html).replaceAll("$1=\"#\"");
+        return html;
+    }
+
     // ---- AST → HTML visitor ----
 
     private static class HtmlVisitor extends AbstractVisitor {
@@ -1065,8 +1092,8 @@ public class MessageHtmlRenderer {
             out.append("<p>"); visitChildren(p); out.append("</p>");
         }
         @Override public void visit(Text t) { out.append(esc(t.getLiteral())); }
-        @Override public void visit(HtmlInline hi) { out.append(hi.getLiteral()); }
-        @Override public void visit(HtmlBlock hb) { out.append(hb.getLiteral()); }
+        @Override public void visit(HtmlInline hi) { out.append(sanitizeRawHtml(hi.getLiteral())); }
+        @Override public void visit(HtmlBlock hb) { out.append(sanitizeRawHtml(hb.getLiteral())); }
         @Override public void visit(Emphasis e) {
             out.append("<em>"); visitChildren(e); out.append("</em>");
         }

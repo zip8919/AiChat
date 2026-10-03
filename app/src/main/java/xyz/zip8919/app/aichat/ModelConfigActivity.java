@@ -161,13 +161,22 @@ public class ModelConfigActivity extends Activity {
                             Toast.makeText(ModelConfigActivity.this, "名称和URL不能为空", Toast.LENGTH_SHORT).show();
                             return;
                         }
+                        // 重名校验：同名 provider 会让 getProvider 的首个匹配产生二义
+                        for (int i = 0; i < providers.size(); i++) {
+                            if ((!isEdit || i != editPos.intValue()) && name.equals(providers.get(i).name)) {
+                                LogUtil.w(TAG, "provider save rejected: duplicate name '%s'", name);
+                                Toast.makeText(ModelConfigActivity.this, "该提供商名称已存在", Toast.LENGTH_SHORT).show();
+                                return;
+                            }
+                        }
                         ProviderInfo info = isEdit ? p : new ProviderInfo();
                         info.name = name;
                         info.apiUrl = url;
                         info.chatPath = path.isEmpty() ? "/chat/completions" : path;
                         info.apiKey = key;
-                        info.thinkingType = "object";
-                        info.thinkingParamName = "thinking";
+                        // 仅在缺省时填默认，保留原 provider 已有的 thinkingType/thinkingParamName
+                        if (info.thinkingType == null || info.thinkingType.isEmpty()) info.thinkingType = "object";
+                        if (info.thinkingParamName == null || info.thinkingParamName.isEmpty()) info.thinkingParamName = "thinking";
                         if (!isEdit) providers.add(info);
                         configManager.setProviders(providers);
                         configManager.save();
@@ -183,12 +192,17 @@ public class ModelConfigActivity extends Activity {
         final ProviderInfo p = providers.get(pos);
         new AlertDialog.Builder(this)
                 .setTitle("删除提供商")
-                .setMessage("确定删除 " + p.name + "？关联的模型也将失效。")
+                .setMessage("确定删除 " + p.name + "？引用该提供商的模型将一并删除。")
                 .setPositiveButton("删除", new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         LogUtil.i(TAG, "provider delete confirmed: pos=%d name=%s", pos, p.name);
                         providers.remove(pos);
+                        // 同步移除以该 provider 命名的模型，避免留下无法发送的孤儿模型
+                        for (int i = models.size() - 1; i >= 0; i--) {
+                            if (p.name.equals(models.get(i).provider)) models.remove(i);
+                        }
                         configManager.setProviders(providers);
+                        configManager.setModels(models);
                         configManager.save();
                         refreshProviderList();
                         refreshModelList();
@@ -244,6 +258,12 @@ public class ModelConfigActivity extends Activity {
                         if (name.isEmpty() || prov.isEmpty()) {
                             LogUtil.w(TAG, "model save rejected: name='%s' provider='%s' (empty)", name, prov);
                             Toast.makeText(ModelConfigActivity.this, "名称和提供商不能为空", Toast.LENGTH_SHORT).show();
+                            return;
+                        }
+                        // 提供商必须已存在，否则该模型按名永远解析不到 provider
+                        if (configManager.getProvider(prov) == null) {
+                            LogUtil.w(TAG, "model save rejected: provider '%s' not found", prov);
+                            Toast.makeText(ModelConfigActivity.this, "提供商不存在: " + prov, Toast.LENGTH_SHORT).show();
                             return;
                         }
                         ModelInfo info = isEdit ? m : new ModelInfo();

@@ -9,6 +9,7 @@ import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.text.InputType;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.AdapterView;
@@ -46,6 +47,9 @@ public class SettingsActivity extends Activity {
     private Button managePresetsButton, savePresetButton;
     private AlertDialog manageDialog;
     private List<String[]> presetList; // [name, prompt]
+    private int titleModelMissingPos = -1; // saved 模型不存在时 spinner 停放的位置，-1 表示无此情况
+    private boolean titleModelUserPicked;  // 用户是否手动动过标题模型 spinner（尚未保存）
+    private String titleModelSignature;    // 上次构建 adapter 时的模型列表快照，用于判断是否需要重建
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -108,6 +112,13 @@ public class SettingsActivity extends Activity {
             }
             public void onNothingSelected(AdapterView<?> parent) {}
         });
+        // 只在用户真正点过 spinner 时才认为选择被改动（回调时序不可靠，改用触摸事件判定）
+        titleModelSpinner.setOnTouchListener(new View.OnTouchListener() {
+            public boolean onTouch(View v, MotionEvent event) {
+                if (event.getAction() == MotionEvent.ACTION_DOWN) titleModelUserPicked = true;
+                return false; // 不消费事件，交回 Spinner 自己处理
+            }
+        });
         LogUtil.d(TAG, "initViews done");
     }
 
@@ -130,6 +141,20 @@ public class SettingsActivity extends Activity {
     private void refreshTitleModelSpinner() {
         ConfigManager cm = ConfigManager.getInstance();
         List<ModelInfo> models = cm.getModels();
+
+        StringBuilder sig = new StringBuilder();
+        for (int i = 0; i < models.size(); i++) {
+            sig.append(models.get(i).name).append("::").append(models.get(i).provider).append(";");
+        }
+        String signature = sig.toString();
+        if (signature.equals(titleModelSignature)) {
+            // 模型列表没变（例如从「管理模型」返回触发的 onResume）：
+            // 保留 spinner 上用户尚未保存的选择，不要重建 adapter 把它冲掉
+            LogUtil.d(TAG, "refreshTitleModelSpinner: model list unchanged, keep selection");
+            return;
+        }
+        titleModelSignature = signature;
+
         List<String> names = new ArrayList<String>();
         for (ModelInfo m : models) {
             names.add(m.name + " (" + m.provider + ")");
@@ -144,10 +169,13 @@ public class SettingsActivity extends Activity {
         for (int i = 0; i < models.size(); i++) {
             if (models.get(i).name.equals(saved)) {
                 titleModelSpinner.setSelection(i);
+                titleModelMissingPos = -1;
                 LogUtil.d(TAG, "refreshTitleModelSpinner: selected pos=%d", i);
                 return;
             }
         }
+        // saved 模型已不存在：仅把 spinner 停在首项用于展示，记下兜底位置供保存路径区分「用户没动过」
+        titleModelMissingPos = models.isEmpty() ? -1 : 0;
         LogUtil.w(TAG, "refreshTitleModelSpinner: saved model '%s' not found", saved);
     }
 
@@ -174,8 +202,14 @@ public class SettingsActivity extends Activity {
             ConfigManager cm = ConfigManager.getInstance();
             List<ModelInfo> models = cm.getModels();
             if (pos < models.size()) {
-                editor.putString(KEY_TITLE_MODEL, models.get(pos).name);
-                LogUtil.d(TAG, "saveSettings: titleModel=%s", models.get(pos).name);
+                if (titleModelMissingPos >= 0 && pos == titleModelMissingPos && !titleModelUserPicked) {
+                    // saved 模型已不存在且用户没动过 spinner：保持原设置，不静默改写成 models[0]
+                    LogUtil.w(TAG, "saveSettings: title model missing, keep '%s'",
+                            prefs.getString(KEY_TITLE_MODEL, DEFAULT_TITLE_MODEL));
+                } else {
+                    editor.putString(KEY_TITLE_MODEL, models.get(pos).name);
+                    LogUtil.d(TAG, "saveSettings: titleModel=%s", models.get(pos).name);
+                }
             } else {
                 LogUtil.w(TAG, "saveSettings: title model pos=%d out of range (%d)", pos, models.size());
             }
@@ -190,12 +224,20 @@ public class SettingsActivity extends Activity {
 
     private void queryBalance() {
         ConfigManager configManager = ConfigManager.getInstance();
-        final ProviderInfo dsProvider = configManager.getProvider("DeepSeek");
-        if (dsProvider == null || dsProvider.apiKey.isEmpty()) {
-            LogUtil.w(TAG, "queryBalance aborted: DeepSeek provider=%s", dsProvider == null ? "null" : "empty key");
-            Toast.makeText(this, "未配置 DeepSeek API Key", Toast.LENGTH_SHORT).show();
+        // 按 supportsBalance 选提供商，不再按名字硬编码（改名后按钮会永久误报未配置）
+        ProviderInfo balanceProvider = null;
+        List<ProviderInfo> providers = configManager.getProviders();
+        for (int i = 0; i < providers.size(); i++) {
+            if (providers.get(i).supportsBalance) { balanceProvider = providers.get(i); break; }
+        }
+        if (balanceProvider == null) balanceProvider = configManager.getProvider("DeepSeek");
+        if (balanceProvider == null || balanceProvider.apiKey == null || balanceProvider.apiKey.isEmpty()) {
+            LogUtil.w(TAG, "queryBalance aborted: provider=%s", balanceProvider == null ? "null" : "empty key");
+            Toast.makeText(this, "未配置可查询余额的提供商 API Key", Toast.LENGTH_SHORT).show();
             return;
         }
+        final ProviderInfo dsProvider = balanceProvider;
+        final CharSequence balanceBtnText = balanceButton.getText();
         LogUtil.i(TAG, "queryBalance: provider=%s url=%s keyLen=%d", dsProvider.name, dsProvider.apiUrl, dsProvider.apiKey.length());
 
         balanceButton.setEnabled(false);
@@ -206,8 +248,9 @@ public class SettingsActivity extends Activity {
                 final String result = ApiClient.queryBalance(dsProvider);
                 runOnUiThread(new Runnable() {
                     public void run() {
+                        if (isFinishing() || isDestroyed()) return; // Activity 已结束，show() 会抛 BadTokenException
                         balanceButton.setEnabled(true);
-                        balanceButton.setText("查询 DeepSeek 余额");
+                        balanceButton.setText(balanceBtnText);
 
                         if (result == null) {
                             LogUtil.w(TAG, "queryBalance: result is null");
@@ -231,7 +274,7 @@ public class SettingsActivity extends Activity {
                             LogUtil.i(TAG, "queryBalance OK: %s", sb.toString().replace("\n", " | "));
 
                             new AlertDialog.Builder(SettingsActivity.this)
-                                    .setTitle("DeepSeek 余额")
+                                    .setTitle(dsProvider.name + " 余额")
                                     .setMessage(sb.toString())
                                     .setPositiveButton("确定", null)
                                     .show();

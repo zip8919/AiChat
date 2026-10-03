@@ -94,11 +94,11 @@ public class MarkdownParser {
     }
 
     private static boolean hasMarkdownFeatures(String text) {
-        int lim = Math.min(text.length(), 2000);
-        for (int i = 0; i < lim; i++) {
+        // 全量扫描并补上表格触发字符 '|'：原实现只看前 2000 字符，长正文后段的表格/标题被当纯文本
+        for (int i = 0; i < text.length(); i++) {
             char c = text.charAt(i);
             if (c == '#' || c == '*' || c == '`' || c == '[' || c == '$'
-                    || c == '>' || c == '~' || c == '-') return true;
+                    || c == '>' || c == '~' || c == '-' || c == '|') return true;
         }
         return false;
     }
@@ -150,7 +150,8 @@ public class MarkdownParser {
     private static SpannableStringBuilder renderMath(MathToken mt, Context ctx, float density) {
         try {
             String key = mt.formula + (mt.block ? "b" : "i");
-            Bitmap cached = latexCache.get(key);
+            Bitmap cached;
+            synchronized (latexCache) { cached = latexCache.get(key); } // latexCache 为静态共享，读写需加锁
             if (cached != null) {
                 LogUtil.v(TAG, "markdown latex CACHE hit: block=%s %s", mt.block, LogUtil.preview(mt.formula, 80));
             } else {
@@ -186,13 +187,15 @@ public class MarkdownParser {
                 c.drawColor(Color.WHITE);
                 d.draw(c);
 
-                if (latexCache.size() >= 30) {
-                    String first = latexCache.keySet().iterator().next();
-                    Bitmap old = latexCache.remove(first);
-                    if (old != null) old.recycle();
-                    LogUtil.v(TAG, "markdown latex cache EVICT oldest (size now %d)", latexCache.size());
+                synchronized (latexCache) {
+                    if (latexCache.size() >= 30) {
+                        String first = latexCache.keySet().iterator().next();
+                        // 不 recycle：同一 Bitmap 可能仍被已渲染的 ImageSpan 持有，回收会让 draw 抛异常
+                        latexCache.remove(first);
+                        LogUtil.v(TAG, "markdown latex cache EVICT oldest (size now %d)", latexCache.size());
+                    }
+                    latexCache.put(key, cached);
                 }
-                latexCache.put(key, cached);
             }
 
             SpannableStringBuilder sb = new SpannableStringBuilder();
@@ -250,7 +253,7 @@ public class MarkdownParser {
             visitChildren(bq);
             out.setSpan(new ForegroundColorSpan(COLOR_BLOCKQUOTE), s, out.length(), 0);
             out.setSpan(new StyleSpan(Typeface.ITALIC), s, out.length(), 0);
-            if (out.charAt(out.length() - 1) != '\n') out.append("\n");
+            if (out.length() > 0 && out.charAt(out.length() - 1) != '\n') out.append("\n"); // 空 blockquote 时 out 为空
         }
 
         @Override public void visit(BulletList bl) { listDepth++; visitChildren(bl); listDepth--; out.append("\n"); }

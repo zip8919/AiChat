@@ -15,6 +15,8 @@ import android.widget.EditText;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.util.regex.Matcher;
+
 /**
  * Runs a JavaScript snippet inside a WebView (Chromium 30 on API 19) and shows
  * the console output. Also used as the live preview surface for html / svg code
@@ -164,10 +166,18 @@ public class JsRunnerActivity extends Activity {
           .append("function alert(m){if(window.Console&&window.Console.log)window.Console.log('alert: '+m);}")
           .append("console={log:__log,info:__log,warn:__log,error:__log,debug:__log};")
           .append("</script>")
-          .append("<script>try{").append(userCode)
+          .append("<script>try{").append(escapeScriptEnd(userCode))
           .append("\n}catch(e){__log('ERROR: '+e);}</script>")
           .append("</body></html>");
         return sb.toString();
+    }
+
+    /**
+     * 用户代码里的 "</script"（不分大小写）会提前结束包装脚本块，转义成 "<\/script"
+     * ——在 JS 字符串/正则里与原文完全等价，HTML 解析器却不再视为结束标签。
+     */
+    private static String escapeScriptEnd(String code) {
+        return code.replaceAll("(?i)</script", Matcher.quoteReplacement("<\\/script"));
     }
 
     private void copyOutput() {
@@ -202,12 +212,8 @@ public class JsRunnerActivity extends Activity {
             Toast.makeText(this, "代码内容为空，无法保存", Toast.LENGTH_SHORT).show();
             return;
         }
-        String ext = "js";
-        if ("html".equals(lang)) {
-            ext = "html";
-        } else if ("svg".equals(lang)) {
-            ext = "svg";
-        }
+        // 复用导出扩展名映射：不再把 html/svg 之外的语言（py/go/md…）一律写成 .js
+        String ext = MainActivity.exportExtForLang(lang);
         String name = "code_" + System.currentTimeMillis() + "." + ext;
         String path = StorageManager.getInstance().saveExport(name, code);
         LogUtil.i(TAG, "saveToExports: lang=%s path=%s", lang, path);
@@ -218,6 +224,22 @@ public class JsRunnerActivity extends Activity {
     @Override
     public void onBackPressed() {
         super.onBackPressed();
+    }
+
+    @Override
+    protected void onDestroy() {
+        // 释放 WebView 与注入的 JS 接口，否则每次进出都泄漏一个 WebView + ConsoleBridge（持有本 Activity）
+        if (webView != null) {
+            try {
+                webView.removeJavascriptInterface("Console");
+                webView.stopLoading();
+                webView.destroy();
+            } catch (Throwable t) {
+                LogUtil.w(TAG, "onDestroy: webView release failed: %s", t);
+            }
+            webView = null;
+        }
+        super.onDestroy();
     }
 
     private class ConsoleBridge {

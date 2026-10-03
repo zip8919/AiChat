@@ -8,13 +8,14 @@ import android.text.style.ClickableSpan;
 import android.text.style.ForegroundColorSpan;
 import android.text.style.StyleSpan;
 import android.text.style.URLSpan;
-import android.util.SparseBooleanArray;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.BaseAdapter;
 import android.widget.TextView;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 public class MessageAdapter extends BaseAdapter {
     private static final String TAG = "MessageAdapter";
@@ -24,7 +25,8 @@ public class MessageAdapter extends BaseAdapter {
     private Context context;
     private LayoutInflater inflater;
     private List<Message> messages;
-    private SparseBooleanArray thoughtExpanded = new SparseBooleanArray();
+    // 展开状态按消息对象身份存储，避免按列表位置存储时删除消息导致状态错位
+    private Map<Message, Boolean> thoughtExpanded = new HashMap<Message, Boolean>();
 
     public MessageAdapter(Context context, List<Message> messages) {
         this.context = context;
@@ -35,7 +37,7 @@ public class MessageAdapter extends BaseAdapter {
     public void setMessages(List<Message> messages) {
         LogUtil.d(TAG, "setMessages: %d messages", messages == null ? -1 : messages.size());
         this.messages = messages;
-        this.thoughtExpanded = new SparseBooleanArray();
+        this.thoughtExpanded = new HashMap<Message, Boolean>();
     }
 
     @Override
@@ -89,7 +91,7 @@ public class MessageAdapter extends BaseAdapter {
                 viewType == VIEW_TYPE_USER ? "user" : "ai", content == null ? 0 : content.length());
 
         if (content != null && content.contains("[thinking]")) {
-            SpannableStringBuilder formatted = formatThinkingContent(content, position, ctx);
+            SpannableStringBuilder formatted = formatThinkingContent(content, msg, position, ctx);
             holder.textView.setText(formatted);
             holder.textView.setMovementMethod(LinkMovementMethod.getInstance());
         } else {
@@ -108,9 +110,9 @@ public class MessageAdapter extends BaseAdapter {
         return spans != null && spans.length > 0;
     }
 
-    private SpannableStringBuilder formatThinkingContent(String content, final int position, Context ctx) {
+    private SpannableStringBuilder formatThinkingContent(String content, final Message msg, final int position, Context ctx) {
         SpannableStringBuilder builder = new SpannableStringBuilder();
-        boolean isExpanded = thoughtExpanded.get(position, false);
+        boolean isExpanded = Boolean.TRUE.equals(thoughtExpanded.get(msg));
         LogUtil.v(TAG, "formatThinkingContent: pos=%d expanded=%s len=%d", position, isExpanded, content.length());
 
         int start = 0;
@@ -152,7 +154,7 @@ public class MessageAdapter extends BaseAdapter {
                         @Override
                         public void onClick(View widget) {
                             LogUtil.d(TAG, "collapse thinking: pos=%d", position);
-                            thoughtExpanded.put(position, false);
+                            thoughtExpanded.put(msg, false);
                             notifyDataSetChanged();
                         }
                     }, f1, f2, 0);
@@ -167,7 +169,7 @@ public class MessageAdapter extends BaseAdapter {
                         @Override
                         public void onClick(View widget) {
                             LogUtil.d(TAG, "expand thinking: pos=%d", position);
-                            thoughtExpanded.put(position, true);
+                            thoughtExpanded.put(msg, true);
                             notifyDataSetChanged();
                         }
                     }, e1, e2, 0);

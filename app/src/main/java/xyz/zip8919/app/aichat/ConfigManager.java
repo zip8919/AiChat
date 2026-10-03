@@ -1,5 +1,6 @@
 package xyz.zip8919.app.aichat;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 import org.json.JSONArray;
@@ -35,14 +36,24 @@ public class ConfigManager {
         LogUtil.i(TAG, "load: reading config (%s)", LogUtil.thread());
         String content = storageManager.loadConfig();
         if (content == null || content.length() == 0) {
-            LogUtil.i(TAG, "load: no config found, creating defaults");
-            createDefault();
+            // 文件存在却读不出内容属于读取/写入失败，不能重建默认值覆盖，否则用户配置被清空
+            String path = storageManager.getConfigPath();
+            boolean fileExists = path != null && new File(path).exists();
+            if (fileExists) {
+                LogUtil.w(TAG, "load: config unreadable/empty, keeping file, using in-memory defaults");
+                createDefault();
+            } else {
+                LogUtil.i(TAG, "load: no config found, creating defaults");
+                createDefault();
+                save();
+            }
         } else {
             LogUtil.d(TAG, "load: config found, %d chars", content.length());
             try {
                 parse(new JSONObject(content));
             } catch (Exception e) {
-                LogUtil.e(TAG, "load: parse failed, falling back to defaults: " + e.getMessage(), e);
+                // 解析失败保留原文件（不 save），避免用默认值静默覆盖用户 API Key 与自定义模型
+                LogUtil.e(TAG, "load: parse failed, keeping original file, using in-memory defaults: " + e.getMessage(), e);
                 createDefault();
             }
         }
@@ -102,8 +113,6 @@ public class ConfigManager {
         this.thinkingLevel = "medium";
         LogUtil.i(TAG, "createDefault: providers=%s models=%d default=%s",
                 providerNames(), models.size(), defaultModel);
-
-        save();
     }
 
     private String providerNames() {

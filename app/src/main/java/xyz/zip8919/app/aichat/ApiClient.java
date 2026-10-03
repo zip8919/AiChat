@@ -21,6 +21,9 @@ public class ApiClient {
 
     private static final String TAG = "ApiClient";
 
+    // 非流式响应体上限（字符），防止超大响应在 API19 上 OOM
+    private static final int MAX_RESPONSE_CHARS = 4 * 1024 * 1024;
+
     public interface StreamCallback {
         void onContent(String text);
         void onThinking(String thinkingText);
@@ -115,13 +118,21 @@ public class ApiClient {
             if (code != 200) {
                 String errBody = "";
                 try {
-                    BufferedReader er = new BufferedReader(new InputStreamReader(conn.getErrorStream(), "UTF-8"));
-                    StringBuilder esb = new StringBuilder();
-                    String el;
-                    while ((el = er.readLine()) != null) esb.append(el);
-                    er.close();
-                    errBody = esb.toString();
-                } catch (Exception ignore) {}
+                    // 无错误体时 getErrorStream() 返回 null，需判空避免 NPE 被吞
+                    java.io.InputStream errStream = conn.getErrorStream();
+                    if (errStream == null) {
+                        LogUtil.w(TAG, "callStream HTTP %d has no error body", code);
+                    } else {
+                        BufferedReader er = new BufferedReader(new InputStreamReader(errStream, "UTF-8"));
+                        StringBuilder esb = new StringBuilder();
+                        String el;
+                        while ((el = er.readLine()) != null) esb.append(el);
+                        er.close();
+                        errBody = esb.toString();
+                    }
+                } catch (Exception e) {
+                    LogUtil.w(TAG, "callStream error body unreadable: %s", e.getMessage());
+                }
                 LogUtil.e(TAG, "callStream FAILED: HTTP %d, body=%s", code, LogUtil.preview(errBody, 800));
                 callback.onError("HTTP " + code);
                 return;
@@ -314,16 +325,23 @@ public class ApiClient {
             if (code != 200) {
                 // Read error body
                 try {
-                    BufferedReader errReader = new BufferedReader(
-                            new InputStreamReader(conn.getErrorStream(), "UTF-8"));
-                    StringBuilder errBody = new StringBuilder();
-                    String line;
-                    while ((line = errReader.readLine()) != null) {
-                        errBody.append(line);
+                    // 无错误体时 getErrorStream() 返回 null，需判空避免 NPE 被吞
+                    java.io.InputStream errStream = conn.getErrorStream();
+                    if (errStream == null) {
+                        result.error = "HTTP " + code;
+                        LogUtil.e(TAG, "doRequestWithError FAILED: HTTP %d (no error body)", code);
+                    } else {
+                        BufferedReader errReader = new BufferedReader(
+                                new InputStreamReader(errStream, "UTF-8"));
+                        StringBuilder errBody = new StringBuilder();
+                        String line;
+                        while ((line = errReader.readLine()) != null) {
+                            errBody.append(line);
+                        }
+                        errReader.close();
+                        result.error = "HTTP " + code + ": " + errBody.toString();
+                        LogUtil.e(TAG, "doRequestWithError FAILED: HTTP %d body=%s", code, LogUtil.preview(errBody.toString(), 800));
                     }
-                    errReader.close();
-                    result.error = "HTTP " + code + ": " + errBody.toString();
-                    LogUtil.e(TAG, "doRequestWithError FAILED: HTTP %d body=%s", code, LogUtil.preview(errBody.toString(), 800));
                 } catch (Exception e) {
                     result.error = "HTTP " + code;
                     LogUtil.e(TAG, "doRequestWithError FAILED: HTTP %d (error body unreadable: %s)", code, e.getMessage());
@@ -335,8 +353,13 @@ public class ApiClient {
                     new InputStreamReader(conn.getInputStream(), "UTF-8"));
             StringBuilder sb = new StringBuilder();
             String line;
+            // 响应体设上限，避免超大/异常响应在 API19 设备上把整个 body 读进内存导致 OOM
             while ((line = reader.readLine()) != null) {
                 sb.append(line);
+                if (sb.length() > MAX_RESPONSE_CHARS) {
+                    LogUtil.w(TAG, "doRequestWithError response exceeds %d chars, truncated", MAX_RESPONSE_CHARS);
+                    break;
+                }
             }
             reader.close();
             result.response = sb.toString();
@@ -448,7 +471,11 @@ public class ApiClient {
             if (choices == null || choices.length() == 0) return null;
             JSONObject msg = choices.getJSONObject(0).optJSONObject("message");
             if (msg == null) return null;
-            return removeThinkingContent(msg.optString("content", ""));
+            // content 缺失或为 null 时返回 null，让调用方走「响应解析失败」而非渲染空气泡
+            if (!msg.has("content") || msg.isNull("content")) return null;
+            String content = msg.optString("content", null);
+            if (content == null) return null;
+            return removeThinkingContent(content);
         } catch (Exception e) {
             LogUtil.e(TAG, "extractMessageContent failed: " + e.getMessage());
             return null;

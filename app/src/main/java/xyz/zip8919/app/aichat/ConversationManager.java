@@ -13,6 +13,8 @@ public class ConversationManager {
     private StorageManager storageManager;
     private List<Conversation> conversations;
     private Conversation currentConversation;
+    // 被删除的「当前会话」的消息列表：主界面 messages 仍指向它，留给下一个 current 复用，避免分裂
+    private List<Message> orphanMessages;
 
     private ConversationManager() {
         this.storageManager = StorageManager.getInstance();
@@ -29,6 +31,12 @@ public class ConversationManager {
     public Conversation getCurrentConversation() {
         if (this.currentConversation == null) {
             this.currentConversation = new Conversation();
+            // 刚删除了「当前会话」时，界面侧仍指向旧的消息列表；让新会话复用它，
+            // 否则后续消息写进旧列表而新会话 messages 为空，保存被跳过，整段对话丢失。
+            if (this.orphanMessages != null) {
+                this.currentConversation.messages = this.orphanMessages;
+                this.orphanMessages = null;
+            }
             this.conversations.add(0, this.currentConversation);
             LogUtil.d(TAG, "getCurrentConversation: created fallback '%s' (%s)",
                     this.currentConversation.id, this.currentConversation.title);
@@ -39,6 +47,7 @@ public class ConversationManager {
     public void setCurrentConversation(Conversation conv) {
         LogUtil.d(TAG, "setCurrentConversation: %s", conv == null ? "null" : conv.id);
         this.currentConversation = conv;
+        this.orphanMessages = null;
     }
 
     public Conversation createNewConversation() {
@@ -46,6 +55,7 @@ public class ConversationManager {
             LogUtil.d(TAG, "createNewConversation: saving previous '%s' first", this.currentConversation.id);
             saveCurrentConversation();
         }
+        this.orphanMessages = null;
         this.currentConversation = new Conversation();
         this.conversations.add(0, this.currentConversation);
         LogUtil.i(TAG, "createNewConversation: id=%s, total=%d", this.currentConversation.id, this.conversations.size());
@@ -53,18 +63,26 @@ public class ConversationManager {
     }
 
     public void saveCurrentConversation() {
-        if (this.currentConversation == null || this.currentConversation.messages.isEmpty()) {
+        // 取一次本地引用：避免序列化 A 之后字段被换成 B，导致 A 的内容写进 B 的文件
+        Conversation conv = this.currentConversation;
+        if (conv == null || conv.messages.isEmpty()) {
             LogUtil.v(TAG, "saveCurrentConversation skipped: empty conversation");
             return;
         }
-        String json = toJson(this.currentConversation);
-        boolean ok = storageManager.saveConversation(this.currentConversation.id, json);
+        String json = toJson(conv);
+        // toJson 内部异常会返回 "{}"，直接落盘会覆盖整个会话文件，这里拒绝写入
+        if (json == null || json.length() < 3 || "{}".equals(json)) {
+            LogUtil.e(TAG, "saveCurrentConversation aborted: serialization failed for id=%s", conv.id);
+            return;
+        }
+        boolean ok = storageManager.saveConversation(conv.id, json);
         LogUtil.d(TAG, "saveCurrentConversation: id=%s msgs=%d jsonLen=%d ok=%s",
-                this.currentConversation.id, this.currentConversation.messages.size(), json.length(), ok);
+                conv.id, conv.messages.size(), json.length(), ok);
     }
 
     public void switchConversation(String conversationId) {
         LogUtil.i(TAG, "switchConversation -> %s", conversationId);
+        this.orphanMessages = null;
         // Try to find in memory
         for (Conversation c : this.conversations) {
             if (c.id.equals(conversationId)) {
@@ -91,6 +109,8 @@ public class ConversationManager {
     public void deleteConversation(String conversationId) {
         LogUtil.i(TAG, "deleteConversation: id=%s, before=%d", conversationId, this.conversations.size());
         if (this.currentConversation != null && this.currentConversation.id.equals(conversationId)) {
+            // 主界面 messages 仍指向被删会话的列表，暂存给下一个 current 复用
+            this.orphanMessages = this.currentConversation.messages;
             this.currentConversation = null;
         }
         for (int i = 0; i < this.conversations.size(); i++) {
@@ -132,6 +152,8 @@ public class ConversationManager {
         });
 
         this.conversations = loaded;
+        // 列表已从磁盘重建，之前暂存的消息列表不再对应任何会话
+        this.orphanMessages = null;
         LogUtil.i(TAG, "loadConversations done: %d conversations", this.conversations.size());
         return this.conversations;
     }
@@ -184,8 +206,12 @@ public class ConversationManager {
             JSONObject json = new JSONObject(jsonStr);
             conv.id = json.optString("id", conv.id);
             conv.title = normalizeTitle(json.optString("title", null));
-            conv.createdAt = json.optLong("createdAt", System.currentTimeMillis());
-            conv.updatedAt = json.optLong("updatedAt", System.currentTimeMillis());
+            // 缺失时间字段时不能用「当前时间」，否则每次加载都变成「刚刚」、排序不断漂移；
+            // 用 0/createdAt 兜底，保证同一文件每次得到相同值。
+            conv.createdAt = json.has("createdAt") ? json.optLong("createdAt", 0) : 0;
+            conv.updatedAt = json.has("updatedAt") ? json.optLong("updatedAt", 0) : 0;
+            if (conv.createdAt == 0 && conv.updatedAt != 0) conv.createdAt = conv.updatedAt;
+            if (conv.updatedAt == 0) conv.updatedAt = conv.createdAt;
             conv.model = json.optString("model", "");
             conv.systemPrompt = json.optString("systemPrompt", "");
             conv.titleGenerated = json.optBoolean("titleGenerated", false);

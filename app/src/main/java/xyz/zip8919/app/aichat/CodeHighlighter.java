@@ -408,9 +408,11 @@ public class CodeHighlighter {
                                 if (code.charAt(i) == '\\') i++;
                                 i++;
                             }
-                            if (i < len) i++; // closing "
-                            String raw = code.substring(valStart, i);
-                            String inner = code.substring(valStart + 1, i - 1);
+                            boolean closed = i < len; // 循环因遇到闭合引号而退出
+                            if (closed) i++; // closing "
+                            int valEnd = i > len ? len : i; // 值未闭合（含以 \ 结尾）时 i 可能超出 len
+                            String raw = code.substring(valStart, valEnd);
+                            String inner = code.substring(valStart + 1, closed ? valEnd - 1 : valEnd);
                             // Color / number detection for SVG attr values
                             if ((lang.equals("svg") || lang.equals("xml")) &&
                                     (inner.matches("#[0-9a-fA-F]{3,8}") ||

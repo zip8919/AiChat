@@ -36,6 +36,7 @@ public class ScanActivity extends Activity {
     private static final int[] SCAN_KEY_CODES = {5, 27, 131, 137, 286};
     private long lastScanLaunchTime = 0;
     private boolean expectingScanResult = false;
+    private Runnable pendingExcerptPicker;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -76,6 +77,10 @@ public class ScanActivity extends Activity {
             @Override
             public void onClick(View v) {
                 int start = scanEditText.getSelectionStart();
+                // 无焦点/无选区时 getSelectionStart() 返回 -1，兜底插到末尾，避免 insert(-1) 越界崩溃
+                if (start < 0) {
+                    start = scanEditText.getText().length();
+                }
                 LogUtil.v(TAG, "newline: insert at %d", start);
                 scanEditText.getText().insert(start, "\n");
             }
@@ -133,6 +138,8 @@ public class ScanActivity extends Activity {
                     scanEditText.setVisibility(View.VISIBLE);
                     scanTriggerButton.setVisibility(View.GONE);
                 } else {
+                    // 回删清空后把输入框一并藏起来，否则空输入框会压住提示文字与按钮
+                    scanEditText.setVisibility(View.GONE);
                     scanHintText.setVisibility(View.VISIBLE);
                     scanTriggerButton.setVisibility(View.VISIBLE);
                 }
@@ -140,6 +147,16 @@ public class ScanActivity extends Activity {
             @Override
             public void afterTextChanged(Editable s) {}
         });
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        // 撤掉扫描键回退的延迟弹窗，避免在已销毁实例上 show()
+        if (pendingExcerptPicker != null && scanEditText != null) {
+            scanEditText.removeCallbacks(pendingExcerptPicker);
+        }
+        pendingExcerptPicker = null;
     }
 
     private void launchSystemScan() {
@@ -185,9 +202,15 @@ public class ScanActivity extends Activity {
                     LogUtil.d(TAG, "scan key: started SPWBZCActivity");
                 } catch (Exception e) {
                     LogUtil.w(TAG, "scan key: SPWBZCActivity start failed (%s), fallback to excerpt picker", e.getMessage());
-                    scanEditText.postDelayed(new Runnable() {
+                    // 延迟到点前 Activity 可能已 finish，销毁后 show() 会抛 BadTokenException
+                    if (pendingExcerptPicker != null) {
+                        scanEditText.removeCallbacks(pendingExcerptPicker);
+                    }
+                    scanEditText.postDelayed(pendingExcerptPicker = new Runnable() {
                         @Override
                         public void run() {
+                            pendingExcerptPicker = null;
+                            if (isFinishing() || isDestroyed()) return;
                             showExcerptPicker();
                         }
                     }, 1500);
@@ -221,6 +244,11 @@ public class ScanActivity extends Activity {
                 if (contentIdx >= 0) {
                     String content = cursor.getString(contentIdx);
                     if (content != null && content.length() > 0) {
+                        // 用户已手动输入内容时不覆盖（与 211-213 注释一致）
+                        if (scanEditText.getText().length() > 0) {
+                            LogUtil.d(TAG, "loadLatestExcerpt: skip, input not empty (%d chars)", scanEditText.getText().length());
+                            return;
+                        }
                         scanEditText.setText(content);
                         scanEditText.setSelection(content.length());
                         scanEditText.setVisibility(View.VISIBLE);
@@ -362,6 +390,7 @@ public class ScanActivity extends Activity {
             try {
                 clipboard.setPrimaryClip(ClipData.newPlainText("scan", text));
             } catch (Exception e) {
+                LogUtil.w(TAG, "copyToClipboard: setPrimaryClip failed (%s), fallback to legacy", e.getMessage());
                 android.text.ClipboardManager oldClipboard =
                     (android.text.ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
                 if (oldClipboard != null) {
