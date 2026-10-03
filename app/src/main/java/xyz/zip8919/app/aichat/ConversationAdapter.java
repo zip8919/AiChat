@@ -10,17 +10,21 @@ import android.widget.TextView;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 
 public class ConversationAdapter extends BaseAdapter {
     private static final String TAG = "ConvAdapter";
+    private static final int MAX_TIME_CACHE = 256;
     private Context context;
     private List<Conversation> conversations;
     private LayoutInflater inflater;
     private SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault());
+    private Map<String, String> timeCache = new HashMap<String, String>();
     private boolean selectionMode = false;
     private Set<String> selectedIds = new HashSet<String>();
 
@@ -151,7 +155,16 @@ public class ConversationAdapter extends BaseAdapter {
         Conversation conv = conversations.get(position);
         LogUtil.v(TAG, "getView: pos=%d id=%s title=%s", position, conv.id, conv.title);
         holder.titleView.setText(ConversationManager.normalizeTitle(conv.title));
-        holder.timeView.setText(dateFormat.format(new Date(conv.updatedAt)));
+        String timeKey = conv.id + ":" + conv.updatedAt;
+        String timeText = timeCache.get(timeKey);
+        if (timeText == null) {
+            timeText = dateFormat.format(new Date(conv.updatedAt));
+            if (timeCache.size() >= MAX_TIME_CACHE) {
+                timeCache.clear();
+            }
+            timeCache.put(timeKey, timeText);
+        }
+        holder.timeView.setText(timeText);
         if (selectionMode) {
             boolean checked = selectedIds.contains(conv.id);
             holder.checkView.setVisibility(View.VISIBLE);

@@ -542,7 +542,7 @@ public class MainActivity extends Activity {
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         LogUtil.d(TAG, "onActivityResult: requestCode=%d resultCode=%d data=%s", requestCode, resultCode, data);
         if (requestCode == REQUEST_CONVERSATION_MANAGER && resultCode == RESULT_OK) {
-            String conversationId = data == null ? null : data.getStringExtra("conversation_id");
+            final String conversationId = data == null ? null : data.getStringExtra("conversation_id");
             if (conversationId != null) {
                 LogUtil.i(TAG, "switching to conversation: %s", conversationId);
                 // 排队消息属于旧会话：在 interruptRequest 派发的 drain 之前丢弃，避免发进新会话
@@ -554,12 +554,24 @@ public class MainActivity extends Activity {
                 }
                 if (isRequestInProgress.get()) interruptRequest();
                 conversationManager.saveCurrentConversation();
-                conversationManager.switchConversation(conversationId);
-                Conversation conv = conversationManager.getCurrentConversation();
-                messages = conv.messages;
-                LogUtil.i(TAG, "switched: id=%s title=%s messages=%d", conv.id, conv.title, messages.size());
-                refreshWebView();
-                Toast.makeText(this, "已切换到: " + conv.title, Toast.LENGTH_SHORT).show();
+                new Thread(new Runnable() {
+                    @Override
+                    public void run() {
+                        conversationManager.switchConversation(conversationId);
+                        runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                Conversation conv = conversationManager.getCurrentConversation();
+                                messages = conv.messages;
+                                LogUtil.i(TAG, "switched: id=%s title=%s messages=%d",
+                                        conv.id, conv.title, messages.size());
+                                refreshWebView();
+                                Toast.makeText(MainActivity.this, "已切换到: " + conv.title,
+                                        Toast.LENGTH_SHORT).show();
+                            }
+                        });
+                    }
+                }, "aichat-switch-conversation").start();
             } else {
                 LogUtil.w(TAG, "REQUEST_CONVERSATION_MANAGER returned null conversation_id");
             }
@@ -1177,13 +1189,14 @@ public class MainActivity extends Activity {
                         }
                     }
 
-                    LogUtil.d(TAG, "request body built: len=%d", body.toString().length());
-                    LogUtil.v(TAG, "request body: %s", LogUtil.preview(body.toString(), 1500));
+                    final String payload = body.toString();
+                    LogUtil.d(TAG, "request body built: len=%d", payload.length());
+                    LogUtil.v(TAG, "request body: %s", LogUtil.preview(payload, 1500));
 
                     long reqMs = System.currentTimeMillis();
                     java.io.OutputStream os = conn.getOutputStream();
                     try {
-                        os.write(body.toString().getBytes("UTF-8"));
+                        os.write(payload.getBytes("UTF-8"));
                     } finally {
                         os.close();
                     }
@@ -1559,11 +1572,24 @@ public class MainActivity extends Activity {
         webViewEvalJs("appendMsg('" + esc + "')");
     }
 
-    private void updateAiContent(String content) {
-        String html = MessageHtmlRenderer.contentToHtml(content, this);
-        String esc = jsEscape(html);
-        LogUtil.v(TAG, "webview js: updateLastMsg(htmlLen=%d)", esc.length());
-        webViewEvalJs("updateLastMsg('" + esc + "')");
+    private void updateAiContent(final String content) {
+        // 渲染代数守卫：异步渲染期间若 refreshWebView 已换页（如切会话），丢弃过期注入
+        final int myRenderGen = renderGeneration.get();
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                final String html = MessageHtmlRenderer.contentToHtml(content, MainActivity.this);
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (renderGeneration.get() != myRenderGen) return;
+                        String esc = jsEscape(html);
+                        LogUtil.v(TAG, "webview js: updateLastMsg(htmlLen=%d)", esc.length());
+                        webViewEvalJs("updateLastMsg('" + esc + "')");
+                    }
+                });
+            }
+        }) {{ setName("aichat-render-" + System.currentTimeMillis()); }}.start();
     }
 
     private void removeDomFrom(int pos) {
@@ -2687,50 +2713,68 @@ public class MainActivity extends Activity {
     // ========== 快速搜题 ==========
 
     private void loadQuickScanResult() {
-        Cursor cursor = null;
-        try {
-            LogUtil.d(TAG, "loadQuickScanResult: querying content://com.jxw.wbzc/query");
-            cursor = getContentResolver().query(
-                Uri.parse("content://com.jxw.wbzc/query"),
-                null, null, null, "_id DESC");
-            if (cursor != null && cursor.moveToFirst()) {
-                int idx = cursor.getColumnIndex("content");
-                if (idx >= 0) {
-                    String text = cursor.getString(idx);
-                    if (text != null && !text.isEmpty()) {
-                        LogUtil.i(TAG, "quick scan result: len=%d preview=%s",
-                                text.length(), LogUtil.preview(text, 100));
-                        String cur = inputEditText.getText().toString();
-                        boolean inserted = false;
-                        if (cur.isEmpty()) {
-                            inputEditText.setText(text);
-                            inserted = true;
-                        } else if (!cur.equals(text) && !cur.endsWith(text)) {
-                            if (!cur.endsWith("\n")) {
-                                inputEditText.append("\n");
+        // 跨进程 ContentProvider 查询 + 游标读取移出主线程，结果回 UI 线程更新输入框
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                Cursor cursor = null;
+                try {
+                    LogUtil.d(TAG, "loadQuickScanResult: querying content://com.jxw.wbzc/query");
+                    cursor = getContentResolver().query(
+                        Uri.parse("content://com.jxw.wbzc/query"),
+                        null, null, null, "_id DESC");
+                    if (cursor != null && cursor.moveToFirst()) {
+                        int idx = cursor.getColumnIndex("content");
+                        if (idx >= 0) {
+                            final String text = cursor.getString(idx);
+                            if (text != null && !text.isEmpty()) {
+                                LogUtil.i(TAG, "quick scan result: len=%d preview=%s",
+                                        text.length(), LogUtil.preview(text, 100));
+                                runOnUiThread(new Runnable() {
+                                    @Override
+                                    public void run() {
+                                        String cur = inputEditText.getText().toString();
+                                        boolean inserted = false;
+                                        if (cur.isEmpty()) {
+                                            inputEditText.setText(text);
+                                            inserted = true;
+                                        } else if (!cur.equals(text) && !cur.endsWith(text)) {
+                                            if (!cur.endsWith("\n")) {
+                                                inputEditText.append("\n");
+                                            }
+                                            inputEditText.append(text);
+                                            inserted = true;
+                                        }
+                                        if (inserted) {
+                                            inputEditText.setSelection(inputEditText.getText().length());
+                                        }
+                                    }
+                                });
+                                return;
                             }
-                            inputEditText.append(text);
-                            inserted = true;
-                        }
-                        if (inserted) {
-                            inputEditText.setSelection(inputEditText.getText().length());
+                            LogUtil.w(TAG, "quick scan result: content column empty");
+                        } else {
+                            LogUtil.w(TAG, "quick scan result: no 'content' column in cursor");
                         }
                     } else {
-                        LogUtil.w(TAG, "quick scan result: content column empty");
+                        LogUtil.w(TAG, "quick scan result: no row returned");
                     }
-                } else {
-                    LogUtil.w(TAG, "quick scan result: no 'content' column in cursor");
+                } catch (Exception e) {
+                    LogUtil.e(TAG, "quick scan result query failed", e);
+                    // 补用户反馈：此前异常被静默吞掉，用户只看到输入框依旧为空
+                    final String errMsg = e.getMessage();
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            Toast.makeText(MainActivity.this, "读取搜题结果失败: " + errMsg,
+                                    Toast.LENGTH_LONG).show();
+                        }
+                    });
+                } finally {
+                    if (cursor != null) cursor.close();
                 }
-            } else {
-                LogUtil.w(TAG, "quick scan result: no row returned");
             }
-        } catch (Exception e) {
-            LogUtil.e(TAG, "quick scan result query failed", e);
-            // 补用户反馈：此前异常被静默吞掉，用户只看到输入框依旧为空
-            Toast.makeText(this, "读取搜题结果失败: " + e.getMessage(), Toast.LENGTH_LONG).show();
-        } finally {
-            if (cursor != null) cursor.close();
-        }
+        }, "aichat-quick-scan").start();
     }
 
     // Execute JS in viewer WebView, using evaluateJavascript (API 19+) when available,
@@ -2854,14 +2898,24 @@ public class MainActivity extends Activity {
                         showConfirmDialog("确定修改本条消息？", new Runnable() {
                             public void run() {
                                 msg.content = newContent;
-                                // DOM update: only update this message's div
-                                String html = msg.isAssistant()
-                                    ? MessageHtmlRenderer.contentToHtml(newContent, MainActivity.this)
-                                    : "<div class=\"bubble\">" + MessageHtmlRenderer.esc(newContent) + "</div>";
-                                String esc = jsEscape(html);
-                                webViewEvalJs("updateMsgAt(" + pos + ",'" + esc + "')");
-                                conversationManager.saveCurrentConversation();
-                                Toast.makeText(MainActivity.this, "已修改", Toast.LENGTH_SHORT).show();
+                                // DOM update: only update this message's div; render off the UI thread
+                                new Thread(new Runnable() {
+                                    @Override
+                                    public void run() {
+                                        final String html = msg.isAssistant()
+                                            ? MessageHtmlRenderer.contentToHtml(newContent, MainActivity.this)
+                                            : "<div class=\"bubble\">" + MessageHtmlRenderer.esc(newContent) + "</div>";
+                                        runOnUiThread(new Runnable() {
+                                            @Override
+                                            public void run() {
+                                                String esc = jsEscape(html);
+                                                webViewEvalJs("updateMsgAt(" + pos + ",'" + esc + "')");
+                                                conversationManager.saveCurrentConversation();
+                                                Toast.makeText(MainActivity.this, "已修改", Toast.LENGTH_SHORT).show();
+                                            }
+                                        });
+                                    }
+                                }) {{ setName("aichat-render-" + System.currentTimeMillis()); }}.start();
                             }
                         });
                     }

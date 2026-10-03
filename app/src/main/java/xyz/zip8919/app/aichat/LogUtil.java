@@ -99,17 +99,72 @@ public final class LogUtil {
     /** 把任意长文本截断成单行预览，用于打印正文/HTML/请求体 */
     public static String preview(String s) {
         if (s == null) return "<null>";
-        String flat = s.replace("\r", "\\r").replace("\n", "\\n");
-        if (flat.length() <= PREVIEW) return "(" + s.length() + ") " + flat;
-        return "(" + s.length() + ") " + flat.substring(0, PREVIEW) + "...<truncated>";
+        FlatPrefix p = flattenPrefix(s, PREVIEW);
+        if (!p.truncated) return "(" + s.length() + ") " + p.text;
+        return "(" + s.length() + ") " + p.text + "...<truncated>";
     }
 
     /** 按指定长度截断 */
     public static String preview(String s, int max) {
         if (s == null) return "<null>";
-        String flat = s.replace("\r", "\\r").replace("\n", "\\n");
-        if (flat.length() <= max) return flat;
-        return flat.substring(0, max) + "...";
+        if (max < 0) {
+            // 与现状一致：max<0 时 flat.length()>max 恒成立，flat.substring(0,max) 抛同一异常
+            throw new StringIndexOutOfBoundsException(max);
+        }
+        FlatPrefix p = flattenPrefix(s, max);
+        if (!p.truncated) return p.text;
+        return p.text + "...";
+    }
+
+    /**
+     * 单遍构建转义前缀，最多产出 maxFlatLen 个转义后字符，避免对整串做两遍 replace。
+     * truncated=true 表示完整转义串长度超过 maxFlatLen，此时 text 恰为现状
+     * flat.substring(0, maxFlatLen) 的内容；转义符跨边界时只保留落在边界内的部分
+     * （如 "a\r"、max=2 时 flat="a\\r" 取前 2 字符得到 "a\\"）。
+     *
+     * 自测样例（PREVIEW=300）：
+     *   preview("a\r\nb")   -> "(4) a\\r\\nb"
+     *   preview(301个'a')   -> "(301) " + 300个'a' + "...<truncated>"
+     *   preview("a\r", 2)   -> "a\\..."（flat 长度 3>2，截到 "a\\"）
+     *   preview("a\n", 3)   -> "a\\n"（flat 长度恰为 3，不加 "..."）
+     *   preview("a\nb", 3)  -> "a\\n..."
+     *   preview("abc", 3)   -> "abc"；preview("abcd", 3) -> "abc..."
+     *   preview("", 0)      -> ""；preview("x", 0) -> "..."
+     */
+    private static FlatPrefix flattenPrefix(String s, int maxFlatLen) {
+        StringBuilder sb = new StringBuilder(Math.min(s.length(), maxFlatLen));
+        int flatLen = 0;
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == '\r' || c == '\n') {
+                if (flatLen + 2 > maxFlatLen) {
+                    // 越过上限：fit 为 0 或 1，只保留落在上限内的部分（跨转义截断与 substring 一致）
+                    int fit = maxFlatLen - flatLen;
+                    if (fit > 0) sb.append('\\');
+                    return new FlatPrefix(sb.toString(), true);
+                }
+                sb.append('\\').append(c == '\r' ? 'r' : 'n');
+                flatLen += 2;
+            } else {
+                if (flatLen + 1 > maxFlatLen) {
+                    return new FlatPrefix(sb.toString(), true);
+                }
+                sb.append(c);
+                flatLen += 1;
+            }
+        }
+        return new FlatPrefix(sb.toString(), false);
+    }
+
+    /** flattenPrefix 的返回值：转义后的前缀文本 + 是否发生截断 */
+    private static final class FlatPrefix {
+        final String text;
+        final boolean truncated;
+
+        FlatPrefix(String text, boolean truncated) {
+            this.text = text;
+            this.truncated = truncated;
+        }
     }
 
     /** 打印当前线程名，便于区分主线程/网络线程 */

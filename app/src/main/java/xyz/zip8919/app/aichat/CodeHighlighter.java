@@ -11,6 +11,12 @@ import java.util.regex.Pattern;
 public class CodeHighlighter {
     private static final String TAG = "CodeHighlighter";
 
+    private static final Pattern HEX_COLOR = Pattern.compile("#[0-9a-fA-F]{3,8}");
+    private static final Pattern RGB_COLOR = Pattern.compile(
+            "rgb\\(\\s*\\d+\\s*,\\s*\\d+\\s*,\\s*\\d+\\s*(,\\s*[\\d.]+\\s*)?\\)");
+    private static final Pattern URL_VALUE = Pattern.compile("url\\([^)]*\\)");
+    private static final Pattern DIMENSION = Pattern.compile("[\\d.]+(px|em|rem|pt|%|cm|mm|in)?");
+
     private static final Set<String> SUPPORTED = new HashSet<>(Arrays.asList(
         "java", "py", "python", "js", "javascript", "ts", "typescript",
         "bash", "sh", "shell", "json", "xml", "html", "svg", "cpp", "c++", "c",
@@ -289,6 +295,7 @@ public class CodeHighlighter {
         Set<String> types = LANG_KEYWORDS.get(lang + "_types");
 
         StringBuilder out = new StringBuilder();
+        Matcher[] matchers = buildMatchers(rules, code);
         int i = 0;
         int len = code.length();
 
@@ -296,11 +303,11 @@ public class CodeHighlighter {
             boolean matched = false;
 
             // 1. Try rules (comments, strings, numbers)
-            if (rules != null) {
-                for (Rule r : rules) {
-                    Matcher m = r.pattern.matcher(code);
+            if (matchers != null) {
+                for (int rIdx = 0; rIdx < matchers.length; rIdx++) {
+                    Matcher m = matchers[rIdx];
                     if (m.find(i) && m.start() == i) {
-                        out.append("<span class=\"tk-").append(r.type).append("\">");
+                        out.append("<span class=\"tk-").append(rules[rIdx].type).append("\">");
                         out.append(esc(m.group()));
                         out.append("</span>");
                         i = m.end();
@@ -415,10 +422,10 @@ public class CodeHighlighter {
                             String inner = code.substring(valStart + 1, closed ? valEnd - 1 : valEnd);
                             // Color / number detection for SVG attr values
                             if ((lang.equals("svg") || lang.equals("xml")) &&
-                                    (inner.matches("#[0-9a-fA-F]{3,8}") ||
-                                     inner.matches("rgb\\(\\s*\\d+\\s*,\\s*\\d+\\s*,\\s*\\d+\\s*(,\\s*[\\d.]+\\s*)?\\)") ||
-                                     inner.matches("url\\([^)]*\\)") ||
-                                     inner.matches("[\\d.]+(px|em|rem|pt|%|cm|mm|in)?")))
+                                    (HEX_COLOR.matcher(inner).matches() ||
+                                     RGB_COLOR.matcher(inner).matches() ||
+                                     URL_VALUE.matcher(inner).matches() ||
+                                     DIMENSION.matcher(inner).matches()))
                                 out.append("<span class=\"tk-num\">").append(esc(raw)).append("</span>");
                             else
                                 out.append("<span class=\"tk-str\">").append(esc(raw)).append("</span>");
@@ -441,13 +448,59 @@ public class CodeHighlighter {
                 continue;
             }
 
-            // 5. Plain text
+            // 5. Plain text — batch a maximal run of characters that would each
+            // reach this same branch: no rule match starts inside it, no
+            // operator, no identifier start, no '<' (XML tag branch).
+            int runEnd = plainRunEnd(code, len, i, matchers);
+            if (runEnd > i) {
+                for (int k = i; k < runEnd; k++) out.append(esc(String.valueOf(code.charAt(k))));
+                i = runEnd;
+                continue;
+            }
+
             out.append(esc(String.valueOf(code.charAt(i))));
             i++;
         }
 
         LogUtil.v(TAG, "highlight done: lang=%s %d chars -> %d chars", lang, len, out.length());
         return out.toString();
+    }
+
+    private static Matcher[] buildMatchers(Rule[] rules, String code) {
+        if (rules == null) return null;
+        Matcher[] matchers = new Matcher[rules.length];
+        for (int i = 0; i < rules.length; i++) {
+            matchers[i] = rules[i].pattern.matcher(code);
+        }
+        return matchers;
+    }
+
+    /**
+     * End index (exclusive) of the longest run starting at {@code i} whose every
+     * character would fall into the main-loop "plain text" branch when processed
+     * one by one: scanning stops before the first position that a rule could
+     * match, the first operator, the first identifier start, or '<'.
+     */
+    private static int plainRunEnd(String code, int len, int i, Matcher[] matchers) {
+        int plainEnd = i + 1;
+        int nextMatch = Integer.MAX_VALUE;
+        if (matchers != null) {
+            for (int rIdx = 0; rIdx < matchers.length; rIdx++) {
+                if (matchers[rIdx].find(i)) {
+                    int start = matchers[rIdx].start();
+                    if (start < nextMatch) nextMatch = start;
+                }
+            }
+        }
+        while (plainEnd < len) {
+            char c = code.charAt(plainEnd);
+            if (Character.isJavaIdentifierStart(c)
+                    || "=+-*/%<>!&|^~?:.,;{}[]()".indexOf(c) >= 0
+                    || c == '<') break;
+            if (plainEnd >= nextMatch) break;
+            plainEnd++;
+        }
+        return plainEnd;
     }
 
     private static String esc(String s) {

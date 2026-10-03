@@ -458,19 +458,24 @@ public class ToolsActivity extends Activity {
     }
 
     private void editFile(final File f) {
-        final String content = readFile(f);
-        if (content == null) {
-            Toast.makeText(this, "读取失败", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        final EditText input = new EditText(this);
-        input.setInputType(InputType.TYPE_CLASS_TEXT
-                | InputType.TYPE_TEXT_FLAG_MULTI_LINE
-                | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
-        input.setText(content);
-        input.setTextSize(12);
-        new AlertDialog.Builder(this)
-                .setTitle("编辑 " + f.getName())
+        // 读文件放到后台线程，避免点击「编辑」时阻塞主线程
+        new Thread(new Runnable() {
+            public void run() {
+                final String content = readFile(f);
+                runOnUiThread(new Runnable() {
+                    public void run() {
+                        if (content == null) {
+                            Toast.makeText(ToolsActivity.this, "读取失败", Toast.LENGTH_SHORT).show();
+                            return;
+                        }
+                        final EditText input = new EditText(ToolsActivity.this);
+                        input.setInputType(InputType.TYPE_CLASS_TEXT
+                                | InputType.TYPE_TEXT_FLAG_MULTI_LINE
+                                | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+                        input.setText(content);
+                        input.setTextSize(12);
+                        new AlertDialog.Builder(ToolsActivity.this)
+                                .setTitle("编辑 " + f.getName())
                 .setView(input)
                 .setPositiveButton("保存", new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
@@ -485,21 +490,37 @@ public class ToolsActivity extends Activity {
                 })
                 .setNegativeButton("取消", null)
                 .show();
+                    }
+                });
+            }
+        }, "aichat-editFile").start();
     }
 
-    private void previewFile(File f) {
-        String content = readFile(f);
-        if (content == null) {
-            Toast.makeText(this, "读取失败", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        String lang = MainActivity.detectLang(content);
-        LogUtil.i(TAG, "previewFile: %s lang=%s", f.getName(), lang);
-        if ("html".equals(lang) || "svg".equals(lang)) {
-            startActivity(MainActivity.newCodePreviewIntent(this, lang, content));
-        } else {
-            startActivity(MainActivity.newJsRunnerIntent(this, content, lang));
-        }
+    private void previewFile(final File f) {
+        // 读文件放到后台线程，避免点击「预览」时阻塞主线程
+        new Thread(new Runnable() {
+            public void run() {
+                final String content = readFile(f);
+                runOnUiThread(new Runnable() {
+                    public void run() {
+                        if (isFinishing() || isDestroyed()) {
+                            return;
+                        }
+                        if (content == null) {
+                            Toast.makeText(ToolsActivity.this, "读取失败", Toast.LENGTH_SHORT).show();
+                            return;
+                        }
+                        String lang = MainActivity.detectLang(content);
+                        LogUtil.i(TAG, "previewFile: %s lang=%s", f.getName(), lang);
+                        if ("html".equals(lang) || "svg".equals(lang)) {
+                            startActivity(MainActivity.newCodePreviewIntent(ToolsActivity.this, lang, content));
+                        } else {
+                            startActivity(MainActivity.newJsRunnerIntent(ToolsActivity.this, content, lang));
+                        }
+                    }
+                });
+            }
+        }, "aichat-previewFile").start();
     }
 
     private void deleteFile(final File f) {
@@ -559,13 +580,23 @@ public class ToolsActivity extends Activity {
                 .setTitle("选择代码文件")
                 .setItems(names, new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int which) {
-                        String content = readFile(files.get(which));
-                        if (content != null) {
-                            loadingFile = true;
-                            jsInput.setText(content);
-                            loadingFile = false;
-                            currentJsFileName = files.get(which).getName();
-                        }
+                        final File picked = files.get(which);
+                        // 读文件放到后台线程，避免选择文件时阻塞主线程
+                        new Thread(new Runnable() {
+                            public void run() {
+                                final String content = readFile(picked);
+                                runOnUiThread(new Runnable() {
+                                    public void run() {
+                                        if (content != null) {
+                                            loadingFile = true;
+                                            jsInput.setText(content);
+                                            loadingFile = false;
+                                            currentJsFileName = picked.getName();
+                                        }
+                                    }
+                                });
+                            }
+                        }, "aichat-pickFile").start();
                     }
                 })
                 .setNegativeButton("取消", null)

@@ -9,7 +9,7 @@ import android.util.Base64;
 import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashMap;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -36,9 +36,11 @@ public class MessageHtmlRenderer {
                     TablesExtension.create()))
             .build();
 
-    // Thread-safe: render threads (aichat-render-*, streaming finalize) run concurrently
+    // Thread-safe: render threads (aichat-render-*, streaming finalize) run concurrently.
+    // Insertion-ordered LinkedHashMap: byte-budget eviction removes the oldest entry first.
+    private static final int LATEX_CACHE_MAX_BYTES = 2 * 1024 * 1024;
     private static final Map<String, String> latexCache =
-            Collections.synchronizedMap(new HashMap<String, String>());
+            Collections.synchronizedMap(new LinkedHashMap<String, String>());
 
     // Per-message HTML render cache: refreshWebView() re-renders every message on
     // settings changes / page returns; unchanged contents hit the cache instead of
@@ -48,12 +50,12 @@ public class MessageHtmlRenderer {
     // oversized renders (e.g. base64 math images) are not cached — otherwise up
     // to 24 near-identical full-message copies stay in memory for good.
     private static final int RENDER_CACHE_MAX_HTML = 256 * 1024;
+    private static final int RENDER_CACHE_MAX_ENTRIES = 24;
+    private static final int RENDER_CACHE_MAX_BYTES = 2 * 1024 * 1024;
+    // accessOrder=true → entrySet() iterates in LRU order (least recent first);
+    // contentToHtml evicts from the front before put (manual removeEldestEntry).
     private static final Map<String, String> renderCache =
-            Collections.synchronizedMap(new LinkedHashMap<String, String>(32, 0.75f, true) {
-                protected boolean removeEldestEntry(Map.Entry<String, String> eldest) {
-                    return size() > 24;
-                }
-            });
+            Collections.synchronizedMap(new LinkedHashMap<String, String>(32, 0.75f, true));
 
     private static final String CSS =
             "*{margin:0;padding:0;box-sizing:border-box;}" +
@@ -372,7 +374,21 @@ public class MessageHtmlRenderer {
         LogUtil.v(TAG, "contentToHtml: in=%d chars -> %d chars html in %d ms (thinking=%s)",
                 text.length(), html.length(), System.currentTimeMillis() - startTs,
                 text.contains("[thinking]"));
-        if (html.length() <= RENDER_CACHE_MAX_HTML) renderCache.put(text, html);
+        if (html.length() <= RENDER_CACHE_MAX_HTML) {
+            synchronized (renderCache) {
+                boolean present = renderCache.containsKey(text);
+                int totalBytes = html.length();
+                for (String v : renderCache.values()) totalBytes += v.length();
+                Iterator<Map.Entry<String, String>> it = renderCache.entrySet().iterator();
+                while (it.hasNext() && ((!present && renderCache.size() >= RENDER_CACHE_MAX_ENTRIES)
+                        || totalBytes > RENDER_CACHE_MAX_BYTES)) {
+                    Map.Entry<String, String> e = it.next();
+                    it.remove();
+                    totalBytes -= e.getValue().length();
+                }
+                renderCache.put(text, html);
+            }
+        }
         return html;
     }
 
@@ -426,26 +442,67 @@ public class MessageHtmlRenderer {
         Node document = PARSER.parse(text);
         StringBuilder html = new StringBuilder();
         document.accept(new HtmlVisitor(html));
-        String result = html.toString();
-        for (int i = 0; i < mathTags.size(); i++)
-            result = result.replace("@@MATH" + i + "@@", mathTags.get(i));
-        for (int i = 0; i < svgBlocks.size(); i++) {
-            // Inject width constraint directly on the SVG element so API 18
-            // respects it even when CSS doesn't override presentational attrs
-            String svgHtml = svgBlocks.get(i);
-            if (svgHtml == null) continue;
-            svgHtml = sanitizeRawHtml(svgHtml);
-            if (svgHtml.toLowerCase().contains(" style=\"")) {
-                svgHtml = svgHtml.replaceFirst("(?i) style=\"", " style=\"max-width:100%;width:100%;height:auto;");
-            } else {
-                svgHtml = svgHtml.replaceFirst("(?i)<svg", "<svg style=\"max-width:100%;width:100%;height:auto;\"");
-            }
-            result = result.replace("@@SVG" + i + "@@",
-                "<div class=\"svg-scroll\">" + svgHtml + "</div>");
-        }
+        String result = backfillPlaceholders(html.toString(), mathTags, svgBlocks);
         LogUtil.v(TAG, "renderMarkdown: %d -> %d chars, %d math formulas",
                 text.length(), result.length(), mathTags.size());
         return result;
+    }
+
+    // Single-pass placeholder backfill: scans left to right for "@@" tokens and
+    // replaces @@MATHn@@ / @@SVGn@@ in one pass instead of a whole-string replace()
+    // per entry. Unknown tokens, out-of-range indexes and null replacements are
+    // kept literally, matching the previous sequential replace() semantics.
+    private static String backfillPlaceholders(String result, List<String> mathTags, List<String> svgBlocks) {
+        StringBuilder out = new StringBuilder(result.length() + 256);
+        int pos = 0;
+        int len = result.length();
+        while (pos < len) {
+            int at = result.indexOf("@@", pos);
+            if (at < 0) {
+                out.append(result, pos, len);
+                break;
+            }
+            out.append(result, pos, at);
+            int p = at + 2;
+            int q = p;
+            while (q < len && Character.isLetter(result.charAt(q))) q++;
+            String kind = result.substring(p, q);
+            int d = q;
+            while (d < len && result.charAt(d) >= '0' && result.charAt(d) <= '9') d++;
+            int idx = -1;
+            if ((kind.equals("MATH") || kind.equals("SVG")) && d > q && d + 1 < len
+                    && result.charAt(d) == '@' && result.charAt(d + 1) == '@'
+                    && (d == q + 1 || result.charAt(q) != '0')) {
+                try {
+                    idx = Integer.parseInt(result.substring(q, d));
+                } catch (NumberFormatException nfe) {
+                    idx = -1;
+                }
+            }
+            if (idx >= 0 && idx < mathTags.size() && mathTags.get(idx) != null
+                    && kind.equals("MATH")) {
+                out.append(mathTags.get(idx));
+                pos = d + 2;
+                continue;
+            }
+            if (idx >= 0 && idx < svgBlocks.size() && svgBlocks.get(idx) != null
+                    && kind.equals("SVG")) {
+                String svgHtml = sanitizeRawHtml(svgBlocks.get(idx));
+                // Inject width constraint directly on the SVG element so API 18
+                // respects it even when CSS doesn't override presentational attrs
+                if (svgHtml.toLowerCase().contains(" style=\"")) {
+                    svgHtml = svgHtml.replaceFirst("(?i) style=\"", " style=\"max-width:100%;width:100%;height:auto;");
+                } else {
+                    svgHtml = svgHtml.replaceFirst("(?i)<svg", "<svg style=\"max-width:100%;width:100%;height:auto;\"");
+                }
+                out.append("<div class=\"svg-scroll\">").append(svgHtml).append("</div>");
+                pos = d + 2;
+                continue;
+            }
+            out.append("@@");
+            pos = at + 2;
+        }
+        return out.toString();
     }
 
     // Extract <svg ...>...</svg> blocks (case-insensitive) and replace with placeholders
@@ -1019,12 +1076,21 @@ public class MessageHtmlRenderer {
         }
 
         synchronized (latexCache) {
-            if (latexCache.size() >= 50) {
-                String first = latexCache.keySet().iterator().next();
-                latexCache.remove(first);
-                LogUtil.v(TAG, "latex cache EVICT oldest (size now %d)", latexCache.size());
-            }
             latexCache.put(key, imgTag);
+            int totalBytes = 0;
+            for (String v : latexCache.values()) totalBytes += v.length();
+            int evicted = 0;
+            Iterator<Map.Entry<String, String>> it = latexCache.entrySet().iterator();
+            while (totalBytes > LATEX_CACHE_MAX_BYTES && it.hasNext()) {
+                Map.Entry<String, String> e = it.next();
+                it.remove();
+                totalBytes -= e.getValue().length();
+                evicted++;
+            }
+            if (evicted > 0) {
+                LogUtil.v(TAG, "latex cache EVICT %d oldest (size now %d)",
+                        evicted, latexCache.size());
+            }
         }
         LogUtil.v(TAG, "latex cached (size=%d): %d chars html", latexCache.size(), imgTag.length());
         return imgTag;
@@ -1043,19 +1109,31 @@ public class MessageHtmlRenderer {
 
     public static String esc(String s) {
         if (s == null) return "";
-        return s.replace("&", "&amp;")
-                .replace("<", "&lt;")
-                .replace(">", "&gt;")
-                .replace("\"", "&quot;");
+        StringBuilder sb = new StringBuilder(s.length() + 16);
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == '&') sb.append("&amp;");
+            else if (c == '<') sb.append("&lt;");
+            else if (c == '>') sb.append("&gt;");
+            else if (c == '"') sb.append("&quot;");
+            else sb.append(c);
+        }
+        return sb.toString();
     }
 
     public static String escAttr(String s) {
         if (s == null) return "";
-        return s.replace("&", "&amp;")
-                .replace("\"", "&quot;")
-                .replace("<", "&lt;")
-                .replace(">", "&gt;")
-                .replace("'", "&#39;");
+        StringBuilder sb = new StringBuilder(s.length() + 16);
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == '&') sb.append("&amp;");
+            else if (c == '"') sb.append("&quot;");
+            else if (c == '<') sb.append("&lt;");
+            else if (c == '>') sb.append("&gt;");
+            else if (c == '\'') sb.append("&#39;");
+            else sb.append(c);
+        }
+        return sb.toString();
     }
 
     // Active-content tags / attributes stripped from model-authored raw HTML before it

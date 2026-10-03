@@ -247,112 +247,140 @@ public class ScanActivity extends Activity {
      * Auto-load the most recent excerpt (only if EditText is empty).
      */
     private void loadLatestExcerpt() {
-        Cursor cursor = null;
-        LogUtil.d(TAG, "loadLatestExcerpt: querying %s", CONTENT_URI);
-        try {
-            cursor = getContentResolver().query(CONTENT_URI, null, null, null, "_id DESC");
-            if (cursor != null && cursor.moveToFirst()) {
-                int contentIdx = cursor.getColumnIndex("content");
-                if (contentIdx >= 0) {
-                    String content = cursor.getString(contentIdx);
-                    if (content != null && content.length() > 0) {
-                        // 用户已手动输入内容时不覆盖（与 211-213 注释一致）
-                        if (scanEditText.getText().length() > 0) {
-                            LogUtil.d(TAG, "loadLatestExcerpt: skip, input not empty (%d chars)", scanEditText.getText().length());
-                            return;
+        // 用户已手动输入内容时不覆盖（与 211-213 注释一致）
+        if (scanEditText.getText().length() > 0) {
+            LogUtil.d(TAG, "loadLatestExcerpt: skip, input not empty (%d chars)", scanEditText.getText().length());
+            return;
+        }
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                Cursor cursor = null;
+                String content = null;
+                LogUtil.d(TAG, "loadLatestExcerpt: querying %s", CONTENT_URI);
+                try {
+                    cursor = getContentResolver().query(CONTENT_URI, null, null, null, "_id DESC");
+                    if (cursor != null && cursor.moveToFirst()) {
+                        int contentIdx = cursor.getColumnIndex("content");
+                        if (contentIdx >= 0) {
+                            content = cursor.getString(contentIdx);
+                            if (content == null || content.length() == 0) {
+                                LogUtil.w(TAG, "loadLatestExcerpt: latest row content empty");
+                            }
+                        } else {
+                            LogUtil.w(TAG, "loadLatestExcerpt: no 'content' column");
                         }
-                        scanEditText.setText(content);
-                        scanEditText.setSelection(content.length());
+                    } else {
+                        LogUtil.w(TAG, "loadLatestExcerpt: cursor empty");
+                    }
+                } catch (Exception e) {
+                    LogUtil.e(TAG, "loadLatestExcerpt query failed: " + e.getMessage(), e);
+                } finally {
+                    if (cursor != null) {
+                        try { cursor.close(); } catch (Exception ignored) {}
+                    }
+                }
+                if (content == null || content.length() == 0) {
+                    return;
+                }
+                final String finalContent = content;
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (isFinishing() || isDestroyed()) return;
+                        scanEditText.setText(finalContent);
+                        scanEditText.setSelection(finalContent.length());
                         scanEditText.setVisibility(View.VISIBLE);
                         scanHintText.setVisibility(View.GONE);
                         scanTriggerButton.setVisibility(View.GONE);
-                        LogUtil.i(TAG, "loadLatestExcerpt: loaded %d chars: %s", content.length(), LogUtil.preview(content, 120));
-                    } else {
-                        LogUtil.w(TAG, "loadLatestExcerpt: latest row content empty");
+                        LogUtil.i(TAG, "loadLatestExcerpt: loaded %d chars: %s",
+                                finalContent.length(), LogUtil.preview(finalContent, 120));
                     }
-                } else {
-                    LogUtil.w(TAG, "loadLatestExcerpt: no 'content' column");
-                }
-            } else {
-                LogUtil.w(TAG, "loadLatestExcerpt: cursor empty");
+                });
             }
-        } catch (Exception e) {
-            LogUtil.e(TAG, "loadLatestExcerpt query failed: " + e.getMessage(), e);
-        } finally {
-            if (cursor != null) {
-                try { cursor.close(); } catch (Exception ignored) {}
-            }
-        }
+        }, "aichat-loadLatestExcerpt").start();
     }
 
     /**
      * Show a dialog listing all saved excerpts for user to pick from.
      */
     private void showExcerptPicker() {
-        final List<ExcerptItem> items = new ArrayList<ExcerptItem>();
-        Cursor cursor = null;
-        LogUtil.d(TAG, "showExcerptPicker: querying %s", CONTENT_URI);
-        try {
-            cursor = getContentResolver().query(CONTENT_URI, null, null, null, "_id DESC");
-            if (cursor != null) {
-                int idIdx = cursor.getColumnIndex("_id");
-                int titleIdx = cursor.getColumnIndex("title");
-                int contentIdx = cursor.getColumnIndex("content");
-                int timeIdx = cursor.getColumnIndex("create_time");
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                final List<ExcerptItem> items = new ArrayList<ExcerptItem>();
+                Cursor cursor = null;
+                LogUtil.d(TAG, "showExcerptPicker: querying %s", CONTENT_URI);
+                try {
+                    cursor = getContentResolver().query(CONTENT_URI, null, null, null, "_id DESC");
+                    if (cursor != null) {
+                        int idIdx = cursor.getColumnIndex("_id");
+                        int titleIdx = cursor.getColumnIndex("title");
+                        int contentIdx = cursor.getColumnIndex("content");
+                        int timeIdx = cursor.getColumnIndex("create_time");
 
-                while (cursor.moveToNext()) {
-                    ExcerptItem item = new ExcerptItem();
-                    if (idIdx >= 0) item.id = cursor.getInt(idIdx);
-                    if (titleIdx >= 0) item.title = cursor.getString(titleIdx);
-                    if (contentIdx >= 0) item.content = cursor.getString(contentIdx);
-                    if (timeIdx >= 0) item.time = cursor.getLong(timeIdx);
-                    if (item.content != null && item.content.length() > 0) {
-                        items.add(item);
+                        while (cursor.moveToNext()) {
+                            ExcerptItem item = new ExcerptItem();
+                            if (idIdx >= 0) item.id = cursor.getInt(idIdx);
+                            if (titleIdx >= 0) item.title = cursor.getString(titleIdx);
+                            if (contentIdx >= 0) item.content = cursor.getString(contentIdx);
+                            if (timeIdx >= 0) item.time = cursor.getLong(timeIdx);
+                            if (item.content != null && item.content.length() > 0) {
+                                items.add(item);
+                            }
+                        }
+                        LogUtil.d(TAG, "showExcerptPicker: %d rows -> %d usable", cursor.getCount(), items.size());
+                    }
+                } catch (Exception e) {
+                    LogUtil.e(TAG, "showExcerptPicker query failed: " + e.getMessage(), e);
+                } finally {
+                    if (cursor != null) {
+                        try { cursor.close(); } catch (Exception ignored) {}
                     }
                 }
-                LogUtil.d(TAG, "showExcerptPicker: %d rows -> %d usable", cursor.getCount(), items.size());
+
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (isFinishing() || isDestroyed()) return;
+
+                        if (items.isEmpty()) {
+                            LogUtil.w(TAG, "showExcerptPicker: no excerpts found");
+                            Toast.makeText(ScanActivity.this, "没有找到摘抄记录，请先在文本摘抄中扫描并保存", Toast.LENGTH_LONG).show();
+                            return;
+                        }
+
+                        String[] labels = new String[items.size()];
+                        for (int i = 0; i < items.size(); i++) {
+                            ExcerptItem item = items.get(i);
+                            String label = item.title != null ? item.title : "摘抄 #" + item.id;
+                            // Show first 30 chars of content as preview
+                            String preview = item.content;
+                            if (preview.length() > 30) preview = preview.substring(0, 30) + "...";
+                            labels[i] = label + "  " + preview;
+                        }
+
+                        new AlertDialog.Builder(ScanActivity.this)
+                            .setTitle("选择摘抄记录")
+                            .setItems(labels, new DialogInterface.OnClickListener() {
+                                @Override
+                                public void onClick(DialogInterface dialog, int which) {
+                                    String content = items.get(which).content;
+                                    LogUtil.i(TAG, "excerpt picked: which=%d id=%d %d chars", which,
+                                            items.get(which).id, content == null ? 0 : content.length());
+                                    scanEditText.setText(content);
+                                    scanEditText.setSelection(content.length());
+                                    scanEditText.setVisibility(View.VISIBLE);
+                                    scanHintText.setVisibility(View.GONE);
+                                    scanTriggerButton.setVisibility(View.GONE);
+                                }
+                            })
+                            .setNegativeButton(getString(R.string.cancel), null)
+                            .show();
+                    }
+                });
             }
-        } catch (Exception e) {
-            LogUtil.e(TAG, "showExcerptPicker query failed: " + e.getMessage(), e);
-        } finally {
-            if (cursor != null) {
-                try { cursor.close(); } catch (Exception ignored) {}
-            }
-        }
-
-        if (items.isEmpty()) {
-            LogUtil.w(TAG, "showExcerptPicker: no excerpts found");
-            Toast.makeText(this, "没有找到摘抄记录，请先在文本摘抄中扫描并保存", Toast.LENGTH_LONG).show();
-            return;
-        }
-
-        String[] labels = new String[items.size()];
-        for (int i = 0; i < items.size(); i++) {
-            ExcerptItem item = items.get(i);
-            String label = item.title != null ? item.title : "摘抄 #" + item.id;
-            // Show first 30 chars of content as preview
-            String preview = item.content;
-            if (preview.length() > 30) preview = preview.substring(0, 30) + "...";
-            labels[i] = label + "  " + preview;
-        }
-
-        new AlertDialog.Builder(this)
-            .setTitle("选择摘抄记录")
-            .setItems(labels, new DialogInterface.OnClickListener() {
-                @Override
-                public void onClick(DialogInterface dialog, int which) {
-                    String content = items.get(which).content;
-                    LogUtil.i(TAG, "excerpt picked: which=%d id=%d %d chars", which,
-                            items.get(which).id, content == null ? 0 : content.length());
-                    scanEditText.setText(content);
-                    scanEditText.setSelection(content.length());
-                    scanEditText.setVisibility(View.VISIBLE);
-                    scanHintText.setVisibility(View.GONE);
-                    scanTriggerButton.setVisibility(View.GONE);
-                }
-            })
-            .setNegativeButton(getString(R.string.cancel), null)
-            .show();
+        }, "aichat-showExcerptPicker").start();
     }
 
     private static class ExcerptItem {

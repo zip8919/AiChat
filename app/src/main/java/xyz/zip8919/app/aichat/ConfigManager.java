@@ -3,12 +3,16 @@ package xyz.zip8919.app.aichat;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
 public class ConfigManager {
     private static final String TAG = "ConfigManager";
     private static ConfigManager instance;
+    private static ExecutorService saveExecutor;
     private StorageManager storageManager;
     private List<ProviderInfo> providers;
     private List<ModelInfo> models;
@@ -63,13 +67,35 @@ public class ConfigManager {
 
     public void save() {
         try {
-            JSONObject json = toJson();
-            String s = json.toString();
-            boolean ok = storageManager.saveConfig(s);
-            LogUtil.i(TAG, "save: %d chars ok=%s", s.length(), ok);
+            final JSONObject json = toJson();
+            final String s = json.toString();
+            final StorageManager sm = storageManager;
+            getSaveExecutor().execute(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        boolean ok = sm.saveConfig(s);
+                        LogUtil.i(TAG, "save: %d chars ok=%s", s.length(), ok);
+                    } catch (Exception e) {
+                        LogUtil.e(TAG, "save failed: " + e.getMessage(), e);
+                    }
+                }
+            });
         } catch (Exception e) {
             LogUtil.e(TAG, "save failed: " + e.getMessage(), e);
         }
+    }
+
+    private static synchronized ExecutorService getSaveExecutor() {
+        if (saveExecutor == null) {
+            saveExecutor = Executors.newSingleThreadExecutor(new ThreadFactory() {
+                @Override
+                public Thread newThread(Runnable r) {
+                    return new Thread(r, "aichat-config-save");
+                }
+            });
+        }
+        return saveExecutor;
     }
 
     private void createDefault() {
