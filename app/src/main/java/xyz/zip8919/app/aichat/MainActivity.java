@@ -2202,7 +2202,7 @@ public class MainActivity extends Activity {
             public void run() {
                 Conversation current = conversationManager.getCurrentConversation();
                 Conversation branch = new Conversation();
-                branch.title = current.title + "-分支";
+                branch.title = ConversationManager.normalizeTitle(current.title) + "-分支";
                 branch.systemPrompt = current.systemPrompt;
                 branch.model = current.model;
                 LogUtil.i(TAG, "branchAt: copying %d messages into branch '%s'", n, branch.title);

@@ -142,11 +142,19 @@ public class ConversationManager {
 
     // ---- JSON serialization ----
 
+    /** A title must never be persisted (or read back) as null/blank/the literal string "null". */
+    static String normalizeTitle(String title) {
+        if (title == null) return "新对话";
+        String t = title.trim();
+        if (t.length() == 0 || "null".equalsIgnoreCase(t)) return "新对话";
+        return t;
+    }
+
     static String toJson(Conversation conv) {
         try {
             JSONObject json = new JSONObject();
             json.put("id", conv.id);
-            json.put("title", conv.title);
+            json.put("title", normalizeTitle(conv.title));
             json.put("createdAt", conv.createdAt);
             json.put("updatedAt", conv.updatedAt);
             json.put("model", conv.model != null ? conv.model : "");
@@ -175,7 +183,7 @@ public class ConversationManager {
         try {
             JSONObject json = new JSONObject(jsonStr);
             conv.id = json.optString("id", conv.id);
-            conv.title = json.optString("title", "新对话");
+            conv.title = normalizeTitle(json.optString("title", null));
             conv.createdAt = json.optLong("createdAt", System.currentTimeMillis());
             conv.updatedAt = json.optLong("updatedAt", System.currentTimeMillis());
             conv.model = json.optString("model", "");

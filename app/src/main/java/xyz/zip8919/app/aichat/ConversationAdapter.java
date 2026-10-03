@@ -60,7 +60,7 @@ public class ConversationAdapter extends BaseAdapter {
 
         Conversation conv = conversations.get(position);
         LogUtil.v(TAG, "getView: pos=%d id=%s title=%s", position, conv.id, conv.title);
-        holder.titleView.setText(conv.title);
+        holder.titleView.setText(ConversationManager.normalizeTitle(conv.title));
         holder.timeView.setText(dateFormat.format(new Date(conv.updatedAt)));
         return convertView;
     }
