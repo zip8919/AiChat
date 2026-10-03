@@ -78,6 +78,9 @@ public class MainActivity extends Activity {
     private final AtomicInteger renderGeneration = new AtomicInteger(0);
     // volatile：请求线程写、UI 线程读，打断时才能可靠 disconnect
     private volatile HttpURLConnection currentConnection;
+    // volatile：后台加载线程回到 UI 线程后判断 initConversation() 是否已执行；
+    // 已执行则 loadConversations() 整体替换列表时丢掉了兜底会话，需按 id 补回列表头部。
+    private volatile boolean initConversationDone = false;
     private Thread currentRequestThread;
     private Handler handler = new Handler();
 
@@ -143,8 +146,34 @@ public class MainActivity extends Activity {
                 configManager.getDefaultModel(), configManager.isThinkingEnabled(),
                 configManager.getThinkingLevel());
 
-        List<Conversation> loaded = conversationManager.loadConversations();
-        LogUtil.i(TAG, "conversations loaded: count=%d", loaded == null ? -1 : loaded.size());
+        // 磁盘 IO + JSON 解析移出主线程。无竞态说明：loadConversations() 在后台只整体替换
+        // ConversationManager.conversations 字段引用、不修改旧列表；主线程 initConversation()
+        // 只往旧列表插入兜底会话，两条线程不会同时修改同一个 List。加载完成后回 UI 线程：
+        // 若 initConversation() 已执行（兜底会话被整体替换掉了），按 id 把当前会话补回列表头部，
+        // 恢复与冷启动一致的状态；若未执行，加载结果已在位，initConversation() 自然复用磁盘会话。
+        final ConversationManager cm = conversationManager;
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                final List<Conversation> loaded = cm.loadConversations();
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        LogUtil.i(TAG, "conversations loaded: count=%d",
+                                loaded == null ? -1 : loaded.size());
+                        if (initConversationDone) {
+                            Conversation cur = cm.getCurrentConversation();
+                            List<Conversation> list = cm.getConversations();
+                            boolean present = false;
+                            for (int i = 0; i < list.size(); i++) {
+                                if (list.get(i).id.equals(cur.id)) { present = true; break; }
+                            }
+                            if (!present) list.add(0, cur);
+                        }
+                    }
+                });
+            }
+        }, "conv-preload").start();
 
         initViews();
         loadSystemPrompt();
@@ -421,6 +450,8 @@ public class MainActivity extends Activity {
         LogUtil.i(TAG, "initConversation: id=%s title=%s messages=%d",
                 conv.id, conv.title, messages.size());
         refreshWebView();
+        // 供后台加载完成的 runOnUiThread 判断兜底会话是否已被 loadConversations() 整体替换
+        initConversationDone = true;
     }
 
     private void createNewConversation() {
@@ -982,6 +1013,13 @@ public class MainActivity extends Activity {
     private void sendMessageText(final String input) {
         LogUtil.i(TAG, "========== sendMessage: len=%d preview=%s ==========",
                 input.length(), LogUtil.preview(input, 200));
+
+        // 外部存储被移除后所有保存会静默失败：发送前探测一次，仅提示不拦截
+        if (!storageManager.isStorageReady()) {
+            LogUtil.w(TAG, "sendMessage: storage not ready (%s), conversation may not persist",
+                    storageManager.getStorageInfo());
+            Toast.makeText(this, "存储不可用，本次对话可能无法保存", Toast.LENGTH_LONG).show();
+        }
 
         loadSystemPrompt();
 

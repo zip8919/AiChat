@@ -48,6 +48,11 @@ public class ScanActivity extends Activity {
         scanHintText = (TextView) findViewById(R.id.scan_hint_text);
         scanTriggerButton = (Button) findViewById(R.id.scan_trigger_button);
 
+        if (savedInstanceState != null) {
+            expectingScanResult = savedInstanceState.getBoolean("expectingScanResult", false);
+            lastScanLaunchTime = savedInstanceState.getLong("lastScanLaunchTime", 0);
+        }
+
         LogUtil.i(TAG, "========== onCreate ========== (%s)", LogUtil.thread());
 
         scanTriggerButton.setOnClickListener(new View.OnClickListener() {
@@ -147,6 +152,13 @@ public class ScanActivity extends Activity {
             @Override
             public void afterTextChanged(Editable s) {}
         });
+    }
+
+    @Override
+    protected void onSaveInstanceState(Bundle outState) {
+        super.onSaveInstanceState(outState);
+        outState.putBoolean("expectingScanResult", expectingScanResult);
+        outState.putLong("lastScanLaunchTime", lastScanLaunchTime);
     }
 
     @Override

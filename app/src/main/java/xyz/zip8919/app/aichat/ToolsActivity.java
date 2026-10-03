@@ -524,6 +524,26 @@ public class ToolsActivity extends Activity {
         return dot < 0 ? "" : name.substring(dot + 1).toLowerCase();
     }
 
+    private static String sniffLang(String code) {
+        if (code == null) {
+            return "js";
+        }
+        String lower = code.trim().toLowerCase(java.util.Locale.US);
+        if (lower.startsWith("<!doctype html") || lower.startsWith("<html")) {
+            return "html";
+        }
+        if (lower.startsWith("<svg")) {
+            return "svg";
+        }
+        if (lower.startsWith("<?xml")) {
+            int xmlEnd = lower.indexOf("?>");
+            if (xmlEnd >= 0 && lower.substring(xmlEnd + 2).trim().startsWith("<svg")) {
+                return "svg";
+            }
+        }
+        return "js";
+    }
+
     // ---------- JS runner ----------
 
     private void pickFileIntoInput() {
@@ -574,7 +594,9 @@ public class ToolsActivity extends Activity {
             return;
         }
         LogUtil.i(TAG, "runJs: len=%d", code.length());
-        startActivity(MainActivity.newJsRunnerIntent(this, code, MainActivity.exportExtForLang(extOf(currentJsFileName))));
+        String lang = currentJsFileName == null || currentJsFileName.isEmpty()
+                ? sniffLang(code) : extOf(currentJsFileName);
+        startActivity(MainActivity.newJsRunnerIntent(this, code, MainActivity.exportExtForLang(lang)));
     }
 
     // ---------- env prompt ----------

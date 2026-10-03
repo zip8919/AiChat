@@ -155,6 +155,14 @@ public class StorageManager {
         return ok;
     }
 
+    public boolean isStorageReady() {
+        if (this.basePath == null) {
+            return false;
+        }
+        File dir = new File(this.basePath);
+        return dir.isDirectory() && dir.canWrite();
+    }
+
     public boolean isExternalStorageAvailable() {
         boolean mounted = "mounted".equals(Environment.getExternalStorageState());
         LogUtil.v(TAG, "isExternalStorageAvailable: state=%s mounted=%s",
@@ -217,6 +225,10 @@ public class StorageManager {
     public String loadConversation(String conversationId) {
         String filePath = this.conversationsPath + File.separator + conversationId + ".json";
         String content = readFile(filePath);
+        // 0 字节会话文件维持「视为不存在」语义：switchConversation 按请求 id 建空会话，而不是随机 id
+        if (content != null && content.length() == 0) {
+            content = null;
+        }
         LogUtil.v(TAG, "loadConversation: id=%s len=%d", conversationId, content == null ? 0 : content.length());
         return content;
     }
@@ -316,10 +328,6 @@ public class StorageManager {
                 firstLine = false;
             }
             String result = sb.toString();
-            if (result.length() == 0) {
-                LogUtil.v(TAG, "readFile: empty file %s", filePath);
-                return null;
-            }
             LogUtil.v(TAG, "readFile: read %d chars <- %s", result.length(), filePath);
             return result;
         } catch (IOException e) {
