@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:orientation="vertical"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#FFFFFF">
+
+    <LinearLayout
+        android:orientation="horizontal"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="#2196F3"
+        android:gravity="center_vertical"
+        android:padding="4dp">
+
+        <Button
+            android:id="@+id/tools_back_button"
+            android:layout_width="wrap_content"
+            android:layout_height="40dp"
+            android:text="返回"
+            android:textSize="12sp" />
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:text="小工具"
+            android:textColor="#FFFFFF"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:fillViewport="true">
+
+        <LinearLayout
+            android:orientation="vertical"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:padding="6dp">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="已保存代码"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:paddingBottom="4dp" />
+
+            <ListView
+                android:id="@+id/tools_file_list"
+                android:layout_width="match_parent"
+                android:layout_height="140dp"
+                android:background="#F5F5F5" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="JS 运行器"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:paddingTop="10dp"
+                android:paddingBottom="4dp" />
+
+            <LinearLayout
+                android:orientation="horizontal"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content">
+
+                <Button
+                    android:id="@+id/tools_js_from_file_button"
+                    android:layout_width="0dp"
+                    android:layout_height="36dp"
+                    android:layout_weight="1"
+                    android:text="选择文件"
+                    android:textSize="11sp" />
+
+                <Button
+                    android:id="@+id/tools_js_paste_button"
+                    android:layout_width="0dp"
+                    android:layout_height="36dp"
+                    android:layout_weight="1"
+                    android:text="粘贴"
+                    android:textSize="11sp" />
+
+                <Button
+                    android:id="@+id/tools_js_clear_button"
+                    android:layout_width="0dp"
+                    android:layout_height="36dp"
+                    android:layout_weight="1"
+                    android:text="清空"
+                    android:textSize="11sp" />
+            </LinearLayout>
+
+            <EditText
+                android:id="@+id/tools_js_input"
+                android:layout_width="match_parent"
+                android:layout_height="160dp"
+                android:gravity="top|start"
+                android:textSize="11sp"
+                android:background="#FAFAFA"
+                android:hint="在此输入或粘贴 JS 代码" />
+
+            <Button
+                android:id="@+id/tools_js_run_button"
+                android:layout_width="match_parent"
+                android:layout_height="40dp"
+                android:text="运行"
+                android:textSize="13sp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="APP 代码环境提示词"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:paddingTop="10dp"
+                android:paddingBottom="4dp" />
+
+            <LinearLayout
+                android:orientation="horizontal"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content">
+
+                <Button
+                    android:id="@+id/tools_env_copy_button"
+                    android:layout_width="0dp"
+                    android:layout_height="40dp"
+                    android:layout_weight="1"
+                    android:text="复制"
+                    android:textSize="11sp" />
+
+                <Button
+                    android:id="@+id/tools_env_insert_button"
+                    android:layout_width="0dp"
+                    android:layout_height="40dp"
+                    android:layout_weight="1"
+                    android:text="插入输入框"
+                    android:textSize="11sp" />
+
+                <Button
+                    android:id="@+id/tools_env_send_button"
+                    android:layout_width="0dp"
+                    android:layout_height="40dp"
+                    android:layout_weight="1"
+                    android:text="直接发送"
+                    android:textSize="11sp" />
+            </LinearLayout>
+        </LinearLayout>
+    </ScrollView>
+</LinearLayout>

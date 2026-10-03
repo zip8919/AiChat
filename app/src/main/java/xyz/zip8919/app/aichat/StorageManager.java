@@ -219,7 +219,7 @@ public class StorageManager {
         }
     }
 
-    private String readFile(String filePath) {
+    public String readFile(String filePath) {
         BufferedReader reader = null;
         try {
             File file = new File(filePath);

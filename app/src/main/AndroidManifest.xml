@@ -48,5 +48,17 @@
             android:exported="false"
             android:configChanges="screenSize|orientation|keyboardHidden"/>
 
+        <activity
+            android:label="小工具"
+            android:name="xyz.zip8919.app.aichat.ToolsActivity"
+            android:exported="false"
+            android:configChanges="screenSize|orientation|keyboardHidden"/>
+
+        <activity
+            android:label="JS 运行器"
+            android:name="xyz.zip8919.app.aichat.JsRunnerActivity"
+            android:exported="false"
+            android:configChanges="screenSize|orientation|keyboardHidden"/>
+
     </application>
 </manifest>

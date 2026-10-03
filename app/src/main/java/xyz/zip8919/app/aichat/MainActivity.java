@@ -179,6 +179,9 @@ public class MainActivity extends Activity {
         findViewById(R.id.history_button).setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) { LogUtil.d(TAG, "click: history"); openConversationManager(); }
         });
+        findViewById(R.id.history_button).setOnLongClickListener(new View.OnLongClickListener() {
+            public boolean onLongClick(View v) { LogUtil.d(TAG, "longclick: history -> tools"); openTools(); return true; }
+        });
         findViewById(R.id.settings_button).setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) { LogUtil.d(TAG, "click: settings"); openSettings(); }
         });
@@ -447,6 +450,11 @@ public class MainActivity extends Activity {
                 REQUEST_CONVERSATION_MANAGER);
     }
 
+    private void openTools() {
+        LogUtil.d(TAG, "openTools -> ToolsActivity");
+        startActivity(new Intent(this, ToolsActivity.class));
+    }
+
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         LogUtil.d(TAG, "onActivityResult: requestCode=%d resultCode=%d data=%s", requestCode, resultCode, data);
@@ -476,6 +484,33 @@ public class MainActivity extends Activity {
             }
         } else {
             LogUtil.d(TAG, "onActivityResult unhandled: requestCode=%d resultCode=%d", requestCode, resultCode);
+        }
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handlePromptIntent(intent);
+    }
+
+    private void handlePromptIntent(Intent intent) {
+        if (intent == null) {
+            return;
+        }
+        String prompt = intent.getStringExtra(EXTRA_PROMPT);
+        if (prompt == null || prompt.isEmpty()) {
+            return;
+        }
+        intent.removeExtra(EXTRA_PROMPT);
+        boolean send = intent.getBooleanExtra(EXTRA_PROMPT_SEND, false);
+        LogUtil.i(TAG, "handlePromptIntent: send=%s len=%d", send, prompt.length());
+        if (inputEditText != null) {
+            inputEditText.setText(prompt);
+            inputEditText.setSelection(prompt.length());
+        }
+        if (send) {
+            sendMessage();
         }
     }
 
@@ -1215,7 +1250,51 @@ public class MainActivity extends Activity {
                 }
             });
         }
+
+        @JavascriptInterface
+        public void runJs(final String code) {
+            LogUtil.d(TAG, "JsBridge.runJs: len=%s", code == null ? "null" : code.length());
+            if (code == null || code.trim().isEmpty()) {
+                return;
+            }
+            handler.post(new Runnable() {
+                public void run() {
+                    startActivity(newJsRunnerIntent(MainActivity.this, code));
+                }
+            });
+        }
     }
+
+    static Intent newJsRunnerIntent(Context ctx, String code) {
+        return newJsRunnerIntent(ctx, code, null);
+    }
+
+    static Intent newJsRunnerIntent(Context ctx, String code, String lang) {
+        Intent it = new Intent(ctx, JsRunnerActivity.class);
+        it.putExtra(JsRunnerActivity.EXTRA_CODE, code);
+        if (lang != null && !lang.isEmpty()) {
+            it.putExtra(JsRunnerActivity.EXTRA_LANG, lang);
+        }
+        return it;
+    }
+
+    static Intent newPreviewIntent(Context ctx, String lang, String code) {
+        Intent it = new Intent(ctx, JsRunnerActivity.class);
+        it.putExtra(JsRunnerActivity.EXTRA_CODE, code);
+        it.putExtra(JsRunnerActivity.EXTRA_LANG, lang);
+        return it;
+    }
+
+    static Intent newPromptIntent(Context ctx, String prompt, boolean send) {
+        Intent it = new Intent(ctx, MainActivity.class);
+        it.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        it.putExtra(EXTRA_PROMPT, prompt);
+        it.putExtra(EXTRA_PROMPT_SEND, send);
+        return it;
+    }
+
+    static final String EXTRA_PROMPT = "extra_prompt";
+    static final String EXTRA_PROMPT_SEND = "extra_prompt_send";
 
     // ========== 图片查看器 ==========
 
@@ -1599,25 +1678,59 @@ public class MainActivity extends Activity {
 
     // ========== 代码块导出 ==========
 
-    private void saveCodeToExport(String lang, String code) {
+    private void saveCodeToExport(final String lang, final String code) {
         if (code == null || code.trim().isEmpty()) {
             Toast.makeText(this, "代码内容为空，无法保存", Toast.LENGTH_SHORT).show();
             return;
         }
-        String ext = "txt";
+        final String ext = exportExtForLang(lang);
+        final EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setText("code_" + System.currentTimeMillis());
+        input.setSelection(input.getText().length());
+        new AlertDialog.Builder(this)
+                .setTitle("保存代码")
+                .setMessage("文件名（自动追加 ." + ext + "）")
+                .setView(input)
+                .setPositiveButton("保存", new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface d, int w) {
+                        String name = sanitizeExportName(input.getText().toString());
+                        if (name.isEmpty()) {
+                            name = "code_" + System.currentTimeMillis();
+                        }
+                        String path = StorageManager.getInstance()
+                                .saveExport(name + "." + ext, code);
+                        LogUtil.i(TAG, "saveCodeToExport: lang=%s ext=%s path=%s", lang, ext, path);
+                        if (path == null) {
+                            Toast.makeText(MainActivity.this, "保存失败", Toast.LENGTH_SHORT).show();
+                        } else {
+                            Toast.makeText(MainActivity.this, "已保存到 " + path, Toast.LENGTH_LONG).show();
+                        }
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    static String exportExtForLang(String lang) {
         if ("html".equals(lang)) {
-            ext = "html";
-        } else if ("svg".equals(lang)) {
-            ext = "svg";
+            return "html";
         }
-        String fileName = "code_" + System.currentTimeMillis() + "." + ext;
-        String path = StorageManager.getInstance().saveExport(fileName, code);
-        LogUtil.i(TAG, "saveCodeToExport: lang=%s ext=%s path=%s", lang, ext, path);
-        if (path == null) {
-            Toast.makeText(this, "保存失败", Toast.LENGTH_SHORT).show();
-        } else {
-            Toast.makeText(this, "已保存到 " + path, Toast.LENGTH_LONG).show();
+        if ("svg".equals(lang)) {
+            return "svg";
         }
+        if ("js".equals(lang) || "javascript".equals(lang)) {
+            return "js";
+        }
+        return "txt";
+    }
+
+    /** Strips path separators and characters Android's filesystem rejects. */
+    static String sanitizeExportName(String name) {
+        if (name == null) {
+            return "";
+        }
+        return name.trim().replaceAll("[/\\\\:*?\"<>|]", "_");
     }
 
     // ========== HTML / SVG 代码预览 ==========

@@ -90,6 +90,9 @@ public class MessageHtmlRenderer {
             "pre .preview-btn{position:absolute;top:4px;right:104px;padding:2px 8px;" +
             "font-size:11px;background:#e1f5fe;border:1px solid #81d4fa;border-radius:3px;" +
             "color:#0277bd;font-family:Roboto,sans-serif;}" +
+            "pre .run-btn{position:absolute;top:4px;right:104px;padding:2px 8px;" +
+            "font-size:11px;background:#fff3e0;border:1px solid #ffcc80;border-radius:3px;" +
+            "color:#e65100;font-family:Roboto,sans-serif;}" +
             "table{border-collapse:collapse;margin:8px 0;font-size:13px;white-space:nowrap;}" +
             "th,td{border:1px solid #ddd;padding:6px 10px;text-align:left;}" +
             "th{background:#f0f0f0;font-weight:bold;}" +
@@ -164,6 +167,14 @@ public class MessageHtmlRenderer {
             "pre.appendChild(sbtn);" +
             "if(langTag){" +
             "var lang=langTag.textContent.trim().toLowerCase();" +
+            "if((lang==='js'||lang==='javascript')&&!pre.querySelector('.run-btn')){" +
+            "var rbtn=document.createElement('button');" +
+            "rbtn.className='run-btn';rbtn.textContent='运行';" +
+            "rbtn.onclick=function(e){e.stopPropagation();e.preventDefault();" +
+            "var code=pre.querySelector('code');" +
+            "var text=code?code.textContent:'';" +
+            "if(window.Android)Android.runJs(text);};" +
+            "pre.appendChild(rbtn);}" +
             "if((lang==='html'||lang==='svg')&&!pre.querySelector('.preview-btn')){" +
             "var pbtn=document.createElement('button');" +
             "pbtn.className='preview-btn';pbtn.textContent='预览';" +
