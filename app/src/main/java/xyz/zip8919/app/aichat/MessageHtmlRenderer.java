@@ -153,7 +153,7 @@ public class MessageHtmlRenderer {
             "var langTag=pre.querySelector('.lang-tag');" +
             "if(langTag){" +
             "var lang=langTag.textContent.trim().toLowerCase();" +
-            "if((lang==='html'||lang==='svg')&&!pre.querySelector('.preview-btn')){" +
+            "if((lang==='html'||lang==='svg'||lang==='mermaid'||lang==='flowchart'||lang==='graph')&&!pre.querySelector('.preview-btn')){" +
             "var pbtn=document.createElement('button');" +
             "pbtn.className='preview-btn';pbtn.textContent='预览';" +
             "pbtn.onclick=function(e){e.stopPropagation();e.preventDefault();" +

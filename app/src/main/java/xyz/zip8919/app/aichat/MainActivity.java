@@ -1633,7 +1633,6 @@ public class MainActivity extends Activity {
                 return true;
             }
         });
-
         zoomOutBtn.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) { viewerEvalJs(codePreviewWebView, "viewerZoom(0.8)"); }
         });
@@ -1731,6 +1730,31 @@ public class MainActivity extends Activity {
         boolean rotatedSideways = (codePreviewRotation == 90 || codePreviewRotation == 270);
 
         String html;
+        if (FlowchartRenderer.isFlowchartLang(currentPreviewLang) != null
+                || FlowchartRenderer.looksLikeFlowchart(currentPreviewCode)) {
+            // Render a mermaid/flowchart subset locally to SVG. Returns null for
+            // unsupported input, in which case fall through to the code preview.
+            String fg = isDarkBg(codePreviewBgColor) ? "#e0e0e0" : "#333333";
+            String svg = FlowchartRenderer.renderSvg(currentPreviewCode, bgColor, fg);
+            if (svg != null) {
+                LogUtil.i(TAG, "loadCodePreview: flowchart svg len=%d", svg.length());
+                html = buildFlowchartPreviewHtml(svg, bgColor, rotateCss);
+                codePreviewWebView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null);
+                // window.onload is unreliable for loadDataWithBaseURL on this WebView
+                // (the fit-to-viewport pass never ran, so a wide diagram stayed at 1:1
+                // and only its right half was visible), so drive it from the Java side
+                // once layout has settled as well.
+                final String fitJs = "if(window.fcFit)window.fcFit();";
+                codePreviewWebView.postDelayed(new Runnable() {
+                    public void run() { viewerEvalJs(codePreviewWebView, fitJs); }
+                }, 600);
+                codePreviewWebView.postDelayed(new Runnable() {
+                    public void run() { viewerEvalJs(codePreviewWebView, fitJs); }
+                }, 1500);
+                return;
+            }
+            LogUtil.w(TAG, "loadCodePreview: flowchart render failed, falling back");
+        }
         if ("svg".equals(currentPreviewLang)) {
             html = buildCodePreviewHtml(currentPreviewCode, currentPreviewLang,
                     bgColor, rotateCss, false, rotatedSideways ? boxH : 0);
@@ -1847,6 +1871,63 @@ public class MainActivity extends Activity {
         if (codePreviewWebView != null) {
             viewerEvalJs(codePreviewWebView, "viewerSetBg('" + color + "')");
         }
+    }
+
+    /**
+     * Wraps a self-contained flowchart SVG (produced by FlowchartRenderer) in
+     * the same viewer page shell as the other preview kinds: toolbar inset,
+     * background, rotate + zoom hooks.
+     */
+    private String buildFlowchartPreviewHtml(String svg, String bgColor, String rotateCss) {
+        String zoomJs =
+                "var vZoom=1;" +
+                "function applyZoom(){var w=document.getElementById('fc-wrap');" +
+                "if(!w)return;var t='scale('+vZoom+')';" +
+                "w.style.webkitTransform=t;w.style.transform=t;" +
+                // The scaled element still occupies its unscaled layout box, so the
+                // scrollable area must be shrunk to match or the page keeps a large
+                // blank region beside/below a shrunken diagram.
+                "var s=w.querySelector('svg');" +
+                "if(s){var sw=s.getAttribute('width')*1,sh=s.getAttribute('height')*1;" +
+                "if(sw>0&&sh>0){w.style.width=(sw*vZoom)+'px';w.style.height=(sh*vZoom)+'px';}}}" +
+                "function viewerZoom(f){vZoom=Math.max(0.1,Math.min(5,vZoom*f));applyZoom();fcHome();}" +
+                "function viewerSetBg(c){document.body.style.backgroundColor=c;" +
+                "document.documentElement.style.backgroundColor=c;" +
+                "var r=document.getElementById('fc-bg');if(r)r.setAttribute('fill',c);}" +
+                "function fcHome(){window.scrollTo(0,0);" +
+                "if(document.documentElement)document.documentElement.scrollTop=0;" +
+                "if(document.body)document.body.scrollTop=0;}" +
+                // A 682px-wide diagram in a 226px viewport opened at 1:1 showed only the
+                // right half, so the user never saw the whole chart. Fit it to the
+                // viewport on load; +/- then zooms from that starting point.
+                "function fcFit(){var w=document.getElementById('fc-wrap');" +
+                "if(!w)return;var s=w.querySelector('svg');if(!s)return;" +
+                "var sw=s.getAttribute('width')*1,sh=s.getAttribute('height')*1;" +
+                "if(!(sw>0&&sh>0))return;" +
+                "var aw=document.body.clientWidth,ah=document.body.clientHeight;if(aw<=0||ah<=0)return;" +
+                "vZoom=Math.min(aw/sw,ah/sh);if(vZoom>1)vZoom=1;if(vZoom<0.1)vZoom=0.1;applyZoom();}" +
+                "window.onload=function(){fcFit();fcHome();};" +
+                "window.addEventListener('resize',function(){fcHome();},false);";        String wrapCss = rotateCss.isEmpty() ? "" : rotateCss + "!important;";
+        return "<!DOCTYPE html><html><head><meta charset=\"UTF-8\">" +
+                "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">" +
+                "<style>*{margin:0;padding:0;-webkit-box-sizing:border-box;box-sizing:border-box;}" +
+                "html{width:100%;height:100%;background:" + bgColor + ";transform-origin:0 0;" +
+                "-webkit-transform-origin:0 0;}" +
+                "body{width:100%;height:100%;overflow:auto;background:" + bgColor + ";" +
+                "padding:" + VIEWER_TOOLBAR_INSET_PX + "px 0 0 0;transform-origin:0 0;" +
+                "-webkit-transform-origin:0 0;}" +
+                // Natural-size canvas: the diagram keeps its own pixel size and the
+                // page scrolls, so dense flowcharts stay readable (scaling to fit a
+                // 226px viewport made every label illegible).
+                "#fc-wrap{display:inline-block;overflow:visible;transform-origin:0 0;" +
+                "-webkit-transform-origin:0 0;" + wrapCss + "}" +
+                "#fc-wrap svg{display:block;}</style></head><body>" +
+                "<div id=\"fc-wrap\">" + svg + "</div>" +
+                "<script>" + zoomJs + "</script></body></html>";
+    }
+
+    private boolean isDarkBg(int state) {
+        return state == 2;
     }
 
     private String getBgColorHex(int state) {
