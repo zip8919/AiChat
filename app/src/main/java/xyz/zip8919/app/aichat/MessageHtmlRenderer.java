@@ -433,6 +433,8 @@ public class MessageHtmlRenderer {
             // Inject width constraint directly on the SVG element so API 18
             // respects it even when CSS doesn't override presentational attrs
             String svgHtml = svgBlocks.get(i);
+            if (svgHtml == null) continue;
+            svgHtml = sanitizeRawHtml(svgHtml);
             if (svgHtml.toLowerCase().contains(" style=\"")) {
                 svgHtml = svgHtml.replaceFirst("(?i) style=\"", " style=\"max-width:100%;width:100%;height:auto;");
             } else {

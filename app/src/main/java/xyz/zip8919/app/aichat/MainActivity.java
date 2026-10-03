@@ -68,6 +68,7 @@ public class MainActivity extends Activity {
     private Spinner thinkingSpinner;
     private View queueBar;
     private TextView queueBarText;
+    private boolean userPicked = false;
 
     private List<Message> messages;
     private List<ModelInfo> availableModels;
@@ -112,8 +113,6 @@ public class MainActivity extends Activity {
     private boolean expectingQuickScanResult = false;
 
     private String currentModel;
-    private String currentApiKey;
-    private String currentApiUrl;
     private String systemPrompt;
 
     @Override
@@ -348,16 +347,20 @@ public class MainActivity extends Activity {
         if ("off".equals(level)) levelPos = 0;
         else if ("low".equals(level)) levelPos = 1;
         else if ("high".equals(level)) levelPos = 3;
+        userPicked = false;
         thinkingSpinner.setSelection(levelPos);
         LogUtil.d(TAG, "thinking level restored: %s -> pos=%d (thinkingEnabled=%s)",
                 level, levelPos, configManager.isThinkingEnabled());
 
         thinkingSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             public void onItemSelected(AdapterView<?> parent, View view, int pos, long id) {
+                userPicked = true;
                 String[] levels = {"off", "low", "medium", "high"};
                 LogUtil.d(TAG, "thinking level selected: pos=%d -> %s", pos, levels[pos]);
-                configManager.setThinkingLevel(levels[pos]);
-                configManager.save();
+                if (userPicked) {
+                    configManager.setThinkingLevel(levels[pos]);
+                    configManager.save();
+                }
             }
             public void onNothingSelected(AdapterView<?> parent) {}
         });
@@ -428,8 +431,6 @@ public class MainActivity extends Activity {
         ProviderInfo provider = configManager.getProvider(model.provider);
         if (provider != null) {
             currentModel = model.name;
-            currentApiKey = provider.apiKey;
-            currentApiUrl = provider.apiUrl;
             LogUtil.i(TAG, "selectModel: pos=%d model=%s provider=%s url=%s keyLen=%d",
                     pos, model.name, provider.name, provider.apiUrl,
                     provider.apiKey == null ? 0 : provider.apiKey.length());
@@ -566,8 +567,21 @@ public class MainActivity extends Activity {
             String text = data == null ? null : data.getStringExtra("scan_text");
             if (text != null && !text.isEmpty()) {
                 LogUtil.i(TAG, "scan result: len=%d preview=%s", text.length(), LogUtil.preview(text, 120));
-                inputEditText.setText(text);
-                inputEditText.setSelection(text.length());
+                String cur = inputEditText.getText().toString();
+                boolean inserted = false;
+                if (cur.isEmpty()) {
+                    inputEditText.setText(text);
+                    inserted = true;
+                } else if (!cur.equals(text) && !cur.endsWith(text)) {
+                    if (!cur.endsWith("\n")) {
+                        inputEditText.append("\n");
+                    }
+                    inputEditText.append(text);
+                    inserted = true;
+                }
+                if (inserted) {
+                    inputEditText.setSelection(inputEditText.getText().length());
+                }
             } else {
                 LogUtil.w(TAG, "REQUEST_SCAN returned empty/null text");
             }
@@ -683,7 +697,6 @@ public class MainActivity extends Activity {
     protected void onStop() {
         LogUtil.d(TAG, "onStop");
         super.onStop();
-        conversationManager.saveCurrentConversation();
     }
 
     @Override
@@ -1141,7 +1154,8 @@ public class MainActivity extends Activity {
                         if (m == aiMsg) continue;
                         org.json.JSONObject mm = new org.json.JSONObject();
                         mm.put("role", m.role);
-                        mm.put("content", m.isAssistant() ? ApiClient.removeThinkingContent(m.content) : m.content);
+                        String sendContent = m.isAssistant() ? ApiClient.removeThinkingContent(m.content) : m.content;
+                        mm.put("content", sendContent == null ? "" : sendContent);
                         msgs.put(mm);
                     }
                     body.put("messages", msgs);
@@ -1168,8 +1182,11 @@ public class MainActivity extends Activity {
 
                     long reqMs = System.currentTimeMillis();
                     java.io.OutputStream os = conn.getOutputStream();
-                    os.write(body.toString().getBytes("UTF-8"));
-                    os.close();
+                    try {
+                        os.write(body.toString().getBytes("UTF-8"));
+                    } finally {
+                        os.close();
+                    }
                     LogUtil.d(TAG, "request body written in %d ms", System.currentTimeMillis() - reqMs);
 
                     int code = conn.getResponseCode();
@@ -1180,9 +1197,13 @@ public class MainActivity extends Activity {
                             java.io.InputStream es = conn.getErrorStream();
                             if (es != null) {
                                 java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
-                                byte[] buf = new byte[2048];
+                                byte[] buf = new byte[1024];
                                 int n;
-                                while ((n = es.read(buf)) > 0) bos.write(buf, 0, n);
+                                int total = 0;
+                                while (total < 4096 && (n = es.read(buf, 0, Math.min(buf.length, 4096 - total))) > 0) {
+                                    bos.write(buf, 0, n);
+                                    total += n;
+                                }
                                 errBody = new String(bos.toByteArray(), "UTF-8");
                             }
                         } catch (Exception ignored) {}
@@ -1203,8 +1224,11 @@ public class MainActivity extends Activity {
                     if (!streamEnabled) {
                         // Non-streaming: the body is one JSON object, no SSE frames.
                         StringBuilder sb = new StringBuilder();
-                        while ((line = reader.readLine()) != null) sb.append(line);
-                        reader.close();
+                        try {
+                            while ((line = reader.readLine()) != null) sb.append(line);
+                        } finally {
+                            reader.close();
+                        }
                         String fullContent = ApiClient.extractMessageContent(sb.toString());
                         LogUtil.i(TAG, "non-stream response: %d chars raw -> %d chars content",
                                 sb.length(), fullContent == null ? 0 : fullContent.length());
@@ -1326,6 +1350,10 @@ public class MainActivity extends Activity {
                                     chunkCount[0], e.getMessage(), LogUtil.preview(data, 300));
                         }
                     }
+                    if (thinkingActive[0] && !thinkingFinished[0]) {
+                        rawContent.append("[/thinking]");
+                        LogUtil.d(TAG, "thinking phase left open at stream end: closed with [/thinking]");
+                    }
                     // Final commit happens in finally: content is written back to
                     // messages (and saved) before the pending queue is released, so a
                     // drained follow-up request cannot invalidate it via the generation guard.
@@ -1371,18 +1399,18 @@ public class MainActivity extends Activity {
                                     final String html =
                                             MessageHtmlRenderer.contentToHtml(commitContent, MainActivity.this);
                                     if (requestGeneration.get() != generation) return;
-                                    if (finalIdx >= 0 && finalIdx < messages.size()
-                                            && messages.get(finalIdx).isAssistant()) {
-                                        messages.get(finalIdx).content = commitContent;
-                                    }
                                     runOnUiThread(new Runnable() {
                                         public void run() {
                                             if (requestGeneration.get() != generation) return;
+                                            if (finalIdx >= 0 && finalIdx < messages.size()
+                                                    && messages.get(finalIdx).isAssistant()) {
+                                                messages.get(finalIdx).content = commitContent;
+                                            }
                                             webViewEvalJs("updateLastMsg('" + jsEscape(html) + "')");
                                             webViewEvalJs("finalizeLast(" + finalIdx + ")");
+                                            conversationManager.saveCurrentConversation();
                                         }
                                     });
-                                    conversationManager.saveCurrentConversation();
                                 } catch (Exception e) {
                                     LogUtil.e(TAG, "final commit failed: %s", e.getMessage(), e);
                                 } finally {
@@ -1823,7 +1851,6 @@ public class MainActivity extends Activity {
 
         View view = getLayoutInflater().inflate(R.layout.dialog_image_viewer, null);
         imageViewerWebView = (WebView) view.findViewById(R.id.viewer_webview);
-        imageViewerWebView.addJavascriptInterface(new JsBridge(), "Android");
         imageCounterText = (TextView) view.findViewById(R.id.viewer_counter);
         prevButton = (Button) view.findViewById(R.id.viewer_prev);
         nextButton = (Button) view.findViewById(R.id.viewer_next);
@@ -2026,7 +2053,6 @@ public class MainActivity extends Activity {
 
         View view = getLayoutInflater().inflate(R.layout.dialog_image_viewer, null);
         tableViewerWebView = (WebView) view.findViewById(R.id.viewer_webview);
-        tableViewerWebView.addJavascriptInterface(new JsBridge(), "Android");
 
         // Hide image-specific controls
         view.findViewById(R.id.viewer_prev).setVisibility(View.GONE);
@@ -2332,7 +2358,6 @@ public class MainActivity extends Activity {
 
         View view = getLayoutInflater().inflate(R.layout.dialog_image_viewer, null);
         codePreviewWebView = (WebView) view.findViewById(R.id.viewer_webview);
-        codePreviewWebView.addJavascriptInterface(new JsBridge(), "Android");
 
         // Hide image-specific controls
         view.findViewById(R.id.viewer_prev).setVisibility(View.GONE);
@@ -2675,8 +2700,21 @@ public class MainActivity extends Activity {
                     if (text != null && !text.isEmpty()) {
                         LogUtil.i(TAG, "quick scan result: len=%d preview=%s",
                                 text.length(), LogUtil.preview(text, 100));
-                        inputEditText.setText(text);
-                        inputEditText.setSelection(text.length());
+                        String cur = inputEditText.getText().toString();
+                        boolean inserted = false;
+                        if (cur.isEmpty()) {
+                            inputEditText.setText(text);
+                            inserted = true;
+                        } else if (!cur.equals(text) && !cur.endsWith(text)) {
+                            if (!cur.endsWith("\n")) {
+                                inputEditText.append("\n");
+                            }
+                            inputEditText.append(text);
+                            inserted = true;
+                        }
+                        if (inserted) {
+                            inputEditText.setSelection(inputEditText.getText().length());
+                        }
                     } else {
                         LogUtil.w(TAG, "quick scan result: content column empty");
                     }
