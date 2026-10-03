@@ -32,13 +32,15 @@ public class SettingsActivity extends Activity {
     private static final String KEY_TITLE_PROMPT = "title_prompt";
     private static final String KEY_QUICK_SCAN_ENABLED = "quick_scan_enabled";
     private static final String KEY_LOG_ENABLED = "log_enabled";
+    private static final String KEY_REALTIME_RENDER = "realtime_render_enabled";
+    private static final String KEY_STREAM_ENABLED = "stream_enabled";
     private static final String KEY_PRESETS = "system_presets";
     private static final String DEFAULT_TITLE_MODEL = "Qwen/Qwen3.5-397B-A17B";
     private static final String DEFAULT_TITLE_PROMPT = "你是一个标题生成助手。根据用户消息生成3-15字标题。只输出标题本身，禁止输出任何其他文字、解释、标点或换行。";
 
     private SharedPreferences prefs;
     private EditText systemPromptEdit, titlePromptEdit;
-    private Switch autoTitleSwitch, quickScanSwitch, logSwitch;
+    private Switch autoTitleSwitch, quickScanSwitch, logSwitch, realtimeRenderSwitch, streamSwitch;
     private Spinner titleModelSpinner, presetSpinner;
     private Button saveButton, cancelButton, balanceButton, manageModelsButton;
     private Button managePresetsButton, savePresetButton;
@@ -65,6 +67,8 @@ public class SettingsActivity extends Activity {
         autoTitleSwitch = (Switch) findViewById(R.id.auto_title_switch);
         quickScanSwitch = (Switch) findViewById(R.id.quick_scan_switch);
         logSwitch = (Switch) findViewById(R.id.log_switch);
+        realtimeRenderSwitch = (Switch) findViewById(R.id.realtime_render_switch);
+        streamSwitch = (Switch) findViewById(R.id.stream_switch);
         titleModelSpinner = (Spinner) findViewById(R.id.title_model_spinner);
         saveButton = (Button) findViewById(R.id.save_button);
         cancelButton = (Button) findViewById(R.id.cancel_button);
@@ -113,6 +117,8 @@ public class SettingsActivity extends Activity {
         autoTitleSwitch.setChecked(prefs.getBoolean(KEY_AUTO_TITLE_ENABLED, true));
         quickScanSwitch.setChecked(prefs.getBoolean(KEY_QUICK_SCAN_ENABLED, false));
         logSwitch.setChecked(prefs.getBoolean(KEY_LOG_ENABLED, true));
+        realtimeRenderSwitch.setChecked(prefs.getBoolean(KEY_REALTIME_RENDER, false));
+        streamSwitch.setChecked(prefs.getBoolean(KEY_STREAM_ENABLED, true));
         LogUtil.ENABLED = logSwitch.isChecked();
         refreshTitleModelSpinner();
         refreshPresetSpinner();
@@ -160,6 +166,8 @@ public class SettingsActivity extends Activity {
         editor.putBoolean(KEY_AUTO_TITLE_ENABLED, autoTitle);
         editor.putBoolean(KEY_QUICK_SCAN_ENABLED, quickScanSwitch.isChecked());
         editor.putBoolean(KEY_LOG_ENABLED, logEnabled);
+        editor.putBoolean(KEY_REALTIME_RENDER, realtimeRenderSwitch.isChecked());
+        editor.putBoolean(KEY_STREAM_ENABLED, streamSwitch.isChecked());
 
         int pos = titleModelSpinner.getSelectedItemPosition();
         if (pos >= 0) {
@@ -262,6 +270,18 @@ public class SettingsActivity extends Activity {
     public static boolean isLogEnabled(Context context) {
         SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, 0);
         return prefs.getBoolean(KEY_LOG_ENABLED, true);
+    }
+
+    /** Re-render markdown/LaTeX while the reply streams. Off by default (heavier). */
+    public static boolean isRealtimeRenderEnabled(Context context) {
+        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, 0);
+        return prefs.getBoolean(KEY_REALTIME_RENDER, false);
+    }
+
+    /** Use stream=true on the completion request. On by default. */
+    public static boolean isStreamEnabled(Context context) {
+        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, 0);
+        return prefs.getBoolean(KEY_STREAM_ENABLED, true);
     }
 
     public static String getTitleModel(Context context) {

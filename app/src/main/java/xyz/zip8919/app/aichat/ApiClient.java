@@ -435,6 +435,26 @@ public class ApiClient {
         return "high"; // low/medium/off → high (API default)
     }
 
+    /**
+     * Pull choices[0].message.content out of a non-streaming completion body.
+     * Returns null when the shape is not recognised, so callers can report a
+     * parse failure instead of rendering an empty reply.
+     */
+    static String extractMessageContent(String responseBody) {
+        if (responseBody == null) return null;
+        try {
+            JSONObject json = new JSONObject(responseBody);
+            JSONArray choices = json.optJSONArray("choices");
+            if (choices == null || choices.length() == 0) return null;
+            JSONObject msg = choices.getJSONObject(0).optJSONObject("message");
+            if (msg == null) return null;
+            return removeThinkingContent(msg.optString("content", ""));
+        } catch (Exception e) {
+            LogUtil.e(TAG, "extractMessageContent failed: " + e.getMessage());
+            return null;
+        }
+    }
+
     static String removeThinkingContent(String content) {
         if (content == null) return "";
         StringBuilder result = new StringBuilder();

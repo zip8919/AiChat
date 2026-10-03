@@ -642,6 +642,7 @@ public class MainActivity extends Activity {
     }
 
     private void sendStreamingRequest(final ProviderInfo provider, final String thinkingLevel, final int generation) {
+        final boolean realtimeRenderEnabled = SettingsActivity.isRealtimeRenderEnabled(this);
         final long startMs = System.currentTimeMillis();
         LogUtil.i(TAG, ">>> sendStreamingRequest START: gen=%d url=%s%s model=%s thinking=%s (type=%s, param=%s)",
                 generation, provider.apiUrl, provider.chatPath, currentModel, thinkingLevel,
@@ -691,7 +692,8 @@ public class MainActivity extends Activity {
 
                     org.json.JSONObject body = new org.json.JSONObject();
                     body.put("model", currentModel);
-                    body.put("stream", true);
+                    final boolean streamEnabled = SettingsActivity.isStreamEnabled(MainActivity.this);
+                    body.put("stream", streamEnabled);
 
                     org.json.JSONArray msgs = new org.json.JSONArray();
                     if (systemPrompt != null && !systemPrompt.isEmpty()) {
@@ -761,6 +763,43 @@ public class MainActivity extends Activity {
                             new java.io.InputStreamReader(conn.getInputStream(), "UTF-8"));
                     String line;
                     long lastUpdate = 0;
+
+                    if (!streamEnabled) {
+                        // Non-streaming: the body is one JSON object, no SSE frames.
+                        StringBuilder sb = new StringBuilder();
+                        while ((line = reader.readLine()) != null) sb.append(line);
+                        reader.close();
+                        String fullContent = ApiClient.extractMessageContent(sb.toString());
+                        LogUtil.i(TAG, "non-stream response: %d chars raw -> %d chars content",
+                                sb.length(), fullContent == null ? 0 : fullContent.length());
+                        if (fullContent == null) {
+                            final String err = "响应解析失败";
+                            runOnUiThread(new Runnable() {
+                                public void run() { Toast.makeText(MainActivity.this, err, Toast.LENGTH_SHORT).show(); }
+                            });
+                            return;
+                        }
+                        final String done = fullContent;
+                        new Thread(new Runnable() {
+                            public void run() {
+                                final String html = MessageHtmlRenderer.contentToHtml(done, MainActivity.this);
+                                runOnUiThread(new Runnable() {
+                                    public void run() {
+                                        if (requestGeneration.get() == generation && aiIndex < messages.size()) {
+                                            messages.get(aiIndex).content = done;
+                                            webViewEvalJs("updateLastMsg('" + jsEscape(html) + "')");
+                                            webViewEvalJs("finalizeLast(" + aiIndex + ")");
+                                        } else {
+                                            LogUtil.w(TAG, "non-stream update skipped: aiIndex=%d >= size=%d",
+                                                    aiIndex, messages.size());
+                                        }
+                                    }
+                                });
+                            }
+                        }).start();
+                        return;
+                    }
+
                     LogUtil.i(TAG, "SSE stream started, begin reading chunks");
                     while (isRequestInProgress.get() && (line = reader.readLine()) != null) {
                         line = line.trim();
@@ -819,9 +858,11 @@ public class MainActivity extends Activity {
                                 }
                             }
 
-                            // Throttle: light text update at most every 200ms
+                            // Throttle: light text update at most every 200ms.
+                            // Skipped when realtime rendering is off — the reply
+                            // then appears once, fully rendered, at the end.
                             long now = System.currentTimeMillis();
-                            if (now - lastUpdate > 200) {
+                            if (realtimeRenderEnabled && now - lastUpdate > 200) {
                                 lastUpdate = now;
                                 final String content = rawContent.toString();
                                 runOnUiThread(new Runnable() {
@@ -1667,7 +1708,13 @@ public class MainActivity extends Activity {
                 currentPreviewLang, currentPreviewCode.length(), codePreviewRotation);
         String bgColor = getBgColorHex(codePreviewBgColor);
 
-        String rotateCss = rotateTransform(codePreviewRotation);
+        // Box the preview wrapper actually has. Needed because the rotated
+        // wrapper must be sized to the swapped axis (see rotateTransformWrap).
+        int boxW = codePreviewWebView.getWidth();
+        int boxH = codePreviewWebView.getHeight();
+        if (boxW <= 0) boxW = getResources().getDisplayMetrics().widthPixels;
+        if (boxH <= 0) boxH = getResources().getDisplayMetrics().heightPixels;
+        String rotateCss = rotateTransformWrap(codePreviewRotation, boxW, boxH);
 
         String html;
         if ("svg".equals(currentPreviewLang)) {
@@ -1711,20 +1758,41 @@ public class MainActivity extends Activity {
         }
 
         if (isFullHtmlDoc) {
-            // Inject zoom/rotate/bg scripts into existing HTML document
+            // A full HTML document brings its own body/html rules, so rotating
+            // body directly lets those rules fight the rotation compensation and
+            // the whole document slides off-screen (blank preview after rotate).
+            // Instead wrap the document content in a dedicated element whose
+            // rotation geometry we fully control.
+            String wrapCss = ".viewer-rot{"
+                    + (rotateCss.isEmpty() ? "" : rotateCss + "!important;")
+                    + "-webkit-transform-origin:0 0 !important;transform-origin:0 0 !important;"
+                    + "}";
             String inject = "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1.0,user-scalable=yes\">"
-                    + "<style>" +
-                    "body{" + rotateCss + "-webkit-transform-origin:0 0;transform-origin:0 0;}"
-                    + "</style>"
+                    + "<style>" + wrapCss + "</style>"
                     + "<script>" + zoomJs + "</script>";
-            // Insert after <head> or after <html>
+            String doc;
+            String openTag;
             if (code.toLowerCase().contains("<head>")) {
-                return code.replaceFirst("(?i)<head[^>]*>", "$0" + Matcher.quoteReplacement(inject));
+                doc = code.replaceFirst("(?i)<head[^>]*>", "$0" + Matcher.quoteReplacement(inject));
+                openTag = "<body[^>]*>";
             } else if (code.toLowerCase().contains("<html>")) {
-                return code.replaceFirst("(?i)<html[^>]*>", "$0<head>" + inject + "</head>");
+                doc = code.replaceFirst("(?i)<html[^>]*>",
+                        "$0<head>" + Matcher.quoteReplacement(inject) + "</head>");
+                openTag = "<body[^>]*>";
             } else {
-                return "<!DOCTYPE html><html><head>" + inject + "</head><body>" + code + "</body></html>";
+                doc = "<!DOCTYPE html><html><head>" + inject
+                        + "</head><body>" + code + "</body></html>";
+                openTag = "<body[^>]*>";
             }
+            // Wrap the document body content so rotation applies to our element.
+            if (rotateCss.isEmpty()) {
+                return doc;
+            }
+            if (doc.matches("(?is).*<body[^>]*>.*</body>.*")) {
+                doc = doc.replaceFirst("(?is)(<body[^>]*>)", "$1<div class=\"viewer-rot\">");
+                doc = doc.replaceFirst("(?is)</body>", "</div></body>");
+            }
+            return doc;
         }
 
         // HTML fragment — wrap in minimal page
@@ -1762,7 +1830,10 @@ public class MainActivity extends Activity {
      * A plain rotate() spins around the element center (or 0 0 without
      * compensation), pushing part of the content into negative x/y where it is
      * clipped and NOT scroll-reachable — the "truncated after rotate" bug.
-     * translate percentages are relative to the element's own box (W×H).
+     * translate percentages are relative to the element's own box (W×H), so for
+     * 90°/270° the wrapper must be sized to the swapped (portrait↔landscape)
+     * box, otherwise the translation lands on the wrong axis and content is
+     * pushed off-screen entirely.
      */
     private String rotateTransform(int deg) {
         switch (deg) {
@@ -1781,6 +1852,40 @@ public class MainActivity extends Activity {
             default:
                 return "";
         }
+    }
+
+    /**
+     * Rotation CSS for the code/SVG/HTML preview wrapper.
+     *
+     * A wrapper div is full-width (W = viewport width, H = content height) and
+     * the plain rotateTransform() above uses percentage translations relative to
+     * that box. For 90°/270° the visual content must occupy the swapped box, so
+     * a bare translateY(-100%) moves it by the wrapper's *height* on the rotated
+     * axis — the content ends up entirely outside the visible area (the
+     * "blank after rotate" bug). Compensating with explicit pixel widths on the
+     * swapped axes keeps the rotated content inside positive coordinates and
+     * reachable by scrolling.
+     */
+    private String rotateTransformWrap(int deg, int boxW, int boxH) {
+        if (deg == 90) {
+            // rotate(90) then pull back by the box height along the rotated Y.
+            return "width:" + boxH + "px;" +
+                    "-webkit-transform:rotate(90deg) translate(0,-100%);" +
+                    "transform:rotate(90deg) translate(0,-100%);" +
+                    "-webkit-transform-origin:0 0;transform-origin:0 0;";
+        }
+        if (deg == 270) {
+            return "width:" + boxH + "px;" +
+                    "-webkit-transform:rotate(-90deg) translate(-100%,0);" +
+                    "transform:rotate(-90deg) translate(-100%,0);" +
+                    "-webkit-transform-origin:0 0;transform-origin:0 0;";
+        }
+        if (deg == 180) {
+            return "-webkit-transform:translate(100%,100%) rotate(180deg);" +
+                    "transform:translate(100%,100%) rotate(180deg);" +
+                    "-webkit-transform-origin:0 0;transform-origin:0 0;";
+        }
+        return "";
     }
 
     private void applyBgColor() {
