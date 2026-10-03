@@ -9,6 +9,7 @@ import android.content.DialogInterface;
 import android.graphics.Color;
 import android.os.Bundle;
 import android.text.InputType;
+import android.util.SparseBooleanArray;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -42,6 +43,12 @@ public class ToolsActivity extends Activity {
     private final List<File> files = new ArrayList<File>();
     private String currentJsFileName = "";
 
+    private boolean selectionMode = false;
+    private LinearLayout selectionActions;
+    private TextView selectionCount;
+    private Button selectButton;
+    private Button selectionCancelButton;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -59,8 +66,35 @@ public class ToolsActivity extends Activity {
 
         fileList.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             public void onItemClick(AdapterView<?> p, View v, int pos, long id) {
+                if (selectionMode) {
+                    updateSelectionBar();
+                    return;
+                }
+                if (pos < 0 || pos >= files.size()) {
+                    return;
+                }
                 showFileMenu(files.get(pos));
             }
+        });
+
+        selectionActions = (LinearLayout) findViewById(R.id.tools_selection_actions);
+        selectionCount = (TextView) findViewById(R.id.tools_selection_count);
+        selectButton = (Button) findViewById(R.id.tools_select_button);
+        selectionCancelButton = (Button) findViewById(R.id.tools_selection_cancel_button);
+        selectButton.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { enterSelectionMode(); }
+        });
+        selectionCancelButton.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { exitSelectionMode(); }
+        });
+        findViewById(R.id.tools_selection_all_button).setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { selectAllFiles(); }
+        });
+        findViewById(R.id.tools_selection_invert_button).setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { invertFileSelection(); }
+        });
+        findViewById(R.id.tools_selection_delete_button).setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { confirmDeleteSelectedFiles(); }
         });
 
         findViewById(R.id.tools_js_run_button).setOnClickListener(new View.OnClickListener() {
@@ -118,11 +152,126 @@ public class ToolsActivity extends Activity {
         for (File f : files) {
             labels.add(f.getName() + "\n" + f.length() + " B");
         }
-        if (labels.isEmpty()) {
+        if (labels.isEmpty() && !selectionMode) {
             labels.add("（暂无已保存代码）");
         }
-        fileList.setAdapter(new ArrayAdapter<String>(this,
-                android.R.layout.simple_list_item_1, labels));
+        fileList.setChoiceMode(selectionMode
+                ? ListView.CHOICE_MODE_MULTIPLE : ListView.CHOICE_MODE_NONE);
+        int itemLayout = selectionMode
+                ? R.layout.item_tools_file_sel : android.R.layout.simple_list_item_1;
+        fileList.setAdapter(new ArrayAdapter<String>(this, itemLayout, labels));
+        fileList.clearChoices();
+        updateSelectionBar();
+    }
+
+    // ---------- multi-select ----------
+
+    @Override
+    public void onBackPressed() {
+        if (selectionMode) {
+            exitSelectionMode();
+            return;
+        }
+        super.onBackPressed();
+    }
+
+    private void enterSelectionMode() {
+        if (files.isEmpty()) {
+            Toast.makeText(this, "没有可用的已保存代码", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        selectionMode = true;
+        refreshFiles();
+        LogUtil.i(TAG, "enterSelectionMode: count=%d", files.size());
+    }
+
+    private void exitSelectionMode() {
+        selectionMode = false;
+        fileList.clearChoices();
+        refreshFiles();
+        LogUtil.i(TAG, "exitSelectionMode");
+    }
+
+    private int selectedFileCount() {
+        SparseBooleanArray checked = fileList.getCheckedItemPositions();
+        int n = 0;
+        if (checked != null) {
+            for (int i = 0; i < checked.size(); i++) {
+                if (checked.valueAt(i)) {
+                    n++;
+                }
+            }
+        }
+        return n;
+    }
+
+    private void updateSelectionBar() {
+        if (selectionActions == null) {
+            return;
+        }
+        selectionActions.setVisibility(selectionMode ? View.VISIBLE : View.GONE);
+        selectButton.setVisibility(selectionMode ? View.GONE : View.VISIBLE);
+        selectionCancelButton.setVisibility(selectionMode ? View.VISIBLE : View.GONE);
+        if (selectionMode) {
+            selectionCount.setText("已选 " + selectedFileCount() + " / " + files.size());
+        } else {
+            selectionCount.setText("点击多选可批量删除");
+        }
+    }
+
+    private void selectAllFiles() {
+        for (int i = 0; i < files.size(); i++) {
+            fileList.setItemChecked(i, true);
+        }
+        updateSelectionBar();
+    }
+
+    private void invertFileSelection() {
+        for (int i = 0; i < files.size(); i++) {
+            fileList.setItemChecked(i, !fileList.isItemChecked(i));
+        }
+        updateSelectionBar();
+    }
+
+    private List<File> getSelectedFiles() {
+        List<File> selected = new ArrayList<File>();
+        for (int i = 0; i < files.size(); i++) {
+            if (fileList.isItemChecked(i)) {
+                selected.add(files.get(i));
+            }
+        }
+        return selected;
+    }
+
+    private void confirmDeleteSelectedFiles() {
+        final List<File> selected = getSelectedFiles();
+        if (selected.isEmpty()) {
+            Toast.makeText(this, "请先选择要删除的代码", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("删除代码")
+                .setMessage("确定要删除选中的 " + selected.size() + " 个文件吗？\n\n此操作不可恢复！")
+                .setPositiveButton("删除", new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface d, int w) {
+                        deleteSelectedFiles(selected);
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void deleteSelectedFiles(List<File> selected) {
+        int ok = 0;
+        for (File f : selected) {
+            if (f.delete()) {
+                ok++;
+            }
+        }
+        LogUtil.i(TAG, "deleteSelectedFiles: %d/%d ok", ok, selected.size());
+        Toast.makeText(this, "已删除 " + ok + " 个文件", Toast.LENGTH_SHORT).show();
+        selectionMode = false;
+        refreshFiles();
     }
 
     // ---------- saved code ----------

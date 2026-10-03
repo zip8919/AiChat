@@ -10,7 +10,9 @@ import android.view.View;
 import android.widget.AdapterView;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.LinearLayout;
 import android.widget.ListView;
+import android.widget.TextView;
 import android.widget.Toast;
 import java.util.List;
 
@@ -25,6 +27,11 @@ public class ConversationManagerActivity extends Activity {
     private ConversationAdapter adapter;
     private ListView listView;
     private SharedPreferences uiState;
+    private LinearLayout selectionActions;
+    private TextView selectionCount;
+    private Button selectModeButton;
+    private Button selectionCancelButton;
+    private boolean selectionMode = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -35,9 +42,14 @@ public class ConversationManagerActivity extends Activity {
         this.conversationManager = ConversationManager.getInstance();
         this.storageManager = StorageManager.getInstance();
         this.listView = (ListView) findViewById(R.id.conversation_list);
+        this.selectionActions = (LinearLayout) findViewById(R.id.selection_actions);
+        this.selectionCount = (TextView) findViewById(R.id.selection_count);
+        this.selectModeButton = (Button) findViewById(R.id.select_mode_button);
+        this.selectionCancelButton = (Button) findViewById(R.id.selection_cancel_button);
 
         initButtons();
         loadConversations();
+        updateSelectionBar();
 
         int savedPos = uiState.getInt(KEY_SCROLL_POS, 0);
         LogUtil.i(TAG, "========== onCreate ========== (%s) conversations=%d savedPos=%d",
@@ -70,6 +82,10 @@ public class ConversationManagerActivity extends Activity {
 
         findViewById(R.id.clear_history_button).setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
+                if (selectionMode) {
+                    LogUtil.d(TAG, "click: clear history ignored, selection mode on");
+                    return;
+                }
                 if (conversations == null || conversations.isEmpty()) {
                     LogUtil.w(TAG, "click: clear history but list empty");
                     Toast.makeText(ConversationManagerActivity.this, "没有历史记录", Toast.LENGTH_SHORT).show();
@@ -89,10 +105,57 @@ public class ConversationManagerActivity extends Activity {
             }
         });
 
+        selectModeButton.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                if (conversations == null || conversations.isEmpty()) {
+                    LogUtil.w(TAG, "click: select mode but list empty");
+                    Toast.makeText(ConversationManagerActivity.this, "没有历史记录", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                enterSelectionMode();
+            }
+        });
+
+        selectionCancelButton.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                LogUtil.d(TAG, "click: cancel selection");
+                exitSelectionMode();
+            }
+        });
+
+        findViewById(R.id.selection_all_button).setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                LogUtil.d(TAG, "click: select all");
+                adapter.selectAll();
+                updateSelectionBar();
+            }
+        });
+
+        findViewById(R.id.selection_invert_button).setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                LogUtil.d(TAG, "click: invert selection");
+                adapter.invertSelection();
+                updateSelectionBar();
+            }
+        });
+
+        findViewById(R.id.selection_delete_button).setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                LogUtil.d(TAG, "click: delete selected");
+                confirmDeleteSelected();
+            }
+        });
+
         listView.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             public void onItemClick(AdapterView<?> parent, View view, int pos, long id) {
                 if (pos < 0 || pos >= conversations.size()) {
                     LogUtil.w(TAG, "item click out of range: pos=%d size=%d", pos, conversations.size());
+                    return;
+                }
+                if (selectionMode) {
+                    LogUtil.d(TAG, "item click (selection mode): pos=%d", pos);
+                    adapter.toggleSelection(pos);
+                    updateSelectionBar();
                     return;
                 }
                 Conversation conv = conversations.get(pos);
@@ -106,11 +169,75 @@ public class ConversationManagerActivity extends Activity {
 
         listView.setOnItemLongClickListener(new AdapterView.OnItemLongClickListener() {
             public boolean onItemLongClick(AdapterView<?> parent, View view, int pos, long id) {
+                if (selectionMode) {
+                    LogUtil.d(TAG, "item long click ignored (selection mode): pos=%d", pos);
+                    return true;
+                }
                 LogUtil.d(TAG, "item long click: pos=%d", pos);
                 showActionDialog(conversations.get(pos));
                 return true;
             }
         });
+    }
+
+    private void enterSelectionMode() {
+        selectionMode = true;
+        adapter.setSelectionMode(true);
+        updateSelectionBar();
+        LogUtil.i(TAG, "enterSelectionMode: %d conversations", conversations.size());
+    }
+
+    private void exitSelectionMode() {
+        selectionMode = false;
+        adapter.setSelectionMode(false);
+        updateSelectionBar();
+        LogUtil.i(TAG, "exitSelectionMode");
+    }
+
+    private void updateSelectionBar() {
+        selectionActions.setVisibility(selectionMode ? View.VISIBLE : View.GONE);
+        selectModeButton.setVisibility(selectionMode ? View.GONE : View.VISIBLE);
+        selectionCancelButton.setVisibility(selectionMode ? View.VISIBLE : View.GONE);
+        selectionCount.setText(selectionMode
+                ? ("已选 " + adapter.getSelectedCount() + " / " + conversations.size())
+                : "点击多选可批量删除");
+    }
+
+    private void confirmDeleteSelected() {
+        final List<String> ids = adapter.getSelectedIds();
+        if (ids.isEmpty()) {
+            LogUtil.w(TAG, "delete selected: nothing selected");
+            Toast.makeText(this, "请先选择要删除的对话", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("删除对话")
+                .setMessage("确定要删除选中的 " + ids.size() + " 个对话吗？\n\n此操作不可恢复！")
+                .setPositiveButton("删除", new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface dialog, int which) {
+                        deleteSelected(ids);
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void deleteSelected(List<String> ids) {
+        LogUtil.i(TAG, "deleteSelected: %d ids=%s", ids.size(), ids.toString());
+        for (int i = 0; i < ids.size(); i++) {
+            conversationManager.deleteConversation(ids.get(i));
+        }
+        int removed = 0;
+        for (int i = conversations.size() - 1; i >= 0; i--) {
+            if (ids.contains(conversations.get(i).id)) {
+                conversations.remove(i);
+                removed++;
+            }
+        }
+        adapter.notifyDataSetChanged();
+        exitSelectionMode();
+        LogUtil.i(TAG, "deleteSelected done: removed=%d remaining=%d", removed, conversations.size());
+        Toast.makeText(this, "已删除 " + removed + " 个对话", Toast.LENGTH_SHORT).show();
     }
 
     private void loadConversations() {
@@ -206,6 +333,16 @@ public class ConversationManagerActivity extends Activity {
         adapter.notifyDataSetChanged();
         LogUtil.i(TAG, "clearAllHistory done: %d remaining", conversations.size());
         Toast.makeText(this, "已清空所有历史对话", Toast.LENGTH_SHORT).show();
+    }
+
+    @Override
+    public void onBackPressed() {
+        if (selectionMode) {
+            LogUtil.d(TAG, "onBackPressed: exit selection mode");
+            exitSelectionMode();
+            return;
+        }
+        super.onBackPressed();
     }
 
     @Override
