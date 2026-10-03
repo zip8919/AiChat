@@ -64,6 +64,8 @@ public class MainActivity extends Activity {
     private WebView conversationWebView;
     private Spinner modelSpinner;
     private Spinner thinkingSpinner;
+    private View queueBar;
+    private TextView queueBarText;
 
     private List<Message> messages;
     private List<ModelInfo> availableModels;
@@ -158,6 +160,11 @@ public class MainActivity extends Activity {
         sendButton = (Button) findViewById(R.id.send_button);
         modelSpinner = (Spinner) findViewById(R.id.model_spinner);
         thinkingSpinner = (Spinner) findViewById(R.id.thinking_spinner);
+        queueBar = findViewById(R.id.queue_bar);
+        queueBarText = (TextView) findViewById(R.id.queue_bar_text);
+        findViewById(R.id.queue_manage_button).setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { LogUtil.d(TAG, "click: queue_manage"); showQueueManager(); }
+        });
         conversationWebView = (WebView) findViewById(R.id.message_webview);
         conversationWebView.getSettings().setJavaScriptEnabled(true);
         conversationWebView.getSettings().setDefaultTextEncodingName("UTF-8");
@@ -395,6 +402,8 @@ public class MainActivity extends Activity {
         if (!pendingQueue.isEmpty()) {
             LogUtil.i(TAG, "createNewConversation: dropping %d queued message(s)", pendingQueue.size());
             pendingQueue.clear();
+            dismissQueueManager();
+            updateQueueBar();
         }
         if (isRequestInProgress.get()) interruptRequest();
         loadSystemPrompt();
@@ -678,7 +687,35 @@ public class MainActivity extends Activity {
 
     // Messages typed while a request is streaming wait here and are sent in order
     // once the current reply finishes. Touched on the UI thread only.
-    private final List<String> pendingQueue = new ArrayList<String>();
+    // Each entry carries a stable id: dialogs hold the id, never the position, so
+    // an action still lands on the message the user picked after the drain has
+    // already sent one of its neighbours.
+    static class QueuedMessage {
+        final int id;
+        final String text;
+
+        QueuedMessage(int id, String text) {
+            this.id = id;
+            this.text = text;
+        }
+    }
+
+    private final List<QueuedMessage> pendingQueue = new ArrayList<QueuedMessage>();
+    private int nextQueueId = 1;
+    private AlertDialog queueManagerDialog;
+    private AlertDialog queueActionsDialog;
+    /** A relist was requested while the action sheet was open; applied on the sheet's dismiss. */
+    private boolean queueManagerDirty;
+    /** True when the action sheet was closed by picking an action rather than by 取消. */
+    private boolean queueActionTaken;
+
+    /** Current position of the queued message with this id, or -1 when it is gone. */
+    private int findQueueIndex(int id) {
+        for (int i = 0; i < pendingQueue.size(); i++) {
+            if (pendingQueue.get(i).id == id) return i;
+        }
+        return -1;
+    }
 
     private void sendMessage() {
         if (isRequestInProgress.get()) {
@@ -687,8 +724,9 @@ public class MainActivity extends Activity {
                 LogUtil.w(TAG, "sendMessage ignored: empty input");
                 return;
             }
-            pendingQueue.add(queued);
+            pendingQueue.add(new QueuedMessage(nextQueueId++, queued));
             inputEditText.setText("");
+            updateQueueBar();
             LogUtil.i(TAG, "sendMessage queued: len=%d pending=%d", queued.length(), pendingQueue.size());
             Toast.makeText(this, "已排队 " + pendingQueue.size() + " 条，将在当前回复结束后发送",
                     Toast.LENGTH_SHORT).show();
@@ -712,12 +750,190 @@ public class MainActivity extends Activity {
                             isRequestInProgress.get(), pendingQueue.size());
                     return;
                 }
-                String next = pendingQueue.remove(0);
-                LogUtil.i(TAG, "drainPendingQueue: sending queued message len=%d remaining=%d",
-                        next.length(), pendingQueue.size());
-                sendMessageText(next);
+                QueuedMessage next = pendingQueue.remove(0);
+                updateQueueBar();
+                refreshQueueManager();
+                LogUtil.i(TAG, "drainPendingQueue: sending queued message id=%d len=%d remaining=%d",
+                        next.id, next.text.length(), pendingQueue.size());
+                sendMessageText(next.text);
             }
         });
+    }
+
+    /** Shows/hides the queued-message bar above the input row. UI thread only. */
+    private void updateQueueBar() {
+        if (queueBar == null || queueBarText == null) return;
+        int n = pendingQueue.size();
+        if (n == 0) {
+            queueBar.setVisibility(View.GONE);
+        } else {
+            queueBar.setVisibility(View.VISIBLE);
+            queueBarText.setText("排队 " + n + " 条，将在当前回复结束后依次发送");
+        }
+    }
+
+    private void showQueueManager() {
+        if (pendingQueue.isEmpty()) {
+            Toast.makeText(this, "没有排队中的消息", Toast.LENGTH_SHORT).show();
+            updateQueueBar();
+            return;
+        }
+        final String[] items = new String[pendingQueue.size()];
+        final int[] ids = new int[pendingQueue.size()];
+        for (int i = 0; i < pendingQueue.size(); i++) {
+            QueuedMessage qm = pendingQueue.get(i);
+            ids[i] = qm.id;
+            String s = qm.text.replace('\n', ' ');
+            if (s.length() > 30) s = s.substring(0, 30) + "…";
+            items[i] = (i + 1) + ". " + s;
+        }
+        queueManagerDialog = new AlertDialog.Builder(this)
+                .setTitle("排队中的消息")
+                .setItems(items, new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface d, int which) {
+                        showQueueItemActions(ids[which]);
+                    }
+                })
+                .setPositiveButton("关闭", null)
+                .setNeutralButton("全部清空", new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface d, int which) {
+                        LogUtil.i(TAG, "queue: clear all (%d)", pendingQueue.size());
+                        pendingQueue.clear();
+                        updateQueueBar();
+                    }
+                })
+                .show();
+    }
+
+    /**
+     * Relists the manager dialog when the queue changed underneath it (a message
+     * was sent by the drain while the dialog was open). Without this the rows
+     * would keep pointing at messages that are no longer at those positions.
+     *
+     * <p>While the per-message action sheet is open the relist is deferred: showing
+     * the manager again would stack it on top of the sheet the user is using.
+     * Deferring is safe because every action resolves its message by id and reports
+     * 「该消息已发送」when the drain got there first.
+     */
+    private void refreshQueueManager() {
+        if (queueActionsDialog != null && queueActionsDialog.isShowing()) {
+            queueManagerDirty = true;
+            return;
+        }
+        if (queueManagerDialog == null || !queueManagerDialog.isShowing()) return;
+        queueManagerDialog.dismiss();
+        queueManagerDialog = null;
+        if (pendingQueue.isEmpty()) return;
+        showQueueManager();
+    }
+
+    private void dismissQueueManager() {
+        if (queueManagerDialog != null) {
+            queueManagerDialog.dismiss();
+            queueManagerDialog = null;
+        }
+    }
+
+    /** Operates on a queued message by its stable id, not by its position. */
+    private void showQueueItemActions(final int id) {
+        final int index = findQueueIndex(id);
+        if (index < 0) {
+            LogUtil.i(TAG, "queue: action on id=%d dropped, already sent (pending=%d)",
+                    id, pendingQueue.size());
+            Toast.makeText(this, "该消息已发送", Toast.LENGTH_SHORT).show();
+            refreshQueueManager();
+            return;
+        }
+        final String[] actions = {"上移", "下移", "插队发送（打断当前回复）", "删除"};
+        queueActionsDialog = new AlertDialog.Builder(this)
+                .setTitle("第 " + (index + 1) + " 条")
+                .setItems(actions, new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface d, int which) {
+                        queueActionTaken = true;
+                        if (which == 0) moveQueueItem(id, -1);
+                        else if (which == 1) moveQueueItem(id, 1);
+                        else if (which == 2) jumpQueue(id);
+                        else deleteQueueItem(id);
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .setOnDismissListener(new DialogInterface.OnDismissListener() {
+                    public void onDismiss(DialogInterface d) {
+                        queueActionsDialog = null;
+                        // Picking an action returns to the list so several edits can be
+                        // made in a row; 取消 closes the whole stack.
+                        boolean reopen = queueActionTaken;
+                        queueActionTaken = false;
+                        if (queueManagerDirty || (reopen && !pendingQueue.isEmpty())) {
+                            queueManagerDirty = false;
+                            refreshQueueManager();
+                            if (reopen && (queueManagerDialog == null || !queueManagerDialog.isShowing())) {
+                                showQueueManager();
+                            }
+                        }
+                    }
+                })
+                .show();
+    }
+
+    private void moveQueueItem(int id, int delta) {
+        int from = findQueueIndex(id);
+        if (from < 0) {
+            Toast.makeText(this, "该消息已发送", Toast.LENGTH_SHORT).show();
+            refreshQueueManager();
+            return;
+        }
+        int to = from + delta;
+        if (to < 0 || to >= pendingQueue.size()) {
+            Toast.makeText(this, delta < 0 ? "已经在最前" : "已经在最后", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        QueuedMessage moved = pendingQueue.remove(from);
+        pendingQueue.add(to, moved);
+        LogUtil.i(TAG, "queue: move id=%d %d -> %d (pending=%d)", id, from, to, pendingQueue.size());
+        updateQueueBar();
+        refreshQueueManager();
+    }
+
+    private void deleteQueueItem(int id) {
+        int index = findQueueIndex(id);
+        if (index < 0) {
+            Toast.makeText(this, "该消息已发送", Toast.LENGTH_SHORT).show();
+            refreshQueueManager();
+            return;
+        }
+        QueuedMessage removed = pendingQueue.remove(index);
+        LogUtil.i(TAG, "queue: delete id=%d idx=%d len=%d (pending=%d)",
+                id, index, removed.text.length(), pendingQueue.size());
+        updateQueueBar();
+        refreshQueueManager();
+        if (pendingQueue.isEmpty()) {
+            Toast.makeText(this, "队列已清空", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    /**
+     * Sends the selected queued message next: it moves to the head of the queue,
+     * then the in-flight reply is stopped so the drain picks it up immediately.
+     */
+    private void jumpQueue(int id) {
+        int index = findQueueIndex(id);
+        if (index < 0) {
+            Toast.makeText(this, "该消息已发送", Toast.LENGTH_SHORT).show();
+            refreshQueueManager();
+            return;
+        }
+        QueuedMessage moved = pendingQueue.remove(index);
+        pendingQueue.add(0, moved);
+        LogUtil.i(TAG, "queue: jump id=%d idx=%d to head (pending=%d, inProgress=%s)",
+                id, index, pendingQueue.size(), isRequestInProgress.get());
+        updateQueueBar();
+        refreshQueueManager();
+        if (isRequestInProgress.get()) {
+            interruptRequest();
+        } else {
+            drainPendingQueue();
+        }
     }
 
     private void sendMessageText(final String input) {
@@ -1805,9 +2021,10 @@ public class MainActivity extends Activity {
             return;
         }
         final String ext = exportExtForLang(lang);
+        final String type = exportTypeForLang(lang);
         final EditText input = new EditText(this);
         input.setSingleLine(true);
-        input.setText("code_" + ext + "_" + System.currentTimeMillis());
+        input.setText("code_" + type + "_" + System.currentTimeMillis());
         input.setSelection(input.getText().length());
         new AlertDialog.Builder(this)
                 .setTitle("保存代码")
@@ -1817,7 +2034,7 @@ public class MainActivity extends Activity {
                     public void onClick(DialogInterface d, int w) {
                         String name = sanitizeExportName(input.getText().toString());
                         if (name.isEmpty()) {
-                            name = "code_" + ext + "_" + System.currentTimeMillis();
+                            name = "code_" + type + "_" + System.currentTimeMillis();
                         }
                         final String fileName = name + "." + ext;
                         if (StorageManager.getInstance().exportExists(fileName)) {
@@ -1855,16 +2072,85 @@ public class MainActivity extends Activity {
     }
 
     static String exportExtForLang(String lang) {
-        if ("html".equals(lang)) {
+        String key = normalizeLangToken(lang);
+        if (key.isEmpty()) {
+            return "txt";
+        }
+        if ("html".equals(key) || "htm".equals(key) || "xhtml".equals(key)) {
             return "html";
         }
-        if ("svg".equals(lang)) {
+        if ("svg".equals(key)) {
             return "svg";
         }
-        if ("js".equals(lang) || "javascript".equals(lang)) {
+        if ("js".equals(key) || "javascript".equals(key) || "node".equals(key) || "jsx".equals(key)) {
             return "js";
         }
+        if ("ts".equals(key) || "typescript".equals(key)) {
+            return "ts";
+        }
+        if ("py".equals(key) || "python".equals(key) || "python3".equals(key)) {
+            return "py";
+        }
+        if ("kt".equals(key) || "kotlin".equals(key)) {
+            return "kt";
+        }
+        if ("sh".equals(key) || "shell".equals(key) || "bash".equals(key)
+                || "zsh".equals(key) || "console".equals(key)) {
+            return "sh";
+        }
+        if ("c++".equals(key) || "cpp".equals(key) || "cxx".equals(key)) {
+            return "cpp";
+        }
+        if ("c#".equals(key) || "cs".equals(key) || "csharp".equals(key)) {
+            return "cs";
+        }
+        if ("yml".equals(key) || "yaml".equals(key)) {
+            return "yaml";
+        }
+        if ("md".equals(key) || "markdown".equals(key)) {
+            return "md";
+        }
+        if ("rs".equals(key) || "rust".equals(key)) {
+            return "rs";
+        }
+        if ("rb".equals(key) || "ruby".equals(key)) {
+            return "rb";
+        }
+        if ("pl".equals(key) || "perl".equals(key)) {
+            return "pl";
+        }
+        if ("ps1".equals(key) || "powershell".equals(key)) {
+            return "ps1";
+        }
+        if ("objective-c".equals(key) || "objc".equals(key)) {
+            return "m";
+        }
+        if ("plaintext".equals(key) || "text".equals(key) || "txt".equals(key)) {
+            return "txt";
+        }
+        // Already a usable extension token (java, json, xml, go, sql, css, php, swift,
+        // dart, lua, scala, groovy, ini, properties, r, diff, patch, ...).
+        if (key.matches("[a-z0-9_+-]{1,10}")) {
+            return key;
+        }
         return "txt";
+    }
+
+    /**
+     * The type marker used in the default export file name, taken straight from the
+     * code block's declared language so ```python saves as code_python_&lt;ts&gt;.py
+     * instead of collapsing every unknown language into "txt".
+     */
+    static String exportTypeForLang(String lang) {
+        String key = normalizeLangToken(lang);
+        return key.isEmpty() ? "txt" : key;
+    }
+
+    private static String normalizeLangToken(String lang) {
+        if (lang == null) {
+            return "";
+        }
+        return lang.trim().toLowerCase().replaceAll("[^a-z0-9_+.#-]", "");
     }
 
     /** Strips path separators and characters Android's filesystem rejects. */
