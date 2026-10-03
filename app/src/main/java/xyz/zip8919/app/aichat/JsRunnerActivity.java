@@ -66,8 +66,19 @@ public class JsRunnerActivity extends Activity {
             public void onClick(View v) { runCurrent(); }
         });
 
-        Button clearBtn = (Button) findViewById(R.id.js_clear_button);
-        clearBtn.setOnClickListener(new View.OnClickListener() {
+        // The parent ScrollView (js_output_scroll) already scrolls the output,
+        // and ScrollingMovementMethod would replace the movement method that
+        // setTextIsSelectable() installs, which silently disables text
+        // selection (long-press showed no handles).
+        outputView.setTextIsSelectable(true);
+
+        Button clearCodeBtn = (Button) findViewById(R.id.js_clear_code_button);
+        clearCodeBtn.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { codeInput.setText(""); }
+        });
+
+        Button clearOutBtn = (Button) findViewById(R.id.js_clear_output_button);
+        clearOutBtn.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) { output.setLength(0); outputView.setText(""); }
         });
 

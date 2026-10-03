@@ -150,6 +150,14 @@ public class StorageManager {
         return ok ? filePath : null;
     }
 
+    /**
+     * True when basePath/exports already holds a file with this name.
+     */
+    public boolean exportExists(String fileName) {
+        File dir = new File(this.basePath + File.separator + EXPORTS_DIR);
+        return new File(dir, fileName).exists();
+    }
+
     // ---- conversations ----
 
     public boolean saveConversation(String conversationId, String content) {

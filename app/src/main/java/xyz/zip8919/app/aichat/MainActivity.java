@@ -142,6 +142,7 @@ public class MainActivity extends Activity {
         initViews();
         loadSystemPrompt();
         initConversation();
+        handlePromptIntent(getIntent());
         LogUtil.i(TAG, "========== onCreate done ==========");
     }
 
@@ -221,10 +222,8 @@ public class MainActivity extends Activity {
                     case MotionEvent.ACTION_UP:
                     case MotionEvent.ACTION_CANCEL:
                         handler.removeCallbacks(longPressRunnable);
-                        if (!longPressed && isRequestInProgress.get()) {
-                            LogUtil.d(TAG, "sendButton short tap during request -> interruptRequest");
-                            interruptRequest();
-                        }
+                        // Short tap while a request is running no longer interrupts:
+                        // sendMessage() queues the text instead. Long press still stops.
                         return false;
                 }
                 return false;
@@ -391,6 +390,12 @@ public class MainActivity extends Activity {
 
     private void createNewConversation() {
         LogUtil.i(TAG, "createNewConversation (requestInProgress=%s)", isRequestInProgress.get());
+        // Queued messages belong to the old conversation; drop them before the
+        // interrupt handler drains the queue into the new one.
+        if (!pendingQueue.isEmpty()) {
+            LogUtil.i(TAG, "createNewConversation: dropping %d queued message(s)", pendingQueue.size());
+            pendingQueue.clear();
+        }
         if (isRequestInProgress.get()) interruptRequest();
         loadSystemPrompt();
         Conversation conv = conversationManager.createNewConversation();
@@ -417,6 +422,7 @@ public class MainActivity extends Activity {
         runOnUiThread(new Runnable() {
             public void run() {
                 if (isFinishing()) return;
+                drainPendingQueue();
                 if (messages.size() != msgCountAtInterrupt) return;
                 if (!messages.isEmpty()) {
                     Message lastMsg = messages.get(messages.size() - 1);
@@ -498,6 +504,7 @@ public class MainActivity extends Activity {
         if (intent == null) {
             return;
         }
+        handleCodePreviewIntent(intent);
         String prompt = intent.getStringExtra(EXTRA_PROMPT);
         if (prompt == null || prompt.isEmpty()) {
             return;
@@ -505,13 +512,68 @@ public class MainActivity extends Activity {
         intent.removeExtra(EXTRA_PROMPT);
         boolean send = intent.getBooleanExtra(EXTRA_PROMPT_SEND, false);
         LogUtil.i(TAG, "handlePromptIntent: send=%s len=%d", send, prompt.length());
-        if (inputEditText != null) {
-            inputEditText.setText(prompt);
-            inputEditText.setSelection(prompt.length());
+        if (inputEditText == null) {
+            return;
         }
         if (send) {
+            // The environment prompt is sent as a standalone message, so keep whatever
+            // the user had already typed: remember it and put it back after the send.
+            String draft = inputEditText.getText().toString();
+            inputEditText.setText(prompt);
+            inputEditText.setSelection(prompt.length());
             sendMessage();
+            if (draft.length() > 0 && inputEditText.getText().length() == 0) {
+                inputEditText.setText(draft);
+                inputEditText.setSelection(draft.length());
+                LogUtil.d(TAG, "handlePromptIntent: restored draft len=%d", draft.length());
+            }
+        } else {
+            // Insert at the caret instead of replacing the draft.
+            int start = Math.max(0, inputEditText.getSelectionStart());
+            int end = Math.max(0, inputEditText.getSelectionEnd());
+            if (start > end) {
+                int tmp = start;
+                start = end;
+                end = tmp;
+            }
+            inputEditText.getText().replace(start, end, prompt);
+            inputEditText.setSelection(start + prompt.length());
         }
+    }
+
+    private void handleCodePreviewIntent(Intent intent) {
+        String code = intent.getStringExtra(EXTRA_PREVIEW_CODE);
+        if (code == null || code.isEmpty()) {
+            return;
+        }
+        intent.removeExtra(EXTRA_PREVIEW_CODE);
+        String lang = intent.getStringExtra(EXTRA_PREVIEW_LANG);
+        if (lang == null || lang.isEmpty()) {
+            lang = detectLang(code);
+        }
+        LogUtil.i(TAG, "handleCodePreviewIntent: lang=%s len=%d", lang, code.length());
+        showCodePreviewDialog(lang, code);
+    }
+
+    /**
+     * Sniffs the renderer from the code itself rather than from a file name, so a
+     * saved snippet still previews as html / svg / js after being renamed.
+     */
+    static String detectLang(String content) {
+        if (content == null) {
+            return "js";
+        }
+        String t = content.trim().toLowerCase();
+        if (t.startsWith("<!doctype") || t.startsWith("<html")) {
+            return "html";
+        }
+        if (t.startsWith("<svg")) {
+            return "svg";
+        }
+        if (t.startsWith("<")) {
+            return "html";
+        }
+        return "js";
     }
 
     @Override
@@ -614,21 +676,22 @@ public class MainActivity extends Activity {
         }
     }
 
-    private boolean sendMessagePending = false;
+    // Messages typed while a request is streaming wait here and are sent in order
+    // once the current reply finishes. Touched on the UI thread only.
+    private final List<String> pendingQueue = new ArrayList<String>();
 
     private void sendMessage() {
         if (isRequestInProgress.get()) {
-            LogUtil.w(TAG, "sendMessage ignored: request already in progress -> interrupt instead");
-            interruptRequest();
-            if (!sendMessagePending) {
-                sendMessagePending = true;
-                handler.postDelayed(new Runnable() {
-                    public void run() {
-                        sendMessagePending = false;
-                        sendMessage();
-                    }
-                }, 150);
+            String queued = inputEditText.getText().toString().trim();
+            if (queued.isEmpty()) {
+                LogUtil.w(TAG, "sendMessage ignored: empty input");
+                return;
             }
+            pendingQueue.add(queued);
+            inputEditText.setText("");
+            LogUtil.i(TAG, "sendMessage queued: len=%d pending=%d", queued.length(), pendingQueue.size());
+            Toast.makeText(this, "已排队 " + pendingQueue.size() + " 条，将在当前回复结束后发送",
+                    Toast.LENGTH_SHORT).show();
             return;
         }
         String input = inputEditText.getText().toString().trim();
@@ -636,6 +699,28 @@ public class MainActivity extends Activity {
             LogUtil.w(TAG, "sendMessage ignored: empty input");
             return;
         }
+        inputEditText.setText("");
+        sendMessageText(input);
+    }
+
+    private void drainPendingQueue() {
+        if (pendingQueue.isEmpty()) return;
+        handler.post(new Runnable() {
+            public void run() {
+                if (isRequestInProgress.get() || pendingQueue.isEmpty()) {
+                    LogUtil.i(TAG, "drainPendingQueue: deferred, inProgress=%s pending=%d",
+                            isRequestInProgress.get(), pendingQueue.size());
+                    return;
+                }
+                String next = pendingQueue.remove(0);
+                LogUtil.i(TAG, "drainPendingQueue: sending queued message len=%d remaining=%d",
+                        next.length(), pendingQueue.size());
+                sendMessageText(next);
+            }
+        });
+    }
+
+    private void sendMessageText(final String input) {
         LogUtil.i(TAG, "========== sendMessage: len=%d preview=%s ==========",
                 input.length(), LogUtil.preview(input, 200));
 
@@ -644,7 +729,6 @@ public class MainActivity extends Activity {
         Message userMsg = new Message(Message.ROLE_USER, input);
         messages.add(userMsg);
         conversationManager.getCurrentConversation().touch();
-        inputEditText.setText("");
         LogUtil.d(TAG, "user message appended, total messages=%d", messages.size());
 
         // Append user message to WebView
@@ -713,6 +797,11 @@ public class MainActivity extends Activity {
                 final int[] chunkCount = {0};
                 final int[] thinkingChunks = {0};
                 final int[] contentChunks = {0};
+                // Bumped for every render request so a slow background render
+                // cannot overwrite a newer one (or the final render).
+                final java.util.concurrent.atomic.AtomicInteger renderSeq =
+                        new java.util.concurrent.atomic.AtomicInteger();
+                final boolean[] renderInFlight = {false};
 
                 HttpURLConnection conn = null;
                 try {
@@ -889,7 +978,12 @@ public class MainActivity extends Activity {
                             if (delta.has("content") && !delta.isNull("content")) {
                                 String ct = delta.getString("content");
                                 contentChunks[0]++;
-                                if (thinkingActive[0] && !thinkingFinished[0]) {
+                                // Only a non-empty content chunk ends the thinking
+                                // phase. The API emits "content":"" on every
+                                // reasoning chunk, which used to end the phase on
+                                // the first reasoning chunk and froze the
+                                // "展开思考（N字）" count at a couple of chars.
+                                if (ct.length() > 0 && thinkingActive[0] && !thinkingFinished[0]) {
                                     thinkingFinished[0] = true;
                                     rawContent.append("[/thinking]");
                                     LogUtil.d(TAG, "thinking phase END at chunk#%d (thinkingChunks=%d)",
@@ -901,25 +995,39 @@ public class MainActivity extends Activity {
                                 }
                             }
 
-                            // Throttle: light text update at most every 200ms.
-                            // Skipped when realtime rendering is off — the reply
-                            // then appears once, fully rendered, at the end.
+                            // Throttle: re-render markdown at most every 200ms.
+                            // Rendering takes hundreds of ms on old devices, so
+                            // it runs off the UI thread and only one render is
+                            // in flight at a time; ticks that arrive meanwhile
+                            // are dropped. Skipped when realtime rendering is
+                            // off — the reply then appears once, at the end.
                             long now = System.currentTimeMillis();
-                            if (realtimeRenderEnabled && now - lastUpdate > 200) {
+                            if (realtimeRenderEnabled && now - lastUpdate > 200 && !renderInFlight[0]) {
                                 lastUpdate = now;
-                                final String content = rawContent.toString();
-                                runOnUiThread(new Runnable() {
+                                renderInFlight[0] = true;
+                                final String partial = rawContent.toString();
+                                final int mySeq = renderSeq.incrementAndGet();
+                                new Thread(new Runnable() {
                                     public void run() {
-                                        if (requestGeneration.get() == generation && aiIndex < messages.size()) {
-                                            messages.get(aiIndex).content = content;
-                                            String esc = jsEscape(content);
-                                            webViewEvalJs("updateLastText('" + esc + "')");
-                                        } else {
-                                            LogUtil.w(TAG, "throttled update skipped: aiIndex=%d >= size=%d",
-                                                    aiIndex, messages.size());
-                                        }
+                                        final String partialHtml =
+                                                MessageHtmlRenderer.contentToHtml(partial, MainActivity.this);
+                                        runOnUiThread(new Runnable() {
+                                            public void run() {
+                                                renderInFlight[0] = false;
+                                                if (renderSeq.get() != mySeq) {
+                                                    return; // superseded by a newer render
+                                                }
+                                                if (requestGeneration.get() == generation && aiIndex < messages.size()) {
+                                                    messages.get(aiIndex).content = partial;
+                                                    webViewEvalJs("updateLastMsg('" + jsEscape(partialHtml) + "')");
+                                                } else {
+                                                    LogUtil.w(TAG, "throttled update skipped: aiIndex=%d >= size=%d",
+                                                            aiIndex, messages.size());
+                                                }
+                                            }
+                                        });
                                     }
-                                });
+                                }).start();
                             }
                         } catch (Exception e) {
                             LogUtil.w(TAG, "failed to parse SSE chunk#%d: %s | raw=%s",
@@ -931,6 +1039,7 @@ public class MainActivity extends Activity {
                     LogUtil.i(TAG, "stream finished: chunks=%d (thinking=%d, content=%d), finalLen=%d, elapsed=%d ms",
                             chunkCount[0], thinkingChunks[0], contentChunks[0],
                             finalContent.length(), System.currentTimeMillis() - startMs);
+                    renderSeq.incrementAndGet(); // invalidate any in-flight stream render
                     new Thread(new Runnable() {
                         public void run() {
                             long renderMs = System.currentTimeMillis();
@@ -974,6 +1083,7 @@ public class MainActivity extends Activity {
                         runOnUiThread(new Runnable() {
                             public void run() {
                                 webViewEvalJs("finalizeLast(" + finalIdx + ")");
+                                drainPendingQueue();
                             }
                         });
                     }
@@ -1293,8 +1403,19 @@ public class MainActivity extends Activity {
         return it;
     }
 
+    /** Opens the zoom / background / rotate code viewer on top of the chat screen. */
+    static Intent newCodePreviewIntent(Context ctx, String lang, String code) {
+        Intent it = new Intent(ctx, MainActivity.class);
+        it.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        it.putExtra(EXTRA_PREVIEW_LANG, lang);
+        it.putExtra(EXTRA_PREVIEW_CODE, code);
+        return it;
+    }
+
     static final String EXTRA_PROMPT = "extra_prompt";
     static final String EXTRA_PROMPT_SEND = "extra_prompt_send";
+    static final String EXTRA_PREVIEW_LANG = "extra_preview_lang";
+    static final String EXTRA_PREVIEW_CODE = "extra_preview_code";
 
     // ========== 图片查看器 ==========
 
@@ -1686,7 +1807,7 @@ public class MainActivity extends Activity {
         final String ext = exportExtForLang(lang);
         final EditText input = new EditText(this);
         input.setSingleLine(true);
-        input.setText("code_" + System.currentTimeMillis());
+        input.setText("code_" + ext + "_" + System.currentTimeMillis());
         input.setSelection(input.getText().length());
         new AlertDialog.Builder(this)
                 .setTitle("保存代码")
@@ -1696,16 +1817,37 @@ public class MainActivity extends Activity {
                     public void onClick(DialogInterface d, int w) {
                         String name = sanitizeExportName(input.getText().toString());
                         if (name.isEmpty()) {
-                            name = "code_" + System.currentTimeMillis();
+                            name = "code_" + ext + "_" + System.currentTimeMillis();
                         }
-                        String path = StorageManager.getInstance()
-                                .saveExport(name + "." + ext, code);
-                        LogUtil.i(TAG, "saveCodeToExport: lang=%s ext=%s path=%s", lang, ext, path);
-                        if (path == null) {
-                            Toast.makeText(MainActivity.this, "保存失败", Toast.LENGTH_SHORT).show();
-                        } else {
-                            Toast.makeText(MainActivity.this, "已保存到 " + path, Toast.LENGTH_LONG).show();
+                        final String fileName = name + "." + ext;
+                        if (StorageManager.getInstance().exportExists(fileName)) {
+                            confirmOverwrite(fileName, lang, code);
+                            return;
                         }
+                        doSaveExport(fileName, lang, code);
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void doSaveExport(String fileName, String lang, String code) {
+        String path = StorageManager.getInstance().saveExport(fileName, code);
+        LogUtil.i(TAG, "saveCodeToExport: lang=%s file=%s path=%s", lang, fileName, path);
+        if (path == null) {
+            Toast.makeText(this, "保存失败", Toast.LENGTH_SHORT).show();
+        } else {
+            Toast.makeText(this, "已保存到 " + path, Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void confirmOverwrite(final String fileName, final String lang, final String code) {
+        new AlertDialog.Builder(this)
+                .setTitle("文件已存在")
+                .setMessage(fileName + " 已存在，是否覆盖？")
+                .setPositiveButton("覆盖", new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface d, int w) {
+                        doSaveExport(fileName, lang, code);
                     }
                 })
                 .setNegativeButton("取消", null)
@@ -1942,7 +2084,12 @@ public class MainActivity extends Activity {
             String wrapCss = ".viewer-rot{"
                     + (rotateCss.isEmpty() ? "" : rotateCss + "!important;")
                     + "-webkit-transform-origin:0 0 !important;transform-origin:0 0 !important;"
-                    + "}";
+                    + "}" +
+                    // The viewer toolbar is an overlay on top of this WebView, so a
+                    // document starting at y=0 renders behind it. Force the inset
+                    // with !important because the document brings its own body rules.
+                    "body{padding-top:" + VIEWER_TOOLBAR_INSET_PX + "px !important;" +
+                    "-webkit-box-sizing:border-box !important;box-sizing:border-box !important;}";
             String inject = "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1.0,user-scalable=yes\">"
                     + "<style>" + wrapCss + "</style>"
                     + "<script>" + zoomJs + "</script>";

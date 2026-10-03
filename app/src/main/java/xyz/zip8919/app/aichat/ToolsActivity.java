@@ -22,6 +22,7 @@ import android.widget.ListView;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
+import android.webkit.WebView;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -158,16 +159,18 @@ public class ToolsActivity extends Activity {
             Toast.makeText(this, "读取失败", Toast.LENGTH_SHORT).show();
             return;
         }
-        TextView tv = new TextView(this);
-        tv.setText(content);
-        tv.setTextSize(12);
-        tv.setTextIsSelectable(true);
-        tv.setPadding(12, 12, 12, 12);
-        ScrollView sv = new ScrollView(this);
-        sv.addView(tv);
+        final String lang = MainActivity.detectLang(content);
+        LogUtil.i(TAG, "viewFile: %s lang=%s len=%d", f.getName(), lang, content.length());
+        WebView wv = new WebView(this);
+        wv.getSettings().setJavaScriptEnabled(false);
+        wv.setBackgroundColor(Color.WHITE);
+        int viewH = (int) (getResources().getDisplayMetrics().density * 380);
+        wv.setLayoutParams(new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, viewH));
+        wv.loadDataWithBaseURL(null, buildHighlightHtml(content, lang), "text/html", "UTF-8", null);
         new AlertDialog.Builder(this)
-                .setTitle(f.getName())
-                .setView(sv)
+                .setTitle(f.getName() + "  [" + lang + "]")
+                .setView(wv)
                 .setPositiveButton("复制全部", new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         copyToClipboard(content);
@@ -175,6 +178,25 @@ public class ToolsActivity extends Activity {
                 })
                 .setNegativeButton("关闭", null)
                 .show();
+    }
+
+    private String buildHighlightHtml(String content, String lang) {
+        return "<!DOCTYPE html><html><head><meta charset=\"UTF-8\">"
+                + "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+                + "<style>"
+                + "html,body{margin:0;padding:0;background:#fff;}"
+                + "pre{margin:8px;padding:8px;background:#F5F5F5;font-family:monospace;font-size:12px;"
+                + "white-space:pre-wrap;word-wrap:break-word;}"
+                + ".tk-kw{color:#d73a49;font-weight:bold;}"
+                + ".tk-str{color:#032f62;}"
+                + ".tk-cmt{color:#6a737d;font-style:italic;}"
+                + ".tk-num{color:#005cc5;}"
+                + ".tk-type{color:#6f42c1;}"
+                + ".tk-fn{color:#6f42c1;}"
+                + ".tk-op{color:#d73a49;}"
+                + "</style></head><body><pre>"
+                + CodeHighlighter.highlight(content, lang)
+                + "</pre></body></html>";
     }
 
     private void renameFile(final File f) {
@@ -241,9 +263,13 @@ public class ToolsActivity extends Activity {
             Toast.makeText(this, "读取失败", Toast.LENGTH_SHORT).show();
             return;
         }
-        String lang = MainActivity.exportExtForLang(extOf(f.getName()));
-        LogUtil.i(TAG, "previewFile: %s ext=%s", f.getName(), lang);
-        startActivity(MainActivity.newPreviewIntent(this, lang, content));
+        String lang = MainActivity.detectLang(content);
+        LogUtil.i(TAG, "previewFile: %s lang=%s", f.getName(), lang);
+        if ("html".equals(lang) || "svg".equals(lang)) {
+            startActivity(MainActivity.newCodePreviewIntent(this, lang, content));
+        } else {
+            startActivity(MainActivity.newJsRunnerIntent(this, content, lang));
+        }
     }
 
     private void deleteFile(final File f) {

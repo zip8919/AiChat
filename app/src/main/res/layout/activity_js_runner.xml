@@ -52,27 +52,36 @@
             android:textSize="12sp" />
 
         <Button
-            android:id="@+id/js_clear_button"
-            android:layout_width="0dp"
-            android:layout_height="40dp"
-            android:layout_weight="1"
-            android:text="清空"
-            android:textSize="12sp" />
-
-        <Button
-            android:id="@+id/js_copy_button"
-            android:layout_width="0dp"
-            android:layout_height="40dp"
-            android:layout_weight="1"
-            android:text="复制输出"
-            android:textSize="12sp" />
-
-        <Button
             android:id="@+id/js_save_button"
             android:layout_width="0dp"
             android:layout_height="40dp"
             android:layout_weight="1"
             android:text="保存"
+            android:textSize="12sp" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="#EEEEEE"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingLeft="4dp">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:padding="4dp"
+            android:text="代码"
+            android:textColor="#333333"
+            android:textSize="12sp" />
+
+        <Button
+            android:id="@+id/js_clear_code_button"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:text="清空代码"
             android:textSize="12sp" />
     </LinearLayout>
 
@@ -87,25 +96,53 @@
         android:background="#F5F5F5"
         android:padding="4dp" />
 
-    <TextView
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:background="#EEEEEE"
-        android:padding="4dp"
-        android:text="输出"
-        android:textColor="#333333"
-        android:textSize="12sp" />
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingLeft="4dp">
 
-    <TextView
-        android:id="@+id/js_output"
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:padding="4dp"
+            android:text="输出"
+            android:textColor="#333333"
+            android:textSize="12sp" />
+
+        <Button
+            android:id="@+id/js_copy_button"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:text="复制输出"
+            android:textSize="12sp" />
+
+        <Button
+            android:id="@+id/js_clear_output_button"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:text="清空输出"
+            android:textSize="12sp" />
+    </LinearLayout>
+
+    <ScrollView
+        android:id="@+id/js_output_scroll"
         android:layout_width="match_parent"
         android:layout_height="120dp"
-        android:background="#FAFAFA"
-        android:padding="4dp"
-        android:scrollbars="vertical"
-        android:textColor="#333333"
-        android:textSize="11sp"
-        android:typeface="monospace" />
+        android:background="#FAFAFA">
+
+        <TextView
+            android:id="@+id/js_output"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:padding="4dp"
+            android:textColor="#333333"
+            android:textSize="11sp"
+            android:typeface="monospace" />
+    </ScrollView>
 
     <TextView
         android:layout_width="match_parent"
