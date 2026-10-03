@@ -10,8 +10,11 @@ import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Collections;
+import java.util.regex.Pattern;
 import org.commonmark.node.*;
 import org.commonmark.parser.Parser;
 import org.commonmark.ext.gfm.strikethrough.Strikethrough;
@@ -33,7 +36,20 @@ public class MessageHtmlRenderer {
                     TablesExtension.create()))
             .build();
 
-    private static final Map<String, String> latexCache = new HashMap<>();
+    // Thread-safe: render threads (aichat-render-*, streaming finalize) run concurrently
+    private static final Map<String, String> latexCache =
+            Collections.synchronizedMap(new HashMap<String, String>());
+
+    // Per-message HTML render cache: refreshWebView() re-renders every message on
+    // settings changes / page returns; unchanged contents hit the cache instead of
+    // re-running the full markdown pipeline. Keys are the message content strings
+    // already held in memory, so no extra key copies. Bounded LRU.
+    private static final Map<String, String> renderCache =
+            Collections.synchronizedMap(new LinkedHashMap<String, String>(32, 0.75f, true) {
+                protected boolean removeEldestEntry(Map.Entry<String, String> eldest) {
+                    return size() > 24;
+                }
+            });
 
     private static final String CSS =
             "*{margin:0;padding:0;box-sizing:border-box;}" +
@@ -321,6 +337,8 @@ public class MessageHtmlRenderer {
 
     public static String contentToHtml(String text, Context ctx) {
         if (text == null || text.isEmpty()) return "";
+        String cached = renderCache.get(text);
+        if (cached != null) return cached;
         long startTs = System.currentTimeMillis();
         String html = text.contains("[thinking]")
                 ? contentWithThinking(text, ctx)
@@ -328,6 +346,7 @@ public class MessageHtmlRenderer {
         LogUtil.v(TAG, "contentToHtml: in=%d chars -> %d chars html in %d ms (thinking=%s)",
                 text.length(), html.length(), System.currentTimeMillis() - startTs,
                 text.contains("[thinking]"));
+        renderCache.put(text, html);
         return html;
     }
 
@@ -803,19 +822,28 @@ public class MessageHtmlRenderer {
         return out.toString();
     }
 
+    // Pre-compiled: preProcessExtensions runs on every markdown render (hot path)
+    private static final Pattern P_FN_DEF =
+            Pattern.compile("(?m)^\\[\\^([^\\]]+)\\]:\\s*(.+)$");
+    private static final Pattern P_FN_REF = Pattern.compile("\\[\\^([^\\]]+)\\]");
+    private static final Pattern P_MARK =
+            Pattern.compile("==([^=\\s].*?[^=\\s]|[^=\\s])==");
+    private static final Pattern P_SUP = Pattern.compile("\\^([^\\^\\s]+)\\^");
+    private static final Pattern P_SUB = Pattern.compile("(?<![~])~([^~\\s]+)~(?!~)");
+
     private static String preProcessExtensions(String text) {
         // Footnote definitions [^id]: text at line start → hidden ref div
-        text = text.replaceAll("(?m)^\\[\\^([^\\]]+)\\]:\\s*(.+)$",
+        text = P_FN_DEF.matcher(text).replaceAll(
                 "<div class=\"fn-def\" id=\"fn-$1\"><sup><a href=\"#fnref-$1\">[$1]</a></sup> $2</div>");
         // Footnote references [^id] → superscript link
-        text = text.replaceAll("\\[\\^([^\\]]+)\\]",
+        text = P_FN_REF.matcher(text).replaceAll(
                 "<sup class=\"fn-ref\" id=\"fnref-$1\"><a href=\"#fn-$1\">[$1]</a></sup>");
         // ==highlight== → <mark>
-        text = text.replaceAll("==([^=\\s].*?[^=\\s]|[^=\\s])==", "<mark>$1</mark>");
+        text = P_MARK.matcher(text).replaceAll("<mark>$1</mark>");
         // ^superscript^ → <sup>
-        text = text.replaceAll("\\^([^\\^\\s]+)\\^", "<sup>$1</sup>");
+        text = P_SUP.matcher(text).replaceAll("<sup>$1</sup>");
         // ~subscript~ → <sub> (single ~ not ~~)
-        text = text.replaceAll("(?<![~])~([^~\\s]+)~(?!~)", "<sub>$1</sub>");
+        text = P_SUB.matcher(text).replaceAll("<sub>$1</sub>");
         return text;
     }
 
@@ -957,12 +985,14 @@ public class MessageHtmlRenderer {
             }
         }
 
-        if (latexCache.size() >= 50) {
-            String first = latexCache.keySet().iterator().next();
-            latexCache.remove(first);
-            LogUtil.v(TAG, "latex cache EVICT oldest (size now %d)", latexCache.size());
+        synchronized (latexCache) {
+            if (latexCache.size() >= 50) {
+                String first = latexCache.keySet().iterator().next();
+                latexCache.remove(first);
+                LogUtil.v(TAG, "latex cache EVICT oldest (size now %d)", latexCache.size());
+            }
+            latexCache.put(key, imgTag);
         }
-        latexCache.put(key, imgTag);
         LogUtil.v(TAG, "latex cached (size=%d): %d chars html", latexCache.size(), imgTag.length());
         return imgTag;
     }

@@ -6,3 +6,5 @@ app/build/
 *.iml
 .idea/
 CLAUDE.md
+
+.test/

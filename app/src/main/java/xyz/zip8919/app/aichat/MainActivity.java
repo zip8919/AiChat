@@ -657,7 +657,7 @@ public class MainActivity extends Activity {
         runOnUiThread(new Runnable() {
             public void run() {
                 LogUtil.v(TAG, "webview js: appendAiDiv()");
-                conversationWebView.loadUrl("javascript:appendAiDiv()");
+                webViewEvalJs("appendAiDiv()");
             }
         });
 
@@ -829,7 +829,7 @@ public class MainActivity extends Activity {
                                         if (requestGeneration.get() == generation && aiIndex < messages.size()) {
                                             messages.get(aiIndex).content = content;
                                             String esc = jsEscape(content);
-                                            conversationWebView.loadUrl("javascript:updateLastText('" + esc + "')");
+                                            webViewEvalJs("updateLastText('" + esc + "')");
                                         } else {
                                             LogUtil.w(TAG, "throttled update skipped: aiIndex=%d >= size=%d",
                                                     aiIndex, messages.size());
@@ -859,8 +859,8 @@ public class MainActivity extends Activity {
                                     if (requestGeneration.get() == generation && aiIndex < messages.size()) {
                                         messages.get(aiIndex).content = finalContent;
                                         String esc = jsEscape(html);
-                                        conversationWebView.loadUrl("javascript:updateLastMsg('" + esc + "')");
-                                        conversationWebView.loadUrl("javascript:finalizeLast(" + aiIndex + ")");
+                                        webViewEvalJs("updateLastMsg('" + esc + "')");
+                                        webViewEvalJs("finalizeLast(" + aiIndex + ")");
                                     } else {
                                         LogUtil.w(TAG, "final update skipped: aiIndex=%d >= size=%d",
                                                 aiIndex, messages.size());
@@ -889,7 +889,7 @@ public class MainActivity extends Activity {
                         final int finalIdx = aiIndex;
                         runOnUiThread(new Runnable() {
                             public void run() {
-                                conversationWebView.loadUrl("javascript:finalizeLast(" + finalIdx + ")");
+                                webViewEvalJs("finalizeLast(" + finalIdx + ")");
                             }
                         });
                     }
@@ -1011,24 +1011,34 @@ public class MainActivity extends Activity {
     private void appendHtml(String msgHtml) {
         String esc = jsEscape(msgHtml);
         LogUtil.v(TAG, "webview js: appendMsg(len=%d)", esc.length());
-        conversationWebView.loadUrl("javascript:appendMsg('" + esc + "')");
+        webViewEvalJs("appendMsg('" + esc + "')");
     }
 
     private void updateAiContent(String content) {
         String html = MessageHtmlRenderer.contentToHtml(content, this);
         String esc = jsEscape(html);
         LogUtil.v(TAG, "webview js: updateLastMsg(htmlLen=%d)", esc.length());
-        conversationWebView.loadUrl("javascript:updateLastMsg('" + esc + "')");
+        webViewEvalJs("updateLastMsg('" + esc + "')");
     }
 
     private void removeDomFrom(int pos) {
         LogUtil.v(TAG, "webview js: removeFromIdx(%d)", pos);
-        conversationWebView.loadUrl("javascript:removeFromIdx(" + pos + ")");
+        webViewEvalJs("removeFromIdx(" + pos + ")");
     }
 
     private void removeDomRange(int fromPos) {
         LogUtil.v(TAG, "webview js: removeRangeFrom(%d)", fromPos);
-        conversationWebView.loadUrl("javascript:removeRangeFrom(" + fromPos + ")");
+        webViewEvalJs("removeRangeFrom(" + fromPos + ")");
+    }
+
+    // Execute JS in the conversation WebView: evaluateJavascript (API 19+) avoids a
+    // full page navigation per call; loadUrl fallback for API 18.
+    private void webViewEvalJs(String js) {
+        if (android.os.Build.VERSION.SDK_INT >= 19) {
+            conversationWebView.evaluateJavascript(js, null);
+        } else {
+            conversationWebView.loadUrl("javascript:" + js);
+        }
     }
 
     private static String jsEscape(String s) {
@@ -1187,6 +1197,7 @@ public class MainActivity extends Activity {
 
         View view = getLayoutInflater().inflate(R.layout.dialog_image_viewer, null);
         imageViewerWebView = (WebView) view.findViewById(R.id.viewer_webview);
+        imageViewerWebView.addJavascriptInterface(new JsBridge(), "Android");
         imageCounterText = (TextView) view.findViewById(R.id.viewer_counter);
         prevButton = (Button) view.findViewById(R.id.viewer_prev);
         nextButton = (Button) view.findViewById(R.id.viewer_next);
@@ -1215,9 +1226,6 @@ public class MainActivity extends Activity {
             public void onClick(View v) {
                 if (currentImageIndex > 0) {
                     currentImageIndex--;
-                    currentRotation = 0;
-                    ImageInfo info = currentImageList.get(currentImageIndex);
-                    currentBgColor = ("svg".equals(info.type)) ? 0 : 2;
                     loadCurrentImage();
                 }
             }
@@ -1227,9 +1235,6 @@ public class MainActivity extends Activity {
             public void onClick(View v) {
                 if (currentImageIndex < currentImageList.size() - 1) {
                     currentImageIndex++;
-                    currentRotation = 0;
-                    ImageInfo info = currentImageList.get(currentImageIndex);
-                    currentBgColor = ("svg".equals(info.type)) ? 0 : 2;
                     loadCurrentImage();
                 }
             }
@@ -1336,24 +1341,40 @@ public class MainActivity extends Activity {
                     "<div class=\"svg-wrap\">" + svgHtml + "</div>" +
                     "</body></html>";
         } else {
-            // Raster image — flex centering for single image
+            // Raster image. The image is laid out inside a swap box whose
+            // width/height follow the rotation: at 90/270 the usable width is the
+            // viewport HEIGHT, otherwise a wide formula (e.g. 400x42) is squeezed
+            // to 95% of the 226px viewport and then clipped by the rotate
+            // transform — the "truncated after rotate" bug.
             String src = MessageHtmlRenderer.escAttr(info.src);
             String alt = MessageHtmlRenderer.escAttr(info.alt);
+            boolean swapped = (currentRotation == 90 || currentRotation == 270);
+            int boxW = swapped ? imageViewerWebView.getHeight() : imageViewerWebView.getWidth();
+            int boxH = swapped ? imageViewerWebView.getWidth() : imageViewerWebView.getHeight();
+            if (boxW <= 0) boxW = 226;
+            if (boxH <= 0) boxH = 871;
+            float fill = swapped ? 0.62f : 0.95f;
+            int maxW = Math.max(1, (int) (boxW * fill));
+            int maxH = Math.max(1, (int) (boxH * fill));
             html = "<!DOCTYPE html><html><head>" +
                     "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1.0,user-scalable=yes\">" +
                     "<style>" +
                     "*{margin:0;padding:0;}" +
-                    "html,body{width:100%;min-height:100%;background:" + bgColor + ";" +
-                    "display:flex;align-items:center;justify-content:center;" +
-                    "overflow:auto;-webkit-transform-origin:0 0;transform-origin:0 0;}" +
-                    "img,svg{max-width:100%;max-height:100%;" + rotateCss + "}" +
+                    "html{width:100%;height:100%;}" +
+                    "html,body{background:" + bgColor + ";overflow:auto;" +
+                    "-webkit-transform-origin:0 0;transform-origin:0 0;}" +
+                    "body{width:100%;height:100%;display:table;}" +
+                    ".img-cell{display:table-cell;vertical-align:middle;text-align:center;width:100%;height:" + boxH + "px;}" +
+                    "img,svg{display:inline-block;vertical-align:middle;max-width:" + maxW + "px;" +
+                    "max-height:" + maxH + "px;" + rotateCss + "}" +
                     "</style>" +
                     "<script>var vZoom=1;function viewerZoom(f){vZoom=Math.min(5,Math.max(0.1,vZoom*f));" +
                     "var t='scale('+vZoom+')';" +
                     "document.body.style.webkitTransform=t;document.body.style.transform=t;}" +
-                    "function viewerSetBg(c){document.body.style.backgroundColor=c;}</script>" +
+                    "function viewerSetBg(c){document.body.style.backgroundColor=c;document.documentElement.style.backgroundColor=c;}" +
+                    "</script>" +
                     "</head><body>" +
-                    "<img src=\"" + src + "\" alt=\"" + alt + "\">" +
+                    "<div class=\"img-cell\"><img src=\"" + src + "\" alt=\"" + alt + "\"></div>" +
                     "</body></html>";
         }
 
@@ -1379,6 +1400,7 @@ public class MainActivity extends Activity {
 
         View view = getLayoutInflater().inflate(R.layout.dialog_image_viewer, null);
         tableViewerWebView = (WebView) view.findViewById(R.id.viewer_webview);
+        tableViewerWebView.addJavascriptInterface(new JsBridge(), "Android");
 
         // Hide image-specific controls
         view.findViewById(R.id.viewer_prev).setVisibility(View.GONE);
@@ -1536,6 +1558,7 @@ public class MainActivity extends Activity {
 
         View view = getLayoutInflater().inflate(R.layout.dialog_image_viewer, null);
         codePreviewWebView = (WebView) view.findViewById(R.id.viewer_webview);
+        codePreviewWebView.addJavascriptInterface(new JsBridge(), "Android");
 
         // Hide image-specific controls
         view.findViewById(R.id.viewer_prev).setVisibility(View.GONE);
@@ -1923,7 +1946,7 @@ public class MainActivity extends Activity {
                                     ? MessageHtmlRenderer.contentToHtml(newContent, MainActivity.this)
                                     : "<div class=\"bubble\">" + MessageHtmlRenderer.esc(newContent) + "</div>";
                                 String esc = jsEscape(html);
-                                conversationWebView.loadUrl("javascript:updateMsgAt(" + pos + ",'" + esc + "')");
+                                webViewEvalJs("updateMsgAt(" + pos + ",'" + esc + "')");
                                 conversationManager.saveCurrentConversation();
                                 Toast.makeText(MainActivity.this, "已修改", Toast.LENGTH_SHORT).show();
                             }
@@ -1945,7 +1968,7 @@ public class MainActivity extends Activity {
                 messages.remove(pos);
                 removeDomFrom(pos);
                 // Reindex DOM: update data-idx of remaining messages after pos
-                conversationWebView.loadUrl("javascript:reindexFrom(" + pos + ")");
+                webViewEvalJs("reindexFrom(" + pos + ")");
                 conversationManager.saveCurrentConversation();
                 Toast.makeText(MainActivity.this, "已删除", Toast.LENGTH_SHORT).show();
             }
