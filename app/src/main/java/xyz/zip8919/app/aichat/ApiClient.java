@@ -7,7 +7,6 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.security.cert.X509Certificate;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicBoolean;
 import javax.net.ssl.HostnameVerifier;
 import javax.net.ssl.HttpsURLConnection;
 import javax.net.ssl.SSLContext;
@@ -23,13 +22,6 @@ public class ApiClient {
 
     // 非流式响应体上限（字符），防止超大响应在 API19 上 OOM
     private static final int MAX_RESPONSE_CHARS = 4 * 1024 * 1024;
-
-    public interface StreamCallback {
-        void onContent(String text);
-        void onThinking(String thinkingText);
-        void onComplete();
-        void onError(String error);
-    }
 
     public static class CallResult {
         public String response;  // non-null on success
@@ -61,137 +53,6 @@ public class ApiClient {
                 (result != null && result.response != null) ? LogUtil.preview(result.response, 500) : "null",
                 (result != null && result.error != null) ? LogUtil.preview(result.error, 500) : "null");
         return result;
-    }
-
-    /**
-     * Non-streaming chat completion.
-     * @return full response JSON string, or null on error
-     */
-    public static String call(ProviderInfo provider, String model,
-            List<Message> messages, String systemPrompt,
-            String thinkingLevel) throws Exception {
-
-        JSONObject body = buildRequestBody(model, messages, systemPrompt, thinkingLevel,
-                provider.thinkingType, provider.thinkingParamName, false);
-        LogUtil.d(TAG, "call -> %s%s model=%s bodyLen=%d", provider.apiUrl, provider.chatPath, model, body.toString().length());
-
-        return doRequest(provider.apiUrl + provider.chatPath, provider.apiKey, body, 60000);
-    }
-
-    /**
-     * Streaming chat completion with SSE parsing.
-     */
-    public static void callStream(ProviderInfo provider, String model,
-            List<Message> messages, String systemPrompt,
-            String thinkingLevel, AtomicBoolean runningFlag, StreamCallback callback) {
-
-        HttpURLConnection conn = null;
-        long startTs = System.currentTimeMillis();
-        int chunks = 0;
-        LogUtil.i(TAG, "callStream START -> %s%s model=%s thinking=%s (%s)",
-                provider.apiUrl, provider.chatPath, model, thinkingLevel, LogUtil.thread());
-        try {
-            JSONObject body = buildRequestBody(model, messages, systemPrompt, thinkingLevel,
-                    provider.thinkingType, provider.thinkingParamName, true);
-
-            String urlStr = provider.apiUrl + provider.chatPath;
-            LogUtil.d(TAG, "callStream opening connection: %s bodyLen=%d", urlStr, body.toString().length());
-            URL url = new URL(urlStr);
-            conn = (HttpURLConnection) url.openConnection();
-            conn.setRequestMethod("POST");
-            conn.setRequestProperty("Content-Type", "application/json");
-            conn.setRequestProperty("Authorization", "Bearer " + provider.apiKey);
-            conn.setDoOutput(true);
-            conn.setConnectTimeout(30000);
-            conn.setReadTimeout(0); // no timeout for streaming
-
-            if (conn instanceof HttpsURLConnection) {
-                setupTLS((HttpsURLConnection) conn);
-            }
-
-            OutputStream os = conn.getOutputStream();
-            os.write(body.toString().getBytes("UTF-8"));
-            os.close();
-
-            int code = conn.getResponseCode();
-            LogUtil.i(TAG, "callStream HTTP response: code=%d in %d ms", code, System.currentTimeMillis() - startTs);
-            if (code != 200) {
-                String errBody = "";
-                try {
-                    // 无错误体时 getErrorStream() 返回 null，需判空避免 NPE 被吞
-                    java.io.InputStream errStream = conn.getErrorStream();
-                    if (errStream == null) {
-                        LogUtil.w(TAG, "callStream HTTP %d has no error body", code);
-                    } else {
-                        BufferedReader er = new BufferedReader(new InputStreamReader(errStream, "UTF-8"));
-                        StringBuilder esb = new StringBuilder();
-                        String el;
-                        while ((el = er.readLine()) != null) esb.append(el);
-                        er.close();
-                        errBody = esb.toString();
-                    }
-                } catch (Exception e) {
-                    LogUtil.w(TAG, "callStream error body unreadable: %s", e.getMessage());
-                }
-                LogUtil.e(TAG, "callStream FAILED: HTTP %d, body=%s", code, LogUtil.preview(errBody, 800));
-                callback.onError("HTTP " + code);
-                return;
-            }
-
-            BufferedReader reader = new BufferedReader(
-                    new InputStreamReader(conn.getInputStream(), "UTF-8"));
-            LogUtil.d(TAG, "callStream SSE started");
-            String line;
-            while (runningFlag.get() && (line = reader.readLine()) != null) {
-                line = line.trim();
-                if (line.startsWith("data: ")) {
-                    String data = line.substring(6);
-                    if ("[DONE]".equals(data)) {
-                        LogUtil.d(TAG, "callStream received [DONE] after %d chunks", chunks);
-                        break;
-                    }
-                    try {
-                        JSONObject json = new JSONObject(data);
-                        JSONArray choices = json.optJSONArray("choices");
-                        if (choices != null && choices.length() > 0) {
-                            JSONObject delta = choices.getJSONObject(0).optJSONObject("delta");
-                            if (delta != null) {
-                                if (delta.has("reasoning_content") && !delta.isNull("reasoning_content")) {
-                                    callback.onThinking(delta.getString("reasoning_content"));
-                                }
-                                if (delta.has("content") && !delta.isNull("content")) {
-                                    callback.onContent(delta.getString("content"));
-                                }
-                            } else {
-                                LogUtil.v(TAG, "callStream chunk#%d: no delta object", chunks);
-                            }
-                        } else {
-                            LogUtil.v(TAG, "callStream chunk#%d: no choices array", chunks);
-                        }
-                    } catch (Exception e) {
-                        LogUtil.w(TAG, "callStream malformed chunk skipped: %s", LogUtil.preview(data, 200));
-                    }
-                    chunks++;
-                }
-            }
-            reader.close();
-
-            if (!runningFlag.get()) {
-                LogUtil.i(TAG, "callStream INTERRUPTED after %d chunks", chunks);
-                callback.onError("interrupted");
-            } else {
-                LogUtil.i(TAG, "callStream COMPLETE: %d chunks in %d ms", chunks, System.currentTimeMillis() - startTs);
-                callback.onComplete();
-            }
-        } catch (Exception e) {
-            LogUtil.e(TAG, "callStream EXCEPTION: " + e.getMessage(), e);
-            callback.onError(e.getMessage());
-        } finally {
-            if (conn != null) {
-                conn.disconnect();
-            }
-            LogUtil.i(TAG, "callStream END: elapsed=%d ms chunks=%d", System.currentTimeMillis() - startTs, chunks);
-        }
     }
 
     /**
@@ -279,8 +140,13 @@ public class ApiClient {
                     new InputStreamReader(conn.getInputStream(), "UTF-8"));
             StringBuilder sb = new StringBuilder();
             String line;
+            // 响应体设上限，避免超大/异常响应在 API19 设备上把整个 body 读进内存导致 OOM
             while ((line = reader.readLine()) != null) {
                 sb.append(line);
+                if (sb.length() > MAX_RESPONSE_CHARS) {
+                    LogUtil.w(TAG, "doRequest response exceeds %d chars, truncated", MAX_RESPONSE_CHARS);
+                    break;
+                }
             }
             reader.close();
             LogUtil.d(TAG, "doRequest <- %d chars in %d ms: %s", sb.length(),
@@ -317,8 +183,11 @@ public class ApiClient {
             String payload = body.toString();
             LogUtil.v(TAG, "doRequestWithError body (%d chars): %s", payload.length(), LogUtil.preview(payload, 1500));
             OutputStream os = conn.getOutputStream();
-            os.write(payload.getBytes("UTF-8"));
-            os.close();
+            try {
+                os.write(payload.getBytes("UTF-8"));
+            } finally {
+                os.close();
+            }
 
             int code = conn.getResponseCode();
             LogUtil.d(TAG, "doRequestWithError HTTP code=%d in %d ms", code, System.currentTimeMillis() - startTs);
@@ -335,8 +204,13 @@ public class ApiClient {
                                 new InputStreamReader(errStream, "UTF-8"));
                         StringBuilder errBody = new StringBuilder();
                         String line;
+                        // 错误体设上限，避免超大错误响应导致 OOM
                         while ((line = errReader.readLine()) != null) {
                             errBody.append(line);
+                            if (errBody.length() > MAX_RESPONSE_CHARS) {
+                                LogUtil.w(TAG, "doRequestWithError error body exceeds %d chars, truncated", MAX_RESPONSE_CHARS);
+                                break;
+                            }
                         }
                         errReader.close();
                         result.error = "HTTP " + code + ": " + errBody.toString();

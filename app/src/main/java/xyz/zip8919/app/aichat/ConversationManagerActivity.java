@@ -63,8 +63,8 @@ public class ConversationManagerActivity extends Activity {
     protected void onPause() {
         super.onPause();
         int first = listView.getFirstVisiblePosition();
-        boolean ok = uiState.edit().putInt(KEY_SCROLL_POS, first).commit();
-        LogUtil.d(TAG, "onPause: saved scroll pos=%d ok=%s", first, ok);
+        uiState.edit().putInt(KEY_SCROLL_POS, first).apply();
+        LogUtil.d(TAG, "onPause: saved scroll pos=%d", first);
     }
 
     private void initButtons() {

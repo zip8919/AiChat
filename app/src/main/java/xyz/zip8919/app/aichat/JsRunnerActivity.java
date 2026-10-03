@@ -127,9 +127,44 @@ public class JsRunnerActivity extends Activity {
                     output.append('\n');
                 }
                 output.append(line);
+                trimOutput();
                 outputView.setText(output.toString());
             }
         });
+    }
+
+    /**
+     * 限制输出缓冲：超过 65536 字符时删除开头降到约 32768（尽量按行界对齐），
+     * 超过 1000 行时删除最前面的行至 1000 行内，始终保留最近输出。
+     */
+    private void trimOutput() {
+        if (output.length() > 65536) {
+            int cut = output.length() - 32768;
+            int nl = output.indexOf("\n", cut);
+            if (nl != -1 && nl < output.length() - 1) {
+                cut = nl + 1;
+            }
+            output.delete(0, cut);
+        }
+        int lines = 1;
+        for (int i = 0; i < output.length(); i++) {
+            if (output.charAt(i) == '\n') {
+                lines++;
+            }
+        }
+        if (lines > 1000) {
+            int skip = lines - 1000;
+            int cut = 0;
+            for (int i = 0; i < output.length() && skip > 0; i++) {
+                if (output.charAt(i) == '\n') {
+                    cut = i + 1;
+                    skip--;
+                }
+            }
+            if (cut > 0) {
+                output.delete(0, cut);
+            }
+        }
     }
 
     private void runCurrent() {

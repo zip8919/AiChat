@@ -276,8 +276,9 @@ public class StorageManager {
         try {
             File file = new File(filePath);
             File parent = file.getParentFile();
-            if (parent != null && !parent.exists()) {
-                parent.mkdirs();
+            if (parent != null && !parent.exists() && !parent.mkdirs()) {
+                LogUtil.e(TAG, "writeFile mkdirs failed: " + parent.getAbsolutePath());
+                return false;
             }
             // 先写临时文件再改名，避免 FileWriter 打开即截断导致写入失败时原内容一并丢失
             tmpFile = new File(filePath + ".tmp");

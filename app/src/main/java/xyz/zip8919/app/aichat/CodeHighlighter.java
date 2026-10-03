@@ -334,7 +334,7 @@ public class CodeHighlighter {
                 Set<String> attrSet = LANG_KEYWORDS.get(lang + "_attrs");
 
                 // Handle CDATA section
-                if (i + 9 < len && code.startsWith("<![CDATA[", i)) {
+                if (i + 9 <= len && code.startsWith("<![CDATA[", i)) {
                     int end = code.indexOf("]]>", i + 9);
                     if (end > i) {
                         out.append("<span class=\"tk-cmt\">");

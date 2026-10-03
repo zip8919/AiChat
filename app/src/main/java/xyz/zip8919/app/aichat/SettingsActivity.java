@@ -214,7 +214,7 @@ public class SettingsActivity extends Activity {
                 LogUtil.w(TAG, "saveSettings: title model pos=%d out of range (%d)", pos, models.size());
             }
         }
-        editor.commit();
+        editor.apply();
         LogUtil.ENABLED = logEnabled;
         LogUtil.i(TAG, "saveSettings: prefs committed, logging %s", logEnabled ? "enabled" : "DISABLED");
 
@@ -364,8 +364,8 @@ public class SettingsActivity extends Activity {
                 obj.put("prompt", p[1]);
                 arr.put(obj);
             }
-            boolean ok = prefs.edit().putString(KEY_PRESETS, arr.toString()).commit();
-            LogUtil.d(TAG, "savePresets: %d presets ok=%s", presetList.size(), ok);
+            prefs.edit().putString(KEY_PRESETS, arr.toString()).apply();
+            LogUtil.d(TAG, "savePresets: %d presets saved", presetList.size());
         } catch (Exception e) {
             LogUtil.e(TAG, "savePresets failed: " + e.getMessage(), e);
         }
