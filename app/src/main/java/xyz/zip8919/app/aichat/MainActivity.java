@@ -42,6 +42,14 @@ import org.json.JSONObject;
 
 public class MainActivity extends Activity {
     private static final String TAG = "MainActivity";
+
+    /**
+     * Height of the viewer overlay toolbar (viewer_top_left / viewer_close are
+     * 44dp + 4dp margin each side). The preview WebViews fill the whole dialog,
+     * so page content must be inset by this much or it renders underneath the
+     * toolbar buttons.
+     */
+    private static final int VIEWER_TOOLBAR_INSET_PX = 52;
     private static final String PREFS_NAME = "aichat_prefs";
     private static final int REQUEST_CONVERSATION_MANAGER = 1;
     private static final int REQUEST_SCAN = 2;
@@ -1715,24 +1723,30 @@ public class MainActivity extends Activity {
         if (boxW <= 0) boxW = getResources().getDisplayMetrics().widthPixels;
         if (boxH <= 0) boxH = getResources().getDisplayMetrics().heightPixels;
         String rotateCss = rotateTransformWrap(codePreviewRotation, boxW, boxH);
+        // When rotated 90/270 the wrapper's content box becomes portrait
+        // (boxH wide). An SVG that declares width="600" would still be clamped
+        // by its own max-width:100% against that narrower box and shrink to a
+        // sliver. Tell the page how wide the rotated content box actually is so
+        // the SVG can scale up to fill it.
+        boolean rotatedSideways = (codePreviewRotation == 90 || codePreviewRotation == 270);
 
         String html;
         if ("svg".equals(currentPreviewLang)) {
             html = buildCodePreviewHtml(currentPreviewCode, currentPreviewLang,
-                    bgColor, rotateCss, false);
+                    bgColor, rotateCss, false, rotatedSideways ? boxH : 0);
         } else {
             // HTML: detect if it's a full document or fragment
             String trimmed = currentPreviewCode.trim().toLowerCase();
             boolean isFullDoc = trimmed.startsWith("<!doctype") || trimmed.startsWith("<html");
             html = buildCodePreviewHtml(currentPreviewCode, currentPreviewLang,
-                    bgColor, rotateCss, isFullDoc);
+                    bgColor, rotateCss, isFullDoc, rotatedSideways ? boxH : 0);
         }
 
         codePreviewWebView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null);
     }
 
     private String buildCodePreviewHtml(String code, String lang,
-            String bgColor, String rotateCss, boolean isFullHtmlDoc) {
+            String bgColor, String rotateCss, boolean isFullHtmlDoc, int sideW) {
         String zoomJs =
                 "var vZoom=1;" +
                 "function viewerZoom(f){vZoom=Math.min(5,Math.max(0.1,vZoom*f));" +
@@ -1741,15 +1755,31 @@ public class MainActivity extends Activity {
                 "function viewerSetBg(c){document.body.style.backgroundColor=c;}";
 
         if ("svg".equals(lang)) {
-            // Wrap SVG code in a minimal HTML page
+            // Wrap SVG code in a minimal HTML page.
+            //
+            // The viewer toolbar (↻/#/◐/✕) is an overlay painted on top of this
+            // WebView, so content starting at y=0 is hidden behind it — inset
+            // the page by the toolbar height.
+            //
+            // Rotation is applied to the SVG's own wrapper. Rotating an inner
+            // element while an ancestor still clips to the unrotated layout box
+            // hides the rotated overflow ("truncated/blank after rotate"), so the
+            // rotated box is given an explicit size on both axes instead of
+            // relying on min-height:100%.
+            String wrapCss = rotateCss.isEmpty() ? "" : rotateCss + "!important;";
+            String svgW = sideW > 0 ? ("width:100%;max-width:none;") : "max-width:100%;";
             return "<!DOCTYPE html><html><head>" +
                     "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1.0,user-scalable=yes\">" +
                     "<style>" +
                     "*{margin:0;padding:0;}" +
-                    "html,body{width:100%;min-height:100%;background:" + bgColor + ";" +
-                    "overflow:auto;-webkit-transform-origin:0 0;transform-origin:0 0;}" +
-                    ".preview-wrap{" + rotateCss + "}" +
-                    ".preview-wrap svg{max-width:100%;height:auto;display:block;}" +
+                    "html{width:100%;height:100%;background:" + bgColor + ";" +
+                    "overflow:hidden;-webkit-transform-origin:0 0;transform-origin:0 0;}" +
+                    "body{width:100%;height:100%;background:" + bgColor + ";" +
+                    "overflow:hidden;-webkit-transform-origin:0 0;transform-origin:0 0;" +
+                    "padding:" + VIEWER_TOOLBAR_INSET_PX + "px 0 0 0;" +
+                    "-webkit-box-sizing:border-box;box-sizing:border-box;}" +
+                    ".preview-wrap{display:block;width:100%;overflow:visible;" + wrapCss + "}" +
+                    ".preview-wrap svg{" + svgW + "height:auto;display:block;}" +
                     "</style>" +
                     "<script>" + zoomJs + "</script>" +
                     "</head><body>" +
@@ -1802,6 +1832,8 @@ public class MainActivity extends Activity {
                 "*{margin:0;padding:0;}" +
                 "html,body{width:100%;min-height:100%;background:" + bgColor + ";" +
                 "overflow:auto;-webkit-transform-origin:0 0;transform-origin:0 0;}" +
+                "body{padding:" + VIEWER_TOOLBAR_INSET_PX + "px 0 0 0;" +
+                "-webkit-box-sizing:border-box;box-sizing:border-box;}" +
                 ".preview-wrap{" + rotateCss + "}" +
                 "</style>" +
                 "<script>" + zoomJs + "</script>" +
