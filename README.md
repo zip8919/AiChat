@@ -28,7 +28,7 @@ Windows：
 
 ```bat
 build.bat --sensenova-key sk-xxx                          # Debug
-build.ps1 -SensenovaKey "sk-xxx"                          # Release，输出 AiChat-v<版本>-<时间戳>-release.apk
+build.ps1 -SensenovaKey "sk-xxx"                          # Release，按 ABI 分包输出 AiChat-v<版本>-<时间戳>-<abi>.apk
 ```
 
 Linux / macOS：
@@ -52,11 +52,21 @@ gradlew assembleRelease -PsensenovaKey=sk-xxx
 | 环境变量 | `KEYSTORE_PASSWORD` | `KEY_ALIAS` |
 | Gradle 属性 | `-PkeystorePassword=...` | `-PkeyAlias=...` |
 
-注：别名默认值 `mc` 仅存在于 build.sh 脚本层，Gradle 端未设默认值。release 输出：`app/build/outputs/apk/release/app-release.apk`。
+注：别名默认值 `mc` 仅存在于 build.sh 脚本层，Gradle 端未设默认值。
+
+release 按 ABI 分包（`app/build/outputs/apk/release/`），每个包只含对应 ABI 的一份 `libconscrypt_jni.so`：
+
+| 文件 | 适用设备 | 体积 |
+|------|---------|------|
+| `app-arm64-v8a-release.apk` | 绝大多数现代设备（首选） | ~1.65 MB |
+| `app-armeabi-v7a-release.apk` | 老 32 位 ARM 设备 | ~1.48 MB |
+| `app-x86-release.apk` | x86 模拟器 | ~1.73 MB |
+| `app-x86_64-release.apk` | x86_64 模拟器 | ~1.79 MB |
+| `app-universal-release.apk` | 不确定 ABI 时的通用包（含全部 4 个 ABI） | ~4.04 MB |
 
 ## 发布
 
-推送 `v*` 标签触发 GitHub Actions 自动构建发布（`.github/workflows/release.yml`），需配置 Secrets：`SENSENOVA_KEY`、`KEYSTORE_PASSWORD`、`KEY_ALIAS`。
+推送 `v*` 标签触发 GitHub Actions 自动构建发布（`.github/workflows/release.yml`），需配置 Secrets：`SENSENOVA_KEY`、`KEYSTORE_PASSWORD`、`KEY_ALIAS`。Release 附件为 4 个 ABI 分包 + 1 个 universal 通用包（`app/build/outputs/apk/release/*.apk`），请按设备 ABI 选择下载。
 
 > 注意：`-PsensenovaKey` 的值会被编译进 `BuildConfig` 常量并留在 APK 的 dex 中，任何人拿到 APK 都能提取（这正是发布包里会出现真实 key 的原因）。所以该 key 不要写进仓库源码，只通过构建参数 / CI Secrets 注入。
 
@@ -65,7 +75,7 @@ gradlew assembleRelease -PsensenovaKey=sk-xxx
 - 纯 Android Framework（Activity、WebView、HttpURLConnection），零第三方 HTTP/图片加载库
 - 依赖（`app/build.gradle:53-57`）：conscrypt-android 2.5.2、jlatexmath-android 0.2.0、commonmark 0.21.0 + GFM strikethrough/tables 扩展
 - Markdown 解析：commonmark-java + GFM 扩展；LaTeX：jlatexmath-android
-- 编译：compileSdk 34，Java 8，minSdk/targetSdk 18；`abiFilters` 未设置，APK 包含全部 ABI
+- 编译：compileSdk 34，Java 8，minSdk/targetSdk 18；用 `splits.abi` 按 ABI 分包（armeabi-v7a / arm64-v8a / x86 / x86_64 + universal 通用包），每个包只带对应 ABI 的 `libconscrypt_jni.so`
 - **TLS / 网络安全**：`TlsCompat.java` 安装 Conscrypt 提供 AES-GCM 等现代套件（兼容 Android 4.4 老设备），启用平台支持的全部协议与套件（仅移除 SSLv3/SSLv2Hello）。**注意：当前实现信任所有证书（trust-all），且主机名校验恒返回 true——不校验任何证书与主机名，存在中间人攻击风险**，请勿在不信任的网络中使用
 
 ## 项目结构
@@ -109,7 +119,7 @@ gradlew assembleRelease -PsensenovaKey=sk-xxx
 
 - 系统：Android 4.4.2（API 19）词典笔真机；minSdk 18 / targetSdk 18（低 targetSdk 保留安装时授权、无运行时权限，为老设备有意选择）
 - 屏幕：竖屏窄宽
-- CPU：build.gradle 未设 `abiFilters`，构建产物包含全部 ABI（如仅需 armv7a 可自行加 `abiFilters 'armeabi-v7a'`）
+- CPU：按 ABI 分包输出（`app/build.gradle` 的 `splits.abi`），提供 armeabi-v7a / arm64-v8a / x86 / x86_64 四个分包与一个 universal 通用包；如只想产出单一 ABI，可把 `splits.abi` 换成 `defaultConfig.ndk.abiFilters`
 
 ## 免责声明
 

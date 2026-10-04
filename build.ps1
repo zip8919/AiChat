@@ -39,11 +39,20 @@ if ($LASTEXITCODE -ne 0) {
 
 $versionName = if ((Get-Content "app\build.gradle" | Select-String 'versionName\s+"([^"]+)"').Matches) { (Get-Content "app\build.gradle" | Select-String 'versionName\s+"([^"]+)"').Matches[0].Groups[1].Value } else { "unknown" }
 $timestamp = Get-Date -Format "yyyyMMdd-HHmm"
-$output = "AiChat-v$versionName-$timestamp-release.apk"
-Copy-Item "app\build\outputs\apk\release\app-release.apk" $output -Force
+
+# 按 ABI 分包：app-<abi>-release.apk / app-universal-release.apk
+$apks = Get-ChildItem "app\build\outputs\apk\release\app-*-release.apk" | Sort-Object Name
+if (-not $apks) { Write-Host "No split APK found!" -ForegroundColor Red; exit 1 }
+$outputs = @()
+foreach ($apk in $apks) {
+    $abi = $apk.BaseName -replace '^app-', '' -replace '-release$', ''
+    $name = "AiChat-v$versionName-$timestamp-$abi.apk"
+    Copy-Item $apk.FullName $name -Force
+    $outputs += $name
+}
 
 Write-Host ""
 Write-Host "=========================================" -ForegroundColor Cyan
 Write-Host "  Build Complete" -ForegroundColor Cyan
 Write-Host "=========================================" -ForegroundColor Cyan
-Write-Host "Output: $output" -ForegroundColor Green
+foreach ($o in $outputs) { Write-Host "Output: $o" -ForegroundColor Green }

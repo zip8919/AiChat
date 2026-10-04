@@ -44,13 +44,30 @@ echo ""
     ${KEYSTORE_PASSWORD:+-PkeystorePassword="$KEYSTORE_PASSWORD"} \
     ${KEY_ALIAS:+-PkeyAlias="$KEY_ALIAS"}
 
-# Rename output
+# Rename output (按 ABI 分包)
 TIMESTAMP=$(date +%Y%m%d-%H%M)
-OUTPUT="AiChat-v1.3.5-${TIMESTAMP}-release.apk"
-cp app/build/outputs/apk/release/app-release.apk "$OUTPUT"
+VERSION=$(sed -n 's/.*versionName[[:space:]]*"\([^"]*\)".*/\1/p' app/build.gradle | head -1)
+VERSION=${VERSION:-unknown}
+
+shopt -s nullglob
+APKS=(app/build/outputs/apk/release/app-*-release.apk)
+if [ ${#APKS[@]} -eq 0 ]; then
+    echo "No split APK found!"
+    exit 1
+fi
+
+OUTPUTS=()
+for apk in "${APKS[@]}"; do
+    base=$(basename "$apk")
+    abi=${base#app-}
+    abi=${abi%-release.apk}
+    out="AiChat-v${VERSION}-${TIMESTAMP}-${abi}.apk"
+    cp "$apk" "$out"
+    OUTPUTS+=("$out")
+done
 
 echo ""
 echo "========================================="
 echo "  Build Complete"
 echo "========================================="
-echo "Output: $OUTPUT"
+for o in "${OUTPUTS[@]}"; do echo "Output: $o"; done

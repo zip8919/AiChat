@@ -59,15 +59,28 @@ REM Get timestamp
 for /f "tokens=2 delims==" %%I in ('wmic os get localdatetime /value') do set datetime=%%I
 set TIMESTAMP=%datetime:~0,8%-%datetime:~8,4%
 
-set OUTPUT=AiChat-v1.0-%TIMESTAMP%.apk
-copy app\build\outputs\apk\debug\app-debug.apk "%OUTPUT%"
+REM 按 ABI 分包复制 debug 产物
+set FOUND=0
+for %%F in (app\build\outputs\apk\debug\app-*-debug.apk) do (
+    set "ABI=%%~nF"
+    set "ABI=!ABI:app-=!"
+    set "ABI=!ABI:-debug=!"
+    set "OUTPUT=AiChat-v1.0-%TIMESTAMP%-!ABI!.apk"
+    copy "%%F" "!OUTPUT!" >nul
+    set FOUND=1
+    echo 输出文件: !OUTPUT!
+)
+
+if "!FOUND!"=="0" (
+    echo.
+    echo 未找到分包 APK^!
+    exit /b 1
+)
 
 echo.
 echo =========================================
 echo   构建完成
 echo =========================================
-echo.
-echo 输出文件: %OUTPUT%
 echo.
 
 endlocal
