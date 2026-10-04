@@ -129,11 +129,11 @@ public class ConfigManager {
         providers.add(sn);
 
         // Models
-        addModel("deepseek-flash", "商汤日日新", true);
-        addModel("deepseek-v4-flash", "DeepSeek", true);
+        addModel("deepseek-v4-flash", "商汤日日新", true);
+        addModel("deepseek-flash", "DeepSeek", true);
         addModel("deepseek-v4-pro", "DeepSeek", true);
 
-        this.defaultModel = "deepseek-flash";
+        this.defaultModel = "deepseek-v4-flash";
         this.enableThinking = true;
         this.thinkingLevel = "medium";
         LogUtil.i(TAG, "createDefault: providers=%s models=%d default=%s",
