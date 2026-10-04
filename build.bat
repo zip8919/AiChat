@@ -1,25 +1,17 @@
 @echo off
 REM 构建脚本 - Windows
 REM 用法:
-REM   build.bat --deepseek-key sk-xxx --siliconflow-key sk-yyy
-REM   build.bat --deepseek-key sk-xxx
+REM   build.bat --sensenova-key sk-xxx
 REM   build.bat
 
 setlocal enabledelayedexpansion
 
-set DEEPSEEK_KEY=
-set SILICONFLOW_KEY=
+set SENSENOVA_KEY=
 
 :parse_args
 if "%~1"=="" goto done_parsing
-if "%~1"=="--deepseek-key" (
-    set DEEPSEEK_KEY=%~2
-    shift
-    shift
-    goto parse_args
-)
-if "%~1"=="--siliconflow-key" (
-    set SILICONFLOW_KEY=%~2
+if "%~1"=="--sensenova-key" (
+    set SENSENOVA_KEY=%~2
     shift
     shift
     goto parse_args
@@ -33,13 +25,11 @@ goto parse_args
 echo 用法: build.bat [选项]
 echo.
 echo 选项:
-echo   --deepseek-key ^<key^>      设置 DeepSeek API Key
-echo   --siliconflow-key ^<key^>   设置硅基流动 API Key
+echo   --sensenova-key ^<key^>     设置商汤日日新 API Key（编译进 APK）
 echo   -h, --help               显示帮助
 echo.
 echo 示例:
-echo   build.bat --deepseek-key sk-abc123 --siliconflow-key sk-xyz789
-echo   build.bat --deepseek-key sk-abc123
+echo   build.bat --sensenova-key sk-abc123
 exit /b 0
 
 :done_parsing
@@ -48,22 +38,16 @@ echo =========================================
 echo   AiChat 构建脚本
 echo =========================================
 echo.
-if defined DEEPSEEK_KEY (
-    echo DeepSeek Key:    (已设置^)
+if defined SENSENOVA_KEY (
+    echo SenseNova Key:   (已设置^)
 ) else (
-    echo DeepSeek Key:    (未设置^)
-)
-if defined SILICONFLOW_KEY (
-    echo SiliconFlow Key: (已设置^)
-) else (
-    echo SiliconFlow Key: (未设置^)
+    echo SenseNova Key:   (未设置^)
 )
 echo.
 
 REM Build
 call gradlew.bat assembleDebug ^
-    -PdeepseekKey="%DEEPSEEK_KEY%" ^
-    -PsiliconflowKey="%SILICONFLOW_KEY%"
+    -PsensenovaKey="%SENSENOVA_KEY%"
 
 if %ERRORLEVEL% NEQ 0 (
     echo.

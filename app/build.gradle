@@ -22,8 +22,8 @@ android {
         versionCode 21
         versionName "1.4.1"
 
-        buildConfigField "String", "DEEPSEEK_KEY", "\"${project.findProperty('deepseekKey') ?: 'sk-xxx'}\""
-        buildConfigField "String", "SILICONFLOW_KEY", "\"${project.findProperty('siliconflowKey') ?: 'sk-xxx'}\""
+        // 默认不内置任何 API Key；商汤日日新的 key 可在构建时用 -PsensenovaKey=... 注入
+        buildConfigField "String", "SENSENOVA_KEY", "\"${project.findProperty('sensenovaKey') ?: ''}\""
     }
 
     buildTypes {

@@ -1,10 +1,10 @@
 # AiChat
 
-Android 词典笔 AI 对话应用（版本 1.4.1，minSdk 18 / targetSdk 18，真机 Android 4.4.2 / API 19）。基于 WebView + HTML/CSS 渲染 Markdown/LaTeX，通过任意 OpenAI 兼容端点调用大模型，内置 DeepSeek 与 SiliconFlow 默认配置。
+Android 词典笔 AI 对话应用（版本 1.4.1，minSdk 18 / targetSdk 18，真机 Android 4.4.2 / API 19）。基于 WebView + HTML/CSS 渲染 Markdown/LaTeX，通过任意 OpenAI 兼容端点调用大模型，内置 DeepSeek（不含 API Key）与商汤日日新 默认配置，默认模型 `deepseek-flash`。
 
 ## 功能
 
-- **多模型 / 多提供商** — 模型配置页可增删提供商与模型，自定义 API URL、Chat Path、API Key；支持 DeepSeek、SiliconFlow 及任意 OpenAI 兼容端点
+- **多模型 / 多提供商** — 模型配置页可增删提供商与模型，自定义 API URL、Chat Path、API Key；内置 DeepSeek、商汤日日新 及任意 OpenAI 兼容端点
 - **对话** — 流式输出（设置可开关）；回复进行中再发送自动排队，队列支持上移/下移/插队发送（打断当前回复）/删除；长按发送键打断当前请求，思考阶段打断自动补 `[/thinking]` 收尾
 - **思考模式** — 关闭/低/中/高四档，思考内容可折叠/展开
 - **Markdown 渲染** — WebView + HTML/CSS：标题、粗斜体、删除线、代码块（复制按钮 + 语法高亮）、表格（横向滑动 + 点击放大）、引用、列表、分割线、图片、链接；LaTeX 公式（`$...$`/`$$...$$`/`\(...\)`/`\[...\]`/裸 `\command`/化学式 `\ce{...}`）、脚注、高亮 `==text==`、上下标、内嵌 HTML/SVG 直通
@@ -27,21 +27,23 @@ Android 词典笔 AI 对话应用（版本 1.4.1，minSdk 18 / targetSdk 18，�
 Windows：
 
 ```bat
-build.bat --deepseek-key sk-xxx --siliconflow-key sk-yyy   # Debug
-build.ps1 -DeepseekKey "sk-xxx" -SiliconflowKey "sk-xxx"  # Release，输出 AiChat-v<版本>-<时间戳>-release.apk
+build.bat --sensenova-key sk-xxx                          # Debug
+build.ps1 -SensenovaKey "sk-xxx"                          # Release，输出 AiChat-v<版本>-<时间戳>-release.apk
 ```
 
 Linux / macOS：
 
 ```bash
-./build.sh --deepseek-key sk-xxx --siliconflow-key sk-xxx
+./build.sh --sensenova-key sk-xxx
 ```
 
 直接使用 Gradle（Windows 为 `gradlew.bat`）：
 
 ```bash
-gradlew assembleRelease -PdeepseekKey=sk-xxx -PsiliconflowKey=sk-xxx
+gradlew assembleRelease -PsensenovaKey=sk-xxx
 ```
+
+不传 `-PsensenovaKey` 时商汤日日新的 API Key 为空（DeepSeek 提供商同样默认不带 Key），需在设备上的模型配置页手动填写。
 
 签名密钥位于 `app/keystore/mc.jks`，通过环境变量或 Gradle 属性提供：
 
@@ -54,7 +56,9 @@ gradlew assembleRelease -PdeepseekKey=sk-xxx -PsiliconflowKey=sk-xxx
 
 ## 发布
 
-推送 `v*` 标签触发 GitHub Actions 自动构建发布（`.github/workflows/release.yml`），需配置 Secrets：`DEEPSEEK_KEY`、`SILICONFLOW_KEY`、`KEYSTORE_PASSWORD`、`KEY_ALIAS`。
+推送 `v*` 标签触发 GitHub Actions 自动构建发布（`.github/workflows/release.yml`），需配置 Secrets：`SENSENOVA_KEY`、`KEYSTORE_PASSWORD`、`KEY_ALIAS`。
+
+> 注意：`-PsensenovaKey` 的值会被编译进 `BuildConfig` 常量并留在 APK 的 dex 中，任何人拿到 APK 都能提取（这正是发布包里会出现真实 key 的原因）。所以该 key 不要写进仓库源码，只通过构建参数 / CI Secrets 注入。
 
 ## 技术栈
 

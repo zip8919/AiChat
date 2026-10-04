@@ -102,15 +102,14 @@ public class ConfigManager {
         providers.clear();
         models.clear();
 
-        String dsKey = BuildConfig.DEEPSEEK_KEY;
-        if (dsKey == null) dsKey = "";
-        String sfKey = BuildConfig.SILICONFLOW_KEY;
-        if (sfKey == null) sfKey = "";
+        // 默认不内置 DeepSeek key；商汤日日新的 key 由构建参数 -PsensenovaKey 注入（可为空）
+        String snKey = BuildConfig.SENSENOVA_KEY;
+        if (snKey == null) snKey = "";
 
-        // DeepSeek provider
+        // DeepSeek provider（不内置 key，用户自行填写）
         ProviderInfo ds = new ProviderInfo();
         ds.name = "DeepSeek";
-        ds.apiKey = dsKey;
+        ds.apiKey = "";
         ds.apiUrl = "https://api.deepseek.com";
         ds.chatPath = "/chat/completions";
         ds.thinkingType = "object";
@@ -118,23 +117,23 @@ public class ConfigManager {
         ds.supportsBalance = true;
         providers.add(ds);
 
-        // SiliconFlow provider
-        ProviderInfo sf = new ProviderInfo();
-        sf.name = "硅基流动";
-        sf.apiKey = sfKey;
-        sf.apiUrl = "https://api.siliconflow.cn";
-        sf.chatPath = "/v1/chat/completions";
-        sf.thinkingType = "boolean";
-        sf.thinkingParamName = "enable_thinking";
-        sf.supportsBalance = false;
-        providers.add(sf);
+        // 商汤日日新 provider
+        ProviderInfo sn = new ProviderInfo();
+        sn.name = "商汤日日新";
+        sn.apiKey = snKey;
+        sn.apiUrl = "https://token.sensenova.cn";
+        sn.chatPath = "/v1/chat/completions";
+        sn.thinkingType = "object";
+        sn.thinkingParamName = "thinking";
+        sn.supportsBalance = false;
+        providers.add(sn);
 
         // Models
+        addModel("deepseek-flash", "商汤日日新", true);
         addModel("deepseek-v4-flash", "DeepSeek", true);
         addModel("deepseek-v4-pro", "DeepSeek", true);
-        addModel("Qwen/Qwen3.5-397B-A17B", "硅基流动", true);
 
-        this.defaultModel = "deepseek-v4-flash";
+        this.defaultModel = "deepseek-flash";
         this.enableThinking = true;
         this.thinkingLevel = "medium";
         LogUtil.i(TAG, "createDefault: providers=%s models=%d default=%s",
