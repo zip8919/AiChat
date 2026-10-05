@@ -267,10 +267,18 @@ public class MessageHtmlRenderer {
             "window.scrollTo(0,Math.max(" +
             "document.documentElement.scrollHeight||0," +
             "document.body.scrollHeight||0));};" +
+            "window.runScripts=function(root){" +
+            "if(!root||!root.querySelectorAll)return;" +
+            "var ss=root.querySelectorAll('script');" +
+            "for(var i=0;i<ss.length;i++){" +
+            "var o=ss[i],n=document.createElement('script');" +
+            "for(var j=0;j<o.attributes.length;j++){n.setAttribute(o.attributes[j].name,o.attributes[j].value);}" +
+            "if(!o.src)n.text=o.textContent;" +
+            "o.parentNode.replaceChild(n,o);}};" +
             "window.appendMsg=function(html){" +
             "var d=document.createElement('div');d.innerHTML=html;" +
             "var el=d.firstElementChild;" +
-            "if(el)document.getElementById('msgs').appendChild(el);" +
+            "if(el){document.getElementById('msgs').appendChild(el);runScripts(el);}" +
             "addCopyBtns();smartScrollToBottom();};" +
             "window.updateLastMsg=function(html){" +
             "var ms=document.querySelectorAll('.msg.ai .content');" +
@@ -294,8 +302,8 @@ public class MessageHtmlRenderer {
             "for(var i=0;i<all.length;i++){" +
             "if(all[i].getAttribute('data-idx')===''+idx){" +
             "var isAi=all[i].className.indexOf('msg ai')>=0;" +
-            "if(isAi){var c=all[i].querySelector('.content');if(c)c.innerHTML=html;}" +
-            "else{var b=all[i].querySelector('.bubble');if(b)b.innerHTML=html;}" +
+            "if(isAi){var c=all[i].querySelector('.content');if(c){c.innerHTML=html;runScripts(c);}}" +
+            "else{var b=all[i].querySelector('.bubble');if(b){b.innerHTML=html;runScripts(b);}}" +
             "addCopyBtns();return;}}};" +
             "window.reindexFrom=function(start){" +
             "var all=document.querySelectorAll('.msg');" +
@@ -310,6 +318,7 @@ public class MessageHtmlRenderer {
             "var btn=last.querySelector('.msg-menu-btn');" +
             "if(btn)btn.setAttribute('onclick'," +
             "\"if(window.Android)Android.messageMenu('\"+idx+\"');event.stopPropagation();return false;\");" +
+            "var c=last.querySelector('.content');if(c)runScripts(c);" +
             "}};" +
             "window.removeFromIdx=function(idx){" +
             "var msgs=document.getElementById('msgs');" +
@@ -431,6 +440,11 @@ public class MessageHtmlRenderer {
         List<String> mathTags = new ArrayList<>();
         float density = ctx.getResources().getDisplayMetrics().density;
 
+        // Mask fenced code blocks and inline code spans first, so the math /
+        // extension preprocessing below can never rewrite their contents.
+        List<String> codeBlocks = new ArrayList<>();
+        text = protectCode(text, codeBlocks);
+
         // 0. Protect raw SVG blocks from markdown parsing — commonmark doesn't treat <svg> as HTML block
         List<String> svgBlocks = new ArrayList<>();
         text = extractAndProtectSvg(text, svgBlocks);
@@ -439,6 +453,7 @@ public class MessageHtmlRenderer {
         text = extractAndRenderLatex(text, density, mathTags);
         text = renderBareLatexCommands(text, density, mathTags);
         text = preProcessExtensions(text);
+        text = restoreCode(text, codeBlocks);
         Node document = PARSER.parse(text);
         StringBuilder html = new StringBuilder();
         document.accept(new HtmlVisitor(html));
@@ -446,6 +461,118 @@ public class MessageHtmlRenderer {
         LogUtil.v(TAG, "renderMarkdown: %d -> %d chars, %d math formulas",
                 text.length(), result.length(), mathTags.size());
         return result;
+    }
+
+    private static final char CODE_MASK_START = '\uE000';
+    private static final char CODE_MASK_END = '\uE001';
+
+    // Replace fenced code blocks (``` / ~~~) and inline code spans (`...`) with
+    // opaque sentinels so preprocessing leaves them byte-for-byte intact. The
+    // originals are restored just before commonmark parses, so code blocks still
+    // render as code and never have their contents interpreted as markdown/math.
+    private static String protectCode(String text, List<String> codeBlocks) {
+        StringBuilder out = new StringBuilder(text.length() + 64);
+        int i = 0, len = text.length();
+        boolean inFence = false;
+        char fenceChar = 0;
+        int fenceLen = 0;
+        int fenceStart = -1;
+        while (i < len) {
+            if (i == 0 || text.charAt(i - 1) == '\n') {
+                int j = i, indent = 0;
+                while (j < len && text.charAt(j) == ' ' && indent < 3) { j++; indent++; }
+                if (inFence) {
+                    if (j < len && text.charAt(j) == fenceChar) {
+                        int run = 0, k = j;
+                        while (k < len && text.charAt(k) == fenceChar) { run++; k++; }
+                        int m = k;
+                        while (m < len && (text.charAt(m) == ' ' || text.charAt(m) == '\t')) m++;
+                        if (run >= fenceLen && (m >= len || text.charAt(m) == '\n')) {
+                            int end = (m < len) ? m + 1 : m;
+                            codeBlocks.add(text.substring(fenceStart, end));
+                            out.append(CODE_MASK_START).append(codeBlocks.size() - 1).append(CODE_MASK_END);
+                            i = end;
+                            inFence = false;
+                            continue;
+                        }
+                    }
+                } else if (j < len && (text.charAt(j) == '`' || text.charAt(j) == '~')) {
+                    char cc = text.charAt(j);
+                    int run = 0, k = j;
+                    while (k < len && text.charAt(k) == cc) { run++; k++; }
+                    if (run >= 3) {
+                        inFence = true;
+                        fenceChar = cc;
+                        fenceLen = run;
+                        fenceStart = i;
+                        int nl = text.indexOf('\n', k);
+                        i = (nl < 0) ? len : nl + 1;
+                        continue;
+                    }
+                }
+            }
+            if (!inFence && text.charAt(i) == '`') {
+                int run = 0, k = i;
+                while (k < len && text.charAt(k) == '`') { run++; k++; }
+                int closeEnd = -1, s = k;
+                while (s < len) {
+                    if (text.charAt(s) == '`') {
+                        int r2 = 0, t = s;
+                        while (t < len && text.charAt(t) == '`') { r2++; t++; }
+                        if (r2 == run) { closeEnd = t; break; }
+                        s = t;
+                    } else {
+                        s++;
+                    }
+                }
+                if (closeEnd >= 0) {
+                    codeBlocks.add(text.substring(i, closeEnd));
+                    out.append(CODE_MASK_START).append(codeBlocks.size() - 1).append(CODE_MASK_END);
+                    i = closeEnd;
+                } else {
+                    out.append(text, i, k);
+                    i = k;
+                }
+                continue;
+            }
+            out.append(text.charAt(i));
+            i++;
+        }
+        if (inFence && fenceStart >= 0) {
+            codeBlocks.add(text.substring(fenceStart));
+            out.append(CODE_MASK_START).append(codeBlocks.size() - 1).append(CODE_MASK_END);
+        }
+        return out.toString();
+    }
+
+    private static String restoreCode(String text, List<String> codeBlocks) {
+        if (codeBlocks.isEmpty()) return text;
+        StringBuilder out = new StringBuilder(text.length());
+        int i = 0, len = text.length();
+        while (i < len) {
+            char c = text.charAt(i);
+            if (c == CODE_MASK_START) {
+                int j = i + 1, idx = 0;
+                boolean any = false;
+                while (j < len && text.charAt(j) >= '0' && text.charAt(j) <= '9') {
+                    idx = idx * 10 + (text.charAt(j) - '0');
+                    any = true;
+                    j++;
+                }
+                if (any && j < len && text.charAt(j) == CODE_MASK_END && idx < codeBlocks.size()) {
+                    out.append(codeBlocks.get(idx));
+                    i = j + 1;
+                    continue;
+                }
+            }
+            out.append(c);
+            i++;
+        }
+        return out.toString();
+    }
+
+    private static boolean isWhitespaceChar(char c) {
+        return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f';
     }
 
     // Single-pass placeholder backfill: scans left to right for "@@" tokens and
@@ -487,7 +614,7 @@ public class MessageHtmlRenderer {
             }
             if (idx >= 0 && idx < svgBlocks.size() && svgBlocks.get(idx) != null
                     && kind.equals("SVG")) {
-                String svgHtml = sanitizeRawHtml(svgBlocks.get(idx));
+                String svgHtml = svgBlocks.get(idx);
                 // Inject width constraint directly on the SVG element so API 18
                 // respects it even when CSS doesn't override presentational attrs
                 if (svgHtml.toLowerCase().contains(" style=\"")) {
@@ -967,9 +1094,16 @@ public class MessageHtmlRenderer {
             }
             if (!inBacktick && text.charAt(i) == '$' && i + 1 < text.length()
                     && text.charAt(i + 1) != '$'
+                    && !isWhitespaceChar(text.charAt(i + 1))
                     && (i == 0 || text.charAt(i - 1) != '$')) {
-                int end = text.indexOf('$', i + 1);
-                if (end > i + 1) {
+                // Closing delimiter must sit on the same line, and the span must
+                // not begin/end with whitespace — otherwise a stray "$" would
+                // swallow unrelated text up to the next unrelated "$".
+                int end = i + 1;
+                while (end < text.length() && text.charAt(end) != '$'
+                        && text.charAt(end) != '\n') end++;
+                if (end < text.length() && text.charAt(end) == '$' && end > i + 1
+                        && !isWhitespaceChar(text.charAt(end - 1))) {
                     String html = renderLatexImg(text.substring(i + 1, end), false, density);
                     mathTags.add(html);
                     out.append("@@MATH").append(mathTags.size() - 1).append("@@");
@@ -1136,24 +1270,6 @@ public class MessageHtmlRenderer {
         return sb.toString();
     }
 
-    // Active-content tags / attributes stripped from model-authored raw HTML before it
-    // reaches the JS-enabled conversation WebView. Benign tags (br/sub/mark/div/...) pass.
-    // Removing the tags (open and close) leaves any inner JS as inert plain text.
-    private static final Pattern P_DANGER_TAG = Pattern.compile(
-            "(?is)<\\s*/?\\s*(script|iframe|object|embed|applet|frame|frameset|noscript|base|link|meta|form)\\b[^>]*>");
-    private static final Pattern P_EVENT_ATTR = Pattern.compile(
-            "(?i)\\son[a-z]+\\s*=\\s*(\"[^\"]*\"|'[^']*'|[^\\s>]+)");
-    private static final Pattern P_JS_URL = Pattern.compile(
-            "(?i)(href|src|xlink:href|action|formaction|background)\\s*=\\s*(\"|')?\\s*(javascript|vbscript|livescript)\\s*:[^\"'>\\s]*");
-
-    static String sanitizeRawHtml(String html) {
-        if (html == null || html.isEmpty()) return "";
-        html = P_DANGER_TAG.matcher(html).replaceAll("");
-        html = P_EVENT_ATTR.matcher(html).replaceAll("");
-        html = P_JS_URL.matcher(html).replaceAll("$1=\"#\"");
-        return html;
-    }
-
     // ---- AST → HTML visitor ----
 
     private static class HtmlVisitor extends AbstractVisitor {
@@ -1172,8 +1288,8 @@ public class MessageHtmlRenderer {
             out.append("<p>"); visitChildren(p); out.append("</p>");
         }
         @Override public void visit(Text t) { out.append(esc(t.getLiteral())); }
-        @Override public void visit(HtmlInline hi) { out.append(sanitizeRawHtml(hi.getLiteral())); }
-        @Override public void visit(HtmlBlock hb) { out.append(sanitizeRawHtml(hb.getLiteral())); }
+        @Override public void visit(HtmlInline hi) { out.append(hi.getLiteral()); }
+        @Override public void visit(HtmlBlock hb) { out.append(hb.getLiteral()); }
         @Override public void visit(Emphasis e) {
             out.append("<em>"); visitChildren(e); out.append("</em>");
         }
