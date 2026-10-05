@@ -19,8 +19,8 @@ android {
         applicationId 'xyz.zip8919.app.aichat'
         minSdk 18
         targetSdk 18
-        versionCode 22
-        versionName "1.4.2"
+        versionCode 23
+        versionName "1.4.3"
 
         // 默认不内置任何 API Key；商汤日日新的 key 可在构建时用 -PsensenovaKey=... 注入
         buildConfigField "String", "SENSENOVA_KEY", "\"${project.findProperty('sensenovaKey') ?: ''}\""
