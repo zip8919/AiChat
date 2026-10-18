@@ -7,6 +7,7 @@ Android 词典笔 AI 对话应用（版本 1.4.2，minSdk 18 / targetSdk 18，�
 - **多模型 / 多提供商** — 模型配置页可增删提供商与模型，自定义 API URL、Chat Path、API Key；内置 DeepSeek、商汤日日新 及任意 OpenAI 兼容端点
 - **对话** — 流式输出（设置可开关）；回复进行中再发送自动排队，队列支持上移/下移/插队发送（打断当前回复）/删除；长按发送键打断当前请求，思考阶段打断自动补 `[/thinking]` 收尾
 - **思考模式** — 关闭/低/中/高四档，思考内容可折叠/展开
+- **联网搜索** — 设置页总开关（默认开启）；AI 可通过 `web_search` 工具调用 DeepSeek Search API 检索实时网页，通过 `web_fetch` 抓取网页正文；回答自动附带去重后的来源链接。总开关同时控制工具定义、搜索系统提示词和实际搜索/抓取请求
 - **Markdown 渲染** — WebView + HTML/CSS：标题、粗斜体、删除线、代码块（复制按钮 + 语法高亮）、表格（横向滑动 + 点击放大）、引用、列表、分割线、图片、链接；LaTeX 公式（`$...$`/`$$...$$`/`\(...\)`/`\[...\]`/裸 `\command`/化学式 `\ce{...}`）、脚注、高亮 `==text==`、上下标、内嵌 HTML/SVG 直通
 - **语法高亮** — 支持 Java、Python、JS/TS、Bash/sh/shell、JSON、C/C++、Go、Rust、Kotlin、Swift、C#、SQL、XML、HTML、SVG；未声明语言时按内容嗅探（HTML/SVG/XML 自动识别）
 - **代码查看器** — 所有代码块均可弹出全屏预览（任意语言），支持缩放/旋转/背景切换；代码块可导出保存到应用存储 exports 目录（按语言扩展名，覆盖 SVG/HTML 及各类代码）
@@ -16,7 +17,7 @@ Android 词典笔 AI 对话应用（版本 1.4.2，minSdk 18 / targetSdk 18，�
 - **自动标题** — 首次对话自动生成标题，标题生成模型与提示词可在设置中配置
 - **系统提示词** — 自定义系统提示词，支持保存/管理/切换多个预设
 - **小工具**（长按"历史"按钮进入）— 已保存代码列表（查看/复制/重命名/编辑/预览运行/多选批量删除）；JS 运行器：在 WebView（Chromium 30）中运行 JS/HTML/SVG，输出可复制，支持粘贴、载入已保存文件、保存到 exports；APP 代码环境提示词（复制/插入输入框/直接发送）
-- **设置** — 流式输出、实时渲染、调试日志、快速搜题开关；模型/提供商管理；查询 DeepSeek 余额（显示总余额/充值/赠送）
+- **设置** — 联网搜索、流式输出、实时渲染、调试日志、快速搜题开关；模型/提供商管理；查询 DeepSeek 余额（显示总余额/充值/赠送）
 - **扫描识别** — 横屏扫描界面，调用词典笔系统 OCR 识别文字，支持加载摘抄记录、编辑、复制、插入
 - **快速搜题模式** — 开启后按扫描键直接跳转系统扫描应用，返回自动填入输入框
 - **屏幕旋转** — 右上角 ↻ 按钮切换横屏/竖屏
@@ -64,6 +65,23 @@ release 按 ABI 分包（`app/build/outputs/apk/release/`），每个包只含�
 | `app-x86_64-release.apk` | x86_64 模拟器 | ~1.79 MB |
 | `app-universal-release.apk` | 不确定 ABI 时的通用包（含全部 4 个 ABI） | ~4.04 MB |
 
+## 联网搜索
+
+设置页的「联网搜索」总开关默认开启，同时控制三件事：
+
+1. 是否向模型发送 `web_search` / `web_fetch` 工具定义
+2. 是否在系统提示词中追加联网工具说明
+3. 是否真正调用 DeepSeek Search / Fetch API
+
+搜索和抓取固定使用 **DeepSeek** 提供商的 API Key（`https://api.deepseek.com`）。当前对话模型可以来自其他提供商；只要 DeepSeek 提供商填写了 Key，模型就可以在对话中调用联网工具。未配置 DeepSeek Key 时，工具会返回错误提示，普通对话不受影响。
+
+- Search：`POST https://api.deepseek.com/v1/tools/search`
+- Fetch：`POST https://api.deepseek.com/v1/tools/fetch`
+- 计费：每 1,000 次成功请求 5 元，具体以 [DeepSeek 官方价格页](https://api-docs.deepseek.com/zh-cn/quick_start/pricing/) 为准
+- 工具调用产生的中间消息只在本次请求内使用，最终回答和「搜索来源」列表正常保存到会话
+
+部分 OpenAI 兼容端点不支持 `tools` 参数。首轮请求因该参数返回 HTTP 400/422 时会自动去掉联网工具重试一次，并提示当前模型不支持联网工具。
+
 ## 发布
 
 推送 `v*` 标签触发 GitHub Actions 自动构建发布（`.github/workflows/release.yml`），需配置 Secrets：`SENSENOVA_KEY`、`KEYSTORE_PASSWORD`、`KEY_ALIAS`。Release 附件为 4 个 ABI 分包 + 1 个 universal 通用包（`app/build/outputs/apk/release/*.apk`），请按设备 ABI 选择下载。
@@ -75,6 +93,7 @@ release 按 ABI 分包（`app/build/outputs/apk/release/`），每个包只含�
 - 纯 Android Framework（Activity、WebView、HttpURLConnection），零第三方 HTTP/图片加载库
 - 依赖（`app/build.gradle:53-57`）：conscrypt-android 2.5.2、jlatexmath-android 0.2.0、commonmark 0.21.0 + GFM strikethrough/tables 扩展
 - Markdown 解析：commonmark-java + GFM 扩展；LaTeX：jlatexmath-android
+- 联网搜索：OpenAI `tool_calls` + DeepSeek Search/Fetch API；流式与非流式响应均支持，工具轮次上限 3 轮
 - 编译：compileSdk 34，Java 8，minSdk/targetSdk 18；用 `splits.abi` 按 ABI 分包（armeabi-v7a / arm64-v8a / x86 / x86_64 + universal 通用包），每个包只带对应 ABI 的 `libconscrypt_jni.so`
 - **TLS / 网络安全**：`TlsCompat.java` 安装 Conscrypt 提供 AES-GCM 等现代套件（兼容 Android 4.4 老设备），启用平台支持的全部协议与套件（仅移除 SSLv3/SSLv2Hello）。**注意：当前实现信任所有证书（trust-all），且主机名校验恒返回 true——不校验任何证书与主机名，存在中间人攻击风险**，请勿在不信任的网络中使用
 
@@ -89,6 +108,7 @@ release 按 ABI 分包（`app/build/outputs/apk/release/`），每个包只含�
 │       ├── java/xyz/zip8919/app/aichat/
 │       │   ├── MainActivity.java        # 主界面：聊天、队列、消息操作、代码查看器、快速搜题、JsBridge
 │       │   ├── ApiClient.java           # HTTP/SSE 请求：流式解析、thinking 处理、余额查询
+│       │   ├── WebSearchTool.java       # 联网工具：DeepSeek Search/Fetch API、工具定义与结果整理
 │       │   ├── TlsCompat.java           # 老设备 TLS 兼容层：安装 Conscrypt、协议/套件全开、trust-all
 │       │   ├── MessageHtmlRenderer.java # Markdown → HTML/CSS 渲染器（思考折叠、代码高亮、JsBridge）
 │       │   ├── CodeHighlighter.java     # 代码语法高亮（约 20 种语言 token 规则）

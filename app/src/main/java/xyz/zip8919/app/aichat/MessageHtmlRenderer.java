@@ -288,6 +288,10 @@ public class MessageHtmlRenderer {
             "var ms=document.querySelectorAll('.msg.ai .content');" +
             "if(ms.length>0){ms[ms.length-1].textContent=text;}" +
             "smartScrollToBottom();};" +
+            "window.setLastMsgStatus=function(text){" +
+            "var ms=document.querySelectorAll('.msg.ai .content');" +
+            "if(ms.length>0){ms[ms.length-1].textContent=text;}" +
+            "smartScrollToBottom();};" +
             "window.appendAiDiv=function(){" +
             "var d=document.createElement('div');" +
             "d.className='msg ai';d.setAttribute('data-idx','-1');" +

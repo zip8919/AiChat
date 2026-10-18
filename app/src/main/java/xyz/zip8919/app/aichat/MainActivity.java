@@ -53,6 +53,8 @@ public class MainActivity extends Activity {
     private static final String PREFS_NAME = "aichat_prefs";
     private static final int REQUEST_CONVERSATION_MANAGER = 1;
     private static final int REQUEST_SCAN = 2;
+    // 主请求之外最多再执行 3 轮工具调用，防止模型反复搜索无法收尾
+    private static final int MAX_TOOL_ROUNDS = 3;
 
     private ConfigManager configManager;
     private ConversationManager conversationManager;
@@ -1093,10 +1095,17 @@ public class MainActivity extends Activity {
 
     private void sendStreamingRequest(final ProviderInfo provider, final String thinkingLevel, final int generation) {
         final boolean realtimeRenderEnabled = SettingsActivity.isRealtimeRenderEnabled(this);
+        final boolean streamEnabled = SettingsActivity.isStreamEnabled(this);
+        final boolean webSearchEnabled = SettingsActivity.isWebSearchEnabled(this);
+        final String modelName = currentModel;
+        final String effectiveSystemPrompt = webSearchEnabled
+                ? WebSearchTool.appendToSystemPrompt(systemPrompt) : systemPrompt;
+        final ProviderInfo searchProvider = webSearchEnabled
+                ? WebSearchTool.resolveProvider(configManager, provider) : null;
         final long startMs = System.currentTimeMillis();
-        LogUtil.i(TAG, ">>> sendStreamingRequest START: gen=%d url=%s%s model=%s thinking=%s (type=%s, param=%s)",
+        LogUtil.i(TAG, ">>> sendStreamingRequest START: gen=%d url=%s%s model=%s thinking=%s webSearch=%s searchProvider=%s",
                 generation, provider.apiUrl, provider.chatPath, currentModel, thinkingLevel,
-                provider.thinkingType, provider.thinkingParamName);
+                webSearchEnabled, searchProvider == null ? "none" : searchProvider.name);
         isRequestInProgress.set(true);
 
         final Message aiMsg = new Message(Message.ROLE_ASSISTANT, "");
@@ -1105,6 +1114,7 @@ public class MainActivity extends Activity {
         // 在 UI 线程做一次快照：请求线程遍历时 UI 线程可能结构性修改 messages，
         // 直接遍历会抛 ConcurrentModificationException
         final List<Message> requestSnapshot = new ArrayList<Message>(messages);
+        final String originalQuestion = lastUserContent(requestSnapshot);
         LogUtil.d(TAG, "AI placeholder added at index=%d, total=%d", aiIndex, messages.size());
 
         // Append AI placeholder div
@@ -1115,11 +1125,26 @@ public class MainActivity extends Activity {
             }
         });
 
+        final WebSearchTool.RequestGuard searchGuard = new WebSearchTool.RequestGuard() {
+            public boolean shouldAbort() {
+                return !isRequestInProgress.get() || requestGeneration.get() != generation;
+            }
+            public void onConnection(HttpURLConnection c) {
+                if (c != null) {
+                    if (isRequestInProgress.get() && requestGeneration.get() == generation) {
+                        currentConnection = c;
+                    }
+                } else if (isRequestInProgress.get() && requestGeneration.get() == generation) {
+                    currentConnection = null;
+                }
+            }
+        };
+
         currentRequestThread = new Thread(new Runnable() {
             public void run() {
                 final StringBuilder rawContent = new StringBuilder();
-                final boolean[] thinkingActive = {false};
-                final boolean[] thinkingFinished = {false};
+                final List<String[]> searchSources = new ArrayList<String[]>();
+                final boolean[] warnedNoSearchKey = {false};
                 final int[] chunkCount = {0};
                 final int[] thinkingChunks = {0};
                 final int[] contentChunks = {0};
@@ -1131,250 +1156,336 @@ public class MainActivity extends Activity {
                 // 请求是否失败（HTTP 非 200 / 解析失败 / 异常）：失败时 finally 需回滚空占位
                 final boolean[] requestFailed = {false};
 
+                String finalContent = "";
                 HttpURLConnection conn = null;
                 try {
-                    String endpoint = provider.apiUrl + provider.chatPath;
-                    java.net.URL url = new java.net.URL(endpoint);
-                    LogUtil.d(TAG, "opening connection: %s (thread=%s)", endpoint, LogUtil.thread());
-                    conn = (HttpURLConnection) url.openConnection();
-                    conn.setRequestMethod("POST");
-                    conn.setRequestProperty("Content-Type", "application/json");
-                    conn.setRequestProperty("Authorization", "Bearer " + provider.apiKey);
-                    conn.setDoOutput(true);
-                    conn.setConnectTimeout(30000);
-                    conn.setReadTimeout(0);
+                    JSONArray conversation = buildChatConversation(requestSnapshot, aiMsg, effectiveSystemPrompt);
+                    JSONArray toolDefs = webSearchEnabled ? WebSearchTool.buildToolDefinitions() : null;
+                    boolean toolsEnabled = webSearchEnabled;
+                    boolean fallbackTried = false;
+                    int round = 0;
 
-                    if (conn instanceof javax.net.ssl.HttpsURLConnection) {
-                        TlsCompat.apply((javax.net.ssl.HttpsURLConnection) conn);
-                    }
-
-                    currentConnection = conn;
-
-                    org.json.JSONObject body = new org.json.JSONObject();
-                    body.put("model", currentModel);
-                    final boolean streamEnabled = SettingsActivity.isStreamEnabled(MainActivity.this);
-                    body.put("stream", streamEnabled);
-
-                    org.json.JSONArray msgs = new org.json.JSONArray();
-                    if (systemPrompt != null && !systemPrompt.isEmpty()) {
-                        org.json.JSONObject sm = new org.json.JSONObject();
-                        sm.put("role", "system");
-                        sm.put("content", systemPrompt);
-                        msgs.put(sm);
-                    }
-                    for (Message m : requestSnapshot) {
-                        if (m == aiMsg) continue;
-                        org.json.JSONObject mm = new org.json.JSONObject();
-                        mm.put("role", m.role);
-                        String sendContent = m.isAssistant() ? ApiClient.removeThinkingContent(m.content) : m.content;
-                        mm.put("content", sendContent == null ? "" : sendContent);
-                        msgs.put(mm);
-                    }
-                    body.put("messages", msgs);
-
-                    if ("boolean".equals(provider.thinkingType)) {
-                        if (!"off".equals(thinkingLevel)) {
-                            body.put(provider.thinkingParamName, true);
-                            int budget = 4096;
-                            if ("low".equals(thinkingLevel)) budget = 2048;
-                            else if ("high".equals(thinkingLevel)) budget = 32768;
-                            body.put("thinking_budget", budget);
+                    while (round <= MAX_TOOL_ROUNDS) {
+                        if (!isRequestInProgress.get() || requestGeneration.get() != generation) {
+                            LogUtil.i(TAG, "tool loop aborted before round %d", round);
+                            return;
                         }
-                    } else {
-                        org.json.JSONObject tObj = new org.json.JSONObject();
-                        tObj.put("type", "off".equals(thinkingLevel) ? "disabled" : "enabled");
-                        body.put(provider.thinkingParamName, tObj);
-                        if (!"off".equals(thinkingLevel)) {
-                            body.put("reasoning_effort", "high".equals(thinkingLevel) ? "max" : "high");
-                        }
-                    }
+                        if (round > 0) showSearchStatus("正在整理搜索结果...", generation);
 
-                    final String payload = body.toString();
-                    LogUtil.d(TAG, "request body built: len=%d", payload.length());
-                    LogUtil.v(TAG, "request body: %s", LogUtil.preview(payload, 1500));
+                        JSONObject body = buildChatRequestBody(modelName, provider, thinkingLevel, conversation,
+                                streamEnabled, toolsEnabled ? toolDefs : null);
 
-                    long reqMs = System.currentTimeMillis();
-                    java.io.OutputStream os = conn.getOutputStream();
-                    try {
-                        os.write(payload.getBytes("UTF-8"));
-                    } finally {
-                        os.close();
-                    }
-                    LogUtil.d(TAG, "request body written in %d ms", System.currentTimeMillis() - reqMs);
+                        LogUtil.d(TAG, "opening connection: %s%s (round=%d, thread=%s)",
+                                provider.apiUrl, provider.chatPath, round, LogUtil.thread());
+                        conn = openChatConnection(provider);
+                        currentConnection = conn;
 
-                    int code = conn.getResponseCode();
-                    LogUtil.i(TAG, "HTTP response: code=%d in %d ms", code, System.currentTimeMillis() - reqMs);
-                    if (code != 200) {
-                        String errBody = null;
+                        final String payload = body.toString();
+                        LogUtil.d(TAG, "request body built: len=%d", payload.length());
+                        LogUtil.v(TAG, "request body: %s", LogUtil.preview(payload, 1500));
+
+                        long reqMs = System.currentTimeMillis();
+                        java.io.OutputStream os = conn.getOutputStream();
                         try {
-                            java.io.InputStream es = conn.getErrorStream();
-                            if (es != null) {
-                                java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
-                                byte[] buf = new byte[1024];
-                                int n;
-                                int total = 0;
-                                while (total < 4096 && (n = es.read(buf, 0, Math.min(buf.length, 4096 - total))) > 0) {
-                                    bos.write(buf, 0, n);
-                                    total += n;
-                                }
-                                errBody = new String(bos.toByteArray(), "UTF-8");
-                            }
-                        } catch (Exception ignored) {}
-                        LogUtil.e(TAG, "request FAILED: HTTP %d, body=%s", code, LogUtil.preview(errBody, 800));
-                        final String err = "HTTP " + code;
-                        requestFailed[0] = true;
-                        runOnUiThread(new Runnable() {
-                            public void run() { Toast.makeText(MainActivity.this, "请求失败: " + err, Toast.LENGTH_SHORT).show(); }
-                        });
-                        return;
-                    }
-
-                    java.io.BufferedReader reader = new java.io.BufferedReader(
-                            new java.io.InputStreamReader(conn.getInputStream(), "UTF-8"));
-                    String line;
-                    long lastUpdate = 0;
-
-                    if (!streamEnabled) {
-                        // Non-streaming: the body is one JSON object, no SSE frames.
-                        StringBuilder sb = new StringBuilder();
-                        try {
-                            while ((line = reader.readLine()) != null) sb.append(line);
+                            os.write(payload.getBytes("UTF-8"));
                         } finally {
-                            reader.close();
+                            os.close();
                         }
-                        String fullContent = ApiClient.extractMessageContent(sb.toString());
-                        LogUtil.i(TAG, "non-stream response: %d chars raw -> %d chars content",
-                                sb.length(), fullContent == null ? 0 : fullContent.length());
-                        if (fullContent == null) {
-                            final String err = "响应解析失败";
+                        LogUtil.d(TAG, "request body written in %d ms", System.currentTimeMillis() - reqMs);
+
+                        int code = conn.getResponseCode();
+                        LogUtil.i(TAG, "HTTP response: code=%d in %d ms (round=%d)",
+                                code, System.currentTimeMillis() - reqMs, round);
+                        if (code != 200) {
+                            String errBody = readErrorBody(conn);
+                            LogUtil.e(TAG, "request FAILED: HTTP %d, body=%s", code, LogUtil.preview(errBody, 800));
+
+                            // 部分 OpenAI 兼容端点不认识 tools 参数。首轮 400 时去掉工具
+                            // 与搜索系统提示重试一次，保证原有普通对话不受联网开关影响。
+                            if ((code == 400 || code == 422) && toolsEnabled && round == 0 && !fallbackTried) {
+                                fallbackTried = true;
+                                toolsEnabled = false;
+                                conversation = buildChatConversation(requestSnapshot, aiMsg, systemPrompt);
+                                LogUtil.w(TAG, "provider rejected tools, retrying without web search");
+                                runOnUiThread(new Runnable() {
+                                    public void run() {
+                                        Toast.makeText(MainActivity.this,
+                                                "当前模型不支持联网工具，已按普通对话发送",
+                                                Toast.LENGTH_SHORT).show();
+                                    }
+                                });
+                                closeChatConnection(conn);
+                                conn = null;
+                                if (requestGeneration.get() == generation) currentConnection = null;
+                                continue;
+                            }
+
+                            final String err = "HTTP " + code;
                             requestFailed[0] = true;
                             runOnUiThread(new Runnable() {
-                                public void run() { Toast.makeText(MainActivity.this, err, Toast.LENGTH_SHORT).show(); }
+                                public void run() { Toast.makeText(MainActivity.this, "请求失败: " + err, Toast.LENGTH_SHORT).show(); }
                             });
                             return;
                         }
-                        // 内容交给 finally 统一提交（先写回 messages 并完成 DOM 收尾，再放行队列），
-                        // 避免这里的异步提交被 drain 引发的代数自增挡掉
-                        rawContent.setLength(0);
-                        rawContent.append(fullContent);
-                        return;
-                    }
 
-                    LogUtil.i(TAG, "SSE stream started, begin reading chunks");
-                    while (isRequestInProgress.get() && (line = reader.readLine()) != null) {
-                        line = line.trim();
-                        // SSE 规范里冒号后的空格可选，兼容 "data:" 与 "data: "
-                        if (!line.startsWith("data:")) {
-                            if (line.length() > 0) {
-                                LogUtil.v(TAG, "skip non-data line: %s", LogUtil.preview(line, 120));
-                            }
-                            continue;
-                        }
-                        String data = line.substring(5).trim();
-                        if ("[DONE]".equals(data)) {
-                            LogUtil.i(TAG, "SSE [DONE] received after %d chunks", chunkCount[0]);
-                            break;
-                        }
-                        chunkCount[0]++;
+                        final StringBuilder roundDisplay = new StringBuilder();
+                        final StringBuilder roundContent = new StringBuilder();
+                        final boolean[] roundThinkingActive = {false};
+                        final boolean[] roundThinkingFinished = {false};
+                        final JSONArray roundToolCalls = new JSONArray();
 
-                        try {
-                            org.json.JSONObject json = new org.json.JSONObject(data);
-                            org.json.JSONArray choices = json.optJSONArray("choices");
-                            if (choices == null || choices.length() == 0) {
-                                LogUtil.v(TAG, "chunk#%d has no choices: %s", chunkCount[0], LogUtil.preview(data, 200));
-                                continue;
-                            }
-                            org.json.JSONObject delta = choices.getJSONObject(0).optJSONObject("delta");
-                            if (delta == null) {
-                                LogUtil.v(TAG, "chunk#%d has no delta", chunkCount[0]);
-                                continue;
+                        if (!streamEnabled) {
+                            // Non-streaming: the body is one JSON object, no SSE frames.
+                            StringBuilder sb = new StringBuilder();
+                            java.io.BufferedReader reader = new java.io.BufferedReader(
+                                    new java.io.InputStreamReader(conn.getInputStream(), "UTF-8"));
+                            try {
+                                String line;
+                                while ((line = reader.readLine()) != null) sb.append(line);
+                            } finally {
+                                reader.close();
                             }
 
-                            if (delta.has("reasoning_content") && !delta.isNull("reasoning_content")) {
-                                String rc = delta.getString("reasoning_content");
+                            JSONObject json = new JSONObject(sb.toString());
+                            JSONArray choices = json.optJSONArray("choices");
+                            JSONObject message = choices != null && choices.length() > 0
+                                    ? choices.getJSONObject(0).optJSONObject("message") : null;
+                            if (message == null) {
+                                LogUtil.e(TAG, "non-stream response missing choices[0].message");
+                                final String err = "响应解析失败";
+                                requestFailed[0] = true;
+                                runOnUiThread(new Runnable() {
+                                    public void run() { Toast.makeText(MainActivity.this, err, Toast.LENGTH_SHORT).show(); }
+                                });
+                                return;
+                            }
+
+                            String reasoning = message.has("reasoning_content") && !message.isNull("reasoning_content")
+                                    ? message.optString("reasoning_content", "") : "";
+                            if (reasoning.length() > 0) {
+                                roundDisplay.append("[thinking]").append(reasoning).append("[/thinking]");
                                 thinkingChunks[0]++;
-                                if (!thinkingActive[0]) {
-                                    thinkingActive[0] = true;
-                                    rawContent.append("[thinking]");
-                                    LogUtil.d(TAG, "thinking phase START at chunk#%d", chunkCount[0]);
+                            }
+                            String content = message.has("content") && !message.isNull("content")
+                                    ? message.optString("content", "") : "";
+                            roundDisplay.append(content);
+                            roundContent.append(content);
+                            if (content.length() > 0) contentChunks[0]++;
+                            JSONArray rawCalls = message.optJSONArray("tool_calls");
+                            if (rawCalls != null) normalizeToolCalls(rawCalls, roundToolCalls);
+                            if (content.length() == 0 && reasoning.length() == 0
+                                    && roundToolCalls.length() == 0) {
+                                LogUtil.e(TAG, "non-stream response has no content and no tool calls");
+                                final String err = "响应解析失败";
+                                requestFailed[0] = true;
+                                runOnUiThread(new Runnable() {
+                                    public void run() { Toast.makeText(MainActivity.this, err, Toast.LENGTH_SHORT).show(); }
+                                });
+                                return;
+                            }
+                            LogUtil.i(TAG, "non-stream round %d: raw=%d content=%d tools=%d",
+                                    round, sb.length(), content.length(), roundToolCalls.length());
+                        } else {
+                            LogUtil.i(TAG, "SSE stream started (round %d)", round);
+                            java.io.BufferedReader reader = new java.io.BufferedReader(
+                                    new java.io.InputStreamReader(conn.getInputStream(), "UTF-8"));
+                            String line;
+                            long lastUpdate = 0;
+                            try {
+                                while (isRequestInProgress.get() && (line = reader.readLine()) != null) {
+                                    line = line.trim();
+                                    // SSE 规范里冒号后的空格可选，兼容 "data:" 与 "data: "
+                                    if (!line.startsWith("data:")) {
+                                        if (line.length() > 0) {
+                                            LogUtil.v(TAG, "skip non-data line: %s", LogUtil.preview(line, 120));
+                                        }
+                                        continue;
+                                    }
+                                    String data = line.substring(5).trim();
+                                    if ("[DONE]".equals(data)) {
+                                        LogUtil.i(TAG, "SSE [DONE] received after %d chunks", chunkCount[0]);
+                                        break;
+                                    }
+                                    chunkCount[0]++;
+
+                                    try {
+                                        JSONObject json = new JSONObject(data);
+                                        JSONArray choices = json.optJSONArray("choices");
+                                        if (choices == null || choices.length() == 0) {
+                                            LogUtil.v(TAG, "chunk#%d has no choices: %s", chunkCount[0], LogUtil.preview(data, 200));
+                                            continue;
+                                        }
+                                        JSONObject delta = choices.getJSONObject(0).optJSONObject("delta");
+                                        if (delta == null) {
+                                            LogUtil.v(TAG, "chunk#%d has no delta", chunkCount[0]);
+                                            continue;
+                                        }
+
+                                        if (delta.has("reasoning_content") && !delta.isNull("reasoning_content")) {
+                                            String rc = delta.getString("reasoning_content");
+                                            thinkingChunks[0]++;
+                                            if (!roundThinkingActive[0]) {
+                                                roundThinkingActive[0] = true;
+                                                roundDisplay.append("[thinking]");
+                                                LogUtil.d(TAG, "thinking phase START at chunk#%d", chunkCount[0]);
+                                            }
+                                            roundDisplay.append(rc);
+                                            if (LogUtil.ENABLED) {
+                                                LogUtil.v(TAG, "reasoning chunk#%d: %s", thinkingChunks[0], LogUtil.preview(rc, 150));
+                                            }
+                                        }
+
+                                        if (delta.has("content") && !delta.isNull("content")) {
+                                            String ct = delta.getString("content");
+                                            contentChunks[0]++;
+                                            // Only a non-empty content chunk ends the thinking
+                                            // phase. The API emits "content":"" on every
+                                            // reasoning chunk, which used to end the phase on
+                                            // the first reasoning chunk and froze the
+                                            // "展开思考（N字）" count at a couple of chars.
+                                            if (ct.length() > 0 && roundThinkingActive[0] && !roundThinkingFinished[0]) {
+                                                roundThinkingFinished[0] = true;
+                                                roundDisplay.append("[/thinking]");
+                                                LogUtil.d(TAG, "thinking phase END at chunk#%d (thinkingChunks=%d)",
+                                                        chunkCount[0], thinkingChunks[0]);
+                                            }
+                                            roundDisplay.append(ct);
+                                            roundContent.append(ct);
+                                            if (LogUtil.ENABLED) {
+                                                LogUtil.v(TAG, "content chunk#%d: %s", contentChunks[0], LogUtil.preview(ct, 150));
+                                            }
+                                        }
+
+                                        JSONArray deltaCalls = delta.optJSONArray("tool_calls");
+                                        if (deltaCalls != null && deltaCalls.length() > 0) {
+                                            accumulateToolCalls(roundToolCalls, deltaCalls);
+                                        }
+
+                                        // Throttle: re-render markdown at most every 200ms.
+                                        // Rendering takes hundreds of ms on old devices, so
+                                        // it runs off the UI thread and only one render is
+                                        // in flight at a time; ticks that arrive meanwhile
+                                        // are dropped. Skipped when realtime rendering is
+                                        // off — the reply then appears once, at the end.
+                                        long now = System.currentTimeMillis();
+                                        if (realtimeRenderEnabled && now - lastUpdate > 200 && !renderInFlight[0]) {
+                                            lastUpdate = now;
+                                            renderInFlight[0] = true;
+                                            final String partial = roundDisplay.toString();
+                                            final int mySeq = renderSeq.incrementAndGet();
+                                            new Thread(new Runnable() {
+                                                public void run() {
+                                                    final String partialHtml =
+                                                            MessageHtmlRenderer.contentToHtml(partial, MainActivity.this);
+                                                    runOnUiThread(new Runnable() {
+                                                        public void run() {
+                                                            renderInFlight[0] = false;
+                                                            if (renderSeq.get() != mySeq) {
+                                                                return; // superseded by a newer render
+                                                            }
+                                                            if (requestGeneration.get() == generation && aiIndex < messages.size()) {
+                                                                messages.get(aiIndex).content = partial;
+                                                                webViewEvalJs("updateLastMsg('" + jsEscape(partialHtml) + "')");
+                                                            } else {
+                                                                LogUtil.w(TAG, "throttled update skipped: aiIndex=%d >= size=%d",
+                                                                        aiIndex, messages.size());
+                                                            }
+                                                        }
+                                                    });
+                                                }
+                                            }).start();
+                                        }
+                                    } catch (Exception e) {
+                                        LogUtil.w(TAG, "failed to parse SSE chunk#%d: %s | raw=%s",
+                                                chunkCount[0], e.getMessage(), LogUtil.preview(data, 300));
+                                    }
                                 }
-                                rawContent.append(rc);
-                                if (LogUtil.ENABLED) {
-                                    LogUtil.v(TAG, "reasoning chunk#%d: %s", thinkingChunks[0], LogUtil.preview(rc, 150));
+                            } finally {
+                                reader.close();
+                            }
+                            if (roundThinkingActive[0] && !roundThinkingFinished[0]) {
+                                roundDisplay.append("[/thinking]");
+                                LogUtil.d(TAG, "thinking phase left open at stream end: closed with [/thinking]");
+                            }
+                            LogUtil.i(TAG, "stream round %d finished: chunks=%d tools=%d contentLen=%d displayLen=%d",
+                                    round, chunkCount[0], roundToolCalls.length(),
+                                    roundContent.length(), roundDisplay.length());
+                        }
+
+                        closeChatConnection(conn);
+                        conn = null;
+                        if (requestGeneration.get() == generation) currentConnection = null;
+
+                        if (roundToolCalls.length() > 0 && hasUsableToolCall(roundToolCalls)) {
+                            if (round >= MAX_TOOL_ROUNDS) {
+                                LogUtil.w(TAG, "tool round limit reached (%d)", MAX_TOOL_ROUNDS);
+                                finalContent = roundDisplay.toString();
+                                if (finalContent.length() == 0) {
+                                    finalContent = "联网工具调用次数已达上限，请重试。";
+                                } else {
+                                    finalContent = finalContent + "\n\n（联网工具调用次数已达上限）";
                                 }
+                                break;
                             }
 
-                            if (delta.has("content") && !delta.isNull("content")) {
-                                String ct = delta.getString("content");
-                                contentChunks[0]++;
-                                // Only a non-empty content chunk ends the thinking
-                                // phase. The API emits "content":"" on every
-                                // reasoning chunk, which used to end the phase on
-                                // the first reasoning chunk and froze the
-                                // "展开思考（N字）" count at a couple of chars.
-                                if (ct.length() > 0 && thinkingActive[0] && !thinkingFinished[0]) {
-                                    thinkingFinished[0] = true;
-                                    rawContent.append("[/thinking]");
-                                    LogUtil.d(TAG, "thinking phase END at chunk#%d (thinkingChunks=%d)",
-                                            chunkCount[0], thinkingChunks[0]);
-                                }
-                                rawContent.append(ct);
-                                if (LogUtil.ENABLED) {
-                                    LogUtil.v(TAG, "content chunk#%d: %s", contentChunks[0], LogUtil.preview(ct, 150));
-                                }
-                            }
+                            appendAssistantToolCalls(conversation, roundContent.toString(), roundToolCalls);
+                            for (int i = 0; i < roundToolCalls.length(); i++) {
+                                JSONObject tc = roundToolCalls.getJSONObject(i);
+                                String id = tc.optString("id", "");
+                                String name = tc.optString("name", "");
+                                if (name.length() == 0) continue;
 
-                            // Throttle: re-render markdown at most every 200ms.
-                            // Rendering takes hundreds of ms on old devices, so
-                            // it runs off the UI thread and only one render is
-                            // in flight at a time; ticks that arrive meanwhile
-                            // are dropped. Skipped when realtime rendering is
-                            // off — the reply then appears once, at the end.
-                            long now = System.currentTimeMillis();
-                            if (realtimeRenderEnabled && now - lastUpdate > 200 && !renderInFlight[0]) {
-                                lastUpdate = now;
-                                renderInFlight[0] = true;
-                                final String partial = rawContent.toString();
-                                final int mySeq = renderSeq.incrementAndGet();
-                                new Thread(new Runnable() {
-                                    public void run() {
-                                        final String partialHtml =
-                                                MessageHtmlRenderer.contentToHtml(partial, MainActivity.this);
+                                String argText = tc.optString("arguments", "");
+                                JSONObject args;
+                                try {
+                                    args = argText.trim().length() == 0 ? new JSONObject() : new JSONObject(argText);
+                                } catch (Exception e) {
+                                    LogUtil.w(TAG, "tool call args parse failed: %s | raw=%s",
+                                            e.getMessage(), LogUtil.preview(argText, 200));
+                                    args = new JSONObject();
+                                }
+
+                                showSearchStatus(toolStatusText(name, args), generation);
+                                String toolResult;
+                                if (searchProvider == null) {
+                                    toolResult = "{\"error\":\"未配置 DeepSeek API Key，无法使用联网搜索\"}";
+                                    if (!warnedNoSearchKey[0]) {
+                                        warnedNoSearchKey[0] = true;
                                         runOnUiThread(new Runnable() {
                                             public void run() {
-                                                renderInFlight[0] = false;
-                                                if (renderSeq.get() != mySeq) {
-                                                    return; // superseded by a newer render
-                                                }
-                                                if (requestGeneration.get() == generation && aiIndex < messages.size()) {
-                                                    messages.get(aiIndex).content = partial;
-                                                    webViewEvalJs("updateLastMsg('" + jsEscape(partialHtml) + "')");
-                                                } else {
-                                                    LogUtil.w(TAG, "throttled update skipped: aiIndex=%d >= size=%d",
-                                                            aiIndex, messages.size());
-                                                }
+                                                Toast.makeText(MainActivity.this,
+                                                        "未配置 DeepSeek API Key，联网搜索不可用",
+                                                        Toast.LENGTH_LONG).show();
                                             }
                                         });
                                     }
-                                }).start();
+                                } else {
+                                    toolResult = WebSearchTool.executeTool(
+                                            searchProvider, name, args, originalQuestion, searchGuard);
+                                }
+
+                                WebSearchTool.extractSources(toolResult, searchSources);
+                                appendToolResult(conversation, id, toolResult);
+
+                                if (!isRequestInProgress.get() || requestGeneration.get() != generation) {
+                                    LogUtil.i(TAG, "tool loop aborted after tool %s", name);
+                                    return;
+                                }
                             }
-                        } catch (Exception e) {
-                            LogUtil.w(TAG, "failed to parse SSE chunk#%d: %s | raw=%s",
-                                    chunkCount[0], e.getMessage(), LogUtil.preview(data, 300));
+                            round++;
+                            continue;
                         }
+
+                        rawContent.setLength(0);
+                        rawContent.append(roundDisplay);
+                        finalContent = rawContent.toString();
+                        break;
                     }
-                    if (thinkingActive[0] && !thinkingFinished[0]) {
-                        rawContent.append("[/thinking]");
-                        LogUtil.d(TAG, "thinking phase left open at stream end: closed with [/thinking]");
-                    }
-                    // Final commit happens in finally: content is written back to
-                    // messages (and saved) before the pending queue is released, so a
-                    // drained follow-up request cannot invalidate it via the generation guard.
-                    LogUtil.i(TAG, "stream finished: chunks=%d (thinking=%d, content=%d), finalLen=%d, elapsed=%d ms",
-                            chunkCount[0], thinkingChunks[0], contentChunks[0],
-                            rawContent.length(), System.currentTimeMillis() - startMs);
+
+                    finalContent = appendSearchSources(finalContent, searchSources);
+                    rawContent.setLength(0);
+                    rawContent.append(finalContent);
                     renderSeq.incrementAndGet(); // invalidate any in-flight stream render
-                    reader.close();
                 } catch (final Exception e) {
                     requestFailed[0] = true;
                     LogUtil.e(TAG, "streaming request EXCEPTION: %s", e.getMessage(), e);
@@ -1438,6 +1549,270 @@ public class MainActivity extends Activity {
         currentRequestThread.setName("aichat-stream-" + System.currentTimeMillis());
         currentRequestThread.start();
         LogUtil.d(TAG, "request thread started: %s", currentRequestThread.getName());
+    }
+
+    private static JSONArray buildChatConversation(List<Message> snapshot, Message aiMsg,
+            String sysPrompt) throws Exception {
+        JSONArray msgs = new JSONArray();
+        if (sysPrompt != null && !sysPrompt.isEmpty()) {
+            JSONObject sm = new JSONObject();
+            sm.put("role", "system");
+            sm.put("content", sysPrompt);
+            msgs.put(sm);
+        }
+        for (Message m : snapshot) {
+            if (m == aiMsg) continue;
+            JSONObject mm = new JSONObject();
+            mm.put("role", m.role);
+            String sendContent = m.isAssistant() ? ApiClient.removeThinkingContent(m.content) : m.content;
+            mm.put("content", sendContent == null ? "" : sendContent);
+            msgs.put(mm);
+        }
+        return msgs;
+    }
+
+    private JSONObject buildChatRequestBody(String model, ProviderInfo provider, String thinkingLevel,
+            JSONArray msgs, boolean stream, JSONArray tools) throws Exception {
+        JSONObject body = new JSONObject();
+        body.put("model", model);
+        body.put("stream", stream);
+        body.put("messages", msgs);
+        if (tools != null && tools.length() > 0) {
+            body.put("tools", tools);
+            body.put("tool_choice", "auto");
+        }
+
+        if ("boolean".equals(provider.thinkingType)) {
+            if (!"off".equals(thinkingLevel)) {
+                body.put(provider.thinkingParamName, true);
+                int budget = 4096;
+                if ("low".equals(thinkingLevel)) budget = 2048;
+                else if ("high".equals(thinkingLevel)) budget = 32768;
+                body.put("thinking_budget", budget);
+            }
+        } else {
+            JSONObject tObj = new JSONObject();
+            tObj.put("type", "off".equals(thinkingLevel) ? "disabled" : "enabled");
+            body.put(provider.thinkingParamName, tObj);
+            if (!"off".equals(thinkingLevel)) {
+                body.put("reasoning_effort", "high".equals(thinkingLevel) ? "max" : "high");
+            }
+        }
+        return body;
+    }
+
+    private static HttpURLConnection openChatConnection(ProviderInfo provider) throws Exception {
+        String endpoint = provider.apiUrl + provider.chatPath;
+        java.net.URL url = new java.net.URL(endpoint);
+        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+        conn.setRequestMethod("POST");
+        conn.setRequestProperty("Content-Type", "application/json");
+        conn.setRequestProperty("Authorization", "Bearer " + provider.apiKey);
+        conn.setDoOutput(true);
+        conn.setConnectTimeout(30000);
+        conn.setReadTimeout(0);
+        if (conn instanceof javax.net.ssl.HttpsURLConnection) {
+            TlsCompat.apply((javax.net.ssl.HttpsURLConnection) conn);
+        }
+        return conn;
+    }
+
+    private static void closeChatConnection(HttpURLConnection conn) {
+        if (conn == null) return;
+        try {
+            conn.disconnect();
+        } catch (Exception ignored) {}
+    }
+
+    private static String readErrorBody(HttpURLConnection conn) {
+        if (conn == null) return "";
+        try {
+            java.io.InputStream es = conn.getErrorStream();
+            if (es == null) return "";
+            java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+            byte[] buf = new byte[1024];
+            int n;
+            int total = 0;
+            while (total < 4096 && (n = es.read(buf, 0, Math.min(buf.length, 4096 - total))) > 0) {
+                bos.write(buf, 0, n);
+                total += n;
+            }
+            return new String(bos.toByteArray(), "UTF-8");
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    private static String lastUserContent(List<Message> snapshot) {
+        if (snapshot == null) return "";
+        for (int i = snapshot.size() - 1; i >= 0; i--) {
+            Message m = snapshot.get(i);
+            if (m != null && m.isUser() && m.content != null) return m.content;
+        }
+        return "";
+    }
+
+    private static void normalizeToolCalls(JSONArray raw, JSONArray out) throws Exception {
+        if (raw == null) return;
+        for (int i = 0; i < raw.length(); i++) {
+            JSONObject item = raw.optJSONObject(i);
+            if (item == null) continue;
+            JSONObject tc = new JSONObject();
+            tc.put("id", item.optString("id", ""));
+            JSONObject fn = item.optJSONObject("function");
+            tc.put("name", fn == null ? "" : fn.optString("name", ""));
+            tc.put("arguments", fn == null ? "{}" : fn.optString("arguments", "{}"));
+            out.put(tc);
+        }
+    }
+
+    private static void accumulateToolCalls(JSONArray acc, JSONArray deltas) throws Exception {
+        if (deltas == null) return;
+        for (int i = 0; i < deltas.length(); i++) {
+            JSONObject d = deltas.optJSONObject(i);
+            if (d == null) continue;
+            int index = d.optInt("index", i);
+            while (acc.length() <= index) {
+                JSONObject empty = new JSONObject();
+                empty.put("id", "");
+                empty.put("name", "");
+                empty.put("arguments", "");
+                acc.put(empty);
+            }
+            JSONObject tc = acc.getJSONObject(index);
+            if (d.has("id") && !d.isNull("id")) {
+                String id = d.optString("id", "");
+                if (id.length() > 0) tc.put("id", id);
+            }
+            JSONObject fn = d.optJSONObject("function");
+            if (fn != null) {
+                if (fn.has("name") && !fn.isNull("name")) {
+                    String name = fn.optString("name", "");
+                    if (name.length() > 0) {
+                        String old = tc.optString("name", "");
+                        if (old.length() == 0) tc.put("name", name);
+                        else if (!old.equals(name)) tc.put("name", old + name);
+                    }
+                }
+                if (fn.has("arguments") && !fn.isNull("arguments")) {
+                    String args = fn.optString("arguments", "");
+                    tc.put("arguments", tc.optString("arguments", "") + args);
+                }
+            }
+        }
+    }
+
+    private static boolean hasUsableToolCall(JSONArray calls) {
+        if (calls == null) return false;
+        for (int i = 0; i < calls.length(); i++) {
+            JSONObject tc = calls.optJSONObject(i);
+            if (tc != null && tc.optString("name", "").length() > 0) return true;
+        }
+        return false;
+    }
+
+    private static void appendAssistantToolCalls(JSONArray conversation, String content,
+            JSONArray calls) throws Exception {
+        JSONArray payload = new JSONArray();
+        for (int i = 0; i < calls.length(); i++) {
+            JSONObject tc = calls.getJSONObject(i);
+            String name = tc.optString("name", "");
+            if (name.length() == 0) continue;
+            String id = tc.optString("id", "");
+            if (id.length() == 0) {
+                id = "call_" + i + "_" + System.currentTimeMillis();
+                tc.put("id", id);
+            }
+            String argText = tc.optString("arguments", "");
+            if (argText.trim().length() == 0) argText = "{}";
+
+            JSONObject out = new JSONObject();
+            out.put("id", id);
+            out.put("type", "function");
+            JSONObject fn = new JSONObject();
+            fn.put("name", name);
+            fn.put("arguments", argText);
+            out.put("function", fn);
+            payload.put(out);
+        }
+        if (payload.length() == 0) return;
+
+        JSONObject assistant = new JSONObject();
+        assistant.put("role", "assistant");
+        assistant.put("content", content == null || content.length() == 0 ? JSONObject.NULL : content);
+        assistant.put("tool_calls", payload);
+        conversation.put(assistant);
+    }
+
+    private static void appendToolResult(JSONArray conversation, String id, String content)
+            throws Exception {
+        JSONObject tm = new JSONObject();
+        tm.put("role", "tool");
+        tm.put("tool_call_id", id == null ? "" : id);
+        tm.put("content", content == null ? "" : content);
+        conversation.put(tm);
+    }
+
+    private static String toolStatusText(String name, JSONObject args) {
+        if (WebSearchTool.TOOL_SEARCH.equals(name)) {
+            String query = args == null ? "" : args.optString("query", "");
+            return query.length() > 0 ? "正在联网搜索：" + shorten(query, 60) : "正在联网搜索...";
+        }
+        if (WebSearchTool.TOOL_FETCH.equals(name)) {
+            String url = args == null ? "" : args.optString("url", "");
+            return url.length() > 0 ? "正在读取网页：" + shorten(url, 60) : "正在读取网页...";
+        }
+        return "正在调用工具：" + shorten(name, 40);
+    }
+
+    private static String shorten(String text, int max) {
+        if (text == null) return "";
+        String oneLine = text.replace('\n', ' ').replace('\r', ' ');
+        if (oneLine.length() <= max) return oneLine;
+        return oneLine.substring(0, max) + "...";
+    }
+
+    private static String appendSearchSources(String content, List<String[]> sources) {
+        if (sources == null || sources.isEmpty()) return content == null ? "" : content;
+        StringBuilder list = new StringBuilder();
+        List<String> seen = new ArrayList<String>();
+        int n = 0;
+        for (int i = 0; i < sources.size() && n < 8; i++) {
+            String[] source = sources.get(i);
+            if (source == null || source.length < 2) continue;
+            String url = source[1];
+            if (url == null || url.length() == 0) continue;
+            boolean duplicate = false;
+            for (int j = 0; j < seen.size(); j++) {
+                if (seen.get(j).equals(url)) {
+                    duplicate = true;
+                    break;
+                }
+            }
+            if (duplicate) continue;
+            seen.add(url);
+
+            String title = source[0];
+            if (title == null || title.length() == 0) title = url;
+            title = title.replace("[", "\\[").replace("]", "\\]");
+            n++;
+            list.append(n).append(". [").append(title).append("](").append(url).append(")\n");
+        }
+        if (n == 0) return content == null ? "" : content;
+
+        StringBuilder out = new StringBuilder(content == null ? "" : content);
+        if (out.length() > 0) out.append("\n\n");
+        out.append("---\n**搜索来源**\n").append(list);
+        return out.toString();
+    }
+
+    private void showSearchStatus(final String text, final int generation) {
+        runOnUiThread(new Runnable() {
+            public void run() {
+                if (requestGeneration.get() != generation) return;
+                webViewEvalJs("setLastMsgStatus('" + jsEscape(text) + "')");
+            }
+        });
     }
 
     private void generateTitle(final String firstMessage) {
