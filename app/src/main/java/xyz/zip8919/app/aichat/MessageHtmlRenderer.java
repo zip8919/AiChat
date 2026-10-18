@@ -280,14 +280,32 @@ public class MessageHtmlRenderer {
             "btn.textContent='── 折叠思考 ──';}" +
             "else{b.style.display='none';" +
             "btn.textContent='── 展开思考（'+b.textContent.length+'字）──';}};" +
-            "window.toggleTool=function(h){" +
-            "var b=h.nextElementSibling;if(!b)return;" +
-            "var a=h.querySelector('.tool-arrow');" +
-            "var hint=h.querySelector('.tool-hint');" +
-            "if(b.style.display==='none'){b.style.display='block';" +
+            "window.__toolOpen=window.__toolOpen||{};" +
+            "window.applyToolStates=function(root){" +
+            "if(!root||!root.querySelectorAll)return;" +
+            "var cards=root.querySelectorAll('.tool-card');" +
+            "for(var i=0;i<cards.length;i++){" +
+            "var k=cards[i].getAttribute('data-tool-key');" +
+            "var b=cards[i].querySelector('.tool-body');" +
+            "var h=cards[i].querySelector('.tool-head-click');" +
+            "if(!b)continue;" +
+            "var a=h?h.querySelector('.tool-arrow'):null;" +
+            "var hint=h?h.querySelector('.tool-hint'):null;" +
+            "if(k&&window.__toolOpen[k]){b.style.display='block';" +
             "if(a)a.textContent='▼';if(hint)hint.textContent='';}" +
             "else{b.style.display='none';" +
-            "if(a)a.textContent='▶';if(hint)hint.textContent='（点击展开）';}};" +
+            "if(a)a.textContent='▶';" +
+            "if(hint)hint.textContent='（点击展开）';}}};" +
+            "window.toggleTool=function(h){" +
+            "var card=h.parentNode;while(card&&card.className.indexOf('tool-card')<0)card=card.parentNode;" +
+            "var b=h.nextElementSibling;if(!b)return;" +
+            "var k=card?card.getAttribute('data-tool-key'):null;" +
+            "var open=b.style.display==='none';" +
+            "b.style.display=open?'block':'none';" +
+            "var a=h.querySelector('.tool-arrow');var hint=h.querySelector('.tool-hint');" +
+            "if(a)a.textContent=open?'▼':'▶';" +
+            "if(hint)hint.textContent=open?'':'（点击展开）';" +
+            "if(k)window.__toolOpen[k]=open;};" +
             "window.smartScrollToBottom=function(force){" +
             "if(!force){" +
             "var st=document.documentElement.scrollTop||document.body.scrollTop||window.pageYOffset||0;" +
@@ -309,10 +327,11 @@ public class MessageHtmlRenderer {
             "var d=document.createElement('div');d.innerHTML=html;" +
             "var el=d.firstElementChild;" +
             "if(el){document.getElementById('msgs').appendChild(el);runScripts(el);}" +
-            "addCopyBtns();smartScrollToBottom();};" +
+            "addCopyBtns();applyToolStates(document);smartScrollToBottom();};" +
             "window.updateLastMsg=function(html){" +
             "var ms=document.querySelectorAll('.msg.ai .content');" +
-            "if(ms.length>0){ms[ms.length-1].innerHTML=html;}" +
+            "if(ms.length>0){ms[ms.length-1].innerHTML=html;" +
+            "applyToolStates(ms[ms.length-1]);}" +
             "addCopyBtns();smartScrollToBottom();};" +
             "window.updateLastText=function(text){" +
             "var ms=document.querySelectorAll('.msg.ai .content');" +
@@ -369,6 +388,7 @@ public class MessageHtmlRenderer {
             "if(attr&&parseInt(attr)>=idx)all[i].parentNode.removeChild(all[i]);}" +
             "};" +
             "addCopyBtns();" +
+            "applyToolStates(document);" +
             "window.scrollTo(0,document.body.scrollHeight);" +
             "})();";
 
@@ -501,7 +521,8 @@ public class MessageHtmlRenderer {
         boolean isFetch = WebSearchTool.TOOL_FETCH.equals(tool);
 
         StringBuilder out = new StringBuilder();
-        out.append("<div class=\"tool-card\">");
+        out.append("<div class=\"tool-card\" data-tool-key=\"")
+           .append(Integer.toHexString(payload.hashCode())).append("\">");
         if (error.length() > 0) {
             out.append("<div class=\"tool-card-head\">")
                .append(isFetch ? "网页抓取失败" : "搜索失败").append("</div>")
