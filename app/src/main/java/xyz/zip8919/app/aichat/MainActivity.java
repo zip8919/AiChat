@@ -1164,13 +1164,20 @@ public class MainActivity extends Activity {
                     boolean toolsEnabled = webSearchEnabled;
                     boolean fallbackTried = false;
                     int round = 0;
+                    // Display text kept for the whole request: thinking + tool cards from
+                    // every round. Without this the reasoning emitted before a tool call
+                    // was discarded and replaced by the next round / status text.
+                    final StringBuilder trace = new StringBuilder();
 
                     while (round <= MAX_TOOL_ROUNDS) {
                         if (!isRequestInProgress.get() || requestGeneration.get() != generation) {
                             LogUtil.i(TAG, "tool loop aborted before round %d", round);
                             return;
                         }
-                        if (round > 0) showSearchStatus("正在整理搜索结果...", generation);
+                        if (round > 0) {
+                            renderSeq.incrementAndGet();
+                            showSearchStatus("正在整理搜索结果...", generation, trace.toString(), aiIndex);
+                        }
 
                         JSONObject body = buildChatRequestBody(modelName, provider, thinkingLevel, conversation,
                                 streamEnabled, toolsEnabled ? toolDefs : null);
@@ -1371,7 +1378,7 @@ public class MainActivity extends Activity {
                                         if (realtimeRenderEnabled && now - lastUpdate > 200 && !renderInFlight[0]) {
                                             lastUpdate = now;
                                             renderInFlight[0] = true;
-                                            final String partial = roundDisplay.toString();
+                                            final String partial = trace.toString() + roundDisplay.toString();
                                             final int mySeq = renderSeq.incrementAndGet();
                                             new Thread(new Runnable() {
                                                 public void run() {
@@ -1419,7 +1426,8 @@ public class MainActivity extends Activity {
                         if (roundToolCalls.length() > 0 && hasUsableToolCall(roundToolCalls)) {
                             if (round >= MAX_TOOL_ROUNDS) {
                                 LogUtil.w(TAG, "tool round limit reached (%d)", MAX_TOOL_ROUNDS);
-                                finalContent = roundDisplay.toString();
+                                trace.append(roundDisplay);
+                                finalContent = trace.toString();
                                 if (finalContent.length() == 0) {
                                     finalContent = "联网工具调用次数已达上限，请重试。";
                                 } else {
@@ -1428,6 +1436,8 @@ public class MainActivity extends Activity {
                                 break;
                             }
 
+                            // Keep this round's reasoning/partial answer visible.
+                            trace.append(roundDisplay);
                             appendAssistantToolCalls(conversation, roundContent.toString(), roundToolCalls);
                             for (int i = 0; i < roundToolCalls.length(); i++) {
                                 JSONObject tc = roundToolCalls.getJSONObject(i);
@@ -1445,7 +1455,8 @@ public class MainActivity extends Activity {
                                     args = new JSONObject();
                                 }
 
-                                showSearchStatus(toolStatusText(name, args), generation);
+                                renderSeq.incrementAndGet();
+                                showSearchStatus(toolStatusText(name, args), generation, trace.toString(), aiIndex);
                                 String toolResult;
                                 if (searchProvider == null) {
                                     toolResult = "{\"error\":\"未配置 DeepSeek API Key，无法使用联网搜索\"}";
@@ -1466,6 +1477,11 @@ public class MainActivity extends Activity {
 
                                 WebSearchTool.extractSources(toolResult, searchSources);
                                 appendToolResult(conversation, id, toolResult);
+                                trace.append(WebSearchTool.buildTraceBlock(name, args, toolResult));
+                                if (requestGeneration.get() == generation) {
+                                    renderSeq.incrementAndGet(); // drop any in-flight stream render
+                                    renderTraceAsync(trace.toString(), generation, null, aiIndex);
+                                }
 
                                 if (!isRequestInProgress.get() || requestGeneration.get() != generation) {
                                     LogUtil.i(TAG, "tool loop aborted after tool %s", name);
@@ -1476,8 +1492,9 @@ public class MainActivity extends Activity {
                             continue;
                         }
 
+                        trace.append(roundDisplay);
                         rawContent.setLength(0);
-                        rawContent.append(roundDisplay);
+                        rawContent.append(trace);
                         finalContent = rawContent.toString();
                         break;
                     }
@@ -1806,13 +1823,39 @@ public class MainActivity extends Activity {
         return out.toString();
     }
 
-    private void showSearchStatus(final String text, final int generation) {
-        runOnUiThread(new Runnable() {
+    private void showSearchStatus(final String text, final int generation, final String traceText,
+            final int aiIndex) {
+        renderTraceAsync(traceText, generation, text, aiIndex);
+    }
+
+    /**
+     * Render the accumulated trace (thinking + tool cards) off the UI thread and
+     * push it to the last AI bubble. {@code status}, when non-null, is appended as
+     * a transient status line that the next render will replace.
+     */
+    private void renderTraceAsync(final String traceText, final int generation, final String status,
+            final int aiIndex) {
+        final String snapshot = traceText == null ? "" : traceText;
+        new Thread(new Runnable() {
             public void run() {
-                if (requestGeneration.get() != generation) return;
-                webViewEvalJs("setLastMsgStatus('" + jsEscape(text) + "')");
+                final String html = MessageHtmlRenderer.contentToHtml(snapshot, MainActivity.this)
+                        + (status == null ? "" : statusHtml(status));
+                runOnUiThread(new Runnable() {
+                    public void run() {
+                        if (requestGeneration.get() != generation) return;
+                        if (aiIndex >= 0 && aiIndex < messages.size()
+                                && messages.get(aiIndex).isAssistant()) {
+                            messages.get(aiIndex).content = snapshot;
+                        }
+                        webViewEvalJs("updateLastMsg('" + jsEscape(html) + "')");
+                    }
+                });
             }
-        });
+        }).start();
+    }
+
+    private static String statusHtml(String status) {
+        return "<div class=\"tool-status\">" + MessageHtmlRenderer.esc(status) + "</div>";
     }
 
     private void generateTitle(final String firstMessage) {

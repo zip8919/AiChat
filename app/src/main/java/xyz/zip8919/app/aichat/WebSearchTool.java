@@ -35,6 +35,15 @@ public class WebSearchTool {
     private static final int SEARCH_TIMEOUT_MS = 25000;
     private static final int FETCH_TIMEOUT_MS = 35000;
 
+    // Display-only caps for the tool trace persisted with the message. The full
+    // result still goes to the model; this only limits what is stored/shown.
+    private static final int TRACE_DISPLAY_SUMMARY_CHARS = 400;
+    private static final int TRACE_DISPLAY_CONTENT_CHARS = 2000;
+
+    /** Marker pair wrapping one tool call + result inside a message body. */
+    public static final String TRACE_START = "[tool]";
+    public static final String TRACE_END = "[/tool]";
+
     /** Lets the UI interrupt a search/fetch request through the same connection slot. */
     public interface RequestGuard {
         boolean shouldAbort();
@@ -262,6 +271,77 @@ public class WebSearchTool {
         } catch (Exception e) {
             LogUtil.w(TAG, "extractSources failed: " + e.getMessage());
         }
+    }
+
+    /**
+     * Build a display block persisted with the assistant message so the user can
+     * review what the model searched/fetched. Format: {@code [tool]{json}[/tool]}.
+     * The JSON is parsed by MessageHtmlRenderer and rendered as a card; the whole
+     * block is stripped from outbound history in ApiClient.removeThinkingContent.
+     */
+    public static String buildTraceBlock(String toolName, JSONObject args, String toolResult) {
+        try {
+            JSONObject display = new JSONObject();
+            display.put("tool", toolName == null ? "" : toolName);
+            if (args != null) {
+                String q = args.optString("query", "");
+                String u = args.optString("url", "");
+                if (q.length() > 0) display.put("query", sanitizeMarker(q, 200));
+                if (u.length() > 0) display.put("url", sanitizeMarker(u, 500));
+                if (args.has("count")) display.put("count", args.optInt("count", 0));
+            }
+
+            JSONObject result = toolResult == null || toolResult.trim().length() == 0
+                    ? null : new JSONObject(toolResult);
+            if (result != null && result.has("error") && !result.isNull("error")) {
+                display.put("error", sanitizeMarker(result.optString("error", ""), 400));
+            } else if (TOOL_FETCH.equals(toolName)) {
+                if (result != null) {
+                    display.put("url", sanitizeMarker(result.optString("url", ""), 500));
+                    display.put("title", sanitizeMarker(result.optString("title", ""), 200));
+                    display.put("content", sanitizeMarker(
+                            result.optString("content", ""), TRACE_DISPLAY_CONTENT_CHARS));
+                    if (result.optBoolean("truncated", false)) display.put("truncated", true);
+                }
+            } else {
+                if (result != null) {
+                    if (result.has("query")) {
+                        display.put("query", sanitizeMarker(result.optString("query", ""), 200));
+                    }
+                    JSONArray results = result.optJSONArray("results");
+                    JSONArray rows = new JSONArray();
+                    if (results != null) {
+                        for (int i = 0; i < results.length(); i++) {
+                            JSONObject item = results.optJSONObject(i);
+                            if (item == null) continue;
+                            JSONObject row = new JSONObject();
+                            row.put("title", sanitizeMarker(item.optString("title", ""), 200));
+                            row.put("url", item.optString("url", ""));
+                            String site = item.optString("site", "");
+                            String date = item.optString("date", "");
+                            if (site.length() > 0) row.put("site", sanitizeMarker(site, 80));
+                            if (date.length() > 0) row.put("date", sanitizeMarker(date, 40));
+                            row.put("summary", sanitizeMarker(
+                                    item.optString("summary", ""), TRACE_DISPLAY_SUMMARY_CHARS));
+                            rows.put(row);
+                        }
+                    }
+                    display.put("results", rows);
+                }
+            }
+
+            return TRACE_START + display.toString() + TRACE_END;
+        } catch (Exception e) {
+            LogUtil.w(TAG, "buildTraceBlock failed: " + e.getMessage());
+            return "";
+        }
+    }
+
+    /** Drop the trace markers from free text so a payload can never close its own block. */
+    private static String sanitizeMarker(String text, int max) {
+        if (text == null) return "";
+        String cleaned = text.replace(TRACE_START, " ").replace(TRACE_END, " ");
+        return truncate(cleaned, max);
     }
 
     private static PostResult postJson(ProviderInfo provider, String path, JSONObject body,

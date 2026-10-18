@@ -358,22 +358,32 @@ public class ApiClient {
 
     static String removeThinkingContent(String content) {
         if (content == null) return "";
+        String withoutThinking = stripBlock(content, "[thinking]", "[/thinking]", 11);
+        return stripBlock(withoutThinking, WebSearchTool.TRACE_START, WebSearchTool.TRACE_END,
+                WebSearchTool.TRACE_END.length()).trim();
+    }
+
+    /**
+     * Remove {@code [start]...[/end]} blocks (inclusive). An unterminated block
+     * drops everything from {@code start} to the end.
+     */
+    private static String stripBlock(String content, String startTag, String endTag, int endLen) {
         StringBuilder result = new StringBuilder();
         int start = 0;
         while (start < content.length()) {
-            int thinkStart = content.indexOf("[thinking]", start);
-            if (thinkStart == -1) {
+            int tagStart = content.indexOf(startTag, start);
+            if (tagStart == -1) {
                 result.append(content.substring(start));
                 break;
             }
-            if (thinkStart > start) {
-                result.append(content.substring(start, thinkStart));
+            if (tagStart > start) {
+                result.append(content.substring(start, tagStart));
             }
-            int thinkEnd = content.indexOf("[/thinking]", thinkStart);
-            if (thinkEnd == -1) break;
-            start = thinkEnd + 11; // "[/thinking]".length()
+            int tagEnd = content.indexOf(endTag, tagStart);
+            if (tagEnd == -1) break;
+            start = tagEnd + endLen;
         }
-        return result.toString().trim();
+        return result.toString();
     }
 
     private static void setupTLS(HttpsURLConnection conn) {
