@@ -32,6 +32,7 @@ public class SettingsActivity extends Activity {
     private static final String KEY_TITLE_MODEL = "title_model";
     private static final String KEY_TITLE_PROMPT = "title_prompt";
     private static final String KEY_QUICK_SCAN_ENABLED = "quick_scan_enabled";
+    private static final String KEY_WEB_SEARCH_ENABLED = "web_search_enabled";
     private static final String KEY_LOG_ENABLED = "log_enabled";
     private static final String KEY_REALTIME_RENDER = "realtime_render_enabled";
     private static final String KEY_STREAM_ENABLED = "stream_enabled";
@@ -42,6 +43,7 @@ public class SettingsActivity extends Activity {
     private SharedPreferences prefs;
     private EditText systemPromptEdit, titlePromptEdit;
     private Switch autoTitleSwitch, quickScanSwitch, logSwitch, realtimeRenderSwitch, streamSwitch;
+    private Switch webSearchSwitch;
     private Spinner titleModelSpinner, presetSpinner;
     private Button saveButton, cancelButton, balanceButton, manageModelsButton;
     private Button managePresetsButton, savePresetButton;
@@ -70,6 +72,7 @@ public class SettingsActivity extends Activity {
         titlePromptEdit = (EditText) findViewById(R.id.title_prompt_edit);
         autoTitleSwitch = (Switch) findViewById(R.id.auto_title_switch);
         quickScanSwitch = (Switch) findViewById(R.id.quick_scan_switch);
+        webSearchSwitch = (Switch) findViewById(R.id.web_search_switch);
         logSwitch = (Switch) findViewById(R.id.log_switch);
         realtimeRenderSwitch = (Switch) findViewById(R.id.realtime_render_switch);
         streamSwitch = (Switch) findViewById(R.id.stream_switch);
@@ -127,6 +130,7 @@ public class SettingsActivity extends Activity {
         titlePromptEdit.setText(prefs.getString(KEY_TITLE_PROMPT, DEFAULT_TITLE_PROMPT));
         autoTitleSwitch.setChecked(prefs.getBoolean(KEY_AUTO_TITLE_ENABLED, true));
         quickScanSwitch.setChecked(prefs.getBoolean(KEY_QUICK_SCAN_ENABLED, false));
+        webSearchSwitch.setChecked(prefs.getBoolean(KEY_WEB_SEARCH_ENABLED, true));
         logSwitch.setChecked(prefs.getBoolean(KEY_LOG_ENABLED, true));
         realtimeRenderSwitch.setChecked(prefs.getBoolean(KEY_REALTIME_RENDER, false));
         streamSwitch.setChecked(prefs.getBoolean(KEY_STREAM_ENABLED, true));
@@ -193,6 +197,7 @@ public class SettingsActivity extends Activity {
         editor.putString(KEY_TITLE_PROMPT, titlePrompt);
         editor.putBoolean(KEY_AUTO_TITLE_ENABLED, autoTitle);
         editor.putBoolean(KEY_QUICK_SCAN_ENABLED, quickScanSwitch.isChecked());
+        editor.putBoolean(KEY_WEB_SEARCH_ENABLED, webSearchSwitch.isChecked());
         editor.putBoolean(KEY_LOG_ENABLED, logEnabled);
         editor.putBoolean(KEY_REALTIME_RENDER, realtimeRenderSwitch.isChecked());
         editor.putBoolean(KEY_STREAM_ENABLED, streamSwitch.isChecked());
@@ -308,6 +313,12 @@ public class SettingsActivity extends Activity {
     public static boolean isQuickScanEnabled(Context context) {
         SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, 0);
         return prefs.getBoolean(KEY_QUICK_SCAN_ENABLED, false);
+    }
+
+    /** Allow the model to call web_search / web_fetch. On by default. */
+    public static boolean isWebSearchEnabled(Context context) {
+        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, 0);
+        return prefs.getBoolean(KEY_WEB_SEARCH_ENABLED, true);
     }
 
     public static boolean isLogEnabled(Context context) {

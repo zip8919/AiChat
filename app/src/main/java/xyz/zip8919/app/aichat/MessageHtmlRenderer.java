@@ -25,6 +25,8 @@ import org.commonmark.ext.gfm.tables.TableCell;
 import org.commonmark.ext.gfm.tables.TableHead;
 import org.commonmark.ext.gfm.tables.TableRow;
 import org.commonmark.ext.gfm.tables.TablesExtension;
+import org.json.JSONArray;
+import org.json.JSONObject;
 import ru.noties.jlatexmath.JLatexMathDrawable;
 
 public class MessageHtmlRenderer {
@@ -128,6 +130,26 @@ public class MessageHtmlRenderer {
             "border-left:3px solid #ccc;color:#888;font-style:italic;font-size:13px;}" +
             ".thinking-toggle{display:block;margin-top:8px;color:#2196F3;" +
             "font-style:normal;font-weight:bold;font-size:13px;cursor:pointer;}" +
+            ".tool-card{margin:8px 0;border:1px solid #dbe4ee;border-radius:8px;" +
+            "background:#f8fbff;overflow:hidden;}" +
+            ".tool-card-head{padding:6px 10px;background:#eaf2fd;color:#1565c0;" +
+            "font-size:12px;font-weight:bold;word-wrap:break-word;}" +
+            ".tool-head-click{cursor:pointer;-webkit-tap-highlight-color:rgba(100,180,255,0.3);}" +
+            ".tool-arrow{display:inline-block;width:12px;color:#1565c0;font-size:10px;}" +
+            ".tool-hint{color:#90a4ae;font-weight:normal;font-size:11px;}" +
+            ".tool-body{display:none;}" +
+            ".tool-item{padding:8px 10px;border-top:1px solid #e6eef8;}" +
+            ".tool-title{color:#1565c0;font-weight:bold;font-size:13px;text-decoration:none;" +
+            "word-wrap:break-word;}" +
+            ".tool-meta{color:#90a4ae;font-size:11px;margin-top:2px;word-wrap:break-word;}" +
+            ".tool-summary{color:#546e7a;font-size:12px;margin-top:4px;line-height:1.5;}" +
+            ".tool-fetch-content{padding:8px 10px;color:#37474f;font-size:12px;" +
+            "line-height:1.6;white-space:pre-wrap;word-wrap:break-word;" +
+            "max-height:240px;overflow-y:auto;}" +
+            ".tool-error{padding:8px 10px;color:#c62828;font-size:12px;}" +
+            ".tool-empty{padding:8px 10px;color:#90a4ae;font-size:12px;}" +
+            ".tool-status{padding:6px 10px;color:#1565c0;font-size:12px;" +
+            "font-style:italic;background:#eaf2fd;border-radius:6px;margin:8px 0;}" +
             ".msg-menu-btn{display:inline-block;background:none;border:none;" +
             "color:#bbb;font-size:17px;padding:2px 8px;line-height:1;" +
             "-webkit-tap-highlight-color:transparent;}" +
@@ -258,6 +280,32 @@ public class MessageHtmlRenderer {
             "btn.textContent='── 折叠思考 ──';}" +
             "else{b.style.display='none';" +
             "btn.textContent='── 展开思考（'+b.textContent.length+'字）──';}};" +
+            "window.__toolOpen=window.__toolOpen||{};" +
+            "window.applyToolStates=function(root){" +
+            "if(!root||!root.querySelectorAll)return;" +
+            "var cards=root.querySelectorAll('.tool-card');" +
+            "for(var i=0;i<cards.length;i++){" +
+            "var k=cards[i].getAttribute('data-tool-key');" +
+            "var b=cards[i].querySelector('.tool-body');" +
+            "var h=cards[i].querySelector('.tool-head-click');" +
+            "if(!b)continue;" +
+            "var a=h?h.querySelector('.tool-arrow'):null;" +
+            "var hint=h?h.querySelector('.tool-hint'):null;" +
+            "if(k&&window.__toolOpen[k]){b.style.display='block';" +
+            "if(a)a.textContent='▼';if(hint)hint.textContent='';}" +
+            "else{b.style.display='none';" +
+            "if(a)a.textContent='▶';" +
+            "if(hint)hint.textContent='（点击展开）';}}};" +
+            "window.toggleTool=function(h){" +
+            "var card=h.parentNode;while(card&&card.className.indexOf('tool-card')<0)card=card.parentNode;" +
+            "var b=h.nextElementSibling;if(!b)return;" +
+            "var k=card?card.getAttribute('data-tool-key'):null;" +
+            "var open=b.style.display==='none';" +
+            "b.style.display=open?'block':'none';" +
+            "var a=h.querySelector('.tool-arrow');var hint=h.querySelector('.tool-hint');" +
+            "if(a)a.textContent=open?'▼':'▶';" +
+            "if(hint)hint.textContent=open?'':'（点击展开）';" +
+            "if(k)window.__toolOpen[k]=open;};" +
             "window.smartScrollToBottom=function(force){" +
             "if(!force){" +
             "var st=document.documentElement.scrollTop||document.body.scrollTop||window.pageYOffset||0;" +
@@ -279,12 +327,17 @@ public class MessageHtmlRenderer {
             "var d=document.createElement('div');d.innerHTML=html;" +
             "var el=d.firstElementChild;" +
             "if(el){document.getElementById('msgs').appendChild(el);runScripts(el);}" +
-            "addCopyBtns();smartScrollToBottom();};" +
+            "addCopyBtns();applyToolStates(document);smartScrollToBottom();};" +
             "window.updateLastMsg=function(html){" +
             "var ms=document.querySelectorAll('.msg.ai .content');" +
-            "if(ms.length>0){ms[ms.length-1].innerHTML=html;}" +
+            "if(ms.length>0){ms[ms.length-1].innerHTML=html;" +
+            "applyToolStates(ms[ms.length-1]);}" +
             "addCopyBtns();smartScrollToBottom();};" +
             "window.updateLastText=function(text){" +
+            "var ms=document.querySelectorAll('.msg.ai .content');" +
+            "if(ms.length>0){ms[ms.length-1].textContent=text;}" +
+            "smartScrollToBottom();};" +
+            "window.setLastMsgStatus=function(text){" +
             "var ms=document.querySelectorAll('.msg.ai .content');" +
             "if(ms.length>0){ms[ms.length-1].textContent=text;}" +
             "smartScrollToBottom();};" +
@@ -335,6 +388,7 @@ public class MessageHtmlRenderer {
             "if(attr&&parseInt(attr)>=idx)all[i].parentNode.removeChild(all[i]);}" +
             "};" +
             "addCopyBtns();" +
+            "applyToolStates(document);" +
             "window.scrollTo(0,document.body.scrollHeight);" +
             "})();";
 
@@ -377,12 +431,14 @@ public class MessageHtmlRenderer {
         String cached = renderCache.get(text);
         if (cached != null) return cached;
         long startTs = System.currentTimeMillis();
-        String html = text.contains("[thinking]")
-                ? contentWithThinking(text, ctx)
+        boolean hasThinking = text.contains("[thinking]");
+        boolean hasTool = text.contains(WebSearchTool.TRACE_START);
+        String html = (hasThinking || hasTool)
+                ? contentWithBlocks(text, ctx)
                 : renderMarkdown(text, ctx);
-        LogUtil.v(TAG, "contentToHtml: in=%d chars -> %d chars html in %d ms (thinking=%s)",
+        LogUtil.v(TAG, "contentToHtml: in=%d chars -> %d chars html in %d ms (thinking=%s, tool=%s)",
                 text.length(), html.length(), System.currentTimeMillis() - startTs,
-                text.contains("[thinking]"));
+                hasThinking, hasTool);
         if (html.length() <= RENDER_CACHE_MAX_HTML) {
             synchronized (renderCache) {
                 boolean present = renderCache.containsKey(text);
@@ -401,39 +457,154 @@ public class MessageHtmlRenderer {
         return html;
     }
 
-    private static String contentWithThinking(String text, Context ctx) {
+    private static String contentWithBlocks(String text, Context ctx) {
         StringBuilder html = new StringBuilder();
         int start = 0;
         int blocks = 0;
         while (start < text.length()) {
             int ts = text.indexOf("[thinking]", start);
-            if (ts == -1) {
+            int gs = text.indexOf(WebSearchTool.TRACE_START, start);
+            boolean thinkingNext = ts != -1 && (gs == -1 || ts < gs);
+            if (ts == -1 && gs == -1) {
                 html.append(renderMarkdown(text.substring(start), ctx));
                 break;
             }
-            if (ts > start)
-                html.append(renderMarkdown(text.substring(start, ts), ctx));
-            int te = text.indexOf("[/thinking]", ts + 10);
-            if (te == -1) {
-                // Streaming: thinking not yet closed
-                LogUtil.v(TAG, "thinking block UNCLOSED at %d, tail=%d chars", ts, text.length() - ts - 10);
-                html.append("<div class=\"thinking-block\">")
-                    .append(esc(text.substring(ts + 10)))
-                    .append("</div>");
-                break;
+            if (thinkingNext) {
+                if (ts > start) html.append(renderMarkdown(text.substring(start, ts), ctx));
+                int te = text.indexOf("[/thinking]", ts + 10);
+                if (te == -1) {
+                    // Streaming: thinking not yet closed
+                    LogUtil.v(TAG, "thinking block UNCLOSED at %d, tail=%d chars", ts, text.length() - ts - 10);
+                    html.append("<div class=\"thinking-block\">")
+                        .append(esc(text.substring(ts + 10)))
+                        .append("</div>");
+                    break;
+                }
+                String thinking = text.substring(ts + 10, te);
+                blocks++;
+                html.append("<div class=\"thinking-wrap\">")
+                    .append("<div class=\"thinking-toggle\" onclick=\"toggleThinking(this)\">── 展开思考（")
+                    .append(String.valueOf(thinking.length())).append("字）──</div>")
+                    .append("<div class=\"thinking-block\" style=\"display:none\">")
+                    .append(renderMarkdown(thinking, ctx))
+                    .append("</div></div>");
+                start = te + 11;
+            } else {
+                if (gs > start) html.append(renderMarkdown(text.substring(start, gs), ctx));
+                int ge = text.indexOf(WebSearchTool.TRACE_END, gs + WebSearchTool.TRACE_START.length());
+                if (ge == -1) {
+                    // Unclosed tool block (should not happen): drop the remainder.
+                    LogUtil.w(TAG, "tool trace block UNCLOSED at %d, dropping tail", gs);
+                    break;
+                }
+                String payload = text.substring(gs + WebSearchTool.TRACE_START.length(), ge);
+                html.append(renderToolBlock(payload));
+                blocks++;
+                start = ge + WebSearchTool.TRACE_END.length();
             }
-            String thinking = text.substring(ts + 10, te);
-            blocks++;
-            html.append("<div class=\"thinking-wrap\">")
-                .append("<div class=\"thinking-toggle\" onclick=\"toggleThinking(this)\">── 展开思考（")
-                .append(String.valueOf(thinking.length())).append("字）──</div>")
-                .append("<div class=\"thinking-block\" style=\"display:none\">")
-                .append(renderMarkdown(thinking, ctx))
-                .append("</div></div>");
-            start = te + 11;
         }
-        LogUtil.v(TAG, "contentWithThinking: %d thinking blocks rendered", blocks);
+        LogUtil.v(TAG, "contentWithBlocks: %d blocks rendered", blocks);
         return html.toString();
+    }
+
+    /** Render one [tool]...[/tool] payload (a JSON object) as an escaped HTML card. */
+    private static String renderToolBlock(String payload) {
+        JSONObject json;
+        try {
+            json = new JSONObject(payload);
+        } catch (Exception e) {
+            LogUtil.w(TAG, "renderToolBlock: bad JSON len=%d", payload == null ? 0 : payload.length());
+            return "";
+        }
+        String tool = json.optString("tool", "");
+        String error = json.optString("error", "");
+        boolean isFetch = WebSearchTool.TOOL_FETCH.equals(tool);
+
+        StringBuilder out = new StringBuilder();
+        out.append("<div class=\"tool-card\" data-tool-key=\"")
+           .append(Integer.toHexString(payload.hashCode())).append("\">");
+        if (error.length() > 0) {
+            out.append("<div class=\"tool-card-head\">")
+               .append(isFetch ? "网页抓取失败" : "搜索失败").append("</div>")
+               .append("<div class=\"tool-error\">").append(esc(error)).append("</div>")
+               .append("</div>");
+            return out.toString();
+        }
+
+        if (isFetch) {
+            String title = json.optString("title", "");
+            String url = json.optString("url", "");
+            String head = "网页抓取" + (title.length() > 0 ? "：" + esc(title)
+                    : (url.length() > 0 ? "：" + esc(url) : ""));
+            out.append(collapsibleHead(head));
+            out.append("<div class=\"tool-body\">");
+            appendUrlLine(out, url, "", "");
+            String content = json.optString("content", "");
+            out.append("<div class=\"tool-fetch-content\">").append(esc(content));
+            if (json.optBoolean("truncated", false)) out.append(" ...（已截断）");
+            out.append("</div>");
+            out.append("</div>");
+            out.append("</div>");
+            return out.toString();
+        }
+
+        String query = json.optString("query", "");
+        int count = json.optInt("count", 0);
+        JSONArray results = json.optJSONArray("results");
+        int n = results == null ? 0 : results.length();
+        out.append(collapsibleHead("搜索"
+           + (query.length() > 0 ? "：" + esc(query) : "")
+           + "（" + (count > 0 ? count : n) + " 条）"));
+        out.append("<div class=\"tool-body\">");
+        if (n == 0) {
+            out.append("<div class=\"tool-empty\">没有找到结果</div>");
+        } else {
+            for (int i = 0; i < n; i++) {
+                JSONObject item = results.optJSONObject(i);
+                if (item == null) continue;
+                out.append("<div class=\"tool-item\">");
+                String url = item.optString("url", "");
+                String title = item.optString("title", "");
+                if (url.length() > 0) {
+                    out.append("<a class=\"tool-title\" href=\"").append(escAttr(url)).append("\">")
+                       .append(esc(title.length() > 0 ? title : url)).append("</a>");
+                } else {
+                    out.append("<span class=\"tool-title\">").append(esc(title)).append("</span>");
+                }
+                appendUrlLine(out, url, item.optString("site", ""), item.optString("date", ""));
+                String summary = item.optString("summary", "");
+                if (summary.length() > 0) {
+                    out.append("<div class=\"tool-summary\">").append(esc(summary)).append("</div>");
+                }
+                out.append("</div>");
+            }
+        }
+        out.append("</div>");
+        out.append("</div>");
+        return out.toString();
+    }
+
+    /** Clickable card header whose sibling .tool-body is hidden by default. */
+    private static String collapsibleHead(String head) {
+        return "<div class=\"tool-card-head tool-head-click\" onclick=\"toggleTool(this)\">"
+                + "<span class=\"tool-arrow\">▶</span> " + head
+                + " <span class=\"tool-hint\">（点击展开）</span></div>";
+    }
+
+    private static void appendUrlLine(StringBuilder out, String url, String site, String date) {
+        StringBuilder meta = new StringBuilder();
+        if (site.length() > 0) meta.append(site);
+        if (date.length() > 0) {
+            if (meta.length() > 0) meta.append(" · ");
+            meta.append(date);
+        }
+        if (url.length() > 0) {
+            if (meta.length() > 0) meta.append(" · ");
+            meta.append(url);
+        }
+        if (meta.length() > 0) {
+            out.append("<div class=\"tool-meta\">").append(esc(meta.toString())).append("</div>");
+        }
     }
 
     private static String renderMarkdown(String text, Context ctx) {
