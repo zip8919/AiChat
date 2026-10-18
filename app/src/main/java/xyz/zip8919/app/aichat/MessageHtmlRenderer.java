@@ -134,6 +134,10 @@ public class MessageHtmlRenderer {
             "background:#f8fbff;overflow:hidden;}" +
             ".tool-card-head{padding:6px 10px;background:#eaf2fd;color:#1565c0;" +
             "font-size:12px;font-weight:bold;word-wrap:break-word;}" +
+            ".tool-head-click{cursor:pointer;-webkit-tap-highlight-color:rgba(100,180,255,0.3);}" +
+            ".tool-arrow{display:inline-block;width:12px;color:#1565c0;font-size:10px;}" +
+            ".tool-hint{color:#90a4ae;font-weight:normal;font-size:11px;}" +
+            ".tool-body{display:none;}" +
             ".tool-item{padding:8px 10px;border-top:1px solid #e6eef8;}" +
             ".tool-title{color:#1565c0;font-weight:bold;font-size:13px;text-decoration:none;" +
             "word-wrap:break-word;}" +
@@ -276,6 +280,14 @@ public class MessageHtmlRenderer {
             "btn.textContent='── 折叠思考 ──';}" +
             "else{b.style.display='none';" +
             "btn.textContent='── 展开思考（'+b.textContent.length+'字）──';}};" +
+            "window.toggleTool=function(h){" +
+            "var b=h.nextElementSibling;if(!b)return;" +
+            "var a=h.querySelector('.tool-arrow');" +
+            "var hint=h.querySelector('.tool-hint');" +
+            "if(b.style.display==='none'){b.style.display='block';" +
+            "if(a)a.textContent='▼';if(hint)hint.textContent='';}" +
+            "else{b.style.display='none';" +
+            "if(a)a.textContent='▶';if(hint)hint.textContent='（点击展开）';}};" +
             "window.smartScrollToBottom=function(force){" +
             "if(!force){" +
             "var st=document.documentElement.scrollTop||document.body.scrollTop||window.pageYOffset||0;" +
@@ -501,12 +513,15 @@ public class MessageHtmlRenderer {
         if (isFetch) {
             String title = json.optString("title", "");
             String url = json.optString("url", "");
-            out.append("<div class=\"tool-card-head\">网页抓取")
-               .append(title.length() > 0 ? "：" + esc(title) : "").append("</div>");
+            String head = "网页抓取" + (title.length() > 0 ? "：" + esc(title)
+                    : (url.length() > 0 ? "：" + esc(url) : ""));
+            out.append(collapsibleHead(head));
+            out.append("<div class=\"tool-body\">");
             appendUrlLine(out, url, "", "");
             String content = json.optString("content", "");
             out.append("<div class=\"tool-fetch-content\">").append(esc(content));
             if (json.optBoolean("truncated", false)) out.append(" ...（已截断）");
+            out.append("</div>");
             out.append("</div>");
             out.append("</div>");
             return out.toString();
@@ -516,9 +531,10 @@ public class MessageHtmlRenderer {
         int count = json.optInt("count", 0);
         JSONArray results = json.optJSONArray("results");
         int n = results == null ? 0 : results.length();
-        out.append("<div class=\"tool-card-head\">搜索")
-           .append(query.length() > 0 ? "：" + esc(query) : "")
-           .append("（").append(count > 0 ? count : n).append(" 条）</div>");
+        out.append(collapsibleHead("搜索"
+           + (query.length() > 0 ? "：" + esc(query) : "")
+           + "（" + (count > 0 ? count : n) + " 条）"));
+        out.append("<div class=\"tool-body\">");
         if (n == 0) {
             out.append("<div class=\"tool-empty\">没有找到结果</div>");
         } else {
@@ -543,7 +559,15 @@ public class MessageHtmlRenderer {
             }
         }
         out.append("</div>");
+        out.append("</div>");
         return out.toString();
+    }
+
+    /** Clickable card header whose sibling .tool-body is hidden by default. */
+    private static String collapsibleHead(String head) {
+        return "<div class=\"tool-card-head tool-head-click\" onclick=\"toggleTool(this)\">"
+                + "<span class=\"tool-arrow\">▶</span> " + head
+                + " <span class=\"tool-hint\">（点击展开）</span></div>";
     }
 
     private static void appendUrlLine(StringBuilder out, String url, String site, String date) {
