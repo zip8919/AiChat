@@ -1,13 +1,13 @@
 # AiChat
 
-Android 词典笔 AI 对话应用（版本 1.5.0，minSdk 18 / targetSdk 18，真机 Android 4.4.2 / API 19）。基于 WebView + HTML/CSS 渲染 Markdown/LaTeX，通过任意 OpenAI 兼容端点调用大模型，内置 DeepSeek（不含 API Key）与商汤日日新 默认配置，默认模型 `deepseek-v4-flash`（商汤日日新）。
+Android 词典笔 AI 对话应用（版本 1.6.0，minSdk 18 / targetSdk 18，真机 Android 4.4.2 / API 19）。基于 WebView + HTML/CSS 渲染 Markdown/LaTeX，通过任意 OpenAI 兼容端点调用大模型，内置 DeepSeek（不含 API Key）与商汤日日新 默认配置，默认模型 `deepseek-v4-flash`（商汤日日新）。
 
 ## 功能
 
 - **多模型 / 多提供商** — 模型配置页可增删提供商与模型，自定义 API URL、Chat Path、API Key；内置 DeepSeek、商汤日日新 及任意 OpenAI 兼容端点
-- **对话** — 流式输出（设置可开关）；回复进行中再发送自动排队，队列支持上移/下移/插队发送（打断当前回复）/删除；长按发送键打断当前请求，思考阶段打断自动补 `[/thinking]` 收尾
+- **对话** — 流式输出（设置可开关）；回复进行中再发送自动排队，队列支持上移/下移/插队发送（打断当前回复）/删除；长按发送键打断当前请求，思考阶段打断自动补 `[/thinking]` 收尾；请求失败时在用户消息下方显示错误卡片，可查看详情、点击气泡立即重试；回复进行中重试会先确认打断
 - **思考模式** — 关闭/低/中/高四档，思考内容可折叠/展开
-- **联网搜索** — 设置页总开关（默认开启）；AI 可通过 `web_search` 工具调用 DeepSeek Search API 检索实时网页，通过 `web_fetch` 抓取网页正文；回答自动附带去重后的来源链接。总开关同时控制工具定义、搜索系统提示词和实际搜索/抓取请求
+- **联网搜索** — 设置页总开关（默认开启）；AI 可通过 `web_search` 工具调用 DeepSeek Search API 检索实时网页，通过 `web_fetch` 抓取网页正文；来源独立成可折叠来源区（按 URL 去重，最多 8 条），不写入正文、不进入后续请求；工具轮次不设上限，单轮工具调用数可配置（默认 15，范围 1-50），超出部分按未执行处理；搜索摘要单条限 1200 字符、单次合计限 6000 字符。总开关同时控制工具定义、搜索系统提示词和实际搜索/抓取请求
 - **Markdown 渲染** — WebView + HTML/CSS：标题、粗斜体、删除线、代码块（复制按钮 + 语法高亮）、表格（横向滑动 + 点击放大）、引用、列表、分割线、图片、链接；LaTeX 公式（`$...$`/`$$...$$`/`\(...\)`/`\[...\]`/裸 `\command`/化学式 `\ce{...}`）、脚注、高亮 `==text==`、上下标、内嵌 HTML/SVG 直通
 - **语法高亮** — 支持 Java、Python、JS/TS、Bash/sh/shell、JSON、C/C++、Go、Rust、Kotlin、Swift、C#、SQL、XML、HTML、SVG；未声明语言时按内容嗅探（HTML/SVG/XML 自动识别）
 - **代码查看器** — 所有代码块均可弹出全屏预览（任意语言），支持缩放/旋转/背景切换；代码块可导出保存到应用存储 exports 目录（按语言扩展名，覆盖 SVG/HTML 及各类代码）
@@ -21,7 +21,7 @@ Android 词典笔 AI 对话应用（版本 1.5.0，minSdk 18 / targetSdk 18，�
 - **扫描识别** — 横屏扫描界面，调用词典笔系统 OCR 识别文字，支持加载摘抄记录、编辑、复制、插入
 - **快速搜题模式** — 开启后按扫描键直接跳转系统扫描应用，返回自动填入输入框
 - **屏幕旋转** — 右上角 ↻ 按钮切换横屏/竖屏
-- **性能优化** — 后台线程渲染、流式增量更新、DOM 细粒度操作
+- **性能优化** — 后台线程渲染、流式增量更新、DOM 细粒度操作；长对话分批渲染，首屏只渲染最近 40 条，滑到顶部再按 30 条追加更早消息并保持滚动位置
 
 ## 构建
 
@@ -103,7 +103,7 @@ release 按 ABI 分包（`app/build/outputs/apk/release/`），每个包只含�
 
 ```
 ├── app/
-│   ├── build.gradle                # 构建配置：versionName 1.4.2 / versionCode 22 / compileSdk 34
+│   ├── build.gradle                # 构建配置：versionName 1.6.0 / versionCode 25 / compileSdk 34
 │   ├── keystore/mc.jks             # 签名密钥库
 │   └── src/main/
 │       ├── AndroidManifest.xml     # 包名 xyz.zip8919.app.aichat，6 个 Activity
