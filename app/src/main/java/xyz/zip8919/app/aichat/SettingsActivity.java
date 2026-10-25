@@ -33,6 +33,11 @@ public class SettingsActivity extends Activity {
     private static final String KEY_TITLE_PROMPT = "title_prompt";
     private static final String KEY_QUICK_SCAN_ENABLED = "quick_scan_enabled";
     private static final String KEY_WEB_SEARCH_ENABLED = "web_search_enabled";
+    /** 单轮 AI 回复内最多实际执行的搜索/抓取请求数（工具轮次本身不设上限）。 */
+    private static final String KEY_WEB_SEARCH_MAX_CALLS = "web_search_max_calls_per_round";
+    private static final int DEFAULT_WEB_SEARCH_MAX_CALLS = 15;
+    private static final int MIN_WEB_SEARCH_MAX_CALLS = 1;
+    private static final int MAX_WEB_SEARCH_MAX_CALLS = 50;
     private static final String KEY_LOG_ENABLED = "log_enabled";
     private static final String KEY_REALTIME_RENDER = "realtime_render_enabled";
     private static final String KEY_STREAM_ENABLED = "stream_enabled";
@@ -42,6 +47,7 @@ public class SettingsActivity extends Activity {
 
     private SharedPreferences prefs;
     private EditText systemPromptEdit, titlePromptEdit;
+    private EditText webSearchMaxCallsEdit;
     private Switch autoTitleSwitch, quickScanSwitch, logSwitch, realtimeRenderSwitch, streamSwitch;
     private Switch webSearchSwitch;
     private Spinner titleModelSpinner, presetSpinner;
@@ -73,6 +79,7 @@ public class SettingsActivity extends Activity {
         autoTitleSwitch = (Switch) findViewById(R.id.auto_title_switch);
         quickScanSwitch = (Switch) findViewById(R.id.quick_scan_switch);
         webSearchSwitch = (Switch) findViewById(R.id.web_search_switch);
+        webSearchMaxCallsEdit = (EditText) findViewById(R.id.web_search_max_calls_edit);
         logSwitch = (Switch) findViewById(R.id.log_switch);
         realtimeRenderSwitch = (Switch) findViewById(R.id.realtime_render_switch);
         streamSwitch = (Switch) findViewById(R.id.stream_switch);
@@ -131,6 +138,7 @@ public class SettingsActivity extends Activity {
         autoTitleSwitch.setChecked(prefs.getBoolean(KEY_AUTO_TITLE_ENABLED, true));
         quickScanSwitch.setChecked(prefs.getBoolean(KEY_QUICK_SCAN_ENABLED, false));
         webSearchSwitch.setChecked(prefs.getBoolean(KEY_WEB_SEARCH_ENABLED, true));
+        webSearchMaxCallsEdit.setText(String.valueOf(getWebSearchMaxCallsPerRound(this)));
         logSwitch.setChecked(prefs.getBoolean(KEY_LOG_ENABLED, true));
         realtimeRenderSwitch.setChecked(prefs.getBoolean(KEY_REALTIME_RENDER, false));
         streamSwitch.setChecked(prefs.getBoolean(KEY_STREAM_ENABLED, true));
@@ -201,6 +209,23 @@ public class SettingsActivity extends Activity {
         editor.putBoolean(KEY_LOG_ENABLED, logEnabled);
         editor.putBoolean(KEY_REALTIME_RENDER, realtimeRenderSwitch.isChecked());
         editor.putBoolean(KEY_STREAM_ENABLED, streamSwitch.isChecked());
+
+        // 每轮工具调用上限：空值 / 非数字 / 越界一律回退，绝不把非法值写进配置
+        int maxCalls = DEFAULT_WEB_SEARCH_MAX_CALLS;
+        String maxCallsText = webSearchMaxCallsEdit.getText().toString().trim();
+        if (maxCallsText.length() > 0) {
+            try {
+                maxCalls = Integer.parseInt(maxCallsText);
+            } catch (NumberFormatException nfe) {
+                LogUtil.w(TAG, "saveSettings: invalid maxCalls '%s', fallback to %d",
+                        maxCallsText, DEFAULT_WEB_SEARCH_MAX_CALLS);
+                maxCalls = DEFAULT_WEB_SEARCH_MAX_CALLS;
+            }
+        }
+        if (maxCalls < MIN_WEB_SEARCH_MAX_CALLS) maxCalls = MIN_WEB_SEARCH_MAX_CALLS;
+        if (maxCalls > MAX_WEB_SEARCH_MAX_CALLS) maxCalls = MAX_WEB_SEARCH_MAX_CALLS;
+        editor.putInt(KEY_WEB_SEARCH_MAX_CALLS, maxCalls);
+        webSearchMaxCallsEdit.setText(String.valueOf(maxCalls));
 
         int pos = titleModelSpinner.getSelectedItemPosition();
         if (pos >= 0) {
@@ -319,6 +344,31 @@ public class SettingsActivity extends Activity {
     public static boolean isWebSearchEnabled(Context context) {
         SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, 0);
         return prefs.getBoolean(KEY_WEB_SEARCH_ENABLED, true);
+    }
+
+    /**
+     * 单轮 AI 回复内最多实际执行多少个搜索/抓取请求（web_search 与 web_fetch 都计入）。
+     * 工具轮次本身没有上限，这个值只约束「一轮里执行几个工具」。
+     * 读取时同样做越界回退，防止历史配置或类型异常导致越界值生效。
+     */
+    public static int getWebSearchMaxCallsPerRound(Context context) {
+        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, 0);
+        int value = DEFAULT_WEB_SEARCH_MAX_CALLS;
+        try {
+            value = prefs.getInt(KEY_WEB_SEARCH_MAX_CALLS, DEFAULT_WEB_SEARCH_MAX_CALLS);
+        } catch (Exception e) {
+            // 旧版本若把该键存成 String，getInt 会抛 ClassCastException
+            LogUtil.w("SettingsActivity", "maxCalls read failed: %s", e.getMessage());
+            try {
+                value = Integer.parseInt(
+                        prefs.getString(KEY_WEB_SEARCH_MAX_CALLS, String.valueOf(DEFAULT_WEB_SEARCH_MAX_CALLS)));
+            } catch (Exception ignored) {
+                value = DEFAULT_WEB_SEARCH_MAX_CALLS;
+            }
+        }
+        if (value < MIN_WEB_SEARCH_MAX_CALLS) value = MIN_WEB_SEARCH_MAX_CALLS;
+        if (value > MAX_WEB_SEARCH_MAX_CALLS) value = MAX_WEB_SEARCH_MAX_CALLS;
+        return value;
     }
 
     public static boolean isLogEnabled(Context context) {

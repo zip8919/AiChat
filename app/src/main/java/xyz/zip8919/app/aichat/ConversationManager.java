@@ -164,6 +164,63 @@ public class ConversationManager {
 
     // ---- JSON serialization ----
 
+    // ---- 旧会话来源迁移 ----
+
+    /** 来源区最多展示的条数（去重后）。 */
+    public static final int MAX_SOURCES = 8;
+
+    /** 旧版本把来源拼成 "---\n**搜索来源**\n1. [标题](url)" 追加在正文末尾。 */
+    private static final String LEGACY_SOURCES_HEADER = "---\n**搜索来源**\n";
+    private static final java.util.regex.Pattern LEGACY_SOURCE_LINE =
+            java.util.regex.Pattern.compile("^(\\d+)\\.\\s+\\[(.*?)\\]\\(([^)]+)\\)\\s*$");
+
+    /**
+     * 把旧格式的来源列表从正文搬到 sources 字段。
+     * 只有整段都能解析成来源行时才迁移；任何一行不匹配就保留原文，避免误删正文。
+     *
+     * @return true 表示已迁移（正文已被裁剪）
+     */
+    static boolean migrateLegacySources(Message m) {
+        if (m == null || m.content == null || !m.isAssistant()) return false;
+        String content = m.content;
+        int idx = content.lastIndexOf(LEGACY_SOURCES_HEADER);
+        if (idx < 0) return false;
+
+        String tail = content.substring(idx + LEGACY_SOURCES_HEADER.length());
+        List<Message.Source> parsed = new ArrayList<Message.Source>();
+        List<String> seen = new ArrayList<String>();
+        String[] lines = tail.split("\n");
+        for (int i = 0; i < lines.length; i++) {
+            String line = lines[i].trim();
+            if (line.length() == 0) continue;
+            java.util.regex.Matcher mt = LEGACY_SOURCE_LINE.matcher(line);
+            if (!mt.matches()) {
+                LogUtil.d(TAG, "migrateLegacySources: not a source line, keep raw body: %s",
+                        LogUtil.preview(line, 80));
+                return false;
+            }
+            String title = mt.group(2).replace("\\[", "[").replace("\\]", "]").trim();
+            String url = mt.group(3).trim();
+            if (url.length() == 0) return false;
+            if (seen.contains(url)) continue;
+            seen.add(url);
+            parsed.add(new Message.Source(title, url));
+        }
+        if (parsed.isEmpty()) return false;
+
+        if (parsed.size() > MAX_SOURCES) {
+            parsed = new ArrayList<Message.Source>(parsed.subList(0, MAX_SOURCES));
+        }
+        String head = content.substring(0, idx);
+        while (head.endsWith("\n") || head.endsWith("\r")) {
+            head = head.substring(0, head.length() - 1);
+        }
+        m.sources = parsed;
+        m.content = head;
+        LogUtil.i(TAG, "migrateLegacySources: moved %d sources out of body", parsed.size());
+        return true;
+    }
+
     /** A title must never be persisted (or read back) as null/blank/the literal string "null". */
     static String normalizeTitle(String title) {
         if (title == null) return "新对话";
@@ -189,6 +246,25 @@ public class ConversationManager {
                 mj.put("role", m.role);
                 mj.put("content", m.content);
                 mj.put("timestamp", m.timestamp);
+                // 失败标记与错误详情需要重启后仍可见，因此一并落盘；
+                // 但它们只是显示用字段，不会进入请求体（见 MainActivity.buildChatConversation）
+                if (m.sendFailed) {
+                    mj.put("sendFailed", true);
+                    if (m.errorDetail != null && m.errorDetail.length() > 0) {
+                        mj.put("errorDetail", m.errorDetail);
+                    }
+                }
+                if (m.sources != null && !m.sources.isEmpty()) {
+                    JSONArray sa = new JSONArray();
+                    for (Message.Source s : m.sources) {
+                        if (s == null) continue;
+                        JSONObject so = new JSONObject();
+                        so.put("title", s.title == null ? "" : s.title);
+                        so.put("url", s.url == null ? "" : s.url);
+                        sa.put(so);
+                    }
+                    if (sa.length() > 0) mj.put("sources", sa);
+                }
                 msgs.put(mj);
             }
             json.put("messages", msgs);
@@ -225,6 +301,21 @@ public class ConversationManager {
                     m.role = mj.optString("role", "user");
                     m.content = mj.optString("content", "");
                     m.timestamp = mj.optLong("timestamp", System.currentTimeMillis());
+                    m.sendFailed = mj.optBoolean("sendFailed", false);
+                    m.errorDetail = mj.optString("errorDetail", "");
+                    JSONArray sa = mj.optJSONArray("sources");
+                    if (sa != null) {
+                        for (int j = 0; j < sa.length(); j++) {
+                            JSONObject so = sa.optJSONObject(j);
+                            if (so == null) continue;
+                            String u = so.optString("url", "");
+                            if (u.length() == 0) continue;
+                            m.sources.add(new Message.Source(so.optString("title", ""), u));
+                        }
+                    } else if (m.isAssistant()) {
+                        // 旧会话：来源曾经以固定格式拼在正文末尾，读取时安全迁移成结构字段
+                        migrateLegacySources(m);
+                    }
                     conv.messages.add(m);
                 }
             }

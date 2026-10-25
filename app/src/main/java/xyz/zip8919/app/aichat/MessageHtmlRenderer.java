@@ -167,7 +167,26 @@ public class MessageHtmlRenderer {
             ".fn-ref a{color:#2196F3;text-decoration:none;}" +
             ".fn-def{font-size:12px;color:#888;border-top:1px solid #eee;" +
             "padding:4px 0;margin:6px 0;}" +
-            ".fn-def sup a{color:#888;text-decoration:none;}";
+            ".fn-def sup a{color:#888;text-decoration:none;}" +
+            ".sources-block{margin:8px 0;border:1px solid #e3e8ef;border-radius:8px;" +
+            "background:#fafbfc;overflow:hidden;}" +
+            ".sources-head{padding:6px 10px;background:#f2f5f9;color:#455a64;" +
+            "font-size:12px;font-weight:bold;cursor:pointer;" +
+            "-webkit-tap-highlight-color:rgba(100,180,255,0.3);}" +
+            ".src-arrow{display:inline-block;width:12px;color:#78909c;font-size:10px;}" +
+            ".sources-body{padding:4px 0;}" +
+            ".src-item{padding:4px 10px;font-size:12px;line-height:1.5;word-wrap:break-word;}" +
+            ".src-item a{color:#1565c0;text-decoration:none;}" +
+            ".msg.user.failed .bubble{background:#FFF3E0;}" +
+            ".error-card{display:inline-block;text-align:left;margin-top:4px;padding:8px 10px;" +
+            "border:1px solid #ffcdd2;border-radius:8px;background:#fff5f5;max-width:85%;}" +
+            ".err-title{color:#c62828;font-size:12px;font-weight:bold;}" +
+            ".err-summary{color:#6d4c41;font-size:12px;margin-top:2px;line-height:1.4;" +
+            "word-wrap:break-word;}" +
+            ".err-actions{margin-top:6px;}" +
+            ".err-btn{font-size:11px;padding:3px 10px;margin-right:6px;border-radius:4px;" +
+            "border:1px solid #cfd8dc;background:#fff;color:#37474f;}" +
+            ".err-btn.retry{background:#e3f2fd;border-color:#90caf9;color:#1565c0;}";
 
     private static final String JS =
             "(function(){" +
@@ -221,7 +240,8 @@ public class MessageHtmlRenderer {
             "var el=lpEl;" +
             "while(el&&el!==document.body){" +
             "var idx=el.getAttribute&&el.getAttribute('data-idx');" +
-            "if(idx!==null&&idx!==undefined){if(window.Android)Android.messageLongPress(idx);return;}" +
+            "if(idx!==null&&idx!==undefined){window.__suppressClickUntil=Date.now()+700;" +
+            "if(window.Android)Android.messageLongPress(idx);return;}" +
             "el=el.parentElement;}" +
             "},700);});" +
             "document.addEventListener('touchmove',function(e){" +
@@ -235,14 +255,24 @@ public class MessageHtmlRenderer {
             "document.addEventListener('touchcancel',function(){" +
             "if(lpTimer){clearTimeout(lpTimer);lpTimer=null;}});" +
             "document.addEventListener('click',function(e){" +
-            "var t=e.target,imgEl=null,tableEl=null;" +
+            // 长按弹菜单后抬手会补发一次 click，这段窗口内的点击直接丢弃
+            "if(window.__suppressClickUntil&&Date.now()<window.__suppressClickUntil)return;" +
+            "var t=e.target,imgEl=null,tableEl=null,failEl=null,isBtn=false;" +
             "while(t&&t!==document.body){" +
             "var tag=t.tagName.toUpperCase();" +
+            "if(tag==='BUTTON')isBtn=true;" +
+            "if(!failEl&&(''+t.className).indexOf('msg user failed')>=0)failEl=t;" +
             "if(!imgEl&&(tag==='IMG'||tag==='SVG'))imgEl=t;" +
             "if(!tableEl&&tag==='TABLE')tableEl=t;" +
             "if(!imgEl&&tag==='A'){e.preventDefault();" +
             "if(window.Android)Android.openUrl(t.href);return false;}" +
             "t=t.parentElement;}" +
+            // 点击失败的用户气泡 → 立即重试（排除菜单按钮、来源链接、详情/重试按钮、图片/表格）
+            "if(failEl&&!isBtn&&!imgEl&&!tableEl){" +
+            "e.preventDefault();e.stopPropagation();" +
+            "var fidx=failEl.getAttribute('data-idx');" +
+            "if(fidx&&window.Android)Android.retryFailedUserMessage(fidx);" +
+            "return false;}" +
             "if(tableEl&&!imgEl){" +
             "e.preventDefault();e.stopPropagation();" +
             "var wrap=tableEl.parentElement;" +
@@ -306,6 +336,27 @@ public class MessageHtmlRenderer {
             "if(a)a.textContent=open?'▼':'▶';" +
             "if(hint)hint.textContent=open?'':'（点击展开）';" +
             "if(k)window.__toolOpen[k]=open;};" +
+            "window.toggleSources=function(h){" +
+            "var b=h.nextElementSibling;if(!b)return;" +
+            "var open=b.style.display==='none';" +
+            "b.style.display=open?'block':'none';" +
+            "var a=h.querySelector('.src-arrow');if(a)a.textContent=open?'▼':'▶';};" +
+            "window.updateLastSources=function(html){" +
+            "var ms=document.querySelectorAll('.msg.ai .sources');" +
+            "if(ms.length>0){ms[ms.length-1].innerHTML=html;}" +
+            "smartScrollToBottom();};" +
+            "window.markUserFailed=function(idx,cardHtml){" +
+            "var all=document.querySelectorAll('.msg.user');" +
+            "for(var i=0;i<all.length;i++){" +
+            "if(all[i].getAttribute('data-idx')===''+idx){" +
+            "all[i].className='msg user failed';" +
+            "var old=all[i].querySelector('.error-card');" +
+            "if(old&&old.parentNode)old.parentNode.removeChild(old);" +
+            "var d=document.createElement('div');d.innerHTML=cardHtml;" +
+            "var card=d.firstElementChild;" +
+            "var menu=all[i].querySelector('.user-menu-wrap');" +
+            "if(card){if(menu)all[i].insertBefore(card,menu);else all[i].appendChild(card);}" +
+            "return;}}};" +
             "window.smartScrollToBottom=function(force){" +
             "if(!force){" +
             "var st=document.documentElement.scrollTop||document.body.scrollTop||window.pageYOffset||0;" +
@@ -344,7 +395,7 @@ public class MessageHtmlRenderer {
             "window.appendAiDiv=function(){" +
             "var d=document.createElement('div');" +
             "d.className='msg ai';d.setAttribute('data-idx','-1');" +
-            "d.innerHTML='<div class=\"content\"></div>" +
+            "d.innerHTML='<div class=\"content\"></div><div class=\"sources\"></div>" +
             "<div class=\"ai-menu-wrap\"><button class=\"msg-menu-btn\" " +
             "onclick=\"if(window.Android)Android.messageMenu(\\'-1\\');" +
             "event.stopPropagation();return false;\">⋯</button></div>';" +
@@ -416,14 +467,88 @@ public class MessageHtmlRenderer {
         LogUtil.v(TAG, "renderMessageDiv: idx=%d role=%s len=%d", index,
                 msg.role, msg.content == null ? 0 : msg.content.length());
         if (msg.isUser()) {
-            return "<div class=\"msg user\" data-idx=\"" + idx + "\">" +
-                   "<div class=\"bubble\">" + esc(msg.content) + "</div>" +
-                   "<div class=\"user-menu-wrap\"><button class=\"msg-menu-btn\" onclick=\"if(window.Android)Android.messageMenu('" + idx + "');event.stopPropagation();return false;\">⋯</button></div></div>\n";
+            StringBuilder sb = new StringBuilder();
+            sb.append("<div class=\"msg user").append(msg.sendFailed ? " failed" : "")
+              .append("\" data-idx=\"").append(idx).append("\">")
+              .append("<div class=\"bubble\">").append(esc(msg.content)).append("</div>");
+            // 失败卡片：摘要 + 查看详情 + 重试，紧跟在气泡下方
+            if (msg.sendFailed) sb.append(renderErrorCard(msg, index));
+            sb.append("<div class=\"user-menu-wrap\"><button class=\"msg-menu-btn\" onclick=\"if(window.Android)Android.messageMenu('")
+              .append(idx)
+              .append("');event.stopPropagation();return false;\">⋯</button></div></div>\n");
+            return sb.toString();
         }
         String html = contentToHtml(msg.content, ctx);
         return "<div class=\"msg ai\" data-idx=\"" + idx + "\">" +
                "<div class=\"content\">" + html + "</div>" +
+               // 来源区在 .content 之外，独立折叠；不参与正文，也不进入请求体
+               "<div class=\"sources\">" + renderSourcesInner(msg.sources) + "</div>" +
                "<div class=\"ai-menu-wrap\"><button class=\"msg-menu-btn\" onclick=\"if(window.Android)Android.messageMenu('" + idx + "');event.stopPropagation();return false;\">⋯</button></div></div>\n";
+    }
+
+    /**
+     * 渲染来源区内部 HTML（默认折叠，点标题栏展开）。
+     * 供整页渲染与流式结束后的 {@code updateLastSources} 共用。
+     */
+    public static String renderSourcesInner(List<Message.Source> sources) {
+        if (sources == null || sources.isEmpty()) return "";
+        int n = Math.min(sources.size(), ConversationManager.MAX_SOURCES);
+        StringBuilder sb = new StringBuilder();
+        sb.append("<div class=\"sources-block\">");
+        sb.append("<div class=\"sources-head\" onclick=\"toggleSources(this);event.stopPropagation();return false;\">")
+          .append("来源（").append(n).append("）<span class=\"src-arrow\">▶</span></div>");
+        sb.append("<div class=\"sources-body\" style=\"display:none\">");
+        int shown = 0;
+        for (int i = 0; i < sources.size() && shown < n; i++) {
+            Message.Source s = sources.get(i);
+            if (s == null || s.url == null || s.url.length() == 0) continue;
+            String title = s.title == null || s.title.length() == 0 ? s.url : s.title;
+            sb.append("<div class=\"src-item\"><a href=\"").append(escAttr(s.url)).append("\">")
+              .append(esc(title)).append("</a></div>");
+            shown++;
+        }
+        sb.append("</div></div>");
+        return shown == 0 ? "" : sb.toString();
+    }
+
+    /** 失败用户消息下方的错误卡片：摘要 + 「查看详情」+「重试」。 */
+    public static String renderErrorCard(Message msg, int index) {
+        if (msg == null || !msg.sendFailed) return "";
+        String idx = String.valueOf(index);
+        return "<div class=\"error-card\">" +
+               "<div class=\"err-title\">请求失败</div>" +
+               "<div class=\"err-summary\">" + esc(errorSummary(msg.errorDetail)) + "</div>" +
+               "<div class=\"err-actions\">" +
+               "<button class=\"err-btn\" onclick=\"if(window.Android)Android.showErrorDetail('" + idx +
+               "');event.stopPropagation();return false;\">查看详情</button>" +
+               "<button class=\"err-btn retry\" onclick=\"if(window.Android)Android.retryFailedUserMessage('" + idx +
+               "');event.stopPropagation();return false;\">重试</button>" +
+               "</div></div>";
+    }
+
+    /** 从失败详情里挑一行做卡片摘要：优先 HTTP 状态 + 提供商错误，其次异常消息。 */
+    private static String errorSummary(String detail) {
+        if (detail == null || detail.trim().length() == 0) return "请求未完成";
+        String http = "", prov = "", exc = "";
+        String[] lines = detail.split("\n");
+        for (int i = 0; i < lines.length; i++) {
+            String l = lines[i].trim();
+            int p = l.indexOf('：');
+            String v = p >= 0 ? l.substring(p + 1).trim() : "";
+            if (l.startsWith("HTTP 状态")) http = v;
+            else if (l.startsWith("提供商错误")) prov = v;
+            else if (l.startsWith("异常消息")) exc = v;
+        }
+        StringBuilder sb = new StringBuilder();
+        if (http.length() > 0) sb.append("HTTP ").append(http);
+        String extra = prov.length() > 0 ? prov : exc;
+        if (extra.length() > 0) {
+            if (sb.length() > 0) sb.append(" · ");
+            sb.append(extra);
+        }
+        String s = sb.toString();
+        if (s.length() > 120) s = s.substring(0, 120) + "…";
+        return s.length() == 0 ? "请求未完成" : s;
     }
 
     public static String contentToHtml(String text, Context ctx) {

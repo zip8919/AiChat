@@ -130,6 +130,40 @@
         android:layout_marginBottom="12dp"
         android:text="允许 AI 调用搜索/抓取工具，使用 DeepSeek Search API（需配置 DeepSeek API Key）"/>
 
+    <!-- 每轮工具调用上限 -->
+    <LinearLayout
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="4dp">
+        <TextView
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:textColor="@color/text_primary"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="每轮工具调用上限"/>
+        <EditText
+            android:id="@+id/web_search_max_calls_edit"
+            android:background="@drawable/edit_text_background"
+            android:gravity="center"
+            android:inputType="number"
+            android:maxLength="2"
+            android:padding="6dp"
+            android:layout_width="64dp"
+            android:layout_height="wrap_content"
+            android:hint="15"/>
+    </LinearLayout>
+    <TextView
+        android:textSize="11sp"
+        android:textColor="@color/text_secondary"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="12dp"
+        android:text="限制单轮 AI 回复中执行的搜索/抓取请求数（1-50，默认 15）；工具轮次不设上限。"/>
+
     <!-- Quick scan switch -->
     <LinearLayout
         android:gravity="center_vertical"

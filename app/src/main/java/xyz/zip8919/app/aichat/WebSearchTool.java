@@ -29,16 +29,13 @@ public class WebSearchTool {
     private static final String FETCH_PATH = "/v1/tools/fetch";
     private static final int DEFAULT_COUNT = 5;
     private static final int MAX_COUNT = 10;
+    /**
+     * 仅作为网络读取的 OOM / 内存保护上限（1MB），不是业务截断：
+     * 搜索摘要与抓取正文都不再做任何字数裁剪，完整传给模型、完整保存、完整展示。
+     */
     private static final int MAX_RESPONSE_CHARS = 1024 * 1024;
-    private static final int MAX_SUMMARY_CHARS = 1200;
-    private static final int MAX_FETCH_CONTENT_CHARS = 20000;
     private static final int SEARCH_TIMEOUT_MS = 25000;
     private static final int FETCH_TIMEOUT_MS = 35000;
-
-    // Display-only caps for the tool trace persisted with the message. The full
-    // result still goes to the model; this only limits what is stored/shown.
-    private static final int TRACE_DISPLAY_SUMMARY_CHARS = 400;
-    private static final int TRACE_DISPLAY_CONTENT_CHARS = 2000;
 
     /** Marker pair wrapping one tool call + result inside a message body. */
     public static final String TRACE_START = "[tool]";
@@ -203,7 +200,7 @@ public class WebSearchTool {
                 row.put("url", item.optString("url", ""));
                 String summary = item.optString("summary", "");
                 if (summary.length() == 0) summary = item.optString("snippet", "");
-                row.put("summary", truncate(summary, MAX_SUMMARY_CHARS));
+                row.put("summary", summary);
                 if (item.has("date") && !item.isNull("date")) {
                     row.put("date", item.optString("date", ""));
                 }
@@ -234,18 +231,12 @@ public class WebSearchTool {
 
         JSONObject json = new JSONObject(post.body);
         String content = json.optString("content", "");
-        boolean truncated = false;
-        if (content.length() > MAX_FETCH_CONTENT_CHARS) {
-            content = content.substring(0, MAX_FETCH_CONTENT_CHARS) + "\n...(内容已截断)";
-            truncated = true;
-        }
 
         JSONObject result = new JSONObject();
         result.put("url", url);
         result.put("title", json.optString("title", ""));
         result.put("content", content);
-        result.put("truncated", truncated);
-        LogUtil.i(TAG, "fetch <- contentLen=%d truncated=%s", content.length(), truncated);
+        LogUtil.i(TAG, "fetch <- contentLen=%d", content.length());
         return result.toString();
     }
 
@@ -299,9 +290,8 @@ public class WebSearchTool {
                 if (result != null) {
                     display.put("url", sanitizeMarker(result.optString("url", ""), 500));
                     display.put("title", sanitizeMarker(result.optString("title", ""), 200));
-                    display.put("content", sanitizeMarker(
-                            result.optString("content", ""), TRACE_DISPLAY_CONTENT_CHARS));
-                    if (result.optBoolean("truncated", false)) display.put("truncated", true);
+                    // 正文完整进卡片：不再截断、不再标记 truncated
+                    display.put("content", sanitizeMarker(result.optString("content", "")));
                 }
             } else {
                 if (result != null) {
@@ -321,8 +311,8 @@ public class WebSearchTool {
                             String date = item.optString("date", "");
                             if (site.length() > 0) row.put("site", sanitizeMarker(site, 80));
                             if (date.length() > 0) row.put("date", sanitizeMarker(date, 40));
-                            row.put("summary", sanitizeMarker(
-                                    item.optString("summary", ""), TRACE_DISPLAY_SUMMARY_CHARS));
+                            // 摘要完整进卡片：不再做 400 字展示截断
+                            row.put("summary", sanitizeMarker(item.optString("summary", "")));
                             rows.put(row);
                         }
                     }
@@ -342,6 +332,12 @@ public class WebSearchTool {
         if (text == null) return "";
         String cleaned = text.replace(TRACE_START, " ").replace(TRACE_END, " ");
         return truncate(cleaned, max);
+    }
+
+    /** 同上，但不做长度裁剪（摘要/正文按原样保留）。 */
+    private static String sanitizeMarker(String text) {
+        if (text == null) return "";
+        return text.replace(TRACE_START, " ").replace(TRACE_END, " ");
     }
 
     private static PostResult postJson(ProviderInfo provider, String path, JSONObject body,
@@ -398,7 +394,9 @@ public class WebSearchTool {
                 result.error = "HTTP " + code + (response.length() > 0
                         ? ": " + truncate(response, 500) : "");
                 LogUtil.w(TAG, "postJson %s <- HTTP %d", path, code);
-                if (attempt == 0 && (code == 408 || code == 429 || code >= 500)) {
+                // 只对限流（429）与服务端错误（5xx）重试：这两类是明确的「未处理成功」。
+                // 408 / 读写超时不重试——请求可能已被服务端处理并计费，重试会重复扣费。
+                if (attempt == 0 && (code == 429 || code >= 500)) {
                     sleep(700);
                     continue;
                 }
@@ -407,10 +405,7 @@ public class WebSearchTool {
                 result.code = -1;
                 result.error = messageOf(e);
                 LogUtil.e(TAG, "postJson " + path + " failed: " + e.getMessage(), e);
-                if (attempt == 0) {
-                    sleep(500);
-                    continue;
-                }
+                // 网络异常（超时、连接重置）直接返回，不重试：见上，避免重复计费
                 return result;
             } finally {
                 if (conn != null) conn.disconnect();

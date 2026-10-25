@@ -301,6 +301,8 @@ public class ConversationManagerActivity extends Activity {
                         LogUtil.d(TAG, "rename: id=%s newTitle='%s'", conv.id, newTitle);
                         if (!newTitle.isEmpty()) {
                             conv.title = newTitle;
+                            // 手动重命名后视为「标题已定稿」，避免异步自动标题回调把它覆盖
+                            conv.titleGenerated = true;
                             conv.touch();
                             conversationManager.saveCurrentConversation();
                             // conv 与缓存引用是同一对象时标题已一并更新；不再调用有副作用的
