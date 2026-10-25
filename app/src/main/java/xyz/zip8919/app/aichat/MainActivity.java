@@ -1131,8 +1131,9 @@ public class MainActivity extends Activity {
         final String chatEndpoint = provider.apiUrl + provider.chatPath;
         final String providerName = provider.name;
         final String modelName = currentModel;
-        final String effectiveSystemPrompt = webSearchEnabled
-                ? WebSearchTool.appendToSystemPrompt(systemPrompt) : systemPrompt;
+        // 系统提示按后端拼装：时间工具始终说明，联网工具仅在开关打开时说明
+        final String effectiveSystemPrompt =
+                WebSearchTool.appendToSystemPrompt(systemPrompt, webSearchEnabled);
         final ProviderInfo searchProvider = (webSearchEnabled && !useTavily)
                 ? WebSearchTool.resolveProvider(configManager, provider) : null;
         // 搜索是否真的可用：Tavily 只看内置密钥；DeepSeek 需要解析到提供商
@@ -1201,8 +1202,9 @@ public class MainActivity extends Activity {
                 final int[] roundRef = {0};
                 try {
                     JSONArray conversation = buildChatConversation(requestSnapshot, aiMsg, effectiveSystemPrompt);
-                    JSONArray toolDefs = webSearchEnabled ? WebSearchTool.buildToolDefinitions() : null;
-                    boolean toolsEnabled = webSearchEnabled;
+                    // 时间工具始终提供，所以即便联网关闭也要发送 tools
+                    JSONArray toolDefs = WebSearchTool.buildToolDefinitions(webSearchEnabled);
+                    boolean toolsEnabled = true;
                     boolean fallbackTried = false;
                     int round = 0;
                     // Display text kept for the whole request: thinking + tool cards from
@@ -1260,7 +1262,7 @@ public class MainActivity extends Activity {
                                 runOnUiThread(new Runnable() {
                                     public void run() {
                                         Toast.makeText(MainActivity.this,
-                                                "当前模型不支持联网工具，已按普通对话发送",
+                                                "当前模型不支持工具调用，已按普通对话发送",
                                                 Toast.LENGTH_SHORT).show();
                                     }
                                 });
@@ -1510,7 +1512,10 @@ public class MainActivity extends Activity {
                                 renderSeq.incrementAndGet();
                                 showSearchStatus(toolStatusText(name, args), generation, trace.toString(), aiIndex);
                                 String toolResult;
-                                if (!searchReady) {
+                                if (WebSearchTool.TOOL_TIME.equals(name)) {
+                                    // 本地工具：不依赖搜索密钥，也不受联网开关影响
+                                    toolResult = WebSearchTool.currentTimeResult();
+                                } else if (!searchReady) {
                                     toolResult = useTavily
                                             ? "{\"error\":\"未配置 Tavily API Key，无法使用联网搜索\"}"
                                             : "{\"error\":\"未配置 DeepSeek API Key，无法使用联网搜索\"}";
@@ -1534,7 +1539,10 @@ public class MainActivity extends Activity {
 
                                 WebSearchTool.extractSources(toolResult, searchSources);
                                 appendToolResult(conversation, id, toolResult);
-                                trace.append(WebSearchTool.buildTraceBlock(name, args, toolResult));
+                                // 时间工具没有检索内容，不打卡片，结果由模型直接在回答中引用
+                                if (!WebSearchTool.TOOL_TIME.equals(name)) {
+                                    trace.append(WebSearchTool.buildTraceBlock(name, args, toolResult));
+                                }
                                 if (requestGeneration.get() == generation) {
                                     renderSeq.incrementAndGet(); // drop any in-flight stream render
                                     renderTraceAsync(trace.toString(), generation, null, aiIndex);
@@ -1837,6 +1845,9 @@ public class MainActivity extends Activity {
     }
 
     private static String toolStatusText(String name, JSONObject args) {
+        if (WebSearchTool.TOOL_TIME.equals(name)) {
+            return "正在获取当前时间...";
+        }
         if (WebSearchTool.TOOL_SEARCH.equals(name)) {
             String query = args == null ? "" : args.optString("query", "");
             return query.length() > 0 ? "正在联网搜索：" + shorten(query, 60) : "正在联网搜索...";

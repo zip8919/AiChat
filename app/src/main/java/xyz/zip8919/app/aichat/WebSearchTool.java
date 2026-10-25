@@ -24,6 +24,8 @@ public class WebSearchTool {
 
     public static final String TOOL_SEARCH = "web_search";
     public static final String TOOL_FETCH = "web_fetch";
+    /** 本地工具：读取设备当前日期时间，不走网络、不需要任何 Key。 */
+    public static final String TOOL_TIME = "get_current_time";
 
     private static final String SEARCH_PATH = "/v1/tools/search";
     private static final String FETCH_PATH = "/v1/tools/fetch";
@@ -57,69 +59,142 @@ public class WebSearchTool {
         String error;
     }
 
-    public static JSONArray buildToolDefinitions() throws Exception {
+    public static JSONArray buildToolDefinitions(boolean includeWebTools) throws Exception {
         JSONArray tools = new JSONArray();
 
-        JSONObject search = new JSONObject();
-        search.put("type", "function");
-        JSONObject searchFn = new JSONObject();
-        searchFn.put("name", TOOL_SEARCH);
-        searchFn.put("description",
-                "联网搜索互联网。用于查询实时信息、新闻、价格、天气、版本、人物事件等你无法确定或可能过时的内容。");
-        JSONObject searchParams = new JSONObject();
-        searchParams.put("type", "object");
-        JSONObject searchProps = new JSONObject();
-        JSONObject query = new JSONObject();
-        query.put("type", "string");
-        query.put("description", "搜索关键词，1-128 个字符");
-        searchProps.put("query", query);
-        JSONObject count = new JSONObject();
-        count.put("type", "integer");
-        count.put("description", "返回结果条数，1-10，默认 5");
-        count.put("minimum", 1);
-        count.put("maximum", MAX_COUNT);
-        searchProps.put("count", count);
-        searchParams.put("properties", searchProps);
-        searchParams.put("required", new JSONArray().put("query"));
-        searchFn.put("parameters", searchParams);
-        search.put("function", searchFn);
-        tools.put(search);
+        if (includeWebTools) {
+            JSONObject search = new JSONObject();
+            search.put("type", "function");
+            JSONObject searchFn = new JSONObject();
+            searchFn.put("name", TOOL_SEARCH);
+            searchFn.put("description",
+                    "联网搜索互联网。用于查询实时信息、新闻、价格、天气、版本、人物事件等你无法确定或可能过时的内容。");
+            JSONObject searchParams = new JSONObject();
+            searchParams.put("type", "object");
+            JSONObject searchProps = new JSONObject();
+            JSONObject query = new JSONObject();
+            query.put("type", "string");
+            query.put("description", "搜索关键词，1-128 个字符");
+            searchProps.put("query", query);
+            JSONObject count = new JSONObject();
+            count.put("type", "integer");
+            count.put("description", "返回结果条数，1-10，默认 5");
+            count.put("minimum", 1);
+            count.put("maximum", MAX_COUNT);
+            searchProps.put("count", count);
+            searchParams.put("properties", searchProps);
+            searchParams.put("required", new JSONArray().put("query"));
+            searchFn.put("parameters", searchParams);
+            search.put("function", searchFn);
+            tools.put(search);
 
-        JSONObject fetch = new JSONObject();
-        fetch.put("type", "function");
-        JSONObject fetchFn = new JSONObject();
-        fetchFn.put("name", TOOL_FETCH);
-        fetchFn.put("description",
-                "抓取指定网页的正文并以 Markdown 返回。适合在搜索结果中继续阅读某篇网页的详细内容。");
-        JSONObject fetchParams = new JSONObject();
-        fetchParams.put("type", "object");
-        JSONObject fetchProps = new JSONObject();
-        JSONObject url = new JSONObject();
-        url.put("type", "string");
-        url.put("description", "要抓取的 http/https 网页地址");
-        fetchProps.put("url", url);
-        fetchParams.put("properties", fetchProps);
-        fetchParams.put("required", new JSONArray().put("url"));
-        fetchFn.put("parameters", fetchParams);
-        fetch.put("function", fetchFn);
-        tools.put(fetch);
+            JSONObject fetch = new JSONObject();
+            fetch.put("type", "function");
+            JSONObject fetchFn = new JSONObject();
+            fetchFn.put("name", TOOL_FETCH);
+            fetchFn.put("description",
+                    "抓取指定网页的正文并以 Markdown 返回。适合在搜索结果中继续阅读某篇网页的详细内容。");
+            JSONObject fetchParams = new JSONObject();
+            fetchParams.put("type", "object");
+            JSONObject fetchProps = new JSONObject();
+            JSONObject url = new JSONObject();
+            url.put("type", "string");
+            url.put("description", "要抓取的 http/https 网页地址");
+            fetchProps.put("url", url);
+            fetchParams.put("properties", fetchProps);
+            fetchParams.put("required", new JSONArray().put("url"));
+            fetchFn.put("parameters", fetchParams);
+            fetch.put("function", fetchFn);
+            tools.put(fetch);
+        }
+
+        // 时间工具不依赖网络、不依赖任何 Key，因此无论联网开关是否开启都提供
+        JSONObject time = new JSONObject();
+        time.put("type", "function");
+        JSONObject timeFn = new JSONObject();
+        timeFn.put("name", TOOL_TIME);
+        timeFn.put("description",
+                "获取设备当前的日期、时间、星期与时区。涉及今天、现在、此刻、几号、星期几、今年等时间敏感问题时"
+                        + "必须先调用，不要凭训练数据猜测当前日期。");
+        JSONObject timeParams = new JSONObject();
+        timeParams.put("type", "object");
+        timeParams.put("properties", new JSONObject());
+        timeFn.put("parameters", timeParams);
+        time.put("function", timeFn);
+        tools.put(time);
 
         return tools;
     }
 
-    public static String buildSystemPrompt() {
-        return "你可以使用联网工具：\n"
-                + "- web_search(query, count)：搜索互联网，返回标题、链接和摘要。\n"
-                + "- web_fetch(url)：抓取指定网页的正文。\n"
-                + "遇到实时信息、新闻、价格、天气、版本、人物事件等你不确定或可能过时的内容时，"
-                + "先调用工具检索，再基于检索结果回答。回答中请引用来源链接。"
-                + "不要编造工具结果；搜索失败时请说明情况。简单常识或纯推理问题可以直接回答。";
+    public static String buildSystemPrompt(boolean includeWebTools) {
+        StringBuilder sb = new StringBuilder();
+        if (includeWebTools) {
+            sb.append("你可以使用联网工具：\n")
+              .append("- web_search(query, count)：搜索互联网，返回标题、链接和摘要。\n")
+              .append("- web_fetch(url)：抓取指定网页的正文。\n")
+              .append("遇到实时信息、新闻、价格、天气、版本、人物事件等你不确定或可能过时的内容时，")
+              .append("先调用工具检索，再基于检索结果回答。回答中请引用来源链接。")
+              .append("不要编造工具结果；搜索失败时请说明情况。简单常识或纯推理问题可以直接回答。")
+              .append("\n\n");
+        }
+        sb.append("你可以调用 get_current_time() 获取设备当前的日期、时间、星期与时区。")
+          .append("涉及今天、现在、几号、星期几、今年等问题时必须先调用它，不要凭训练数据推断当前日期。");
+        return sb.toString();
     }
 
-    public static String appendToSystemPrompt(String base) {
-        String toolPrompt = buildSystemPrompt();
+    public static String appendToSystemPrompt(String base, boolean includeWebTools) {
+        String toolPrompt = buildSystemPrompt(includeWebTools);
         if (base == null || base.trim().length() == 0) return toolPrompt;
         return base + "\n\n" + toolPrompt;
+    }
+
+    /**
+     * 本地时间工具：返回设备当前日期时间（含星期、时区、ISO 8601 与时间戳）。
+     * 不访问网络，因此与联网开关、API Key 都无关。
+     */
+    public static String currentTimeResult() {
+        try {
+            java.util.Calendar cal = java.util.Calendar.getInstance();
+            java.util.TimeZone tz = cal.getTimeZone();
+            int rawOffset = tz.getOffset(cal.getTimeInMillis());
+            String sign = rawOffset >= 0 ? "+" : "-";
+            int absMin = Math.abs(rawOffset) / 60000;
+            String offset = String.format(java.util.Locale.US, "%s%02d:%02d",
+                    sign, absMin / 60, absMin % 60);
+
+            java.text.SimpleDateFormat dateFmt =
+                    new java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US);
+            java.text.SimpleDateFormat timeFmt =
+                    new java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US);
+            java.text.SimpleDateFormat isoFmt =
+                    new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US);
+            dateFmt.setTimeZone(tz);
+            timeFmt.setTimeZone(tz);
+            isoFmt.setTimeZone(tz);
+
+            String[] weekdays = {"星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"};
+            String weekday = weekdays[cal.get(java.util.Calendar.DAY_OF_WEEK) - 1];
+
+            String date = dateFmt.format(cal.getTime());
+            String time = timeFmt.format(cal.getTime());
+            String iso = isoFmt.format(cal.getTime()) + offset;
+
+            JSONObject result = new JSONObject();
+            result.put("date", date);
+            result.put("time", time);
+            result.put("datetime", date + " " + time);
+            result.put("weekday", weekday);
+            result.put("iso8601", iso);
+            result.put("timezone", tz.getID());
+            result.put("utc_offset", offset);
+            result.put("timestamp", cal.getTimeInMillis() / 1000);
+
+            LogUtil.i(TAG, "currentTime <- %s %s (%s)", date + " " + time, weekday, tz.getID());
+            return result.toString();
+        } catch (Exception e) {
+            LogUtil.e(TAG, "currentTime failed: " + e.getMessage(), e);
+            return error("获取当前时间失败: " + messageOf(e));
+        }
     }
 
     /**
@@ -156,6 +231,10 @@ public class WebSearchTool {
     public static String executeTool(ProviderInfo provider, String toolName, JSONObject args,
             String originalQuestion, RequestGuard guard, boolean useTavily, String tavilyKey) {
         try {
+            // 本地工具优先处理：不需要 provider / Key，也不受搜索开关影响
+            if (TOOL_TIME.equals(toolName)) {
+                return currentTimeResult();
+            }
             if (TOOL_SEARCH.equals(toolName)) {
                 String query = args == null ? "" : args.optString("query", "").trim();
                 if (query.length() == 0) return error("搜索词不能为空");
