@@ -186,7 +186,10 @@ public class MessageHtmlRenderer {
             ".err-actions{margin-top:6px;}" +
             ".err-btn{font-size:11px;padding:3px 10px;margin-right:6px;border-radius:4px;" +
             "border:1px solid #cfd8dc;background:#fff;color:#37474f;}" +
-            ".err-btn.retry{background:#e3f2fd;border-color:#90caf9;color:#1565c0;}";
+            ".err-btn.retry{background:#e3f2fd;border-color:#90caf9;color:#1565c0;}" +
+            "#older-hint{padding:10px 8px;text-align:center;color:#90a4ae;font-size:12px;" +
+            "border-bottom:1px dashed #e0e0e0;margin-bottom:6px;" +
+            "-webkit-tap-highlight-color:rgba(100,180,255,0.2);}";
 
     private static final String JS =
             "(function(){" +
@@ -345,6 +348,42 @@ public class MessageHtmlRenderer {
             "var ms=document.querySelectorAll('.msg.ai .sources');" +
             "if(ms.length>0){ms[ms.length-1].innerHTML=html;}" +
             "smartScrollToBottom();};" +
+            // ---- 更早消息的懒加载 ----
+            "window.setOlderHint=function(remaining){" +
+            "window.__loadingOlder=false;" +
+            "var h=document.getElementById('older-hint');if(!h)return;" +
+            "if(remaining>0){window.__olderDone=false;h.style.display='block';" +
+            "h.textContent='上滑加载更早的 '+remaining+' 条消息';}" +
+            "else{window.__olderDone=true;h.style.display='block';h.textContent='已到最早一条';" +
+            "setTimeout(function(){h.style.display='none';},1200);}};" +
+            "window.loadOlderNow=function(){" +
+            "if(window.__olderDone||window.__loadingOlder)return;" +
+            "window.__loadingOlder=true;" +
+            "if(window.Android)Android.loadOlderMessages();};" +
+            // 只复位闸门，不改提示文案（用于 Java 侧丢弃批次时）
+            "window.resetOlderGate=function(){window.__loadingOlder=false;};" +
+            "window.prependOlder=function(html,remaining){" +
+            "var msgs=document.getElementById('msgs');if(!msgs)return;" +
+            "var d=document.createElement('div');d.innerHTML=html;" +
+            "var frag=document.createDocumentFragment();" +
+            "while(d.firstChild)frag.appendChild(d.firstChild);" +
+            "var doc=document.documentElement;" +
+            // 记住插入前的总高度，插入后按高度差把视口下移，视觉上内容不动
+            "var before=doc.scrollHeight||document.body.scrollHeight;" +
+            "msgs.insertBefore(frag,msgs.firstChild);" +
+            "var after=doc.scrollHeight||document.body.scrollHeight;" +
+            "var delta=after-before;" +
+            "if(delta>0)window.scrollTo(0,(window.pageYOffset||doc.scrollTop||0)+delta);" +
+            "addCopyBtns();applyToolStates(document);" +
+            "window.__loadingOlder=false;setOlderHint(remaining);};" +
+            "var __olderTicking=false;" +
+            "window.addEventListener('scroll',function(){" +
+            "if(__olderTicking)return;__olderTicking=true;" +
+            "setTimeout(function(){" +
+            "__olderTicking=false;" +
+            "if(window.__olderDone||window.__loadingOlder)return;" +
+            "var st=document.documentElement.scrollTop||document.body.scrollTop||window.pageYOffset||0;" +
+            "if(st<=40)loadOlderNow();},150);});" +
             "window.markUserFailed=function(idx,cardHtml){" +
             "var all=document.querySelectorAll('.msg.user');" +
             "for(var i=0;i<all.length;i++){" +
@@ -438,24 +477,44 @@ public class MessageHtmlRenderer {
             "var attr=all[i].getAttribute('data-idx');" +
             "if(attr&&parseInt(attr)>=idx)all[i].parentNode.removeChild(all[i]);}" +
             "};" +
+            "var __oh=document.getElementById('older-hint');" +
+            "window.__olderDone=(!__oh||__oh.style.display==='none');" +
             "addCopyBtns();" +
             "applyToolStates(document);" +
             "window.scrollTo(0,document.body.scrollHeight);" +
             "})();";
 
-    public static String buildConversationHtml(List<Message> messages, Context ctx) {
+    /**
+     * 构建整页 HTML，只渲染 {@code [from, messages.size())} 这一窗口内的消息。
+     * 更早的消息由 {@link #renderMessagesHtml} 在用户上滑时按批追加，避免长对话
+     * 一次把所有消息都塞进 WebView。
+     */
+    public static String buildConversationHtml(List<Message> messages, int from, Context ctx) {
         long startTs = System.currentTimeMillis();
-        LogUtil.d(TAG, "buildConversationHtml: %d messages (cache=%d)",
-                messages == null ? -1 : messages.size(), latexCache.size());
+        int total = messages == null ? 0 : messages.size();
+        int start = Math.max(0, Math.min(from, total));
+        LogUtil.d(TAG, "buildConversationHtml: %d messages, render from %d (cache=%d)",
+                total, start, latexCache.size());
 
         StringBuilder body = new StringBuilder();
-        for (int i = 0; i < messages.size(); i++) {
-            body.append(renderMessageDiv(messages.get(i), i, ctx));
-        }
-        String page = buildPage(body.toString());
-        LogUtil.d(TAG, "buildConversationHtml done: body=%d chars, page=%d chars in %d ms",
-                body.length(), page.length(), System.currentTimeMillis() - startTs);
+        body.append(renderMessagesHtml(messages, start, ctx));
+        String page = buildPage(body.toString(), start);
+        LogUtil.d(TAG, "buildConversationHtml done: rendered=%d, body=%d chars, page=%d chars in %d ms",
+                total - start, body.length(), page.length(), System.currentTimeMillis() - startTs);
         return page;
+    }
+
+    /**
+     * 渲染一批消息为 HTML 片段（不带 html/head 外壳），data-idx 使用绝对索引，
+     * 保证与 messages 下标一致——消息菜单、删除、重定位都依赖这个索引。
+     */
+    public static String renderMessagesHtml(List<Message> messages, int startIndex, Context ctx) {
+        if (messages == null) return "";
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < messages.size(); i++) {
+            sb.append(renderMessageDiv(messages.get(i), startIndex + i, ctx));
+        }
+        return sb.toString();
     }
 
     public static String renderMessageDiv(Message msg, int index, Context ctx) {
@@ -1526,12 +1585,18 @@ public class MessageHtmlRenderer {
         return imgTag;
     }
 
-    private static String buildPage(String bodyHtml) {
+    private static String buildPage(String bodyHtml, int olderCount) {
+        // olderCount = 尚未渲染的更早消息条数；>0 时顶部显示上滑提示
+        String hint = olderCount > 0
+                ? "<div id=\"older-hint\" onclick=\"loadOlderNow()\">上滑加载更早的 "
+                        + olderCount + " 条消息</div>"
+                : "<div id=\"older-hint\" style=\"display:none\"></div>";
         return "<!DOCTYPE html>\n<html>\n<head>\n" +
                "<meta charset=\"utf-8\">\n" +
                "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1,user-scalable=no\">\n" +
                "<style>\n" + CSS + "\n</style>\n" +
                "</head>\n<body>\n" +
+               hint +
                "<div id=\"msgs\">\n" + bodyHtml + "\n</div>\n" +
                "<script>\n" + JS + "\n</script>\n" +
                "</body>\n</html>";

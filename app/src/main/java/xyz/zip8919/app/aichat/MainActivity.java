@@ -53,6 +53,10 @@ public class MainActivity extends Activity {
     private static final String PREFS_NAME = "aichat_prefs";
     private static final int REQUEST_CONVERSATION_MANAGER = 1;
     private static final int REQUEST_SCAN = 2;
+    // 长对话分批渲染：首屏只渲染最近 N 条，滑到顶部再补一批，
+    // 避免几百条消息（含公式/图片）一次性塞进 WebView 把老设备卡死。
+    private static final int INITIAL_VISIBLE_MESSAGES = 40;
+    private static final int OLDER_PAGE_SIZE = 30;
     // 工具轮次不再设上限：只要模型还在调用工具、用户没打断，就一直继续下去。
     // 单轮内实际执行的工具请求数由设置项 web_search_max_calls_per_round 限制。
 
@@ -74,6 +78,11 @@ public class MainActivity extends Activity {
 
     private List<Message> messages;
     private List<ModelInfo> availableModels;
+    // DOM 里已渲染的最早消息在 messages 中的下标；其上滑加载时向前推进。
+    // volatile：渲染线程读、UI 线程写。
+    private volatile int renderedFrom = 0;
+    // 防止滚动事件连续触发重复请求
+    private volatile boolean loadingOlderMessages = false;
 
     private AtomicBoolean isRequestInProgress = new AtomicBoolean(false);
     private AtomicInteger requestGeneration = new AtomicInteger(0);
@@ -2122,9 +2131,11 @@ public class MainActivity extends Activity {
         final int myRenderGen = renderGeneration.incrementAndGet();
         final List<Message> snapshot =
                 messages == null ? new ArrayList<Message>() : new ArrayList<Message>(messages);
+        // 只渲染最近一批：更早的消息等用户上滑到顶部再追加
+        final int from = Math.max(0, snapshot.size() - INITIAL_VISIBLE_MESSAGES);
         new Thread(new Runnable() {
             public void run() {
-                final String html = MessageHtmlRenderer.buildConversationHtml(snapshot, MainActivity.this);
+                final String html = MessageHtmlRenderer.buildConversationHtml(snapshot, from, MainActivity.this);
                 LogUtil.d(TAG, "conversation html built: len=%d in %d ms",
                         html == null ? -1 : html.length(), System.currentTimeMillis() - t0);
                 runOnUiThread(new Runnable() {
@@ -2135,8 +2146,11 @@ public class MainActivity extends Activity {
                             return;
                         }
                         if (conversationWebView == null) return;
+                        renderedFrom = from;
+                        loadingOlderMessages = false;
                         conversationWebView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null);
-                        LogUtil.d(TAG, "webview reloaded with full conversation html");
+                        LogUtil.d(TAG, "webview reloaded: showing %d of %d messages (from=%d)",
+                                snapshot.size() - from, snapshot.size(), from);
                     }
                 });
             }
@@ -2312,6 +2326,55 @@ public class MainActivity extends Activity {
                     } catch (Exception e) {
                         LogUtil.w(TAG, "messageLongPress parse failed: idx=%s err=%s", idx, e.getMessage());
                     }
+                }
+            });
+        }
+
+        /** 用户滑到顶部时，追加更早的一批消息（在后台线程渲染，避免卡 UI）。 */
+        @JavascriptInterface
+        public void loadOlderMessages() {
+            handler.post(new Runnable() {
+                public void run() {
+                    if (loadingOlderMessages) return;
+                    if (messages == null || messages.isEmpty()) {
+                        webViewEvalJs("setOlderHint(0)");
+                        return;
+                    }
+                    final int from = Math.min(renderedFrom, messages.size());
+                    if (from <= 0) {
+                        webViewEvalJs("setOlderHint(0)");
+                        LogUtil.d(TAG, "loadOlderMessages: already at the beginning");
+                        return;
+                    }
+                    final int start = Math.max(0, from - OLDER_PAGE_SIZE);
+                    final List<Message> slice = new ArrayList<Message>(messages.subList(start, from));
+                    loadingOlderMessages = true;
+                    LogUtil.d(TAG, "loadOlderMessages: rendering %d messages [%d,%d)",
+                            slice.size(), start, from);
+                    new Thread(new Runnable() {
+                        public void run() {
+                            final String html = MessageHtmlRenderer.renderMessagesHtml(
+                                    slice, start, MainActivity.this);
+                            runOnUiThread(new Runnable() {
+                                public void run() {
+                                    // 期间发生过整页重建（切会话 / 设置变更）就丢弃这一批，避免错位
+                                    if (renderedFrom != from) {
+                                        loadingOlderMessages = false;
+                                        // 这一批被丢弃，但 JS 侧的闸门必须复位，否则上滑再也触发不了
+                                        webViewEvalJs("resetOlderGate()");
+                                        LogUtil.d(TAG, "loadOlderMessages dropped: renderedFrom=%d, expected=%d",
+                                                renderedFrom, from);
+                                        return;
+                                    }
+                                    renderedFrom = start;
+                                    loadingOlderMessages = false;
+                                    webViewEvalJs("prependOlder('" + jsEscape(html) + "'," + start + ")");
+                                    LogUtil.d(TAG, "loadOlderMessages: prepended, renderedFrom=%d, htmlLen=%d",
+                                            start, html.length());
+                                }
+                            });
+                        }
+                    }) {{ setName("aichat-older-" + System.currentTimeMillis()); }}.start();
                 }
             });
         }
@@ -3566,6 +3629,8 @@ public class MainActivity extends Activity {
             public void run() {
                 LogUtil.i(TAG, "deleteMessage: pos=%d, size %d -> %d", pos, messages.size(), messages.size() - 1);
                 messages.remove(pos);
+                // 渲染起点跟着前移，否则上滑加载会按旧下标取到错位的消息
+                if (pos < renderedFrom) renderedFrom--;
                 removeDomFrom(pos);
                 // Reindex DOM: update data-idx of remaining messages after pos
                 webViewEvalJs("reindexFrom(" + pos + ")");
@@ -3602,6 +3667,7 @@ public class MainActivity extends Activity {
                 public void run() {
                     LogUtil.i(TAG, "retry(regenerate): truncating from pos=%d", pos);
                     messages.subList(pos, messages.size()).clear();
+                    if (renderedFrom > pos) renderedFrom = pos;
                     removeDomRange(pos);
                     execStreamingRequest();
                 }
@@ -3635,6 +3701,8 @@ public class MainActivity extends Activity {
                 pos, messages.size() - pos, content.length());
 
         messages.subList(pos, messages.size()).clear();
+        // 截断会把渲染起点之后的消息删掉，起点最多回退到 pos
+        if (renderedFrom > pos) renderedFrom = pos;
         removeDomRange(pos);
 
         Message um = new Message(Message.ROLE_USER, content);
@@ -3757,6 +3825,7 @@ public class MainActivity extends Activity {
             public void run() {
                 LogUtil.i(TAG, "rollbackTo: removing %d messages after pos=%d", n, pos);
                 messages.subList(messages.size() - n, messages.size()).clear();
+                if (renderedFrom > messages.size()) renderedFrom = messages.size();
                 removeDomRange(messages.size());
                 conversationManager.saveCurrentConversation();
                 Toast.makeText(MainActivity.this, "已回溯", Toast.LENGTH_SHORT).show();
