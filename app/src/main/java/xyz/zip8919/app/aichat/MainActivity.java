@@ -1121,6 +1121,11 @@ public class MainActivity extends Activity {
         final boolean realtimeRenderEnabled = SettingsActivity.isRealtimeRenderEnabled(this);
         final boolean streamEnabled = SettingsActivity.isStreamEnabled(this);
         final boolean webSearchEnabled = SettingsActivity.isWebSearchEnabled(this);
+        // 搜索后端在 UI 线程先定死：Tavily 走自建网关，不需要 DeepSeek 提供商；
+        // DeepSeek 后端才要求存在带 Key 的 DeepSeek 提供商。
+        final boolean useTavily = SettingsActivity.isTavilySearch(this);
+        // 密钥只在运行时从设置读取，不写死、不打进安装包
+        final String tavilyKey = SettingsActivity.getTavilyKey(this);
         // 单轮工具调用上限（web_search + web_fetch 合计），在 UI 线程先读定，避免请求线程反复访问 prefs
         final int maxCallsPerRound = SettingsActivity.getWebSearchMaxCallsPerRound(this);
         final String chatEndpoint = provider.apiUrl + provider.chatPath;
@@ -1128,12 +1133,16 @@ public class MainActivity extends Activity {
         final String modelName = currentModel;
         final String effectiveSystemPrompt = webSearchEnabled
                 ? WebSearchTool.appendToSystemPrompt(systemPrompt) : systemPrompt;
-        final ProviderInfo searchProvider = webSearchEnabled
+        final ProviderInfo searchProvider = (webSearchEnabled && !useTavily)
                 ? WebSearchTool.resolveProvider(configManager, provider) : null;
+        // 搜索是否真的可用：Tavily 只看内置密钥；DeepSeek 需要解析到提供商
+        final boolean searchReady = webSearchEnabled
+                && (useTavily ? TavilyTool.hasApiKey(tavilyKey) : searchProvider != null);
         final long startMs = System.currentTimeMillis();
-        LogUtil.i(TAG, ">>> sendStreamingRequest START: gen=%d url=%s%s model=%s thinking=%s webSearch=%s searchProvider=%s",
+        LogUtil.i(TAG, ">>> sendStreamingRequest START: gen=%d url=%s%s model=%s thinking=%s webSearch=%s backend=%s searchProvider=%s",
                 generation, provider.apiUrl, provider.chatPath, currentModel, thinkingLevel,
-                webSearchEnabled, searchProvider == null ? "none" : searchProvider.name);
+                webSearchEnabled, useTavily ? "tavily" : "deepseek",
+                searchProvider == null ? "none" : searchProvider.name);
         isRequestInProgress.set(true);
 
         final Message aiMsg = new Message(Message.ROLE_ASSISTANT, "");
@@ -1501,21 +1510,26 @@ public class MainActivity extends Activity {
                                 renderSeq.incrementAndGet();
                                 showSearchStatus(toolStatusText(name, args), generation, trace.toString(), aiIndex);
                                 String toolResult;
-                                if (searchProvider == null) {
-                                    toolResult = "{\"error\":\"未配置 DeepSeek API Key，无法使用联网搜索\"}";
+                                if (!searchReady) {
+                                    toolResult = useTavily
+                                            ? "{\"error\":\"未配置 Tavily API Key，无法使用联网搜索\"}"
+                                            : "{\"error\":\"未配置 DeepSeek API Key，无法使用联网搜索\"}";
                                     if (!warnedNoSearchKey[0]) {
                                         warnedNoSearchKey[0] = true;
+                                        final String warnText = useTavily
+                                                ? "未配置 Tavily API Key，联网搜索不可用"
+                                                : "未配置 DeepSeek API Key，联网搜索不可用";
                                         runOnUiThread(new Runnable() {
                                             public void run() {
                                                 Toast.makeText(MainActivity.this,
-                                                        "未配置 DeepSeek API Key，联网搜索不可用",
-                                                        Toast.LENGTH_LONG).show();
+                                                        warnText, Toast.LENGTH_LONG).show();
                                             }
                                         });
                                     }
                                 } else {
                                     toolResult = WebSearchTool.executeTool(
-                                            searchProvider, name, args, originalQuestion, searchGuard);
+                                            searchProvider, name, args, originalQuestion,
+                                            searchGuard, useTavily, tavilyKey);
                                 }
 
                                 WebSearchTool.extractSources(toolResult, searchSources);

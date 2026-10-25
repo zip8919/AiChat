@@ -130,6 +130,60 @@
         android:layout_marginBottom="12dp"
         android:text="允许 AI 调用搜索/抓取工具，使用 DeepSeek Search API（需配置 DeepSeek API Key）"/>
 
+    <!-- 搜索服务（后端） -->
+    <LinearLayout
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="2dp">
+        <TextView
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:textColor="@color/text_primary"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="搜索服务"/>
+        <Spinner
+            android:id="@+id/search_backend_spinner"
+            android:layout_width="140dp"
+            android:layout_height="wrap_content"/>
+    </LinearLayout>
+    <TextView
+        android:textSize="11sp"
+        android:textColor="@color/text_secondary"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="8dp"
+        android:text="Tavily：经自建网关调用，默认选项；DeepSeek：使用 DeepSeek 提供商的 API Key，按次计费。"/>
+
+    <!-- Tavily 密钥（仅本机保存） -->
+    <TextView
+        android:textSize="13sp"
+        android:textColor="@color/text_primary"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="4dp"
+        android:text="Tavily API Key"/>
+    <EditText
+        android:id="@+id/tavily_key_edit"
+        android:background="@drawable/edit_text_background"
+        android:padding="10dp"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="2dp"
+        android:hint="tvly-..."
+        android:inputType="textVisiblePassword"
+        android:maxLines="1"/>
+    <TextView
+        android:textSize="11sp"
+        android:textColor="@color/text_secondary"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="12dp"
+        android:text="仅保存在本机，不会写入源码或打进安装包；换设备、清除数据后需重新填写。"/>
+
     <!-- 每轮工具调用上限 -->
     <LinearLayout
         android:gravity="center_vertical"

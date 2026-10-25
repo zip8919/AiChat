@@ -33,6 +33,12 @@ public class SettingsActivity extends Activity {
     private static final String KEY_TITLE_PROMPT = "title_prompt";
     private static final String KEY_QUICK_SCAN_ENABLED = "quick_scan_enabled";
     private static final String KEY_WEB_SEARCH_ENABLED = "web_search_enabled";
+    /** 搜索后端：tavily（默认，免费）/ deepseek */
+    private static final String KEY_SEARCH_BACKEND = "search_backend";
+    /** Tavily 密钥：仅保存在本机，源码与安装包中均不内置。 */
+    private static final String KEY_TAVILY_KEY = "tavily_api_key";
+    public static final String SEARCH_BACKEND_TAVILY = "tavily";
+    public static final String SEARCH_BACKEND_DEEPSEEK = "deepseek";
     /** 单轮 AI 回复内最多实际执行的搜索/抓取请求数（工具轮次本身不设上限）。 */
     private static final String KEY_WEB_SEARCH_MAX_CALLS = "web_search_max_calls_per_round";
     private static final int DEFAULT_WEB_SEARCH_MAX_CALLS = 15;
@@ -47,10 +53,11 @@ public class SettingsActivity extends Activity {
 
     private SharedPreferences prefs;
     private EditText systemPromptEdit, titlePromptEdit;
+    private EditText tavilyKeyEdit;
     private EditText webSearchMaxCallsEdit;
     private Switch autoTitleSwitch, quickScanSwitch, logSwitch, realtimeRenderSwitch, streamSwitch;
     private Switch webSearchSwitch;
-    private Spinner titleModelSpinner, presetSpinner;
+    private Spinner titleModelSpinner, presetSpinner, searchBackendSpinner;
     private Button saveButton, cancelButton, balanceButton, manageModelsButton;
     private Button managePresetsButton, savePresetButton;
     private AlertDialog manageDialog;
@@ -84,6 +91,13 @@ public class SettingsActivity extends Activity {
         realtimeRenderSwitch = (Switch) findViewById(R.id.realtime_render_switch);
         streamSwitch = (Switch) findViewById(R.id.stream_switch);
         titleModelSpinner = (Spinner) findViewById(R.id.title_model_spinner);
+        searchBackendSpinner = (Spinner) findViewById(R.id.search_backend_spinner);
+        tavilyKeyEdit = (EditText) findViewById(R.id.tavily_key_edit);
+        ArrayAdapter<String> backendAdapter = new ArrayAdapter<String>(this,
+                android.R.layout.simple_spinner_item,
+                new String[]{"Tavily（免费）", "DeepSeek"});
+        backendAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        searchBackendSpinner.setAdapter(backendAdapter);
         saveButton = (Button) findViewById(R.id.save_button);
         cancelButton = (Button) findViewById(R.id.cancel_button);
         balanceButton = (Button) findViewById(R.id.balance_button);
@@ -138,6 +152,9 @@ public class SettingsActivity extends Activity {
         autoTitleSwitch.setChecked(prefs.getBoolean(KEY_AUTO_TITLE_ENABLED, true));
         quickScanSwitch.setChecked(prefs.getBoolean(KEY_QUICK_SCAN_ENABLED, false));
         webSearchSwitch.setChecked(prefs.getBoolean(KEY_WEB_SEARCH_ENABLED, true));
+        searchBackendSpinner.setSelection(
+                SEARCH_BACKEND_DEEPSEEK.equals(getSearchBackend(this)) ? 1 : 0);
+        tavilyKeyEdit.setText(getTavilyKey(this));
         webSearchMaxCallsEdit.setText(String.valueOf(getWebSearchMaxCallsPerRound(this)));
         logSwitch.setChecked(prefs.getBoolean(KEY_LOG_ENABLED, true));
         realtimeRenderSwitch.setChecked(prefs.getBoolean(KEY_REALTIME_RENDER, false));
@@ -206,6 +223,10 @@ public class SettingsActivity extends Activity {
         editor.putBoolean(KEY_AUTO_TITLE_ENABLED, autoTitle);
         editor.putBoolean(KEY_QUICK_SCAN_ENABLED, quickScanSwitch.isChecked());
         editor.putBoolean(KEY_WEB_SEARCH_ENABLED, webSearchSwitch.isChecked());
+        editor.putString(KEY_SEARCH_BACKEND,
+                searchBackendSpinner.getSelectedItemPosition() == 1
+                        ? SEARCH_BACKEND_DEEPSEEK : SEARCH_BACKEND_TAVILY);
+        editor.putString(KEY_TAVILY_KEY, tavilyKeyEdit.getText().toString().trim());
         editor.putBoolean(KEY_LOG_ENABLED, logEnabled);
         editor.putBoolean(KEY_REALTIME_RENDER, realtimeRenderSwitch.isChecked());
         editor.putBoolean(KEY_STREAM_ENABLED, streamSwitch.isChecked());
@@ -344,6 +365,29 @@ public class SettingsActivity extends Activity {
     public static boolean isWebSearchEnabled(Context context) {
         SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, 0);
         return prefs.getBoolean(KEY_WEB_SEARCH_ENABLED, true);
+    }
+
+    /**
+     * 当前搜索后端。默认 Tavily（免费），旧配置或异常值一律回落到 Tavily。
+     */
+    public static String getSearchBackend(Context context) {
+        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, 0);
+        String v = prefs.getString(KEY_SEARCH_BACKEND, SEARCH_BACKEND_TAVILY);
+        return SEARCH_BACKEND_DEEPSEEK.equals(v) ? SEARCH_BACKEND_DEEPSEEK : SEARCH_BACKEND_TAVILY;
+    }
+
+    public static boolean isTavilySearch(Context context) {
+        return SEARCH_BACKEND_TAVILY.equals(getSearchBackend(context));
+    }
+
+    /**
+     * Tavily 密钥。只从本机 SharedPreferences 读取——源码和安装包里都不内置，
+     * 换设备或清除数据后需要重新填写。
+     */
+    public static String getTavilyKey(Context context) {
+        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, 0);
+        String v = prefs.getString(KEY_TAVILY_KEY, "");
+        return v == null ? "" : v.trim();
     }
 
     /**

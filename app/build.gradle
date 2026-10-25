@@ -19,11 +19,12 @@ android {
         applicationId 'xyz.zip8919.app.aichat'
         minSdk 18
         targetSdk 18
-        versionCode 25
-        versionName "1.6.0"
+        versionCode 26
+        versionName "1.7.0"
 
         // 默认不内置任何 API Key；商汤日日新的 key 可在构建时用 -PsensenovaKey=... 注入
         buildConfigField "String", "SENSENOVA_KEY", "\"${project.findProperty('sensenovaKey') ?: ''}\""
+        // 注意：Tavily 密钥不通过构建注入，也不写入安装包；用户在应用设置页填写，仅存于本机。
     }
 
     // 按设备 ABI 拆分安装包：每个包只带一份 libconscrypt_jni.so；另外产出一个通用包

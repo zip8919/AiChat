@@ -30,9 +30,9 @@ public class WebSearchTool {
     private static final int DEFAULT_COUNT = 5;
     private static final int MAX_COUNT = 10;
     /** 单条搜索摘要的上限（字符）：摘要会一次性进入上下文，不裁剪太费 token。 */
-    private static final int MAX_SUMMARY_CHARS = 1200;
+    static final int MAX_SUMMARY_CHARS = 1200;
     /** 一次搜索内所有条目摘要的合计上限（字符），超出部分只保留标题与链接。 */
-    private static final int MAX_TOTAL_SUMMARY_CHARS = 6000;
+    static final int MAX_TOTAL_SUMMARY_CHARS = 6000;
     /**
      * 仅作为网络读取的 OOM / 内存保护上限（1MB），不是业务截断：
      * web_fetch 的正文仍完整传给模型、完整保存、完整展示。
@@ -148,12 +148,14 @@ public class WebSearchTool {
         return provider.apiUrl.toLowerCase(Locale.US).contains("deepseek.com");
     }
 
+    /**
+     * 统一的工具执行入口。{@code useTavily} 为 true 时走 Tavily 网关，
+     * 否则走原来的 DeepSeek Search / Fetch。两条路都输出相同结构，上层无感知。
+     * {@code tavilyKey} 由调用方从设置中读取并传入——密钥不写入源码，也不打进安装包。
+     */
     public static String executeTool(ProviderInfo provider, String toolName, JSONObject args,
-            String originalQuestion, RequestGuard guard) {
+            String originalQuestion, RequestGuard guard, boolean useTavily, String tavilyKey) {
         try {
-            if (!hasApiKey(provider)) {
-                return error("未配置 DeepSeek API Key，无法使用联网搜索。");
-            }
             if (TOOL_SEARCH.equals(toolName)) {
                 String query = args == null ? "" : args.optString("query", "").trim();
                 if (query.length() == 0) return error("搜索词不能为空");
@@ -161,6 +163,15 @@ public class WebSearchTool {
                 int count = args == null ? DEFAULT_COUNT : args.optInt("count", DEFAULT_COUNT);
                 if (count < 1) count = 1;
                 if (count > MAX_COUNT) count = MAX_COUNT;
+                if (useTavily) {
+                    if (!TavilyTool.hasApiKey(tavilyKey)) {
+                        return error("未配置 Tavily API Key，请到设置页填写后重试。");
+                    }
+                    return TavilyTool.search(query, count, tavilyKey, guard);
+                }
+                if (!hasApiKey(provider)) {
+                    return error("未配置 DeepSeek API Key，无法使用联网搜索。");
+                }
                 String ori = originalQuestion == null ? "" : originalQuestion.trim();
                 if (ori.length() > 128) ori = ori.substring(0, 128);
                 return search(provider, query, count, ori, guard);
@@ -168,6 +179,15 @@ public class WebSearchTool {
             if (TOOL_FETCH.equals(toolName)) {
                 String url = args == null ? "" : args.optString("url", "").trim();
                 if (!isValidHttpUrl(url)) return error("抓取地址必须是合法的 http/https URL");
+                if (useTavily) {
+                    if (!TavilyTool.hasApiKey(tavilyKey)) {
+                        return error("未配置 Tavily API Key，请到设置页填写后重试。");
+                    }
+                    return TavilyTool.extract(url, tavilyKey, guard);
+                }
+                if (!hasApiKey(provider)) {
+                    return error("未配置 DeepSeek API Key，无法使用联网搜索。");
+                }
                 return fetch(provider, url, guard);
             }
             return error("未知工具: " + toolName);

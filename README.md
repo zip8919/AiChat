@@ -1,13 +1,13 @@
 # AiChat
 
-Android 词典笔 AI 对话应用（版本 1.6.0，minSdk 18 / targetSdk 18，真机 Android 4.4.2 / API 19）。基于 WebView + HTML/CSS 渲染 Markdown/LaTeX，通过任意 OpenAI 兼容端点调用大模型，内置 DeepSeek（不含 API Key）与商汤日日新 默认配置，默认模型 `deepseek-v4-flash`（商汤日日新）。
+Android 词典笔 AI 对话应用（版本 1.7.0，minSdk 18 / targetSdk 18，真机 Android 4.4.2 / API 19）。基于 WebView + HTML/CSS 渲染 Markdown/LaTeX，通过任意 OpenAI 兼容端点调用大模型，内置 DeepSeek（不含 API Key）与商汤日日新 默认配置，默认模型 `deepseek-v4-flash`（商汤日日新）。
 
 ## 功能
 
 - **多模型 / 多提供商** — 模型配置页可增删提供商与模型，自定义 API URL、Chat Path、API Key；内置 DeepSeek、商汤日日新 及任意 OpenAI 兼容端点
 - **对话** — 流式输出（设置可开关）；回复进行中再发送自动排队，队列支持上移/下移/插队发送（打断当前回复）/删除；长按发送键打断当前请求，思考阶段打断自动补 `[/thinking]` 收尾；请求失败时在用户消息下方显示错误卡片，可查看详情、点击气泡立即重试；回复进行中重试会先确认打断
 - **思考模式** — 关闭/低/中/高四档，思考内容可折叠/展开
-- **联网搜索** — 设置页总开关（默认开启）；AI 可通过 `web_search` 工具调用 DeepSeek Search API 检索实时网页，通过 `web_fetch` 抓取网页正文；来源独立成可折叠来源区（按 URL 去重，最多 8 条），不写入正文、不进入后续请求；工具轮次不设上限，单轮工具调用数可配置（默认 15，范围 1-50），超出部分按未执行处理；搜索摘要单条限 1200 字符、单次合计限 6000 字符。总开关同时控制工具定义、搜索系统提示词和实际搜索/抓取请求
+- **联网搜索** — 设置页总开关（默认开启）；搜索服务可选 **Tavily（默认，免费，经自建网关）** 或 DeepSeek。AI 可通过 `web_search` 工具检索实时网页，通过 `web_fetch` 抓取网页正文；来源独立成可折叠来源区（按 URL 去重，最多 8 条），不写入正文、不进入后续请求；工具轮次不设上限，单轮工具调用数可配置（默认 15，范围 1-50），超出部分按未执行处理；搜索摘要单条限 1200 字符、单次合计限 6000 字符。总开关同时控制工具定义、搜索系统提示词和实际搜索/抓取请求
 - **Markdown 渲染** — WebView + HTML/CSS：标题、粗斜体、删除线、代码块（复制按钮 + 语法高亮）、表格（横向滑动 + 点击放大）、引用、列表、分割线、图片、链接；LaTeX 公式（`$...$`/`$$...$$`/`\(...\)`/`\[...\]`/裸 `\command`/化学式 `\ce{...}`）、脚注、高亮 `==text==`、上下标、内嵌 HTML/SVG 直通
 - **语法高亮** — 支持 Java、Python、JS/TS、Bash/sh/shell、JSON、C/C++、Go、Rust、Kotlin、Swift、C#、SQL、XML、HTML、SVG；未声明语言时按内容嗅探（HTML/SVG/XML 自动识别）
 - **代码查看器** — 所有代码块均可弹出全屏预览（任意语言），支持缩放/旋转/背景切换；代码块可导出保存到应用存储 exports 目录（按语言扩展名，覆盖 SVG/HTML 及各类代码）
@@ -71,15 +71,21 @@ release 按 ABI 分包（`app/build/outputs/apk/release/`），每个包只含�
 
 1. 是否向模型发送 `web_search` / `web_fetch` 工具定义
 2. 是否在系统提示词中追加联网工具说明
-3. 是否真正调用 DeepSeek Search / Fetch API
+3. 是否真正调用搜索/抓取 API
 
-搜索和抓取固定使用 **DeepSeek** 提供商的 API Key（`https://api.deepseek.com`）。当前对话模型可以来自其他提供商；只要 DeepSeek 提供商填写了 Key，模型就可以在对话中调用联网工具。未配置 DeepSeek Key 时，工具会返回错误提示，普通对话不受影响。
+搜索服务在设置页选择，默认 **Tavily**：
 
-- Search：`POST https://api.deepseek.com/v1/tools/search`
-- Fetch：`POST https://api.deepseek.com/v1/tools/fetch`
-- 计费：每 1,000 次成功请求 5 元，具体以 [DeepSeek 官方价格页](https://api-docs.deepseek.com/zh-cn/quick_start/pricing/) 为准
-- 工具调用产生的中间消息只在本次请求内使用，最终回答和「搜索来源」列表正常保存到会话
-- 每条搜索/抓取的工具调用都会在回答中展示一张结果卡片：搜索卡片含查询词、结果条数及每条结果的标题、链接、站点、时间与摘要；抓取卡片含网页标题、URL 与正文摘录（超长自动截断）。卡片默认折叠，点击标题栏展开/收起。这些卡片随消息持久化，重新打开会话仍可查看，但不会作为上下文发给模型
+| 后端 | 端点 | 鉴权 |
+|------|------|------|
+| Tavily（默认） | `POST https://tavily.20090102.xyz/search`、`/extract` | 网关 `?key=` + `Authorization: Bearer tvly-…` |
+| DeepSeek | `POST https://api.deepseek.com/v1/tools/search`、`/v1/tools/fetch` | DeepSeek 提供商的 API Key |
+
+Tavily 的密钥在应用内「设置 → Tavily API Key」填写，仅保存在本机，不写入源码、也不打进安装包。切换到 Tavily 后不需要配置 DeepSeek 提供商；DeepSeek 后端才要求 DeepSeek 提供商填写了 Key。当前对话模型可以来自任意提供商，与搜索后端无关。搜索不可用时工具返回错误提示，普通对话不受影响。
+
+- 计费：Tavily 走自建网关的免费额度；DeepSeek 每 1,000 次成功请求 5 元，具体以 [DeepSeek 官方价格页](https://api-docs.deepseek.com/zh-cn/quick_start/pricing/) 为准
+- 搜索摘要单条上限 1,200 字符、单次合计上限 6,000 字符，超出总量的条目只保留标题与链接；`web_fetch` 正文不截断（仅受 1MB 网络读取保护）
+- 工具调用产生的中间消息只在本次请求内使用，最终回答和来源区正常保存到会话
+- 每条搜索/抓取的工具调用都会在回答中展示一张结果卡片：搜索卡片含查询词、结果条数及每条结果的标题、链接、站点与摘要；抓取卡片含网页标题、URL 与正文。卡片默认折叠，点击标题栏展开/收起。这些卡片随消息持久化，重新打开会话仍可查看，但不会作为上下文发给模型
 - 工具调用前的思考内容会保留在回答中，不会因随后的搜索/整理而消失
 
 部分 OpenAI 兼容端点不支持 `tools` 参数。首轮请求因该参数返回 HTTP 400/422 时会自动去掉联网工具重试一次，并提示当前模型不支持联网工具。
@@ -103,7 +109,7 @@ release 按 ABI 分包（`app/build/outputs/apk/release/`），每个包只含�
 
 ```
 ├── app/
-│   ├── build.gradle                # 构建配置：versionName 1.6.0 / versionCode 25 / compileSdk 34
+│   ├── build.gradle                # 构建配置：versionName 1.7.0 / versionCode 26 / compileSdk 34
 │   ├── keystore/mc.jks             # 签名密钥库
 │   └── src/main/
 │       ├── AndroidManifest.xml     # 包名 xyz.zip8919.app.aichat，6 个 Activity
