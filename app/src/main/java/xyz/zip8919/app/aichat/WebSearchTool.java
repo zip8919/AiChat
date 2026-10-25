@@ -29,9 +29,13 @@ public class WebSearchTool {
     private static final String FETCH_PATH = "/v1/tools/fetch";
     private static final int DEFAULT_COUNT = 5;
     private static final int MAX_COUNT = 10;
+    /** 单条搜索摘要的上限（字符）：摘要会一次性进入上下文，不裁剪太费 token。 */
+    private static final int MAX_SUMMARY_CHARS = 1200;
+    /** 一次搜索内所有条目摘要的合计上限（字符），超出部分只保留标题与链接。 */
+    private static final int MAX_TOTAL_SUMMARY_CHARS = 6000;
     /**
      * 仅作为网络读取的 OOM / 内存保护上限（1MB），不是业务截断：
-     * 搜索摘要与抓取正文都不再做任何字数裁剪，完整传给模型、完整保存、完整展示。
+     * web_fetch 的正文仍完整传给模型、完整保存、完整展示。
      */
     private static final int MAX_RESPONSE_CHARS = 1024 * 1024;
     private static final int SEARCH_TIMEOUT_MS = 25000;
@@ -191,6 +195,11 @@ public class WebSearchTool {
         JSONObject json = new JSONObject(post.body);
         JSONArray results = json.optJSONArray("results");
         JSONArray out = new JSONArray();
+        int rawTotal = 0;
+        int keptTotal = 0;
+        // 单次搜索的摘要总预算：几条结果叠加后仍可能撑爆上下文，
+        // 所以在「单条上限」之外再加一层总量控制，超出的条目只保留标题与链接。
+        int budget = MAX_TOTAL_SUMMARY_CHARS;
         if (results != null) {
             for (int i = 0; i < results.length(); i++) {
                 JSONObject item = results.optJSONObject(i);
@@ -200,6 +209,15 @@ public class WebSearchTool {
                 row.put("url", item.optString("url", ""));
                 String summary = item.optString("summary", "");
                 if (summary.length() == 0) summary = item.optString("snippet", "");
+                rawTotal += summary.length();
+                int allow = Math.min(MAX_SUMMARY_CHARS, budget);
+                if (allow <= 0) {
+                    summary = "";
+                } else if (summary.length() > allow) {
+                    summary = summary.substring(0, allow) + "…";
+                }
+                budget -= summary.length();
+                keptTotal += summary.length();
                 row.put("summary", summary);
                 if (item.has("date") && !item.isNull("date")) {
                     row.put("date", item.optString("date", ""));
@@ -214,7 +232,8 @@ public class WebSearchTool {
         JSONObject result = new JSONObject();
         result.put("query", query);
         result.put("results", out);
-        LogUtil.i(TAG, "search <- %d results", out.length());
+        LogUtil.i(TAG, "search <- %d results, summary %d -> %d chars (per=%d, total=%d)",
+                out.length(), rawTotal, keptTotal, MAX_SUMMARY_CHARS, MAX_TOTAL_SUMMARY_CHARS);
         return result.toString();
     }
 
