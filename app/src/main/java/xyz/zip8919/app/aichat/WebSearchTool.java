@@ -390,6 +390,21 @@ public class WebSearchTool {
      */
     public static String buildTraceBlock(String toolName, JSONObject args, String toolResult) {
         try {
+            // 时间工具没有检索结果，单独走一条展示分支，否则会渲染成「搜索（0 条）」
+            if (TOOL_TIME.equals(toolName)) {
+                JSONObject display = new JSONObject();
+                display.put("tool", TOOL_TIME);
+                JSONObject t = toolResult == null || toolResult.trim().length() == 0
+                        ? null : new JSONObject(toolResult);
+                if (t != null && t.has("error") && !t.isNull("error")) {
+                    display.put("error", sanitizeMarker(t.optString("error", ""), 400));
+                } else if (t != null) {
+                    display.put("datetime", sanitizeMarker(t.optString("datetime", ""), 60));
+                    display.put("weekday", sanitizeMarker(t.optString("weekday", ""), 20));
+                    display.put("timezone", sanitizeMarker(t.optString("timezone", ""), 60));
+                }
+                return TRACE_START + display.toString() + TRACE_END;
+            }
             JSONObject display = new JSONObject();
             display.put("tool", toolName == null ? "" : toolName);
             if (args != null) {

@@ -239,6 +239,7 @@ public class ConversationManager {
             json.put("model", conv.model != null ? conv.model : "");
             json.put("systemPrompt", conv.systemPrompt != null ? conv.systemPrompt : "");
             json.put("titleGenerated", conv.titleGenerated);
+            json.put("titleRequested", conv.titleRequested);
 
             JSONArray msgs = new JSONArray();
             for (Message m : conv.messages) {
@@ -246,6 +247,12 @@ public class ConversationManager {
                 mj.put("role", m.role);
                 mj.put("content", m.content);
                 mj.put("timestamp", m.timestamp);
+                if (m.apiText != null && m.apiText.length() > 0) {
+                    mj.put("apiText", m.apiText);
+                }
+                if (m.toolHistory != null && m.toolHistory.length() > 2) {
+                    mj.put("toolHistory", m.toolHistory);
+                }
                 // 失败标记与错误详情需要重启后仍可见，因此一并落盘；
                 // 但它们只是显示用字段，不会进入请求体（见 MainActivity.buildChatConversation）
                 if (m.sendFailed) {
@@ -291,6 +298,7 @@ public class ConversationManager {
             conv.model = json.optString("model", "");
             conv.systemPrompt = json.optString("systemPrompt", "");
             conv.titleGenerated = json.optBoolean("titleGenerated", false);
+            conv.titleRequested = json.optBoolean("titleRequested", conv.titleGenerated);
 
             conv.messages.clear();
             JSONArray msgs = json.optJSONArray("messages");
@@ -303,6 +311,8 @@ public class ConversationManager {
                     m.timestamp = mj.optLong("timestamp", System.currentTimeMillis());
                     m.sendFailed = mj.optBoolean("sendFailed", false);
                     m.errorDetail = mj.optString("errorDetail", "");
+                    m.apiText = mj.optString("apiText", "");
+                    m.toolHistory = mj.optString("toolHistory", "");
                     JSONArray sa = mj.optJSONArray("sources");
                     if (sa != null) {
                         for (int j = 0; j < sa.length(); j++) {

@@ -1096,9 +1096,12 @@ public class MainActivity extends Activity {
         Conversation conv = conversationManager.getCurrentConversation();
         boolean isFirstMsg = conv.messages.size() == 1;
         boolean autoTitle = SettingsActivity.isAutoTitleEnabled(this);
-        LogUtil.d(TAG, "title check: isFirstMsg=%s autoTitle=%s titleGenerated=%s",
-                isFirstMsg, autoTitle, conv.titleGenerated);
-        if (isFirstMsg && !conv.titleGenerated) {
+        LogUtil.d(TAG, "title check: isFirstMsg=%s autoTitle=%s titleGenerated=%s titleRequested=%s",
+                isFirstMsg, autoTitle, conv.titleGenerated, conv.titleRequested);
+        // titleRequested 在发起请求前就置位：否则「首轮回复失败回滚/删除消息」后
+        // 再发一条又会满足 size==1，同一个会话会重复请求标题。
+        if (isFirstMsg && !conv.titleGenerated && !conv.titleRequested) {
+            conv.titleRequested = true;
             // 先落一个「消息前 15 字」的兜底标题：自动标题关闭、生成失败或返回空时都保留它
             applyFallbackTitle(conv, input);
             if (autoTitle) {
@@ -1117,7 +1120,37 @@ public class MainActivity extends Activity {
         sendStreamingRequest(provider, thinkingLevel, gen);
     }
 
+    /**
+     * 工具轮次中途失败后的续跑状态：保留已经回放给模型的 tool_calls/tool 结果，
+     * 只重新发最后一次请求，而不是把整条用户消息重发一遍。
+     */
+    private static class ResumeState {
+        final int aiIndex;
+        final int round;
+        final String trace;
+        final JSONArray conversation;
+        final List<String[]> sources;
+        final String apiText;
+        final String toolHistoryJson;
+
+        ResumeState(int aiIndex, int round, String trace, JSONArray conversation,
+                List<String[]> sources, String apiText, String toolHistoryJson) {
+            this.aiIndex = aiIndex;
+            this.round = round;
+            this.trace = trace;
+            this.conversation = conversation;
+            this.sources = sources;
+            this.apiText = apiText;
+            this.toolHistoryJson = toolHistoryJson;
+        }
+    }
+
     private void sendStreamingRequest(final ProviderInfo provider, final String thinkingLevel, final int generation) {
+        sendStreamingRequest(provider, thinkingLevel, generation, null);
+    }
+
+    private void sendStreamingRequest(final ProviderInfo provider, final String thinkingLevel,
+            final int generation, final ResumeState resume) {
         final boolean realtimeRenderEnabled = SettingsActivity.isRealtimeRenderEnabled(this);
         final boolean streamEnabled = SettingsActivity.isStreamEnabled(this);
         final boolean webSearchEnabled = SettingsActivity.isWebSearchEnabled(this);
@@ -1146,20 +1179,34 @@ public class MainActivity extends Activity {
                 searchProvider == null ? "none" : searchProvider.name);
         isRequestInProgress.set(true);
 
-        final Message aiMsg = new Message(Message.ROLE_ASSISTANT, "");
-        messages.add(aiMsg);
-        final int aiIndex = messages.size() - 1;
+        final Message aiMsg;
+        final int aiIndex;
+        if (resume != null) {
+            // 续跑：复用已存在的那条 AI 消息，不新增占位、不重复插 DOM
+            aiMsg = messages.get(resume.aiIndex);
+            aiIndex = resume.aiIndex;
+            LogUtil.i(TAG, "resume request from aiIndex=%d, round=%d, traceLen=%d",
+                    aiIndex, resume.round, resume.trace == null ? 0 : resume.trace.length());
+        } else {
+            aiMsg = new Message(Message.ROLE_ASSISTANT, "");
+            messages.add(aiMsg);
+            aiIndex = messages.size() - 1;
+        }
         // 在 UI 线程做一次快照：请求线程遍历时 UI 线程可能结构性修改 messages，
         // 直接遍历会抛 ConcurrentModificationException
         final List<Message> requestSnapshot = new ArrayList<Message>(messages);
         final String originalQuestion = lastUserContent(requestSnapshot);
-        LogUtil.d(TAG, "AI placeholder added at index=%d, total=%d", aiIndex, messages.size());
+        LogUtil.d(TAG, "AI message at index=%d, total=%d", aiIndex, messages.size());
 
-        // Append AI placeholder div
+        // Append AI placeholder div（续跑时页面里已经有这条消息，只需清掉错误卡片）
         runOnUiThread(new Runnable() {
             public void run() {
-                LogUtil.v(TAG, "webview js: appendAiDiv()");
-                webViewEvalJs("appendAiDiv()");
+                if (resume != null) {
+                    webViewEvalJs("clearAssistantFailed(" + aiIndex + ")");
+                } else {
+                    LogUtil.v(TAG, "webview js: appendAiDiv()");
+                    webViewEvalJs("appendAiDiv()");
+                }
             }
         });
 
@@ -1181,7 +1228,23 @@ public class MainActivity extends Activity {
         currentRequestThread = new Thread(new Runnable() {
             public void run() {
                 final StringBuilder rawContent = new StringBuilder();
-                final List<String[]> searchSources = new ArrayList<String[]>();
+                // 本条回复真正发给模型的纯文本（不含 thinking/tool 标记），落盘后供后续轮次回放
+                final StringBuilder apiTextBuilder = new StringBuilder(
+                        resume != null && resume.apiText != null ? resume.apiText : "");
+                // 本条回复产生的工具调用历史（assistant tool_calls + tool 结果）
+                // 续跑时先把之前已经完成的轮次搬进来，避免再次失败时历史丢失
+                final JSONArray toolHistory = new JSONArray();
+                if (resume != null && resume.toolHistoryJson != null
+                        && resume.toolHistoryJson.length() > 2) {
+                    try {
+                        JSONArray prev = new JSONArray(resume.toolHistoryJson);
+                        for (int i = 0; i < prev.length(); i++) toolHistory.put(prev.get(i));
+                    } catch (Exception e) {
+                        LogUtil.w(TAG, "resume: bad toolHistory, starting empty: %s", e.getMessage());
+                    }
+                }
+                final List<String[]> searchSources = resume != null
+                        ? new ArrayList<String[]>(resume.sources) : new ArrayList<String[]>();
                 final boolean[] warnedNoSearchKey = {false};
                 final int[] chunkCount = {0};
                 final int[] thinkingChunks = {0};
@@ -1200,17 +1263,30 @@ public class MainActivity extends Activity {
                 final String[] errorDetail = {""};
                 // 当前轮次：异常分支在 try 外也要读，故用单元素数组
                 final int[] roundRef = {0};
+                // 最后一次 HTTP 状态（-1 表示没拿到响应）：400/422 说明工具格式被拒，
+                // 这类失败「从出错处重试」也没用，应退回整条消息重发。
+                final int[] lastHttpCode = {-1};
+                // Display text kept for the whole request: thinking + tool cards from
+                // every round. Without this the reasoning emitted before a tool call
+                // was discarded and replaced by the next round / status text.
+                // 声明在 try 外：失败分支在 finally 里还要用它落盘已展示的思考/工具卡片。
+                final StringBuilder trace = new StringBuilder(resume != null && resume.trace != null
+                        ? resume.trace : "");
+                // 已经推送到 DOM 的 base（思考 + 工具卡片）文本：只有它变化时才重渲染，
+                // 避免流式期间每帧都重建上面那一大段
+                final String[] baseRendered = {""};
                 try {
-                    JSONArray conversation = buildChatConversation(requestSnapshot, aiMsg, effectiveSystemPrompt);
+                    JSONArray conversation = resume != null
+                            ? resume.conversation
+                            : buildChatConversation(requestSnapshot, aiMsg, effectiveSystemPrompt);
                     // 时间工具始终提供，所以即便联网关闭也要发送 tools
                     JSONArray toolDefs = WebSearchTool.buildToolDefinitions(webSearchEnabled);
                     boolean toolsEnabled = true;
                     boolean fallbackTried = false;
-                    int round = 0;
-                    // Display text kept for the whole request: thinking + tool cards from
-                    // every round. Without this the reasoning emitted before a tool call
-                    // was discarded and replaced by the next round / status text.
-                    final StringBuilder trace = new StringBuilder();
+                    int round = resume != null ? resume.round : 0;
+                    if (resume != null && trace.length() > 0) {
+                        showSearchStatus("正在重新生成...", generation, trace.toString(), aiIndex);
+                    }
 
                     while (true) {
                         roundRef[0] = round;
@@ -1274,6 +1350,7 @@ public class MainActivity extends Activity {
 
                             final String err = "HTTP " + code;
                             requestFailed[0] = true;
+                            lastHttpCode[0] = code;
                             errorDetail[0] = buildErrorDetail(providerName, modelName, chatEndpoint,
                                     round, code, errBody, null);
                             LogUtil.e(TAG, "request FAILED (round %d): %s", round, errorDetail[0]);
@@ -1426,18 +1503,25 @@ public class MainActivity extends Activity {
                                         // Rendering takes hundreds of ms on old devices, so
                                         // it runs off the UI thread and only one render is
                                         // in flight at a time; ticks that arrive meanwhile
-                                        // are dropped. Skipped when realtime rendering is
-                                        // off — the reply then appears once, at the end.
+                                        // are dropped.
+                                        // 刷新分成 base（已完成的思考/工具卡片）和 tail（本轮增量）：
+                                        // 只重画 tail，否则每个分片都把上面的卡片与 markdown
+                                        // 一起打回纯文本。
                                         long now = System.currentTimeMillis();
                                         if (realtimeRenderEnabled && now - lastUpdate > 200 && !renderInFlight[0]) {
                                             lastUpdate = now;
                                             renderInFlight[0] = true;
-                                            final String partial = trace.toString() + roundDisplay.toString();
+                                            final String baseNow = trace.toString();
+                                            final String roundNow = roundDisplay.toString();
+                                            final boolean baseChanged = !baseNow.equals(baseRendered[0]);
                                             final int mySeq = renderSeq.incrementAndGet();
                                             new Thread(new Runnable() {
                                                 public void run() {
-                                                    final String partialHtml =
-                                                            MessageHtmlRenderer.contentToHtml(partial, MainActivity.this);
+                                                    final String baseHtml = baseChanged
+                                                            ? MessageHtmlRenderer.contentToHtml(baseNow, MainActivity.this)
+                                                            : null;
+                                                    final String tailHtml =
+                                                            MessageHtmlRenderer.contentToHtml(roundNow, MainActivity.this);
                                                     runOnUiThread(new Runnable() {
                                                         public void run() {
                                                             renderInFlight[0] = false;
@@ -1445,8 +1529,12 @@ public class MainActivity extends Activity {
                                                                 return; // superseded by a newer render
                                                             }
                                                             if (requestGeneration.get() == generation && aiIndex < messages.size()) {
-                                                                messages.get(aiIndex).content = partial;
-                                                                webViewEvalJs("updateLastMsg('" + jsEscape(partialHtml) + "')");
+                                                                messages.get(aiIndex).content = baseNow + roundNow;
+                                                                if (baseHtml != null) {
+                                                                    baseRendered[0] = baseNow;
+                                                                    webViewEvalJs("streamBase('" + jsEscape(baseHtml) + "')");
+                                                                }
+                                                                webViewEvalJs("streamTailHtml('" + jsEscape(tailHtml) + "')");
                                                             } else {
                                                                 LogUtil.w(TAG, "throttled update skipped: aiIndex=%d >= size=%d",
                                                                         aiIndex, messages.size());
@@ -1455,6 +1543,44 @@ public class MainActivity extends Activity {
                                                     });
                                                 }
                                             }).start();
+                                        } else if (!realtimeRenderEnabled && !renderInFlight[0] && now - lastUpdate > 120) {
+                                            lastUpdate = now;
+                                            final String baseNow = trace.toString();
+                                            final String roundNow = roundDisplay.toString();
+                                            // 只把本轮增量转成纯文本；整段转会把前面的
+                                            // 工具卡片、思考块、markdown 全抹掉
+                                            final String tailPlain = plainForStream(roundNow);
+                                            final boolean baseChanged = !baseNow.equals(baseRendered[0]);
+                                            if (!baseChanged) {
+                                                runOnUiThread(new Runnable() {
+                                                    public void run() {
+                                                        if (requestGeneration.get() == generation && aiIndex < messages.size()) {
+                                                            messages.get(aiIndex).content = baseNow + roundNow;
+                                                            webViewEvalJs("streamTailText('" + jsEscape(tailPlain) + "')");
+                                                        }
+                                                    }
+                                                });
+                                            } else {
+                                                // trace 刚追加了工具卡片：重建一次 base，再续上本轮文字
+                                                renderInFlight[0] = true;
+                                                new Thread(new Runnable() {
+                                                    public void run() {
+                                                        final String baseHtml =
+                                                                MessageHtmlRenderer.contentToHtml(baseNow, MainActivity.this);
+                                                        runOnUiThread(new Runnable() {
+                                                            public void run() {
+                                                                renderInFlight[0] = false;
+                                                                if (requestGeneration.get() == generation && aiIndex < messages.size()) {
+                                                                    baseRendered[0] = baseNow;
+                                                                    messages.get(aiIndex).content = baseNow + roundNow;
+                                                                    webViewEvalJs("streamBase('" + jsEscape(baseHtml) + "')");
+                                                                    webViewEvalJs("streamTailText('" + jsEscape(tailPlain) + "')");
+                                                                }
+                                                            }
+                                                        });
+                                                    }
+                                                }).start();
+                                            }
                                         }
                                     } catch (Exception e) {
                                         LogUtil.w(TAG, "failed to parse SSE chunk#%d: %s | raw=%s",
@@ -1480,7 +1606,11 @@ public class MainActivity extends Activity {
                         if (roundToolCalls.length() > 0 && hasUsableToolCall(roundToolCalls)) {
                             // Keep this round's reasoning/partial answer visible.
                             trace.append(roundDisplay);
-                            appendAssistantToolCalls(conversation, roundContent.toString(), roundToolCalls);
+                            // 注意：这里不把 roundContent 累进 apiText——工具轮次的正文
+                            // 已经作为 assistant(tool_calls).content 存在于 toolHistory 里，
+                            // 再拼一次会让模型看到重复的同一段回答。
+                            appendAssistantToolCalls(conversation, toolHistory,
+                                    roundContent.toString(), roundToolCalls);
                             // 本轮实际执行计数：超过上限的调用只回一条占位结果，不发请求
                             int executedThisRound = 0;
                             for (int i = 0; i < roundToolCalls.length(); i++) {
@@ -1492,7 +1622,7 @@ public class MainActivity extends Activity {
                                 // 一轮内所有 tool_calls 都必须有对应的 tool 结果，否则下一轮
                                 // 请求的 assistant/tool 配对不完整，多数端点会直接 400。
                                 if (executedThisRound >= maxCallsPerRound) {
-                                    appendToolResult(conversation, id, limitResultJson(maxCallsPerRound));
+                                    appendToolResult(conversation, toolHistory, id, limitResultJson(maxCallsPerRound));
                                     LogUtil.w(TAG, "tool call %d/%d NOT executed: per-round limit %d reached (tool=%s)",
                                             i + 1, roundToolCalls.length(), maxCallsPerRound, name);
                                     continue;
@@ -1538,11 +1668,9 @@ public class MainActivity extends Activity {
                                 }
 
                                 WebSearchTool.extractSources(toolResult, searchSources);
-                                appendToolResult(conversation, id, toolResult);
-                                // 时间工具没有检索内容，不打卡片，结果由模型直接在回答中引用
-                                if (!WebSearchTool.TOOL_TIME.equals(name)) {
-                                    trace.append(WebSearchTool.buildTraceBlock(name, args, toolResult));
-                                }
+                                appendToolResult(conversation, toolHistory, id, toolResult);
+                                // 所有工具都打卡片：时间工具此前被跳过，界面上完全看不到
+                                trace.append(WebSearchTool.buildTraceBlock(name, args, toolResult));
                                 if (requestGeneration.get() == generation) {
                                     renderSeq.incrementAndGet(); // drop any in-flight stream render
                                     renderTraceAsync(trace.toString(), generation, null, aiIndex);
@@ -1558,6 +1686,9 @@ public class MainActivity extends Activity {
                         }
 
                         trace.append(roundDisplay);
+                        // 最终回复的正文（只有这一轮要作为最后一条 assistant 消息回放）
+                        apiTextBuilder.setLength(0);
+                        apiTextBuilder.append(roundContent);
                         rawContent.setLength(0);
                         rawContent.append(trace);
                         finalContent = rawContent.toString();
@@ -1566,7 +1697,11 @@ public class MainActivity extends Activity {
 
                     // 来源独立成结构字段：不拼接正文，避免后续每次请求都把来源列表再喂回模型
                     aiMsg.sources = dedupeSources(searchSources, ConversationManager.MAX_SOURCES);
-                    LogUtil.i(TAG, "sources collected: %d", aiMsg.sources.size());
+                    // 结构化落盘：下一次请求靠 apiText 还原正文、靠 toolHistory 回放工具调用
+                    aiMsg.apiText = apiTextBuilder.toString();
+                    if (toolHistory.length() > 0) aiMsg.toolHistory = toolHistory.toString();
+                    LogUtil.i(TAG, "sources collected: %d, apiText=%d chars, toolHistory=%d entries",
+                            aiMsg.sources.size(), aiMsg.apiText.length(), toolHistory.length());
                     rawContent.setLength(0);
                     rawContent.append(finalContent);
                     renderSeq.incrementAndGet(); // invalidate any in-flight stream render
@@ -1602,7 +1737,17 @@ public class MainActivity extends Activity {
                             public void run() {
                                 try {
                                     if (failed) {
-                                        // 请求失败：移除空 assistant 占位，避免空气泡落盘/进入后续请求体
+                                        // 工具结果已经回传给模型的轮次：保留这条 AI 消息和
+                                        // 已展示的思考/工具卡片，挂「从出错处重试」，不再重发
+                                        // 整条用户消息，也不必重新执行已经跑过的工具。
+                                        if (roundRef[0] > 0 && toolHistory.length() > 0
+                                                && lastHttpCode[0] != 400 && lastHttpCode[0] != 422) {
+                                            markAssistantFailed(finalIdx, errorDetail[0],
+                                                    trace.toString(), toolHistory.toString(),
+                                                    apiTextBuilder.toString(), generation);
+                                            return;
+                                        }
+                                        // 首轮就失败：移除空 assistant 占位，避免空气泡落盘/进入后续请求体
                                         rollbackEmptyAssistantPlaceholder(finalIdx, generation);
                                         // 失败标记打到对应的用户消息上（错误卡片 + 点击重试）
                                         markSendFailed(finalIdx, errorDetail[0], generation);
@@ -1651,15 +1796,158 @@ public class MainActivity extends Activity {
             sm.put("content", sysPrompt);
             msgs.put(sm);
         }
+        // 只回放最近几条回复的工具历史：更早的只保留正文，避免长会话把上下文撑爆
+        final int HISTORY_TOOL_TURNS = 3;
+        int aiTotal = 0;
+        for (Message m : snapshot) {
+            if (m != aiMsg && m.isAssistant()) aiTotal++;
+        }
+        int aiSeen = 0;
         for (Message m : snapshot) {
             if (m == aiMsg) continue;
+            if (m.isAssistant()) {
+                boolean replayTools = (aiTotal - aiSeen) <= HISTORY_TOOL_TURNS;
+                aiSeen++;
+                appendAssistantHistory(msgs, m, replayTools);
+                continue;
+            }
             JSONObject mm = new JSONObject();
             mm.put("role", m.role);
-            String sendContent = m.isAssistant() ? ApiClient.removeThinkingContent(m.content) : m.content;
+            String sendContent = m.content;
             mm.put("content", sendContent == null ? "" : sendContent);
             msgs.put(mm);
         }
         return msgs;
+    }
+
+    /**
+     * 历史回放时单条摘要的上限（字）。摘要之外的信息（标题、链接、站点、日期）
+     * 一律保留：链接是模型判断来源的关键，砍掉比砍摘要损失大得多。
+     */
+    private static final int HISTORY_SUMMARY_MAX = 250;
+    /** 所有条目摘要的合计预算：超出后剩余的条目只留标题与链接。 */
+    private static final int HISTORY_SUMMARY_TOTAL = 1500;
+    /** 网页抓取的正文上限（字）。 */
+    private static final int HISTORY_FETCH_MAX = 600;
+    /** 序列化后的总长兜底，防止条目极多时把上下文撑爆。 */
+    private static final int HISTORY_RESULT_MAX = 3000;
+
+    /**
+     * 把一条历史 AI 回复回放成请求体里的若干条消息：先 assistant(tool_calls) +
+     * tool(结果) 的配对，最后是最终正文。此前这里只发一条纯文本，工具调用与
+     * 结果被整段丢弃，模型因此完全不知道上文搜过什么。
+     */
+    private static void appendAssistantHistory(JSONArray msgs, Message m, boolean replayTools)
+            throws Exception {
+        String hist = replayTools ? m.toolHistory : "";
+        boolean replayed = false;
+        if (hist != null && hist.length() > 2) {
+            try {
+                JSONArray arr = new JSONArray(hist);
+                for (int i = 0; i < arr.length(); i++) {
+                    JSONObject o = arr.optJSONObject(i);
+                    if (o == null) continue;
+                    if ("tool".equals(o.optString("role", ""))) {
+                        JSONObject t = new JSONObject();
+                        t.put("role", "tool");
+                        t.put("tool_call_id", o.optString("tool_call_id", ""));
+                        t.put("content", compactHistoryResult(o.optString("content", "")));
+                        msgs.put(t);
+                    } else {
+                        msgs.put(o);
+                    }
+                }
+                replayed = arr.length() > 0;
+            } catch (Exception e) {
+                LogUtil.w(TAG, "appendAssistantHistory: bad toolHistory, fallback to text: %s", e.getMessage());
+            }
+        }
+
+        String text = m.apiText != null && m.apiText.trim().length() > 0
+                ? m.apiText.trim()
+                : MessageHtmlRenderer.plainTextOf(m.content);
+        if (text.length() > 0 || !replayed) {
+            JSONObject mm = new JSONObject();
+            mm.put("role", "assistant");
+            mm.put("content", text);
+            msgs.put(mm);
+        }
+    }
+
+    /** 历史里的工具结果只保留前若干字符，避免每次请求都把旧搜索结果整段重发。 */
+    /**
+     * 压缩一条历史工具结果，供下一轮请求回放。
+     *
+     * <p>按结构压缩而不是硬截断：硬截断会把 JSON 砍成半截，后半段的链接全部丢失，
+     * 模型既读不懂也拿不到来源。这里保留所有条目的 title/url/site/date，只压
+     * summary；只有总长仍超预算时才按条丢弃，并注明剩余条数。
+     *
+     * <p>必须是纯函数：相同输入永远得到逐字节相同的输出。历史消息属于请求前缀，
+     * 前缀一变（哪怕只差一个字），后面的 prompt 缓存就全部失效。
+     */
+    private static String compactHistoryResult(String result) {
+        if (result == null || result.length() == 0) return "";
+        try {
+            JSONObject json = new JSONObject(result);
+            JSONArray results = json.optJSONArray("results");
+            if (results == null) {
+                // 网页抓取：正文太长，留开头即可
+                String content = json.optString("content", "");
+                if (content.length() > HISTORY_FETCH_MAX) {
+                    json.put("content", content.substring(0, HISTORY_FETCH_MAX) + "…（正文已截断）");
+                }
+                return fitHistoryLimit(json);
+            }
+            int budget = HISTORY_SUMMARY_TOTAL;
+            for (int i = 0; i < results.length(); i++) {
+                JSONObject item = results.optJSONObject(i);
+                if (item == null) continue;
+                String summary = item.optString("summary", "");
+                int allow = Math.min(HISTORY_SUMMARY_MAX, budget);
+                if (allow <= 0) {
+                    item.put("summary", "");
+                    continue;
+                }
+                if (summary.length() > allow) summary = summary.substring(0, allow) + "…";
+                budget -= summary.length();
+                item.put("summary", summary);
+            }
+            return fitHistoryLimit(json);
+        } catch (Exception e) {
+            // 不是合法 JSON（极少见）：退化为定长截断
+            return result.length() <= HISTORY_RESULT_MAX
+                    ? result : result.substring(0, HISTORY_RESULT_MAX) + "…（历史结果已压缩）";
+        }
+    }
+
+    /** 序列化并按条兜底：超过总长上限时保留能放下的条目，注明被省略的条数。 */
+    private static String fitHistoryLimit(JSONObject json) {
+        String s = json.toString();
+        if (s.length() <= HISTORY_RESULT_MAX) return s;
+        try {
+            JSONArray results = json.optJSONArray("results");
+            if (results == null) {
+                return s.substring(0, HISTORY_RESULT_MAX) + "…（历史结果已压缩）";
+            }
+            JSONArray kept = new JSONArray();
+            int total = 0;
+            for (int i = 0; i < results.length(); i++) {
+                JSONObject item = results.optJSONObject(i);
+                if (item == null) continue;
+                String one = item.toString();
+                if (total + one.length() > HISTORY_RESULT_MAX) break;
+                kept.put(item);
+                total += one.length();
+            }
+            int dropped = results.length() - kept.length();
+            JSONObject out = new JSONObject();
+            out.put("query", json.optString("query", ""));
+            out.put("results", kept);
+            if (dropped > 0) out.put("truncated", "另有 " + dropped + " 条结果未列出");
+            return out.toString();
+        } catch (Exception e) {
+            return s.substring(0, HISTORY_RESULT_MAX) + "…（历史结果已压缩）";
+        }
     }
 
     private JSONObject buildChatRequestBody(String model, ProviderInfo provider, String thinkingLevel,
@@ -1802,8 +2090,12 @@ public class MainActivity extends Activity {
         return false;
     }
 
-    private static void appendAssistantToolCalls(JSONArray conversation, String content,
-            JSONArray calls) throws Exception {
+    /**
+     * 追加一轮 assistant(tool_calls)。{@code mirror} 非空时同时记录到工具历史，
+     * 供后续轮次回放以及「从出错处重试」使用。
+     */
+    private static void appendAssistantToolCalls(JSONArray conversation, JSONArray mirror,
+            String content, JSONArray calls) throws Exception {
         JSONArray payload = new JSONArray();
         for (int i = 0; i < calls.length(); i++) {
             JSONObject tc = calls.getJSONObject(i);
@@ -1833,15 +2125,17 @@ public class MainActivity extends Activity {
         assistant.put("content", content == null || content.length() == 0 ? JSONObject.NULL : content);
         assistant.put("tool_calls", payload);
         conversation.put(assistant);
+        if (mirror != null) mirror.put(assistant);
     }
 
-    private static void appendToolResult(JSONArray conversation, String id, String content)
-            throws Exception {
+    private static void appendToolResult(JSONArray conversation, JSONArray mirror, String id,
+            String content) throws Exception {
         JSONObject tm = new JSONObject();
         tm.put("role", "tool");
         tm.put("tool_call_id", id == null ? "" : id);
         tm.put("content", content == null ? "" : content);
         conversation.put(tm);
+        if (mirror != null) mirror.put(tm);
     }
 
     private static String toolStatusText(String name, JSONObject args) {
@@ -1953,6 +2247,57 @@ public class MainActivity extends Activity {
     }
 
     /**
+     * 工具轮次中途失败：保留这条 AI 消息（含思考与工具卡片），挂一张带
+     * 「从出错处重试」的错误卡片。工具历史一并落盘，重启后仍可继续。
+     */
+    private void markAssistantFailed(final int aiIndex, final String detail, final String traceText,
+            final String toolHistoryJson, final String apiText, final int generation) {
+        if (aiIndex < 0 || aiIndex >= messages.size()) return;
+        Message am = messages.get(aiIndex);
+        if (am == null || !am.isAssistant()) return;
+        am.content = traceText == null ? "" : traceText;
+        am.errorDetail = detail == null ? "" : detail;
+        am.apiText = apiText == null ? "" : apiText;
+        am.toolHistory = toolHistoryJson == null ? "" : toolHistoryJson;
+        am.sendFailed = true;
+        LogUtil.i(TAG, "markAssistantFailed: idx=%d traceLen=%d tools=%d",
+                aiIndex, am.content.length(), am.toolHistory.length());
+
+        final String content = am.content;
+        new Thread(new Runnable() {
+            public void run() {
+                final String html = MessageHtmlRenderer.contentToHtml(content, MainActivity.this);
+                runOnUiThread(new Runnable() {
+                    public void run() {
+                        if (requestGeneration.get() != generation) return;
+                        if (aiIndex >= messages.size()) return;
+                        webViewEvalJs("finalizeLast(" + aiIndex + ")");
+                        webViewEvalJs("updateMsgAt(" + aiIndex + ",'" + jsEscape(html) + "')");
+                        String card = MessageHtmlRenderer.renderAssistantErrorCard(messages.get(aiIndex), aiIndex);
+                        webViewEvalJs("markAssistantFailed(" + aiIndex + ",'" + jsEscape(card) + "')");
+                        conversationManager.saveCurrentConversation();
+                    }
+                });
+            }
+        }) {{ setName("aichat-render-" + System.currentTimeMillis()); }}.start();
+    }
+
+    /** 去掉展示标记后的纯文本，供关闭实时渲染时的流式直出使用。 */
+    private static String plainForStream(String text) {
+        if (text == null) return "";
+        String s = text.replace("[thinking]", "").replace("[/thinking]", "");
+        int guard = 0;
+        while (guard++ < 64) {
+            int i = s.indexOf("[tool]");
+            if (i < 0) break;
+            int j = s.indexOf("[/tool]", i);
+            if (j < 0) { s = s.substring(0, i); break; }
+            s = s.substring(0, i) + s.substring(j + 7);
+        }
+        return s;
+    }
+
+    /**
      * 把失败标记写到本次请求对应的用户消息上，并让 DOM 立刻显示错误卡片。
      * 失败标记与详情会随会话落盘，重启后仍在。
      */
@@ -2033,6 +2378,15 @@ public class MainActivity extends Activity {
                         if (requestGeneration.get() != generation) return;
                         if (aiIndex >= 0 && aiIndex < messages.size()
                                 && messages.get(aiIndex).isAssistant()) {
+                            String cur = messages.get(aiIndex).content;
+                            // 迟到的中间态渲染不能覆盖更完整的内容：内容只会单调变长，
+                            // 比当前短的快照一定是旧轮次的，直接丢弃（否则会把已经
+                            // 生成的后半段正文冲掉，只剩第一轮内容）。
+                            if (cur != null && cur.length() > snapshot.length()) {
+                                LogUtil.d(TAG, "stale trace render dropped: cur=%d, snapshot=%d",
+                                        cur.length(), snapshot.length());
+                                return;
+                            }
                             messages.get(aiIndex).content = snapshot;
                         }
                         webViewEvalJs("updateLastMsg('" + jsEscape(html) + "')");
@@ -2425,6 +2779,32 @@ public class MainActivity extends Activity {
                         }
                     } catch (Exception e) {
                         LogUtil.w(TAG, "retryFailedUserMessage failed: %s", e.getMessage());
+                    }
+                }
+            });
+        }
+
+        /** 工具轮次中途失败的 AI 消息：从出错处继续，不重发整条用户消息。 */
+        @JavascriptInterface
+        public void retryFailedAssistant(final String idx) {
+            LogUtil.d(TAG, "JsBridge.retryFailedAssistant: idx=%s", idx);
+            handler.post(new Runnable() {
+                public void run() {
+                    try {
+                        int pos = Integer.parseInt(idx);
+                        if (pos < 0 || pos >= messages.size()) return;
+                        Message m = messages.get(pos);
+                        if (m == null || !m.isAssistant() || !m.sendFailed) {
+                            LogUtil.d(TAG, "retryFailedAssistant ignored: pos=%d not a failed AI msg", pos);
+                            return;
+                        }
+                        if (isRequestInProgress.get()) {
+                            Toast.makeText(MainActivity.this, "当前回复仍在进行，请先停止", Toast.LENGTH_SHORT).show();
+                            return;
+                        }
+                        resumeAssistantRequest(pos);
+                    } catch (Exception e) {
+                        LogUtil.w(TAG, "retryFailedAssistant failed: %s", e.getMessage());
                     }
                 }
             });
@@ -3546,7 +3926,11 @@ public class MainActivity extends Activity {
     }
 
     private String getMessageText(Message msg) {
-        if (msg.isAssistant()) return ApiClient.removeThinkingContent(msg.content);
+        if (msg.isAssistant()) {
+            // 取完整正文：content 里混着 [thinking]/[tool] 展示块，用普通字符串剥离
+            // 会在遇到未闭合标记时把后半段整段吃掉（长按菜单只剩第一段的根因）。
+            return MessageHtmlRenderer.plainTextOf(msg.content);
+        }
         return msg.content;
     }
 
@@ -3619,6 +4003,13 @@ public class MainActivity extends Activity {
                         showConfirmDialog("确定修改本条消息？", new Runnable() {
                             public void run() {
                                 msg.content = newContent;
+                                if (msg.isAssistant()) {
+                                    // 手改过正文后，旧的工具历史/纯文本不再对应当前内容
+                                    msg.apiText = newContent;
+                                    msg.toolHistory = "";
+                                    msg.sendFailed = false;
+                                    msg.errorDetail = "";
+                                }
                                 // DOM update: only update this message's div; render off the UI thread
                                 new Thread(new Runnable() {
                                     @Override
@@ -3705,6 +4096,89 @@ public class MainActivity extends Activity {
                 }
             });
         }
+    }
+
+    /**
+     * 工具轮次中途失败后，从出错处继续：把已经完成的工具调用/结果重新拼进请求，
+     * 只重发最后一次请求。已执行过的工具不会重跑，用户也不必重发整条消息。
+     */
+    private void resumeAssistantRequest(final int pos) {
+        if (pos < 0 || pos >= messages.size()) {
+            LogUtil.w(TAG, "resumeAssistantRequest: pos=%d out of range (size=%d)", pos, messages.size());
+            return;
+        }
+        final Message am = messages.get(pos);
+        if (am == null || !am.isAssistant()) {
+            LogUtil.w(TAG, "resumeAssistantRequest: pos=%d is not an assistant message", pos);
+            return;
+        }
+        loadSystemPrompt();
+        int selPos = modelSpinner.getSelectedItemPosition();
+        if (selPos < 0 || availableModels == null || selPos >= availableModels.size()) {
+            Toast.makeText(this, "未选择模型", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        ProviderInfo provider = configManager.getProvider(availableModels.get(selPos).provider);
+        if (provider == null) {
+            Toast.makeText(this, "未选择模型", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        try {
+            boolean webSearchEnabled = SettingsActivity.isWebSearchEnabled(this);
+            String sysPrompt = WebSearchTool.appendToSystemPrompt(systemPrompt, webSearchEnabled);
+            List<Message> prefix = new ArrayList<Message>(messages.subList(0, pos));
+            JSONArray conversation = buildChatConversation(prefix, null, sysPrompt);
+
+            int rounds = 0;
+            if (am.toolHistory != null && am.toolHistory.length() > 2) {
+                JSONArray hist = new JSONArray(am.toolHistory);
+                for (int i = 0; i < hist.length(); i++) {
+                    JSONObject o = hist.optJSONObject(i);
+                    if (o == null) continue;
+                    if (!"tool".equals(o.optString("role", ""))) rounds++;
+                    conversation.put(o);
+                }
+            }
+            if (rounds == 0) {
+                // 没有可续跑的上下文：退化成普通的整条重试
+                LogUtil.i(TAG, "resumeAssistantRequest: no tool history, fallback to resend");
+                resendUserAt(lastUserIndexBefore(pos));
+                return;
+            }
+
+            List<String[]> sources = new ArrayList<String[]>();
+            if (am.sources != null) {
+                for (Message.Source s : am.sources) {
+                    if (s == null || s.url == null || s.url.length() == 0) continue;
+                    sources.add(new String[]{s.title == null ? "" : s.title, s.url});
+                }
+            }
+
+            am.sendFailed = false;
+            am.errorDetail = "";
+            conversationManager.saveCurrentConversation();
+
+            String thinkingLevel = configManager.getThinkingLevel();
+            if (!configManager.isThinkingEnabled()) thinkingLevel = "off";
+            int gen = requestGeneration.incrementAndGet();
+            LogUtil.i(TAG, "resumeAssistantRequest: pos=%d rounds=%d traceLen=%d",
+                    pos, rounds, am.content == null ? 0 : am.content.length());
+            sendStreamingRequest(provider, thinkingLevel, gen,
+                    new ResumeState(pos, rounds, am.content == null ? "" : am.content,
+                            conversation, sources, am.apiText == null ? "" : am.apiText,
+                            am.toolHistory == null ? "" : am.toolHistory));
+        } catch (Exception e) {
+            LogUtil.e(TAG, "resumeAssistantRequest failed: %s", e.getMessage(), e);
+            Toast.makeText(this, "无法从此处继续，请重试整条消息", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    /** pos 之前最近一条用户消息的下标，没有则返回 -1。 */
+    private int lastUserIndexBefore(int pos) {
+        for (int i = Math.min(pos, messages.size()) - 1; i >= 0; i--) {
+            if (messages.get(i).isUser()) return i;
+        }
+        return -1;
     }
 
     /**
@@ -3876,6 +4350,9 @@ public class MainActivity extends Activity {
                     copy.role = src.role;
                     copy.content = src.content;
                     copy.timestamp = src.timestamp;
+                    // 纯文本/工具历史也要一起带走，否则分支里的 AI 回复又退回「只有正文」
+                    copy.apiText = src.apiText;
+                    copy.toolHistory = src.toolHistory;
                     // 来源区跟着消息一起分支，否则分支里的回答会丢掉来源
                     if (src.sources != null && !src.sources.isEmpty()) {
                         for (Message.Source s : src.sources) {

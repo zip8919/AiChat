@@ -22,6 +22,13 @@ public class ConversationManagerActivity extends Activity {
     private static final String PREFS_NAME = "aichat_ui_state";
     private static final String KEY_SCROLL_POS = "history_scroll_pos";
 
+    /**
+     * 只有「从本页点进某个会话、再返回」才恢复上次的滚动位置。
+     * 冷启动（进程重启）和新建会话都必须回到顶部，否则会停在旧位置，
+     * 显得新会话/最新记录被藏起来了。
+     */
+    private static boolean restoreScrollNextTime = false;
+
     private ConversationManager conversationManager;
     private StorageManager storageManager;
     // 进入本页时缓存「当前会话」引用：onCreate 时它必然已存在（由主界面建立），
@@ -73,6 +80,9 @@ public class ConversationManagerActivity extends Activity {
                 LogUtil.d(TAG, "click: new conversation");
                 Conversation conv = conversationManager.createNewConversation();
                 LogUtil.i(TAG, "new conversation created: id=%s -> return to main", conv.id);
+                // 新建会话后列表要回到顶部，不能停在旧位置
+                restoreScrollNextTime = false;
+                uiState.edit().remove(KEY_SCROLL_POS).apply();
                 Intent result = new Intent();
                 result.putExtra("conversation_id", conv.id);
                 setResult(RESULT_OK, result);
@@ -160,6 +170,8 @@ public class ConversationManagerActivity extends Activity {
                 }
                 Conversation conv = conversations.get(pos);
                 LogUtil.i(TAG, "item click: pos=%d id=%s title=%s", pos, conv.id, conv.title);
+                // 返回本页时恢复滚动位置；冷启动/新建会话不恢复
+                restoreScrollNextTime = true;
                 Intent result = new Intent();
                 result.putExtra("conversation_id", conv.id);
                 setResult(RESULT_OK, result);
@@ -258,9 +270,12 @@ public class ConversationManagerActivity extends Activity {
                             adapter.setConversations(conversations);
                         }
                         updateSelectionBar();
-                        int savedPos = uiState.getInt(KEY_SCROLL_POS, 0);
+                        int savedPos = restoreScrollNextTime ? uiState.getInt(KEY_SCROLL_POS, 0) : 0;
+                        restoreScrollNextTime = false;
                         if (savedPos > 0 && savedPos < conversations.size()) {
                             listView.setSelection(savedPos);
+                        } else {
+                            listView.setSelection(0);
                         }
                     }
                 });

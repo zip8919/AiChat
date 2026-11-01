@@ -12,6 +12,11 @@ public class Conversation {
     public String systemPrompt;
     public List<Message> messages;
     public boolean titleGenerated;
+    /**
+     * 已经为本会话发起过自动标题请求。与 titleGenerated（标题真的写入成功）
+     * 分开：请求失败/返回空/还在进行中时也不会被下一条消息再次触发。
+     */
+    public boolean titleRequested;
 
     private static long lastId = 0;
 
@@ -28,6 +33,7 @@ public class Conversation {
         this.model = "";
         this.systemPrompt = "";
         this.titleGenerated = false;
+        this.titleRequested = false;
     }
 
     public Conversation(String id) {

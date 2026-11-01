@@ -187,14 +187,20 @@ public class MessageHtmlRenderer {
             ".err-btn{font-size:11px;padding:3px 10px;margin-right:6px;border-radius:4px;" +
             "border:1px solid #cfd8dc;background:#fff;color:#37474f;}" +
             ".err-btn.retry{background:#e3f2fd;border-color:#90caf9;color:#1565c0;}" +
+            // 流式时正文分两段：base 是已完成的思考/工具卡片（渲染一次后不再动），
+            // tail 是本轮增量。关掉实时渲染时 tail 走纯文本，保留换行，开销远小于 markdown
+            ".stream-tail{word-wrap:break-word;}" +
+            ".stream-tail.plain{white-space:pre-wrap;}" +
+            ".stream-tail.plain::after{content:'▍';color:#90a4ae;}" +
+            ".error-card.inline{display:block;margin:8px 0;max-width:100%;}" +
             "#older-hint{padding:10px 8px;text-align:center;color:#90a4ae;font-size:12px;" +
             "border-bottom:1px dashed #e0e0e0;margin-bottom:6px;" +
             "-webkit-tap-highlight-color:rgba(100,180,255,0.2);}";
 
     private static final String JS =
             "(function(){" +
-            "function addCopyBtns(){" +
-            "var pres=document.querySelectorAll('pre');" +
+            "function addCopyBtns(root){" +
+            "var pres=(root||document).querySelectorAll('pre');" +
             "for(var i=0;i<pres.length;i++){(function(pre){" +
             "if(pre.querySelector('.copy-btn'))return;" +
             "var btn=document.createElement('button');" +
@@ -420,9 +426,65 @@ public class MessageHtmlRenderer {
             "addCopyBtns();applyToolStates(document);smartScrollToBottom();};" +
             "window.updateLastMsg=function(html){" +
             "var ms=document.querySelectorAll('.msg.ai .content');" +
-            "if(ms.length>0){ms[ms.length-1].innerHTML=html;" +
+            "if(ms.length>0){ms[ms.length-1].className='content';" +
+            "ms[ms.length-1].innerHTML=html;" +
             "applyToolStates(ms[ms.length-1]);}" +
             "addCopyBtns();smartScrollToBottom();};" +
+            // 流式输出拆成两段：base（已完成的思考/工具卡片）+ tail（本轮增量）。
+            // 以前每个分片都整体重设 .content，工具轮次结束后上面的卡片和已渲染好的
+            // markdown 会被打回纯文本，看起来像「又变回没渲染的样子」。
+            "window.streamBase=function(html){" +
+            "var ms=document.querySelectorAll('.msg.ai .content');" +
+            "if(ms.length===0)return;" +
+            "var c=ms[ms.length-1];" +
+            "var b=c.querySelector('.stream-base');" +
+            "var t=c.querySelector('.stream-tail');" +
+            "if(!b||!t){" +
+            "var keepTail=t?t.innerHTML:'';" +
+            "c.className='content';" +
+            "c.innerHTML='<div class=\"stream-base\"></div><div class=\"stream-tail\"></div>';" +
+            "b=c.querySelector('.stream-base');t=c.querySelector('.stream-tail');" +
+            "if(keepTail)t.innerHTML=keepTail;}" +
+            "b.innerHTML=html;applyToolStates(b);addCopyBtns(b);};" +
+            "window.streamTailHtml=function(html){" +
+            "var ms=document.querySelectorAll('.msg.ai .content');" +
+            "if(ms.length===0)return;" +
+            "var c=ms[ms.length-1];var t=c.querySelector('.stream-tail');" +
+            "if(!t){var keep=c.innerHTML;" +
+            "c.innerHTML='<div class=\"stream-base\"></div><div class=\"stream-tail\"></div>';" +
+            "c.querySelector('.stream-base').innerHTML=keep;" +
+            "t=c.querySelector('.stream-tail');}" +
+            "t.className='stream-tail';t.innerHTML=html;" +
+            "addCopyBtns(t);smartScrollToBottom();};" +
+            "window.streamTailText=function(text){" +
+            "var ms=document.querySelectorAll('.msg.ai .content');" +
+            "if(ms.length===0)return;" +
+            "var c=ms[ms.length-1];var t=c.querySelector('.stream-tail');" +
+            "if(!t){var keep=c.innerHTML;" +
+            "c.innerHTML='<div class=\"stream-base\"></div><div class=\"stream-tail\"></div>';" +
+            "c.querySelector('.stream-base').innerHTML=keep;" +
+            "t=c.querySelector('.stream-tail');}" +
+            "t.className='stream-tail plain';t.textContent=text;" +
+            "smartScrollToBottom();};" +
+            // 写入失败卡片（工具轮次中途失败时挂在 AI 气泡下方，支持从出错处重试）
+            "window.markAssistantFailed=function(idx,cardHtml){" +
+            "var all=document.querySelectorAll('.msg.ai');" +
+            "for(var i=0;i<all.length;i++){" +
+            "if(all[i].getAttribute('data-idx')===''+idx){" +
+            "var old=all[i].querySelector('.error-card');" +
+            "if(old&&old.parentNode)old.parentNode.removeChild(old);" +
+            "var d=document.createElement('div');d.innerHTML=cardHtml;" +
+            "var card=d.firstElementChild;" +
+            "var menu=all[i].querySelector('.ai-menu-wrap');" +
+            "if(card){if(menu)all[i].insertBefore(card,menu);else all[i].appendChild(card);}" +
+            "return;}}};" +
+            "window.clearAssistantFailed=function(idx){" +
+            "var all=document.querySelectorAll('.msg.ai');" +
+            "for(var i=0;i<all.length;i++){" +
+            "if(all[i].getAttribute('data-idx')===''+idx){" +
+            "var c=all[i].querySelector('.error-card');" +
+            "if(c&&c.parentNode)c.parentNode.removeChild(c);" +
+            "return;}}};" +
             "window.updateLastText=function(text){" +
             "var ms=document.querySelectorAll('.msg.ai .content');" +
             "if(ms.length>0){ms[ms.length-1].textContent=text;}" +
@@ -445,7 +507,7 @@ public class MessageHtmlRenderer {
             "for(var i=0;i<all.length;i++){" +
             "if(all[i].getAttribute('data-idx')===''+idx){" +
             "var isAi=all[i].className.indexOf('msg ai')>=0;" +
-            "if(isAi){var c=all[i].querySelector('.content');if(c){c.innerHTML=html;runScripts(c);}}" +
+            "if(isAi){var c=all[i].querySelector('.content');if(c){c.className='content';c.innerHTML=html;runScripts(c);}}" +
             "else{var b=all[i].querySelector('.bubble');if(b){b.innerHTML=html;runScripts(b);}}" +
             "addCopyBtns();return;}}};" +
             "window.reindexFrom=function(start){" +
@@ -542,6 +604,8 @@ public class MessageHtmlRenderer {
                "<div class=\"content\">" + html + "</div>" +
                // 来源区在 .content 之外，独立折叠；不参与正文，也不进入请求体
                "<div class=\"sources\">" + renderSourcesInner(msg.sources) + "</div>" +
+               // 工具轮次中途失败：保留已展示的思考/工具卡片，卡片提供「从出错处重试」
+               (msg.sendFailed ? renderAssistantErrorCard(msg, index) : "") +
                "<div class=\"ai-menu-wrap\"><button class=\"msg-menu-btn\" onclick=\"if(window.Android)Android.messageMenu('" + idx + "');event.stopPropagation();return false;\">⋯</button></div></div>\n";
     }
 
@@ -582,6 +646,24 @@ public class MessageHtmlRenderer {
                "');event.stopPropagation();return false;\">查看详情</button>" +
                "<button class=\"err-btn retry\" onclick=\"if(window.Android)Android.retryFailedUserMessage('" + idx +
                "');event.stopPropagation();return false;\">重试</button>" +
+               "</div></div>";
+    }
+
+    /** 工具轮次中途失败时，挂在 AI 气泡下方的错误卡片（可保留上下文继续重试）。 */
+    public static String renderAssistantErrorCard(Message msg, int index) {
+        if (msg == null || !msg.sendFailed) return "";
+        String idx = String.valueOf(index);
+        boolean canResume = msg.toolHistory != null && msg.toolHistory.length() > 2;
+        return "<div class=\"error-card inline\">" +
+               "<div class=\"err-title\">回复中断</div>" +
+               "<div class=\"err-summary\">" + esc(errorSummary(msg.errorDetail)) + "</div>" +
+               "<div class=\"err-actions\">" +
+               "<button class=\"err-btn\" onclick=\"if(window.Android)Android.showErrorDetail('" + idx +
+               "');event.stopPropagation();return false;\">查看详情</button>" +
+               (canResume
+                   ? "<button class=\"err-btn retry\" onclick=\"if(window.Android)Android.retryFailedAssistant('"
+                     + idx + "');event.stopPropagation();return false;\">从出错处重试</button>"
+                   : "") +
                "</div></div>";
     }
 
@@ -646,8 +728,8 @@ public class MessageHtmlRenderer {
         int start = 0;
         int blocks = 0;
         while (start < text.length()) {
-            int ts = text.indexOf("[thinking]", start);
-            int gs = text.indexOf(WebSearchTool.TRACE_START, start);
+            int ts = indexOfOutsideCode(text, "[thinking]", start);
+            int gs = indexOfOutsideCode(text, WebSearchTool.TRACE_START, start);
             boolean thinkingNext = ts != -1 && (gs == -1 || ts < gs);
             if (ts == -1 && gs == -1) {
                 html.append(renderMarkdown(text.substring(start), ctx));
@@ -655,7 +737,7 @@ public class MessageHtmlRenderer {
             }
             if (thinkingNext) {
                 if (ts > start) html.append(renderMarkdown(text.substring(start, ts), ctx));
-                int te = text.indexOf("[/thinking]", ts + 10);
+                int te = indexOfOutsideCode(text, "[/thinking]", ts + 10);
                 if (te == -1) {
                     // Streaming: thinking not yet closed
                     LogUtil.v(TAG, "thinking block UNCLOSED at %d, tail=%d chars", ts, text.length() - ts - 10);
@@ -675,7 +757,7 @@ public class MessageHtmlRenderer {
                 start = te + 11;
             } else {
                 if (gs > start) html.append(renderMarkdown(text.substring(start, gs), ctx));
-                int ge = text.indexOf(WebSearchTool.TRACE_END, gs + WebSearchTool.TRACE_START.length());
+                int ge = findToolBlockEnd(text, gs + WebSearchTool.TRACE_START.length());
                 if (ge == -1) {
                     // Unclosed tool block (should not happen): drop the remainder.
                     LogUtil.w(TAG, "tool trace block UNCLOSED at %d, dropping tail", gs);
@@ -691,6 +773,125 @@ public class MessageHtmlRenderer {
         return html.toString();
     }
 
+    /**
+     * 从 {@code from} 开始查找 {@code needle}，跳过围栏代码块与行内代码。
+     * 代码示例里出现的 {@code [tool]} / {@code [thinking]} 不能被当成展示标记，
+     * 否则正文会在标记处被截断。
+     */
+    private static int indexOfOutsideCode(String text, String needle, int from) {
+        int i = Math.max(0, from);
+        int len = text.length();
+        boolean inFence = false, inInline = false;
+        char fenceChar = 0;
+        int fenceLen = 0, inlineRun = 0;
+        while (i < len) {
+            if (i == 0 || text.charAt(i - 1) == '\n') {
+                int j = i, indent = 0;
+                while (j < len && text.charAt(j) == ' ' && indent < 3) { j++; indent++; }
+                if (inFence) {
+                    if (j < len && text.charAt(j) == fenceChar) {
+                        int run = 0, k = j;
+                        while (k < len && text.charAt(k) == fenceChar) { run++; k++; }
+                        int m = k;
+                        while (m < len && (text.charAt(m) == ' ' || text.charAt(m) == '\t')) m++;
+                        if (run >= fenceLen && (m >= len || text.charAt(m) == '\n')) {
+                            i = (m < len) ? m + 1 : m;
+                            inFence = false;
+                            continue;
+                        }
+                    }
+                    i++;
+                    continue;
+                }
+                if (j < len && (text.charAt(j) == '`' || text.charAt(j) == '~')) {
+                    char cc = text.charAt(j);
+                    int run = 0, k = j;
+                    while (k < len && text.charAt(k) == cc) { run++; k++; }
+                    if (run >= 3) {
+                        inFence = true;
+                        fenceChar = cc;
+                        fenceLen = run;
+                        int nl = text.indexOf('\n', k);
+                        i = (nl < 0) ? len : nl + 1;
+                        continue;
+                    }
+                }
+            }
+            if (inFence) {
+                i++;
+                continue;
+            }
+            char c = text.charAt(i);
+            if (c == '`') {
+                int run = 0, k = i;
+                while (k < len && text.charAt(k) == '`') { run++; k++; }
+                if (!inInline) { inInline = true; inlineRun = run; }
+                else if (run == inlineRun) { inInline = false; }
+                i = k;
+                continue;
+            }
+            if (!inInline && text.startsWith(needle, i)) return i;
+            i++;
+        }
+        return -1;
+    }
+
+    /**
+     * 从 {@code from} 开始找工具块的结束标记。工具结果的正文里可能带 {@code [/tool]}
+     * 字样（旧版本数据），取到的是假的结束位置时 payload 不是合法 JSON，继续往后找。
+     */
+    private static int findToolBlockEnd(String text, int from) {
+        int ge = indexOfOutsideCode(text, WebSearchTool.TRACE_END, from);
+        while (ge != -1) {
+            String payload = text.substring(from, ge).trim();
+            if (payload.length() == 0) return ge;
+            if (payload.charAt(0) == '{') {
+                try {
+                    new JSONObject(payload);
+                    return ge;
+                } catch (Exception ignored) {
+                    // 不是完整 JSON：多半是正文里出现了 [/tool]，继续找下一个
+                }
+            }
+            ge = indexOfOutsideCode(text, WebSearchTool.TRACE_END,
+                    ge + WebSearchTool.TRACE_END.length());
+        }
+        return -1;
+    }
+
+    /**
+     * 去掉 {@code [thinking]...[/thinking]} 与 {@code [tool]...[/tool]} 展示块，
+     * 保留全部正文（不渲染）。用于复制、编辑、选择文本等「取纯文本」场景。
+     * 与 {@code ApiClient.removeThinkingContent} 不同，这里跳过代码块里的标记，
+     * 也不会因为某个块未闭合就把后面的正文整段丢掉。
+     */
+    public static String plainTextOf(String content) {
+        if (content == null || content.length() == 0) return "";
+        StringBuilder out = new StringBuilder(content.length());
+        int start = 0;
+        while (start < content.length()) {
+            int ts = indexOfOutsideCode(content, "[thinking]", start);
+            int gs = indexOfOutsideCode(content, WebSearchTool.TRACE_START, start);
+            boolean thinkingNext = ts != -1 && (gs == -1 || ts < gs);
+            if (ts == -1 && gs == -1) {
+                out.append(content, start, content.length());
+                break;
+            }
+            int at = thinkingNext ? ts : gs;
+            if (at > start) out.append(content, start, at);
+            if (thinkingNext) {
+                int te = indexOfOutsideCode(content, "[/thinking]", at + 10);
+                if (te == -1) break;          // 未闭合：丢弃剩余
+                start = te + 11;
+            } else {
+                int ge = findToolBlockEnd(content, at + WebSearchTool.TRACE_START.length());
+                if (ge == -1) break;
+                start = ge + WebSearchTool.TRACE_END.length();
+            }
+        }
+        return out.toString().trim();
+    }
+
     /** Render one [tool]...[/tool] payload (a JSON object) as an escaped HTML card. */
     private static String renderToolBlock(String payload) {
         JSONObject json;
@@ -703,15 +904,30 @@ public class MessageHtmlRenderer {
         String tool = json.optString("tool", "");
         String error = json.optString("error", "");
         boolean isFetch = WebSearchTool.TOOL_FETCH.equals(tool);
+        boolean isTime = WebSearchTool.TOOL_TIME.equals(tool);
 
         StringBuilder out = new StringBuilder();
         out.append("<div class=\"tool-card\" data-tool-key=\"")
            .append(Integer.toHexString(payload.hashCode())).append("\">");
         if (error.length() > 0) {
             out.append("<div class=\"tool-card-head\">")
-               .append(isFetch ? "网页抓取失败" : "搜索失败").append("</div>")
+               .append(isFetch ? "网页抓取失败" : (isTime ? "获取时间失败" : "搜索失败")).append("</div>")
                .append("<div class=\"tool-error\">").append(esc(error)).append("</div>")
                .append("</div>");
+            return out.toString();
+        }
+
+        // 时间工具：一行卡片，不折叠
+        if (isTime) {
+            String dt = json.optString("datetime", "");
+            String wd = json.optString("weekday", "");
+            String tz = json.optString("timezone", "");
+            StringBuilder line = new StringBuilder();
+            if (dt.length() > 0) line.append(dt);
+            if (wd.length() > 0) { if (line.length() > 0) line.append(' '); line.append(wd); }
+            if (tz.length() > 0) { if (line.length() > 0) line.append("（"); line.append(tz).append("）"); }
+            out.append("<div class=\"tool-card-head\">当前时间：")
+               .append(esc(line.toString())).append("</div></div>");
             return out.toString();
         }
 
@@ -833,10 +1049,14 @@ public class MessageHtmlRenderer {
         int fenceLen = 0;
         int fenceStart = -1;
         while (i < len) {
-            if (i == 0 || text.charAt(i - 1) == '\n') {
-                int j = i, indent = 0;
-                while (j < len && text.charAt(j) == ' ' && indent < 3) { j++; indent++; }
-                if (inFence) {
+            // ---- 围栏代码块内部 ----
+            // 关键：块内内容一个字都不能写进 out，否则它会在 restoreCode 之后
+            // 既留在原地（被 commonmark 当成 HTML 块渲染）又随哨兵重复出现。
+            // 这里只在块结束时写一个哨兵，块内容整体保存在 codeBlocks 里。
+            if (inFence) {
+                if (i == 0 || text.charAt(i - 1) == '\n') {
+                    int j = i, indent = 0;
+                    while (j < len && text.charAt(j) == ' ' && indent < 3) { j++; indent++; }
                     if (j < len && text.charAt(j) == fenceChar) {
                         int run = 0, k = j;
                         while (k < len && text.charAt(k) == fenceChar) { run++; k++; }
@@ -851,7 +1071,16 @@ public class MessageHtmlRenderer {
                             continue;
                         }
                     }
-                } else if (j < len && (text.charAt(j) == '`' || text.charAt(j) == '~')) {
+                }
+                int nl = text.indexOf('\n', i);
+                i = (nl < 0) ? len : nl + 1;
+                continue;
+            }
+
+            if (i == 0 || text.charAt(i - 1) == '\n') {
+                int j = i, indent = 0;
+                while (j < len && text.charAt(j) == ' ' && indent < 3) { j++; indent++; }
+                if (j < len && (text.charAt(j) == '`' || text.charAt(j) == '~')) {
                     char cc = text.charAt(j);
                     int run = 0, k = j;
                     while (k < len && text.charAt(k) == cc) { run++; k++; }
