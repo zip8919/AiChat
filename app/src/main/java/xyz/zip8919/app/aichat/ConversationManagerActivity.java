@@ -30,7 +30,6 @@ public class ConversationManagerActivity extends Activity {
     private static boolean restoreScrollNextTime = false;
 
     private ConversationManager conversationManager;
-    private StorageManager storageManager;
     // 进入本页时缓存「当前会话」引用：onCreate 时它必然已存在（由主界面建立），
     // 之后重命名用它同步标题，避免再调用有副作用的 getCurrentConversation() 造出幽灵会话
     private Conversation currentConversationRef;
@@ -51,7 +50,6 @@ public class ConversationManagerActivity extends Activity {
 
         this.uiState = getSharedPreferences(PREFS_NAME, 0);
         this.conversationManager = ConversationManager.getInstance();
-        this.storageManager = StorageManager.getInstance();
         // 此刻「当前会话」必已由主界面建立，缓存引用即可安全同步标题；
         // 之后即使在本页删掉当前会话，也不会再触发 getCurrentConversation() 的惰性创建
         this.currentConversationRef = this.conversationManager.getCurrentConversation();
@@ -319,16 +317,17 @@ public class ConversationManagerActivity extends Activity {
                             // 手动重命名后视为「标题已定稿」，避免异步自动标题回调把它覆盖
                             conv.titleGenerated = true;
                             conv.touch();
-                            conversationManager.saveCurrentConversation();
                             // conv 与缓存引用是同一对象时标题已一并更新；不再调用有副作用的
-                            // getCurrentConversation()（current 为 null 时会凭空造出「新对话」）
+                            // getCurrentConversation()（current 为 null 时会凭空造出「新对话」）。
+                            // 被重命名的会话不一定是 current：是就走统一的异步保存，
+                            // 不是就单独排队写，别在 UI 线程序列化整个会话
                             if (currentConversationRef != null && currentConversationRef.id.equals(conv.id)) {
                                 currentConversationRef.title = newTitle;
+                                conversationManager.saveCurrentConversation();
+                            } else {
+                                conversationManager.saveConversationAsync(conv);
                             }
                             adapter.notifyDataSetChanged();
-                            // Re-save to disk
-                            String json = ConversationManager.toJson(conv);
-                            storageManager.saveConversation(conv.id, json);
                             Toast.makeText(ConversationManagerActivity.this, "已重命名", Toast.LENGTH_SHORT).show();
                             LogUtil.i(TAG, "rename ok: id=%s -> '%s'", conv.id, newTitle);
                         } else {

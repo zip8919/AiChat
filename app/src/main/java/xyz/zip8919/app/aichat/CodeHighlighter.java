@@ -281,12 +281,12 @@ public class CodeHighlighter {
     }
 
     public static String highlight(String code, String lang) {
-        if (code == null || lang == null) return esc(code);
+        if (code == null || lang == null) return Html.esc(code);
         lang = lang.trim().toLowerCase();
         if (!SUPPORTED.contains(lang)) {
             LogUtil.v(TAG, "highlight: lang '%s' not supported -> plain esc (%d chars)",
                     lang, code.length());
-            return esc(code);
+            return Html.esc(code);
         }
         LogUtil.v(TAG, "highlight: lang=%s %d chars", lang, code.length());
 
@@ -308,7 +308,7 @@ public class CodeHighlighter {
                     Matcher m = matchers[rIdx];
                     if (m.find(i) && m.start() == i) {
                         out.append("<span class=\"tk-").append(rules[rIdx].type).append("\">");
-                        out.append(esc(m.group()));
+                        out.append(Html.esc(m.group()));
                         out.append("</span>");
                         i = m.end();
                         matched = true;
@@ -325,13 +325,13 @@ public class CodeHighlighter {
                 String word = code.substring(start, i);
 
                 if (keywords != null && keywords.contains(word))
-                    out.append("<span class=\"tk-kw\">").append(esc(word)).append("</span>");
+                    out.append("<span class=\"tk-kw\">").append(Html.esc(word)).append("</span>");
                 else if (types != null && types.contains(word))
-                    out.append("<span class=\"tk-type\">").append(esc(word)).append("</span>");
+                    out.append("<span class=\"tk-type\">").append(Html.esc(word)).append("</span>");
                 else if (i < len && code.charAt(i) == '(')
-                    out.append("<span class=\"tk-fn\">").append(esc(word)).append("</span>");
+                    out.append("<span class=\"tk-fn\">").append(Html.esc(word)).append("</span>");
                 else
-                    out.append(esc(word));
+                    out.append(Html.esc(word));
                 continue;
             }
 
@@ -345,7 +345,7 @@ public class CodeHighlighter {
                     int end = code.indexOf("]]>", i + 9);
                     if (end > i) {
                         out.append("<span class=\"tk-cmt\">");
-                        out.append(esc(code.substring(i, end + 3)));
+                        out.append(Html.esc(code.substring(i, end + 3)));
                         out.append("</span>");
                         i = end + 3; continue;
                     }
@@ -357,7 +357,7 @@ public class CodeHighlighter {
                     while (i < len && code.charAt(i) != '>') i++;
                     if (i < len) i++;
                     out.append("<span class=\"tk-cmt\">");
-                    out.append(esc(code.substring(start, i)));
+                    out.append(Html.esc(code.substring(start, i)));
                     out.append("</span>");
                     continue;
                 }
@@ -369,7 +369,7 @@ public class CodeHighlighter {
                     while (i < len && code.charAt(i) != '>') i++;
                     if (i < len) i++; // skip >
                     out.append("<span class=\"tk-kw\">");
-                    out.append(esc(code.substring(start, i)));
+                    out.append(Html.esc(code.substring(start, i)));
                     out.append("</span>");
                     continue;
                 }
@@ -382,7 +382,7 @@ public class CodeHighlighter {
                 while (i < len && !Character.isWhitespace(code.charAt(i))
                         && code.charAt(i) != '>' && code.charAt(i) != '/') i++;
                 String tagName = code.substring(nameStart, i);
-                out.append("&lt;<span class=\"tk-kw\">").append(esc(tagName)).append("</span>");
+                out.append("&lt;<span class=\"tk-kw\">").append(Html.esc(tagName)).append("</span>");
 
                 // Parse attributes
                 while (i < len && code.charAt(i) != '>' && code.charAt(i) != '/') {
@@ -399,9 +399,9 @@ public class CodeHighlighter {
                     String attrName = code.substring(attrStart, i);
                     if (attrName.isEmpty()) { out.append(code.charAt(i)); i++; continue; }
                     if (attrSet != null && (attrSet.contains(attrName) || attrName.startsWith("data-")))
-                        out.append("<span class=\"tk-type\">").append(esc(attrName)).append("</span>");
+                        out.append("<span class=\"tk-type\">").append(Html.esc(attrName)).append("</span>");
                     else
-                        out.append(esc(attrName));
+                        out.append(Html.esc(attrName));
 
                     // Skip whitespace before =
                     while (i < len && Character.isWhitespace(code.charAt(i))) { out.append(' '); i++; }
@@ -426,9 +426,9 @@ public class CodeHighlighter {
                                      RGB_COLOR.matcher(inner).matches() ||
                                      URL_VALUE.matcher(inner).matches() ||
                                      DIMENSION.matcher(inner).matches()))
-                                out.append("<span class=\"tk-num\">").append(esc(raw)).append("</span>");
+                                out.append("<span class=\"tk-num\">").append(Html.esc(raw)).append("</span>");
                             else
-                                out.append("<span class=\"tk-str\">").append(esc(raw)).append("</span>");
+                                out.append("<span class=\"tk-str\">").append(Html.esc(raw)).append("</span>");
                         }
                     }
                 }
@@ -444,7 +444,7 @@ public class CodeHighlighter {
                 int start = i;
                 i++;
                 while (i < len && "=+-*/%<>!&|^~?:.,;".indexOf(code.charAt(i)) >= 0) i++;
-                out.append("<span class=\"tk-op\">").append(esc(code.substring(start, i))).append("</span>");
+                out.append("<span class=\"tk-op\">").append(Html.esc(code.substring(start, i))).append("</span>");
                 continue;
             }
 
@@ -453,12 +453,12 @@ public class CodeHighlighter {
             // operator, no identifier start, no '<' (XML tag branch).
             int runEnd = plainRunEnd(code, len, i, matchers);
             if (runEnd > i) {
-                for (int k = i; k < runEnd; k++) out.append(esc(String.valueOf(code.charAt(k))));
+                for (int k = i; k < runEnd; k++) out.append(Html.esc(String.valueOf(code.charAt(k))));
                 i = runEnd;
                 continue;
             }
 
-            out.append(esc(String.valueOf(code.charAt(i))));
+            out.append(Html.esc(String.valueOf(code.charAt(i))));
             i++;
         }
 
@@ -503,11 +503,4 @@ public class CodeHighlighter {
         return plainEnd;
     }
 
-    private static String esc(String s) {
-        if (s == null) return "";
-        return s.replace("&", "&amp;")
-                .replace("<", "&lt;")
-                .replace(">", "&gt;")
-                .replace("\"", "&quot;");
-    }
 }

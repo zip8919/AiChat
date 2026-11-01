@@ -1,9 +1,14 @@
 package xyz.zip8919.app.aichat;
 
+import android.os.Looper;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -13,6 +18,11 @@ public class ConversationManager {
     private StorageManager storageManager;
     private List<Conversation> conversations;
     private Conversation currentConversation;
+    /**
+     * 保存队列：一次会话可能有几百条消息，序列化 + 写盘在主线程做会直接掉帧。
+     * 单线程保证同一会话的多次保存按调用顺序落盘（后写覆盖前写是期望行为）。
+     */
+    private final ExecutorService saveExecutor = Executors.newSingleThreadExecutor();
     // 被删除的「当前会话」的消息列表：主界面 messages 仍指向它，留给下一个 current 复用，避免分裂
     private List<Message> orphanMessages;
 
@@ -64,20 +74,77 @@ public class ConversationManager {
 
     public void saveCurrentConversation() {
         // 取一次本地引用：避免序列化 A 之后字段被换成 B，导致 A 的内容写进 B 的文件
-        Conversation conv = this.currentConversation;
+        final Conversation conv = this.currentConversation;
         if (conv == null || conv.messages.isEmpty()) {
             LogUtil.v(TAG, "saveCurrentConversation skipped: empty conversation");
             return;
         }
+        // 主线程只做一次浅拷贝，序列化与写盘都挪到后台：调用点大多在 UI 线程
+        // （流式收尾、失败标记、标题回写），长会话在这里同步写会卡住主线程。
+        final Conversation snapshot = snapshotOf(conv);
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            saveExecutor.execute(new Runnable() {
+                public void run() {
+                    writeConversation(snapshot);
+                }
+            });
+        } else {
+            writeConversation(snapshot);
+        }
+    }
+
+    /** 序列化 + 落盘。只在保存线程（或非主线程调用方）执行。 */
+    private void writeConversation(Conversation conv) {
         String json = toJson(conv);
         // toJson 内部异常会返回 "{}"，直接落盘会覆盖整个会话文件，这里拒绝写入
         if (json == null || json.length() < 3 || "{}".equals(json)) {
-            LogUtil.e(TAG, "saveCurrentConversation aborted: serialization failed for id=%s", conv.id);
+            LogUtil.e(TAG, "save aborted: serialization failed for id=%s", conv.id);
             return;
         }
         boolean ok = storageManager.saveConversation(conv.id, json);
         LogUtil.d(TAG, "saveCurrentConversation: id=%s msgs=%d jsonLen=%d ok=%s",
                 conv.id, conv.messages.size(), json.length(), ok);
+    }
+
+    /** 异步保存任意会话（列表页重命名等场景），不要求它是 current。 */
+    public void saveConversationAsync(Conversation conv) {
+        if (conv == null || conv.messages == null) return;
+        final Conversation snapshot = snapshotOf(conv);
+        saveExecutor.execute(new Runnable() {
+            public void run() {
+                writeConversation(snapshot);
+            }
+        });
+    }
+
+    /**
+     * 等队列里的保存全部落盘。删会话前必须调用：否则队列里还挂着的保存
+     * 会把刚删掉的文件又写回来。
+     */
+    public void flushSaves() {
+        if (Looper.myLooper() != Looper.getMainLooper()) return;
+        try {
+            saveExecutor.submit(new Runnable() {
+                public void run() {
+                }
+            }).get(3, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            LogUtil.w(TAG, "flushSaves timeout/failed: %s", e.getMessage());
+        }
+    }
+
+    /** 拷贝会话壳与消息列表。消息对象本身共享——后台只读，最坏情况是存到一帧中间态。 */
+    private static Conversation snapshotOf(Conversation src) {
+        Conversation c = new Conversation(src.id);
+        c.title = src.title;
+        c.createdAt = src.createdAt;
+        c.updatedAt = src.updatedAt;
+        c.model = src.model;
+        c.systemPrompt = src.systemPrompt;
+        c.titleGenerated = src.titleGenerated;
+        c.titleRequested = src.titleRequested;
+        c.messages = new ArrayList<Message>(src.messages);
+        return c;
     }
 
     public void switchConversation(String conversationId) {
@@ -108,6 +175,8 @@ public class ConversationManager {
 
     public void deleteConversation(String conversationId) {
         LogUtil.i(TAG, "deleteConversation: id=%s, before=%d", conversationId, this.conversations.size());
+        // 先落盘队列里的写：否则删完文件后，队列里排着的保存会把它重新写回来
+        flushSaves();
         if (this.currentConversation != null && this.currentConversation.id.equals(conversationId)) {
             // 主界面 messages 仍指向被删会话的列表，暂存给下一个 current 复用
             this.orphanMessages = this.currentConversation.messages;
