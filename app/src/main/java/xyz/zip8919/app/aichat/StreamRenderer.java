@@ -133,9 +133,23 @@ final class StreamRenderer {
         final int mySeq = ui.nextSeq();
         new Thread(new Runnable() {
             public void run() {
-                // 渲染放在这里做：markdown + 公式可能几十毫秒，不能占 UI 线程
-                final String baseHtml = baseChanged ? ui.renderHtml(baseNow) : null;
-                final String tailHtml = ui.renderHtml(roundNow);
+                String bh = null;
+                String th = null;
+                try {
+                    // 渲染放在这里做：markdown + 公式可能几十毫秒，不能占 UI 线程
+                    bh = baseChanged ? ui.renderHtml(baseNow) : null;
+                    th = ui.renderHtml(roundNow);
+                } catch (Throwable t) {
+                    // 渲染层异常（畸形公式、超长嵌套）不能让 inFlight 卡在 true：
+                    // 那会让后续所有分片被「有渲染在飞」挡掉，界面从此不再更新。
+                    LogUtil.e("StreamRenderer", "render failed, tick skipped: " + t.getMessage());
+                }
+                if (th == null) {
+                    inFlight.set(false);
+                    return;
+                }
+                final String baseHtml = bh;
+                final String tailHtml = th;
                 ui.runOnUi(new Runnable() {
                     public void run() {
                         // 先复位再判序号：过期分支若直接 return，这个标志会永远为 true，
@@ -177,7 +191,15 @@ final class StreamRenderer {
         inFlight.set(true);
         new Thread(new Runnable() {
             public void run() {
-                final String baseHtml = ui.renderHtml(baseNow);
+                final String baseHtml;
+                try {
+                    baseHtml = ui.renderHtml(baseNow);
+                } catch (Throwable t) {
+                    // 同上：渲染失败必须复位 inFlight，否则后续分片全被挡掉
+                    LogUtil.e("StreamRenderer", "plain base render failed: " + t.getMessage());
+                    inFlight.set(false);
+                    return;
+                }
                 ui.runOnUi(new Runnable() {
                     public void run() {
                         inFlight.set(false);

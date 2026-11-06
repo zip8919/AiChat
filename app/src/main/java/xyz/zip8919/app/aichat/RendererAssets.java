@@ -396,11 +396,21 @@ final class RendererAssets {
             "if(s&&s.parentNode)s.parentNode.removeChild(s);};" +
             "window.updateLastMsg=function(html){" +
             "var ms=document.querySelectorAll('.msg.ai .content');" +
-            "if(ms.length>0){ms[ms.length-1].className='content';" +
-            "ms[ms.length-1].innerHTML=html;" +
-            "applyToolStates(ms[ms.length-1]);}" +
+            "if(ms.length===0)return;" +
+            "var c=ms[ms.length-1];" +
+            // 已有 base/tail 骨架时把整段 HTML 写进 base、清空 tail：
+            // 若这里改回「整体替换 c.innerHTML」，收尾一次就把骨架抹掉，
+            // 之后续跑只能走 fallback 重建，等于又闪一次。
+            "var b=c.querySelector('.stream-base');" +
+            "var t=c.querySelector('.stream-tail');" +
+            "if(b){b.innerHTML=html;if(t)t.innerHTML='';}" +
+            "else{c.className='content';c.innerHTML=html;}" +
+            "applyToolStates(c);" +
             "clearStatus();" +
             "addCopyBtns();smartScrollToBottom();};" +
+            // 收尾定型：内容已经完整时只把 tail 并进 base，不重新解析 markdown
+            "window.streamFinalize=function(){" +
+            "window.streamCommitTail();clearStatus();};" +
             // 流式输出拆成两段：base（已完成的思考/工具卡片）+ tail（本轮增量）。
             // 以前每个分片都整体重设 .content，工具轮次结束后上面的卡片和已渲染好的
             // markdown 会被打回纯文本，看起来像「又变回没渲染的样子」。
@@ -423,20 +433,30 @@ final class RendererAssets {
             // 轮次切换：把本轮已经流出去的 tail 并进 base。
             // 这里用 DOM 节点搬移而不是 innerHTML 拼接 —— 不重新解析 markdown、
             // 不重新解码公式图片，视觉上完全不闪，内容也不会重复或丢字。
+            // 骨架不存在时（收尾后 updateLastMsg 平铺、续跑的历史消息）必须现建：
+            // 直接 return 会让 Java 侧以为 base 已推送，续跑时工具卡片永远不出现。
             "window.streamCommitTail=function(){" +
             "var ms=document.querySelectorAll('.msg.ai .content');" +
             "if(ms.length===0)return;" +
             "var c=ms[ms.length-1];" +
             "var b=c.querySelector('.stream-base');" +
             "var t=c.querySelector('.stream-tail');" +
-            "if(!b||!t)return;" +
+            "if(!b||!t){" +
+            "var keep=c.innerHTML;" +
+            "c.className='content';" +
+            "c.innerHTML='<div class=\"stream-base\"></div><div class=\"stream-tail\"></div>';" +
+            "b=c.querySelector('.stream-base');t=c.querySelector('.stream-tail');" +
+            "if(keep)b.innerHTML=keep;return;}" +
             "while(t.firstChild)b.appendChild(t.firstChild);" +
-            "t.className='stream-tail';t.innerHTML='';};" +
+            "t.className='stream-tail';t.innerHTML='';" +
+            "clearStatus();};" +
             "window.streamTailHtml=function(html){" +
             "var ms=document.querySelectorAll('.msg.ai .content');" +
             "if(ms.length===0)return;" +
             "var c=ms[ms.length-1];var t=c.querySelector('.stream-tail');" +
-            "if(!t){var keep=c.innerHTML;" +
+            "if(!t){var b=c.querySelector('.stream-base');" +
+            "var keep=b?b.innerHTML:c.innerHTML;" +
+            "c.className='content';" +
             "c.innerHTML='<div class=\"stream-base\"></div><div class=\"stream-tail\"></div>';" +
             "c.querySelector('.stream-base').innerHTML=keep;" +
             "t=c.querySelector('.stream-tail');}" +
@@ -446,7 +466,8 @@ final class RendererAssets {
             "var ms=document.querySelectorAll('.msg.ai .content');" +
             "if(ms.length===0)return;" +
             "var c=ms[ms.length-1];var t=c.querySelector('.stream-tail');" +
-            "if(!t){var keep=c.innerHTML;" +
+            "if(!t){var b=c.querySelector('.stream-base');" +
+            "var keep=b?b.innerHTML:c.innerHTML;" +
             "c.innerHTML='<div class=\"stream-base\"></div><div class=\"stream-tail\"></div>';" +
             "c.querySelector('.stream-base').innerHTML=keep;" +
             "t=c.querySelector('.stream-tail');}" +

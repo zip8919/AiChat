@@ -190,6 +190,12 @@ final class ChatStreamRunner {
                 SseRound.Result rr = readRound(conn, st, renderer);
                 st.chunks = rr.chunks;
                 if (rr.error != null) {
+                    // 用户打断时 abort 会让读循环立刻退出，chunks 可能为 0，
+                    // 这里会误报「服务端没有返回任何内容」。打断不是失败，静默返回。
+                    if (!session.isAlive(job.generation)) {
+                        LogUtil.i(TAG, "round %d aborted by user: %s", round, rr.error);
+                        return;
+                    }
                     st.failed = true;
                     // 本轮流式已经吐出来的内容不能丢：错误卡片要挂在这段内容之下，
                     // 否则用户看到的是「回答突然没了，只剩一张报错卡」

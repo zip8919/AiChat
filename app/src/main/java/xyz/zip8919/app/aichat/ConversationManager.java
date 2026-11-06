@@ -25,6 +25,12 @@ public class ConversationManager {
     private final ExecutorService saveExecutor = Executors.newSingleThreadExecutor();
     // 被删除的「当前会话」的消息列表：主界面 messages 仍指向它，留给下一个 current 复用，避免分裂
     private List<Message> orphanMessages;
+    /**
+     * 已删除的会话 id。flushSaves 有超时，队列里可能还压着这个会话的保存任务；
+     * 不拦一下，删完文件后那条迟到的保存会把它重新写回来（列表里「删了又出现」）。
+     */
+    private final java.util.Set<String> deletedIds =
+            java.util.Collections.synchronizedSet(new java.util.HashSet<String>());
 
     private ConversationManager() {
         this.storageManager = StorageManager.getInstance();
@@ -95,6 +101,11 @@ public class ConversationManager {
 
     /** 序列化 + 落盘。只在保存线程（或非主线程调用方）执行。 */
     private void writeConversation(Conversation conv) {
+        if (conv == null) return;
+        if (deletedIds.contains(conv.id)) {
+            LogUtil.i(TAG, "save skipped: conversation %s already deleted", conv.id);
+            return;
+        }
         String json = toJson(conv);
         // toJson 内部异常会返回 "{}"，直接落盘会覆盖整个会话文件，这里拒绝写入
         if (json == null || json.length() < 3 || "{}".equals(json)) {
@@ -124,10 +135,12 @@ public class ConversationManager {
     public void flushSaves() {
         if (Looper.myLooper() != Looper.getMainLooper()) return;
         try {
+            // 1.5s：够写完一个中等会话，又不至于让主线程卡到接近 ANR 阈值（5s）。
+            // 超时不再是致命的——deleteConversation 已用 deletedIds 拦住迟到的写。
             saveExecutor.submit(new Runnable() {
                 public void run() {
                 }
-            }).get(3, TimeUnit.SECONDS);
+            }).get(1500, TimeUnit.MILLISECONDS);
         } catch (Exception e) {
             LogUtil.w(TAG, "flushSaves timeout/failed: %s", e.getMessage());
         }
@@ -177,6 +190,8 @@ public class ConversationManager {
         LogUtil.i(TAG, "deleteConversation: id=%s, before=%d", conversationId, this.conversations.size());
         // 先落盘队列里的写：否则删完文件后，队列里排着的保存会把它重新写回来
         flushSaves();
+        // flush 可能超时（大会话序列化慢），残余任务靠这里兜底拦掉
+        deletedIds.add(conversationId);
         if (this.currentConversation != null && this.currentConversation.id.equals(conversationId)) {
             // 主界面 messages 仍指向被删会话的列表，暂存给下一个 current 复用
             this.orphanMessages = this.currentConversation.messages;

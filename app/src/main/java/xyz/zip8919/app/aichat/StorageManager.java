@@ -283,7 +283,9 @@ public class StorageManager {
             // 先写临时文件再改名，避免 FileWriter 打开即截断导致写入失败时原内容一并丢失
             tmpFile = new File(filePath + ".tmp");
             writer = new FileWriter(tmpFile);
-            writer.write(content);
+            // content 为 null 时 FileWriter.write 抛 NPE（不是 IOException，不会被下面的
+            // catch 兜住），会直接冒到调用线程。落盘语义上 null 等价于空文件。
+            writer.write(content == null ? "" : content);
             writer.flush();
             writer.close();
             writer = null;

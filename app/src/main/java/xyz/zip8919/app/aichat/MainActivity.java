@@ -94,6 +94,9 @@ public class MainActivity extends Activity {
     // 已经推到 WebView 的 trace（base 层）文本。流式期间状态行与工具卡片会交替
     // 下发，内容没变就只更新状态行，别再整段重渲染——那是低端机上最明显的闪烁源。
     private volatile String lastStreamTrace = "";
+    // 当前气泡在 DOM 上实际显示的完整正文（base + tail）。收尾时用它判断
+    // 「界面已经是最终内容」——是就只把 tail 定型进 base，省掉一次整段重渲染。
+    private volatile String lastPushedContent = "";
     // volatile：请求线程写、UI 线程读，打断时才能可靠 disconnect
     private volatile HttpURLConnection currentConnection;
     // volatile：后台加载线程回到 UI 线程后判断 initConversation() 是否已执行；
@@ -480,7 +483,8 @@ public class MainActivity extends Activity {
     }
 
     private void selectModel(int pos) {
-        if (pos < 0 || pos >= availableModels.size()) {
+        // 先判 null 再取 size()：反过来会在 availableModels 尚未赋值时直接 NPE
+        if (availableModels == null || pos < 0 || pos >= availableModels.size()) {
             LogUtil.w(TAG, "selectModel: invalid pos=%d (size=%d)", pos,
                     availableModels == null ? -1 : availableModels.size());
             return;
@@ -825,8 +829,9 @@ public class MainActivity extends Activity {
         LogUtil.d(TAG, "onPause");
         super.onPause();
         conversationManager.saveCurrentConversation();
-        // 保存是异步的，退到后台前把队列清干净，避免进程被回收时丢掉最后一次写入
-        conversationManager.flushSaves();
+        // 这里不再 flushSaves：它是对主线程的阻塞等待（最长数秒），而 onPause 是
+        // 用户切走的第一帧、也是 ANR 的高危窗口。保存在单线程队列里按序执行，
+        // 进程真要退出还有 onDestroy 兜底，没必要在这个位置赌主线程。
     }
 
     @Override
@@ -1024,6 +1029,8 @@ public class MainActivity extends Activity {
         // base 层的内容基准：新请求从空白开始，续跑从上次的 trace 开始。
         // 不清会把上一条消息的 trace 当成「已推送」，导致工具卡片永远不出现。
         lastStreamTrace = isResume && resume.trace != null ? resume.trace : "";
+        // DOM 内容基准同理：续跑时界面上已经有上次的正文，新请求从空白开始
+        lastPushedContent = isResume && resume.trace != null ? resume.trace : "";
         runOnUiThread(new Runnable() {
             public void run() {
                 webViewEvalJs(isResume
@@ -1111,6 +1118,9 @@ public class MainActivity extends Activity {
             if (aiIndex >= 0 && aiIndex < messages.size()) {
                 messages.get(aiIndex).content = content;
             }
+            // 只有真正写进 DOM 的这一次才更新：被序号守卫挡掉的 tick 不会走到这里，
+            // 否则会把「没显示出来的内容」误记成已显示。
+            lastPushedContent = content == null ? "" : content;
         }
 
         public void toast(final String msg) {
@@ -1183,8 +1193,16 @@ public class MainActivity extends Activity {
                         return;
                     }
 
-                    final String html =
-                            MessageHtmlRenderer.contentToHtml(settled.content, MainActivity.this);
+                    // 收尾提交。两条路径：
+                    //   1) DOM 已经是最终内容（最后一次分片成功落地）——只把 tail 定型进
+                    //      base，不重新解析 markdown。长回答含代码块/公式时，整段重渲染
+                    //      会让公式图片重新解码，视觉上就是「回答结束后闪一下」。
+                    //   2) DOM 落后于最终内容（最后一片被节流丢弃/被序号守卫挡掉）——
+                    //      必须重渲染补上，否则结尾少几十个字。
+                    final boolean domComplete = settled.content != null
+                            && settled.content.equals(lastPushedContent);
+                    final String html = domComplete ? null
+                            : MessageHtmlRenderer.contentToHtml(settled.content, MainActivity.this);
                     if (requestGeneration.get() != settled.generation) return;
                     runOnUiThread(new Runnable() {
                         public void run() {
@@ -1193,7 +1211,11 @@ public class MainActivity extends Activity {
                                     && messages.get(finalIdx).isAssistant()) {
                                 messages.get(finalIdx).content = settled.content;
                             }
-                            webViewEvalJs("updateLastMsg('" + jsEscape(html) + "')");
+                            if (domComplete) {
+                                webViewEvalJs("streamFinalize()");
+                            } else {
+                                webViewEvalJs("updateLastMsg('" + jsEscape(html) + "')");
+                            }
                             // 来源区独立渲染在 .content 之外，默认折叠
                             Message am = finalIdx >= 0 && finalIdx < messages.size()
                                     ? messages.get(finalIdx) : null;
@@ -2333,14 +2355,25 @@ public class MainActivity extends Activity {
         final int n = pos + 1;
         showConfirmDialog("将前 " + n + " 条消息复制到新对话分支，确定？", new Runnable() {
             public void run() {
+                // 与新建/切换会话同一套收口：排队消息属于旧会话，在途请求会继续往
+                // messages 里写。不先停掉，分支切过去后收尾逻辑会按旧下标写到新列表。
+                if (queue != null) queue.clearAll();
+                if (isRequestInProgress.get()) interruptRequest();
+                dropTrailingEmptyAssistant();
+                // 清空占位后 pos 可能已经越界（最后一条正是那条空 AI 占位）
+                int last = Math.min(pos, messages.size() - 1);
+                if (last < 0) {
+                    Toast.makeText(MainActivity.this, "没有可复制的消息", Toast.LENGTH_SHORT).show();
+                    return;
+                }
                 Conversation current = conversationManager.getCurrentConversation();
                 Conversation branch = new Conversation();
                 branch.title = ConversationManager.normalizeTitle(current.title) + "-分支";
                 branch.systemPrompt = current.systemPrompt;
                 branch.model = current.model;
-                LogUtil.i(TAG, "branchAt: copying %d messages into branch '%s'", n, branch.title);
+                LogUtil.i(TAG, "branchAt: copying %d messages into branch '%s'", last + 1, branch.title);
 
-                for (int i = 0; i <= pos; i++) {
+                for (int i = 0; i <= last; i++) {
                     Message src = messages.get(i);
                     Message copy = new Message();
                     copy.role = src.role;

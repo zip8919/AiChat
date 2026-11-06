@@ -180,20 +180,27 @@ final class ViewerController {
             }
         });
 
-        imageDialog = new AlertDialog.Builder(activity)
+        final AlertDialog dlg = new AlertDialog.Builder(activity)
                 .setView(view)
                 .setCancelable(true)
                 .create();
-        imageDialog.setOnDismissListener(new DialogInterface.OnDismissListener() {
+        // 捕获创建时的引用：dismiss() 的回调是 post 到主线程执行的，用户关掉预览
+        // 后立刻点开另一张图时，这个回调会落在新实例创建之后。若按字段清理，
+        // 被销毁的是新 WebView、被置空的是新 dialog —— 表现为白屏且关不掉。
+        final WebView ownedWv = imageWebView;
+        dlg.setOnDismissListener(new DialogInterface.OnDismissListener() {
             public void onDismiss(DialogInterface dialog) {
-                if (imageWebView != null) {
-                    imageWebView.destroy();
-                    imageWebView = null;
+                if (ownedWv != null) {
+                    try { ownedWv.destroy(); } catch (Exception ignored) {}
                 }
-                imageDialog = null;
-                imageList = null;
+                if (imageWebView == ownedWv) imageWebView = null;
+                if (imageDialog == dlg) {
+                    imageDialog = null;
+                    imageList = null;
+                }
             }
         });
+        imageDialog = dlg;
         imageDialog.getWindow().setLayout(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT);
@@ -340,19 +347,22 @@ final class ViewerController {
             }
         });
 
-        tableDialog = new AlertDialog.Builder(activity)
+        final AlertDialog tDlg = new AlertDialog.Builder(activity)
                 .setView(view)
                 .setCancelable(true)
                 .create();
-        tableDialog.setOnDismissListener(new DialogInterface.OnDismissListener() {
+        // 同上：dismiss 回调可能迟到，只清理自己持有的那份资源
+        final WebView ownedTableWv = tableWebView;
+        tDlg.setOnDismissListener(new DialogInterface.OnDismissListener() {
             public void onDismiss(DialogInterface dialog) {
-                if (tableWebView != null) {
-                    tableWebView.destroy();
-                    tableWebView = null;
+                if (ownedTableWv != null) {
+                    try { ownedTableWv.destroy(); } catch (Exception ignored) {}
                 }
-                tableDialog = null;
+                if (tableWebView == ownedTableWv) tableWebView = null;
+                if (tableDialog == tDlg) tableDialog = null;
             }
         });
+        tableDialog = tDlg;
         tableDialog.getWindow().setLayout(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT);
@@ -480,21 +490,25 @@ final class ViewerController {
             }
         });
 
-        codeDialog = new AlertDialog.Builder(activity)
+        final AlertDialog cDlg = new AlertDialog.Builder(activity)
                 .setView(view)
                 .setCancelable(true)
                 .create();
-        codeDialog.setOnDismissListener(new DialogInterface.OnDismissListener() {
+        final WebView ownedCodeWv = codeWebView;
+        cDlg.setOnDismissListener(new DialogInterface.OnDismissListener() {
             public void onDismiss(DialogInterface dialog) {
-                if (codeWebView != null) {
-                    codeWebView.destroy();
-                    codeWebView = null;
+                if (ownedCodeWv != null) {
+                    try { ownedCodeWv.destroy(); } catch (Exception ignored) {}
                 }
-                codeDialog = null;
-                codeText = null;
-                codeLang = null;
+                if (codeWebView == ownedCodeWv) codeWebView = null;
+                if (codeDialog == cDlg) {
+                    codeDialog = null;
+                    codeText = null;
+                    codeLang = null;
+                }
             }
         });
+        codeDialog = cDlg;
         codeDialog.getWindow().setLayout(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT);
