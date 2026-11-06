@@ -1597,7 +1597,14 @@ public class MainActivity extends Activity {
             handler.post(new Runnable() {
                 public void run() {
                     try {
-                        showMessageMenu(Integer.parseInt(idx));
+                        int pos = Integer.parseInt(idx);
+                        // 正在生成的气泡在 DOM 上是 data-idx=-1，messages 里没有对应下标。
+                        // 以前直接交给 showMessageMenu，被 pos<0 的守卫挡掉 —— 生成期间菜单打不开。
+                        if (pos < 0) {
+                            showStreamingMenu();
+                            return;
+                        }
+                        showMessageMenu(pos);
                     } catch (Exception e) {
                         LogUtil.w(TAG, "messageLongPress parse failed: idx=%s err=%s", idx, e.getMessage());
                     }
@@ -1986,20 +1993,25 @@ public class MainActivity extends Activity {
             Toast.makeText(this, "内容为空", Toast.LENGTH_SHORT).show();
             return;
         }
+        copyToClipboard(text);
+    }
+
+    /** 写剪贴板。API 18 上有设备返回的是旧版 android.text.ClipboardManager，需要分支。 */
+    private void copyToClipboard(String text) {
         try {
             Object svc = getSystemService(Context.CLIPBOARD_SERVICE);
             if (svc instanceof ClipboardManager) {
                 ClipboardManager cm = (ClipboardManager) svc;
                 cm.setPrimaryClip(ClipData.newPlainText("message", text));
-                LogUtil.d(TAG, "copyMessage: copied %d chars via ClipboardManager", text.length());
+                LogUtil.d(TAG, "copyToClipboard: %d chars via ClipboardManager", text.length());
             } else {
                 // API 18 fallback: some devices return the old ClipboardManager
                 ((android.text.ClipboardManager) svc).setText(text);
-                LogUtil.d(TAG, "copyMessage: copied %d chars via legacy ClipboardManager", text.length());
+                LogUtil.d(TAG, "copyToClipboard: %d chars via legacy ClipboardManager", text.length());
             }
             Toast.makeText(this, "已复制", Toast.LENGTH_SHORT).show();
         } catch (Exception e) {
-            LogUtil.e(TAG, "copyMessage failed: " + e.getMessage(), e);
+            LogUtil.e(TAG, "copyToClipboard failed: " + e.getMessage(), e);
             Toast.makeText(this, "复制失败: " + e.getMessage(), Toast.LENGTH_LONG).show();
         }
     }
@@ -2008,16 +2020,76 @@ public class MainActivity extends Activity {
     private void selectText(int pos) {
         String text = getMessageText(messages.get(pos));
         LogUtil.d(TAG, "selectText: pos=%d len=%s", pos, text == null ? "null" : text.length());
+        showSelectableText("选择文本", text);
+    }
+
+    /** 弹一个可长按选区的只读文本框。流式中的气泡也用这个，只是没下标可取。 */
+    private void showSelectableText(String title, String text) {
         final TextView tv = new TextView(this);
-        tv.setText(text);
+        tv.setText(text == null ? "" : text);
         tv.setTextIsSelectable(true);
         tv.setPadding(32, 32, 32, 32);
         tv.setTextSize(14);
         new AlertDialog.Builder(this)
-                .setTitle("选择文本")
+                .setTitle(title)
                 .setView(tv)
                 .setPositiveButton("关闭", null)
                 .show();
+    }
+
+    /**
+     * 正在生成的气泡：DOM 上的 data-idx 是 -1，messages 里没有稳定的下标。
+     * 常规菜单里的修改/删除/回溯都会破坏请求状态机，这里只给三项安全操作。
+     */
+    private void showStreamingMenu() {
+        if (!isRequestInProgress.get()) {
+            // 请求已结束却还挂着 -1：说明 DOM 与消息列表脱节，重新渲染一次即可修复
+            LogUtil.w(TAG, "showStreamingMenu: no request in flight, refreshing view");
+            refreshWebView();
+            return;
+        }
+        final String[] items = {"复制已生成内容", "选择文本", "停止生成"};
+        new AlertDialog.Builder(this)
+                .setTitle("操作消息")
+                .setItems(items, new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface dialog, int which) {
+                        if (which == 0) {
+                            copyStreamingText();
+                        } else if (which == 1) {
+                            String text = streamingText();
+                            if (text.isEmpty()) {
+                                Toast.makeText(MainActivity.this, "还没有生成内容", Toast.LENGTH_SHORT).show();
+                            } else {
+                                showSelectableText("选择文本", text);
+                            }
+                        } else {
+                            interruptRequest();
+                        }
+                    }
+                })
+                .show();
+    }
+
+    private void copyStreamingText() {
+        String text = streamingText();
+        if (text.isEmpty()) {
+            Toast.makeText(this, "还没有生成内容", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        copyToClipboard(text);
+    }
+
+    /** 当前正在生成的那条 AI 回复的纯文本。找不到就是空串。 */
+    private String streamingText() {
+        if (messages == null) return "";
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            Message m = messages.get(i);
+            if (m != null && m.isAssistant()) {
+                String t = getMessageText(m);
+                return t == null ? "" : t;
+            }
+        }
+        return "";
     }
 
     // 3. 修改

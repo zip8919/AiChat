@@ -55,6 +55,7 @@
 | `renderSeq` | 渲染序号。每次发起渲染自增，回来时对不上就丢弃 | 任意线程 | 渲染回调 |
 | `lastStreamTrace` | base 层当前已推送的 trace 文本 | UI 线程 | 请求线程（判断要不要写 base） |
 | `queue.paused` | 重试期间暂停队列放行 | UI 线程 | drain |
+| `__holdRender`（JS） | 手指按在表格/代码块上时暂停重绘，保护横向滚动 | touchstart | touchend 后 180ms |
 
 `lastStreamTrace` 是**两条渲染路径共享**的状态：流式 tick 的 `streamBase`（整段替换）
 和工具卡片的 `streamAppendBase`（只追加增量）。任何一方写完都要更新它，
@@ -119,3 +120,5 @@ rounds done: sources=5 apiText=842 toolHistory=4
    排队那条在重试结束后发出（验证 `MessageQueue.pause/resume`）
 10. 多轮搜索（连续触发 5 次以上工具）：每轮卡片都应立刻出现，
     滑动不卡顿（验证增量渲染 + `TraceKit`）
+11. 生成中长按正在输出的气泡：弹出「复制已生成内容 / 选择文本 / 停止生成」
+12. 生成中含宽表格的回答：手指在表格上横向拖动，位置不能被重绘拉回

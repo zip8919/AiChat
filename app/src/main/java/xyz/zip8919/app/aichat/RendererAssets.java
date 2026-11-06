@@ -194,19 +194,25 @@ final class RendererAssets {
             "if(window.Android)Android.previewCode(lang,text);};" +
             "pre.appendChild(pbtn);}}})" +
             "(pres[i]);}}" +
-            "var lpTimer=null,lpStartX=0,lpStartY=0,lpEl=null;" +
+            // 长按目标必须在 touchstart 时就把 data-idx 解析出来：流式期间 tail
+            // 每 200ms 整段重建，700ms 后原节点早已脱离文档，parentElement 链断掉，
+            // 再向上找 data-idx 只会走到 null —— 菜单永远不弹。
+            "var lpTimer=null,lpStartX=0,lpStartY=0,lpIdx=null;" +
             "document.addEventListener('touchstart',function(e){" +
             "if(!e.touches||e.touches.length!==1)return;" +
             "var t=e.touches[0];" +
-            "lpStartX=t.clientX;lpStartY=t.clientY;lpEl=e.target;" +
-            "lpTimer=setTimeout(function(){" +
-            "var el=lpEl;" +
+            "lpStartX=t.clientX;lpStartY=t.clientY;lpIdx=null;" +
+            "var el=e.target;" +
             "while(el&&el!==document.body){" +
             "var idx=el.getAttribute&&el.getAttribute('data-idx');" +
-            "if(idx!==null&&idx!==undefined){window.__suppressClickUntil=Date.now()+700;" +
-            "if(window.Android)Android.messageLongPress(idx);return;}" +
+            "if(idx!==null&&idx!==undefined){lpIdx=idx;break;}" +
             "el=el.parentElement;}" +
-            "},700);});" +
+            "if(lpIdx===null)return;" +
+            "if(lpTimer)clearTimeout(lpTimer);" +
+            "lpTimer=setTimeout(function(){lpTimer=null;" +
+            "if(lpIdx===null)return;" +
+            "window.__suppressClickUntil=Date.now()+700;" +
+            "if(window.Android)Android.messageLongPress(lpIdx);},700);});" +
             "document.addEventListener('touchmove',function(e){" +
             "if(!lpTimer||!e.touches||e.touches.length!==1)return;" +
             "var t=e.touches[0];" +
@@ -357,6 +363,8 @@ final class RendererAssets {
             "if(card){if(menu)all[i].insertBefore(card,menu);else all[i].appendChild(card);}" +
             "return;}}};" +
             "window.smartScrollToBottom=function(force){" +
+            // 手指按在可横滑容器上：不要拽视口，否则表格被滚出屏幕，看起来就是「滑不动」
+            "if(window.__holdRender)return;" +
             "if(!force){" +
             "var st=document.documentElement.scrollTop||document.body.scrollTop||window.pageYOffset||0;" +
             "var sh=Math.max(document.documentElement.scrollHeight||0,document.body.scrollHeight||0);" +
@@ -398,6 +406,10 @@ final class RendererAssets {
             "var ms=document.querySelectorAll('.msg.ai .content');" +
             "if(ms.length===0)return;" +
             "var c=ms[ms.length-1];" +
+            // html 是这条消息的完整内容，被闸门挡住的缓存帧已经在里面了：
+            // 直接丢弃，否则收尾后 tail 会再追加一次，末尾一段重复。
+            "window.__pendingTailHtml=null;window.__pendingTailText=null;" +
+            "window.__pendingBaseHtml=null;window.__holdRender=false;" +
             // 已有 base/tail 骨架时把整段 HTML 写进 base、清空 tail：
             // 若这里改回「整体替换 c.innerHTML」，收尾一次就把骨架抹掉，
             // 之后续跑只能走 fallback 重建，等于又闪一次。
@@ -408,9 +420,10 @@ final class RendererAssets {
             "applyToolStates(c);" +
             "clearStatus();" +
             "addCopyBtns();smartScrollToBottom();};" +
-            // 收尾定型：内容已经完整时只把 tail 并进 base，不重新解析 markdown
+            // 收尾定型：先把被触摸闸门挡住的最后一帧落地，再把 tail 并进 base。
+            // 顺序反了会把这帧搬到定型后的 base 后面，末尾一段重复。
             "window.streamFinalize=function(){" +
-            "window.streamCommitTail();clearStatus();};" +
+            "window.__flushPending();window.streamCommitTail();clearStatus();};" +
             // 流式输出拆成两段：base（已完成的思考/工具卡片）+ tail（本轮增量）。
             // 以前每个分片都整体重设 .content，工具轮次结束后上面的卡片和已渲染好的
             // markdown 会被打回纯文本，看起来像「又变回没渲染的样子」。
@@ -418,6 +431,10 @@ final class RendererAssets {
             "var ms=document.querySelectorAll('.msg.ai .content');" +
             "if(ms.length===0)return;" +
             "var c=ms[ms.length-1];" +
+            // 手指按在表格/代码块上：先缓存，抬手后由 __flushPending 写入。
+            // 直接吞掉不行——Java 侧的 lastStreamTrace 已按「已推送」记账，
+            // 这一帧丢了就再也不会补，卡片会凭空消失。
+            "if(window.__holdRender){if(html)window.__pendingBaseHtml=html;return;}" +
             "var b=c.querySelector('.stream-base');" +
             "var t=c.querySelector('.stream-tail');" +
             "if(!b||!t){" +
@@ -470,6 +487,53 @@ final class RendererAssets {
             "while(t.firstChild)b.appendChild(t.firstChild);" +
             "t.className='stream-tail';t.innerHTML='';" +
             "clearStatus();};" +
+            // ---- 横向滚动保护 ----
+            // 流式每 200ms 重建一次 tail，正在拖动的表格节点会被整棵销毁：
+            // scrollLeft 归零、手指的拖拽序列中断，表现就是「生成时表格滑不动」。
+            // 手指按在可横滑容器上时暂停重绘，抬手 180ms 后补最后一帧；
+            // 非触摸场景（工具卡片追加）则保存并恢复 scrollLeft。
+            "window.__holdRender=false;window.__holdToken=0;" +
+            "window.__pendingTailHtml=null;window.__pendingTailText=null;window.__pendingBaseHtml=null;" +
+            "window.__inHScroll=function(el){while(el&&el!==document.body){" +
+            "var cn=''+(el.className||'');" +
+            "if(cn.indexOf('table-scroll')>=0||cn.indexOf('svg-scroll')>=0||el.tagName==='PRE')return true;" +
+            "el=el.parentElement;}return false;};" +
+            "window.__snapScroll=function(root){var a=root.querySelectorAll('.table-scroll,.svg-scroll,pre'),r=[];" +
+            "for(var i=0;i<a.length;i++)r.push([a[i].scrollLeft,a[i].scrollTop]);return r;};" +
+            "window.__restoreScroll=function(root,s){var a=root.querySelectorAll('.table-scroll,.svg-scroll,pre');" +
+            "var need=false;for(var i=0;i<a.length&&i<s.length;i++){if(s[i][0]){need=true;break;}}" +
+            "if(need)void root.offsetHeight;" +              // 先强制布局，否则 scrollLeft 设置会被丢弃
+            "for(var i=0;i<a.length&&i<s.length;i++){" +
+            "if(s[i][0])a[i].scrollLeft=s[i][0];if(s[i][1])a[i].scrollTop=s[i][1];}};" +
+            "window.__applyTailHtml=function(t,html){var s=window.__snapScroll(t);" +
+            "t.className='stream-tail';t.innerHTML=html;window.__restoreScroll(t,s);" +
+            "clearStatus();addCopyBtns(t);smartScrollToBottom();};" +
+            "window.__applyTailText=function(t,text){var s=window.__snapScroll(t);" +
+            "t.className='stream-tail plain';t.textContent=text;window.__restoreScroll(t,s);" +
+            "clearStatus();smartScrollToBottom();};" +
+            "window.__flushPending=function(){" +
+            // 走到这里说明触摸手势结束了（抬手，或请求收尾）：解除闸门再落地。
+            // 必须先落地再 commitTail —— 否则缓存帧会被搬进一个已经定型的 base，
+            // 表现是最后一段内容重复出现。
+            "window.__holdRender=false;" +
+            "var bh=window.__pendingBaseHtml;window.__pendingBaseHtml=null;" +
+            "if(bh!==null)window.streamBase(bh);" +          // hold 已清，这里可以正常写入
+            "var h=window.__pendingTailHtml,x=window.__pendingTailText;" +
+            "window.__pendingTailHtml=null;window.__pendingTailText=null;" +
+            "if(h===null&&x===null)return;" +
+            "var ms=document.querySelectorAll('.msg.ai .content');if(ms.length===0)return;" +
+            "var t=ms[ms.length-1].querySelector('.stream-tail');if(!t)return;" +
+            "if(h!==null)window.__applyTailHtml(t,h);else window.__applyTailText(t,x);};" +
+            "window.__releaseHold=function(){if(!window.__holdRender)return;var tk=++window.__holdToken;" +
+            "setTimeout(function(){if(tk!==window.__holdToken)return;" +
+            "window.__holdRender=false;window.__flushPending();},180);};" +
+            "document.addEventListener('touchstart',function(e){" +
+            "if(window.__inHScroll(e.target)){window.__holdRender=true;window.__holdToken++;}" +
+            // 手指已经离开横滑容器：立刻收口。只靠 touchend 的 180ms 计时器，
+            // 会被下一次触摸覆盖 token 而永远不释放，闸门卡死后内容停止更新。
+            "else if(window.__holdRender){window.__holdToken++;window.__holdRender=false;window.__flushPending();}},true);" +
+            "document.addEventListener('touchend',function(){window.__releaseHold();},true);" +
+            "document.addEventListener('touchcancel',function(){window.__releaseHold();},true);" +
             "window.streamTailHtml=function(html){" +
             "var ms=document.querySelectorAll('.msg.ai .content');" +
             "if(ms.length===0)return;" +
@@ -480,8 +544,8 @@ final class RendererAssets {
             "c.innerHTML='<div class=\"stream-base\"></div><div class=\"stream-tail\"></div>';" +
             "c.querySelector('.stream-base').innerHTML=keep;" +
             "t=c.querySelector('.stream-tail');}" +
-            "t.className='stream-tail';t.innerHTML=html;" +
-            "clearStatus();addCopyBtns(t);smartScrollToBottom();};" +
+            "if(window.__holdRender){window.__pendingTailHtml=html;window.__pendingTailText=null;return;}" +
+            "window.__applyTailHtml(t,html);};" +
             "window.streamTailText=function(text){" +
             "var ms=document.querySelectorAll('.msg.ai .content');" +
             "if(ms.length===0)return;" +
@@ -491,8 +555,8 @@ final class RendererAssets {
             "c.innerHTML='<div class=\"stream-base\"></div><div class=\"stream-tail\"></div>';" +
             "c.querySelector('.stream-base').innerHTML=keep;" +
             "t=c.querySelector('.stream-tail');}" +
-            "t.className='stream-tail plain';t.textContent=text;" +
-            "clearStatus();smartScrollToBottom();};" +
+            "if(window.__holdRender){window.__pendingTailText=text;window.__pendingTailHtml=null;return;}" +
+            "window.__applyTailText(t,text);};" +
             // 写入失败卡片（工具轮次中途失败时挂在 AI 气泡下方，支持从出错处重试）
             "window.markAssistantFailed=function(idx,cardHtml){" +
             "var all=document.querySelectorAll('.msg.ai');" +
@@ -554,6 +618,10 @@ final class RendererAssets {
             "var cur=parseInt(all[i].getAttribute('data-idx'));" +
             "if(cur>=start)all[i].setAttribute('data-idx',''+(cur-1));}};" +
             "window.finalizeLast=function(idx){" +
+            // 这条气泡不再是「流式中」：之后任何缓存帧都不该再落到它身上
+            // （失败路径紧接着会用完整内容重写 base，残留的 tail 帧会重复）
+            "window.__pendingTailHtml=null;window.__pendingTailText=null;" +
+            "window.__pendingBaseHtml=null;window.__holdRender=false;" +
             "var ms=document.querySelectorAll('.msg.ai');" +
             "if(ms.length>0){" +
             "var last=ms[ms.length-1];" +
