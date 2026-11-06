@@ -364,8 +364,11 @@ public class ApiClient {
     }
 
     /**
-     * Remove {@code [start]...[/end]} blocks (inclusive). An unterminated block
-     * drops everything from {@code start} to the end.
+     * Remove {@code [start]...[/end]} blocks (inclusive).
+     *
+     * <p>未闭合时只丢掉开标签、保留后面的内容。旧实现对未闭合块直接 break，
+     * 把整段后半部分一起丢掉——打断、断流、模型漏写结束标记都会命中，
+     * 表现就是「回答莫名其妙少了一半」。
      */
     private static String stripBlock(String content, String startTag, String endTag, int endLen) {
         StringBuilder result = new StringBuilder();
@@ -380,7 +383,10 @@ public class ApiClient {
                 result.append(content.substring(start, tagStart));
             }
             int tagEnd = content.indexOf(endTag, tagStart);
-            if (tagEnd == -1) break;
+            if (tagEnd == -1) {
+                result.append(content.substring(tagStart + startTag.length()));
+                break;
+            }
             start = tagEnd + endLen;
         }
         return result.toString();

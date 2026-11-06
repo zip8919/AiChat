@@ -88,10 +88,9 @@ final class ChatHistory {
     private static void appendAssistant(JSONArray msgs, Message m, boolean replayTools)
             throws Exception {
         String hist = replayTools ? m.toolHistory : "";
-        boolean replayed = false;
         if (hist != null && hist.length() > 2) {
             try {
-                replayed = appendToolHistory(msgs, hist);
+                appendToolHistory(msgs, hist);
             } catch (Exception e) {
                 // 存坏了就退回纯文本，不要让整个请求挂掉
                 LogUtil.w(TAG, "bad toolHistory, fallback to text: %s", e.getMessage());
@@ -101,7 +100,9 @@ final class ChatHistory {
         String text = m.apiText != null && m.apiText.trim().length() > 0
                 ? m.apiText.trim()
                 : MessageHtmlRenderer.plainTextOf(m.content);
-        if (text.length() > 0 || !replayed) {
+        // 正文为空就别发 assistant：空 content 会被部分端点判为非法消息（400），
+        // 而工具轮次里「只有 tool_calls、没有最终正文」本身也是合法状态。
+        if (text.length() > 0) {
             JSONObject mm = new JSONObject();
             mm.put("role", "assistant");
             mm.put("content", text);

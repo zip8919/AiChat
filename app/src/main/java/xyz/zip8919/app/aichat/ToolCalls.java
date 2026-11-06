@@ -59,8 +59,12 @@ final class ToolCalls {
                 String name = fn.optString("name", "");
                 if (name.length() > 0) {
                     String old = tc.optString("name", "");
-                    if (old.length() == 0) tc.put("name", name);
-                    else if (!old.equals(name)) tc.put("name", old + name);
+                    // name 在协议里是完整下发的（只有 arguments 分片）。少数兼容端点
+                    // 每片都重复同一个 name，旧实现无条件 old + name 会拼成
+                    // "web_searchweb_search"，工具直接找不到、整轮白跑。
+                    if (old.length() == 0 || name.startsWith(old)) {
+                        tc.put("name", name);
+                    }
                 }
             }
             if (fn.has("arguments") && !fn.isNull("arguments")) {

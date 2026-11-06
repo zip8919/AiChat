@@ -90,8 +90,9 @@ final class ChatTransport {
     /** 读取错误响应体，最多 4KB——够看错误原因，又不至于把日志撑爆。 */
     static String readErrorBody(HttpURLConnection conn) {
         if (conn == null) return "";
+        InputStream es = null;
         try {
-            InputStream es = conn.getErrorStream();
+            es = conn.getErrorStream();
             if (es == null) return "";
             ByteArrayOutputStream bos = new ByteArrayOutputStream();
             byte[] buf = new byte[1024];
@@ -104,6 +105,11 @@ final class ChatTransport {
             return new String(bos.toByteArray(), "UTF-8");
         } catch (Exception e) {
             return "";
+        } finally {
+            // 不关流在复用的 keep-alive 连接上会拖住后续请求，也占着 fd
+            if (es != null) {
+                try { es.close(); } catch (Exception ignored) { }
+            }
         }
     }
 }

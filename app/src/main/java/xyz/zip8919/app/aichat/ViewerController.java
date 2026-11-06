@@ -732,7 +732,8 @@ final class ViewerController {
             wv.evaluateJavascript(js, null);
         } else {
             LogUtil.v(TAG, "evalJs: API<19 fallback loadUrl: %s", LogUtil.preview(js, 120));
-            wv.loadUrl("javascript:" + js);
+            // loadUrl 会按 URL 解析：'#' 之后整段丢失、'%' 触发解码，代码里这两者都常见
+            wv.loadUrl("javascript:" + TextKit.forJsUrl(js));
         }
     }
 

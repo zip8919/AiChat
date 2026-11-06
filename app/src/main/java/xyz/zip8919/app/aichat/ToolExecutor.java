@@ -83,6 +83,13 @@ final class ToolExecutor {
         int skipped = 0;
         int total = calls == null ? 0 : calls.length();
         for (int i = 0; i < total; i++) {
+            // 打断后立刻停手：原来只在每轮末尾检查 isAlive，用户点了停止仍会把
+            // 剩下的工具跑完；而工具内部会因 guard 直接返回 null，被当成
+            // 「未配置搜索密钥」写进结果并弹提示，误导用户去改设置。
+            if (!host.isAlive()) {
+                LogUtil.i("ToolExecutor", "aborted before tool %d/%d", i + 1, total);
+                return new Outcome(executed, skipped, true);
+            }
             JSONObject call = calls.optJSONObject(i);
             if (call == null) continue;
             String id = call.optString("id", "");

@@ -54,4 +54,23 @@ final class TextKit {
         if (one.length() > 15) one = one.substring(0, 15);
         return one;
     }
+
+    /**
+     * 给 API 18 的 {@code loadUrl("javascript:...")} 做转义。
+     *
+     * <p>这条路径会先按 URL 解析再交给 JS 引擎：{@code #} 之后被当 fragment 丢掉、
+     * {@code %} 触发一次解码、{@code +} 变成空格、空格被规范化。聊天内容里
+     * {@code #} 和 {@code %} 太常见（Markdown 标题、代码注释、百分比），
+     * 不处理就会「只渲染半截」甚至整段脚本失效。
+     *
+     * <p>只动这几个会改变语义的字符，其余原样保留；WebView 会把 {@code %XX}
+     * 还原后再交给 JS 引擎，所以字符串内容不会被打乱。
+     */
+    static String forJsUrl(String js) {
+        if (js == null) return "";
+        return js.replace("%", "%25")
+                .replace("#", "%23")
+                .replace("+", "%2B")
+                .replace(" ", "%20");
+    }
 }

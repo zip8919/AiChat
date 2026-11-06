@@ -522,6 +522,9 @@ public class MainActivity extends Activity {
         // interrupt handler drains the queue into the new one.
         if (queue != null) queue.clearAll();
         if (isRequestInProgress.get()) interruptRequest();
+        // 打断的 UI 清理是异步的（还要校验会话没被换掉），而下面这行马上要保存旧会话：
+        // 先把末尾的空 AI 占位删掉，否则旧会话文件里会留下一个永远没有内容的空气泡
+        dropTrailingEmptyAssistant();
         loadSystemPrompt();
         Conversation conv = conversationManager.createNewConversation();
         conv.systemPrompt = systemPrompt;
@@ -530,6 +533,33 @@ public class MainActivity extends Activity {
         LogUtil.i(TAG, "new conversation created: id=%s model=%s", conv.id, conv.model);
         refreshWebView();
         Toast.makeText(this, "已创建新对话", Toast.LENGTH_SHORT).show();
+    }
+
+    /**
+     * 丢掉末尾连续的「空 AI 占位」。
+     *
+     * <p>请求刚发出、还没收到第一个字时，末尾会有一条 content 为空的 assistant。
+     * 正常收尾由 settleStream / interruptRequest 负责清掉，但那两条都是异步的，
+     * 且会因为「会话已经切走」被守卫跳过。新建/切换会话前必须同步清一次，
+     * 否则空占位会随旧会话落盘，下次打开是个点不开的空气泡。
+     */
+    private void dropTrailingEmptyAssistant() {
+        if (messages == null) return;
+        boolean removed = false;
+        while (!messages.isEmpty()) {
+            Message last = messages.get(messages.size() - 1);
+            if (last != null && last.isAssistant()
+                    && (last.content == null || last.content.length() == 0)) {
+                messages.remove(messages.size() - 1);
+                removed = true;
+            } else {
+                break;
+            }
+        }
+        if (removed) {
+            LogUtil.d(TAG, "dropTrailingEmptyAssistant: removed, size=%d", messages.size());
+            removeUnfinalizedAiDiv();
+        }
     }
 
     private void interruptRequest() {
@@ -543,10 +573,18 @@ public class MainActivity extends Activity {
         }
         // Safety: skip UI cleanup if activity is finishing
         if (isFinishing()) return;
+        // 记下发起时的会话。清理动作（标记「已打断」、挂重试卡片、落盘）都是针对
+        // 「当前会话」的，而调用方往往紧接着就切/新建会话；不校验就会把旧会话的
+        // 消息标记写到新会话的文件里。
+        final Conversation convAtInterrupt = conversationManager.getCurrentConversation();
         final int msgCountAtInterrupt = messages.size();
         runOnUiThread(new Runnable() {
             public void run() {
                 if (isFinishing()) return;
+                if (conversationManager.getCurrentConversation() != convAtInterrupt) {
+                    LogUtil.d(TAG, "interrupt cleanup skipped: conversation changed");
+                    return;
+                }
                 if (queue != null) queue.drain();
                 if (messages.size() != msgCountAtInterrupt) return;
                 if (!messages.isEmpty()) {
@@ -636,6 +674,7 @@ public class MainActivity extends Activity {
                 // 排队消息属于旧会话：在 interruptRequest 派发的 drain 之前丢弃，避免发进新会话
                 if (queue != null) queue.clearAll();
                 if (isRequestInProgress.get()) interruptRequest();
+                dropTrailingEmptyAssistant();
                 conversationManager.saveCurrentConversation();
                 new Thread(new Runnable() {
                     @Override
@@ -1422,7 +1461,7 @@ public class MainActivity extends Activity {
         if (android.os.Build.VERSION.SDK_INT >= 19) {
             wv.evaluateJavascript(js, null);
         } else {
-            wv.loadUrl("javascript:" + js);
+            wv.loadUrl("javascript:" + TextKit.forJsUrl(js));
         }
     }
 
@@ -1667,6 +1706,8 @@ public class MainActivity extends Activity {
         public void showImageViewer(final String indexStr, final String imagesJson) {
             handler.post(new Runnable() {
                 public void run() {
+                    // onDestroy 会把 viewer 置空，而 WebView 里排队执行的 JS 仍可能回调进来
+                    if (viewer == null) return;
                     try {
                         viewer.showImage(Integer.parseInt(indexStr), imagesJson);
                     } catch (Exception e) {
@@ -1680,6 +1721,7 @@ public class MainActivity extends Activity {
         public void showTableViewer(final String tableHtml) {
             handler.post(new Runnable() {
                 public void run() {
+                    if (viewer == null) return;
                     viewer.showTable(tableHtml);
                 }
             });
@@ -1700,6 +1742,7 @@ public class MainActivity extends Activity {
         public void previewCode(final String lang, final String code) {
             handler.post(new Runnable() {
                 public void run() {
+                    if (viewer == null) return;
                     viewer.showCode(lang, code);
                 }
             });
@@ -1824,7 +1867,15 @@ public class MainActivity extends Activity {
     // ========== 消息长按菜单 ==========
 
     private void showMessageMenu(final int pos) {
+        // pos 来自 DOM 上的 data-idx。消息可能在长按之后、菜单弹出之前被删掉
+        // （流式收尾回滚空占位、另一条消息的重试截断），直接 get 会越界崩溃。
+        if (messages == null || pos < 0 || pos >= messages.size()) {
+            LogUtil.w(TAG, "showMessageMenu ignored: pos=%d size=%d", pos,
+                    messages == null ? -1 : messages.size());
+            return;
+        }
         final Message msg = messages.get(pos);
+        if (msg == null) return;
         String[] items = {"复制", "选择文本", "修改", "删除", "重试", "回溯到此处", "创建分支"};
         LogUtil.d(TAG, "showMessageMenu: pos=%d role=%s len=%s", pos, msg.role,
                 msg.content == null ? "null" : msg.content.length());
@@ -1909,6 +1960,10 @@ public class MainActivity extends Activity {
 
     // 3. 修改
     private void editMessage(final int pos) {
+        if (pos < 0 || pos >= messages.size()) {
+            LogUtil.w(TAG, "editMessage ignored: pos=%d size=%d", pos, messages.size());
+            return;
+        }
         final Message msg = messages.get(pos);
         final String oldContent = getMessageText(msg);
 
@@ -1969,11 +2024,21 @@ public class MainActivity extends Activity {
 
     // 4. 删除
     private void deleteMessage(final int pos) {
+        if (pos < 0 || pos >= messages.size()) {
+            LogUtil.w(TAG, "deleteMessage ignored: pos=%d size=%d", pos, messages.size());
+            return;
+        }
         Message msg = messages.get(pos);
         String preview = getMessageText(msg);
+        if (preview == null) preview = "";
         if (preview.length() > 30) preview = preview.substring(0, 30) + "...";
         showConfirmDialog("确定删除本条消息？\n\n" + preview, new Runnable() {
             public void run() {
+                // 弹窗期间列表可能已经变化（排队消息发出去、另一条被回滚）
+                if (pos < 0 || pos >= messages.size()) {
+                    LogUtil.w(TAG, "deleteMessage aborted: pos=%d size=%d", pos, messages.size());
+                    return;
+                }
                 LogUtil.i(TAG, "deleteMessage: pos=%d, size %d -> %d", pos, messages.size(), messages.size() - 1);
                 messages.remove(pos);
                 // 渲染起点跟着前移，否则上滑加载会按旧下标取到错位的消息

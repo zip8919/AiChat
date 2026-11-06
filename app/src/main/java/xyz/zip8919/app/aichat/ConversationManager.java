@@ -214,9 +214,13 @@ public class ConversationManager {
         }
 
         // Sort: newest updatedAt first
+        // 不用 Long.compare：它是 API 19 才进 Android 的，4.3(API 18) 上会 NoSuchMethodError，
+        // 而这段在每个冷启动都会跑到，等于必崩。
         Collections.sort(loaded, new Comparator<Conversation>() {
             public int compare(Conversation a, Conversation b) {
-                return Long.compare(b.updatedAt, a.updatedAt);
+                if (b.updatedAt > a.updatedAt) return 1;
+                if (b.updatedAt < a.updatedAt) return -1;
+                return 0;
             }
         });
 
@@ -312,9 +316,12 @@ public class ConversationManager {
 
             JSONArray msgs = new JSONArray();
             for (Message m : conv.messages) {
+                if (m == null) continue;
                 JSONObject mj = new JSONObject();
-                mj.put("role", m.role);
-                mj.put("content", m.content);
+                // JSONObject.put(String, Object) 遇到 null 会写成 JSON null，
+                // 而 optString() 读回来是字符串 "null"——消息会变成字面量 null。
+                mj.put("role", m.role == null ? Message.ROLE_USER : m.role);
+                mj.put("content", m.content == null ? "" : m.content);
                 mj.put("timestamp", m.timestamp);
                 if (m.apiText != null && m.apiText.length() > 0) {
                     mj.put("apiText", m.apiText);
@@ -356,7 +363,12 @@ public class ConversationManager {
         Conversation conv = new Conversation();
         try {
             JSONObject json = new JSONObject(jsonStr);
-            conv.id = json.optString("id", conv.id);
+            String rawId = json.optString("id", "");
+            // 旧版本可能把 null 写成字符串 "null"，那样这个会话永远匹配不上
+            // 任何一次 switchConversation，等于打不开
+            if (rawId.length() > 0 && !"null".equalsIgnoreCase(rawId)) {
+                conv.id = rawId;
+            }
             conv.title = normalizeTitle(json.optString("title", null));
             // 缺失时间字段时不能用「当前时间」，否则每次加载都变成「刚刚」、排序不断漂移；
             // 用 0/createdAt 兜底，保证同一文件每次得到相同值。
@@ -375,8 +387,12 @@ public class ConversationManager {
                 for (int i = 0; i < msgs.length(); i++) {
                     JSONObject mj = msgs.getJSONObject(i);
                     Message m = new Message();
-                    m.role = mj.optString("role", "user");
-                    m.content = mj.optString("content", "");
+                    String role = mj.optString("role", Message.ROLE_USER);
+                    // 同上：role 一旦是字符串 "null"，isUser()/isAssistant() 全为 false，
+                    // 这条消息既渲染不出来也进不了请求体，等于永久丢失
+                    m.role = (role.length() == 0 || "null".equalsIgnoreCase(role))
+                            ? Message.ROLE_USER : role;
+                    m.content = mj.isNull("content") ? "" : mj.optString("content", "");
                     m.timestamp = mj.optLong("timestamp", System.currentTimeMillis());
                     m.sendFailed = mj.optBoolean("sendFailed", false);
                     m.errorDetail = mj.optString("errorDetail", "");

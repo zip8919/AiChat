@@ -367,11 +367,21 @@ public class MessageHtmlRenderer {
             if (at > start) out.append(content, start, at);
             if (thinkingNext) {
                 int te = indexOfOutsideCode(content, "[/thinking]", at + 10);
-                if (te == -1) break;          // 未闭合：丢弃剩余
+                if (te == -1) {
+                    // 未闭合（手动打断、或模型没写结束标记）：只丢掉开标签，保留后面的
+                    // 正文。原来这里直接 break，等于把「复制 / 选择文本 / 编辑」拿到的
+                    // 内容砍掉一大截，和屏幕上看到的不一致。
+                    out.append(content, at + 10, content.length());
+                    break;
+                }
                 start = te + 11;
             } else {
                 int ge = findToolBlockEnd(content, at + WebSearchTool.TRACE_START.length());
-                if (ge == -1) break;
+                if (ge == -1) {
+                    // 同上：工具块没闭合时保留 payload，不要让整段回答凭空消失
+                    out.append(content, at + WebSearchTool.TRACE_START.length(), content.length());
+                    break;
+                }
                 start = ge + WebSearchTool.TRACE_END.length();
             }
         }

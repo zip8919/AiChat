@@ -143,22 +143,33 @@ final class SseRound {
                 }
                 r.chunks++;
 
+                JSONObject json;
                 try {
-                    JSONObject json = new JSONObject(data);
-                    JSONArray choices = json.optJSONArray("choices");
-                    if (choices == null || choices.length() == 0) {
-                        LogUtil.v(TAG, "chunk#%d has no choices: %s",
-                                r.chunks, LogUtil.preview(data, 200));
-                        continue;
-                    }
-                    JSONObject delta = choices.getJSONObject(0).optJSONObject("delta");
-                    if (delta == null) {
-                        LogUtil.v(TAG, "chunk#%d has no delta", r.chunks);
-                        continue;
-                    }
+                    json = new JSONObject(data);
+                } catch (Exception e) {
+                    LogUtil.w(TAG, "failed to parse SSE chunk#%d: %s | raw=%s",
+                            r.chunks, e.getMessage(), LogUtil.preview(data, 300));
+                    continue;
+                }
+                JSONArray choices = json.optJSONArray("choices");
+                if (choices == null || choices.length() == 0) {
+                    LogUtil.v(TAG, "chunk#%d has no choices: %s",
+                            r.chunks, LogUtil.preview(data, 200));
+                    continue;
+                }
+                JSONObject first = choices.optJSONObject(0);
+                JSONObject delta = first == null ? null : first.optJSONObject("delta");
+                if (delta == null) {
+                    LogUtil.v(TAG, "chunk#%d has no delta", r.chunks);
+                    continue;
+                }
 
-                    if (delta.has("reasoning_content") && !delta.isNull("reasoning_content")) {
-                        String rc = delta.getString("reasoning_content");
+                // 从这里往下不再用 catch 兜住：解析异常应当让本轮失败并保留已输出的
+                // 内容，而不是被当成「坏分片」跳过——那样工具调用会静默丢失，
+                // 界面上只看到模型「想了半天没动静」。
+                if (delta.has("reasoning_content") && !delta.isNull("reasoning_content")) {
+                    String rc = delta.optString("reasoning_content", "");
+                    if (rc.length() > 0) {
                         r.thinkingChunks++;
                         if (!thinkingActive) {
                             thinkingActive = true;
@@ -172,41 +183,38 @@ final class SseRound {
                                     r.thinkingChunks, LogUtil.preview(rc, 150));
                         }
                     }
+                }
 
-                    if (delta.has("content") && !delta.isNull("content")) {
-                        String ct = delta.getString("content");
-                        r.contentChunks++;
-                        // 非空 content 才算思考结束：API 在每个 reasoning 分片后都会
-                        // 附一个 "content":""，按 has() 判断会立刻结束思考阶段
-                        if (ct.length() > 0 && thinkingActive && !thinkingFinished) {
-                            thinkingFinished = true;
-                            r.display.append("[/thinking]");
-                            LogUtil.d(TAG, "thinking phase END at chunk#%d (chunks=%d)",
-                                    r.chunks, r.thinkingChunks);
-                        }
-                        r.display.append(ct);
-                        r.content.append(ct);
-                        if (LogUtil.ENABLED) {
-                            LogUtil.v(TAG, "content chunk#%d: %s",
-                                    r.contentChunks, LogUtil.preview(ct, 150));
-                        }
+                if (delta.has("content") && !delta.isNull("content")) {
+                    String ct = delta.optString("content", "");
+                    r.contentChunks++;
+                    // 非空 content 才算思考结束：API 在每个 reasoning 分片后都会
+                    // 附一个 "content":""，按 has() 判断会立刻结束思考阶段
+                    if (ct.length() > 0 && thinkingActive && !thinkingFinished) {
+                        thinkingFinished = true;
+                        r.display.append("[/thinking]");
+                        LogUtil.d(TAG, "thinking phase END at chunk#%d (chunks=%d)",
+                                r.chunks, r.thinkingChunks);
                     }
+                    r.display.append(ct);
+                    r.content.append(ct);
+                    if (LogUtil.ENABLED) {
+                        LogUtil.v(TAG, "content chunk#%d: %s",
+                                r.contentChunks, LogUtil.preview(ct, 150));
+                    }
+                }
 
-                    JSONArray deltaCalls = delta.optJSONArray("tool_calls");
-                    if (deltaCalls != null && deltaCalls.length() > 0) {
-                        ToolCalls.accumulate(r.toolCalls, deltaCalls);
-                    }
+                JSONArray deltaCalls = delta.optJSONArray("tool_calls");
+                if (deltaCalls != null && deltaCalls.length() > 0) {
+                    ToolCalls.accumulate(r.toolCalls, deltaCalls);
+                }
 
-                    if (progress != null) {
-                        long now = System.currentTimeMillis();
-                        if (now - lastEmit > 100) {
-                            lastEmit = now;
-                            progress.onProgress(r.display.toString(), r.content.toString());
-                        }
+                if (progress != null) {
+                    long now = System.currentTimeMillis();
+                    if (now - lastEmit > 100) {
+                        lastEmit = now;
+                        progress.onProgress(r.display.toString(), r.content.toString());
                     }
-                } catch (Exception e) {
-                    LogUtil.w(TAG, "failed to parse SSE chunk#%d: %s | raw=%s",
-                            r.chunks, e.getMessage(), LogUtil.preview(data, 300));
                 }
             }
         } finally {
@@ -216,6 +224,20 @@ final class SseRound {
         if (thinkingActive && !thinkingFinished) {
             r.display.append("[/thinking]");
             LogUtil.d(TAG, "thinking left open at stream end: closed with [/thinking]");
+        }
+        // 空流必须当失败：200 + 一个 data 都没有（网关超时、被中间层吞掉、配额耗尽）
+        // 以前会被当成「成功但内容为空」，收尾时用空内容覆盖气泡，用户看到回答凭空消失。
+        if (r.chunks == 0) {
+            r.error = "服务端没有返回任何内容";
+            r.cause = new Exception("empty SSE stream: no data line received");
+            LogUtil.e(TAG, "stream produced no chunks at all");
+            return r;
+        }
+        if (r.display.length() == 0 && r.toolCalls.length() == 0) {
+            r.error = "响应解析失败";
+            r.cause = new Exception("stream has neither text nor tool_calls");
+            LogUtil.e(TAG, "stream finished without text or tool calls (chunks=%d)", r.chunks);
+            return r;
         }
         LogUtil.i(TAG, "stream finished: chunks=%d tools=%d contentLen=%d displayLen=%d",
                 r.chunks, r.toolCalls.length(), r.content.length(), r.display.length());
