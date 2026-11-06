@@ -60,7 +60,7 @@ public class SettingsActivity extends Activity {
     private static final int DEFAULT_RETRY_429_BASE_S = 2;
     private static final int DEFAULT_RETRY_429_MAX_WAIT_S = 30;
     private static final int MIN_RETRY_429_MAX = 1;
-    private static final int MAX_RETRY_429_MAX = 5;
+    private static final int MAX_RETRY_429_MAX = 20;
     private static final int MIN_RETRY_429_BASE_S = 1;
     private static final int MAX_RETRY_429_BASE_S = 30;
     private static final int MIN_RETRY_429_MAX_WAIT_S = 1;

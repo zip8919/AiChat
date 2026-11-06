@@ -66,6 +66,18 @@ public class MainActivity extends Activity {
     private static final int MENU_ATTACH_TEXT = 1;
     /** 导入文本上限：超过直接报错，不截断——半截代码更难排查。 */
     private static final int MAX_IMPORT_BYTES = 512 * 1024;
+    /** 单条消息最多挂几个附件。老设备内存与端点上下文都扛不住更多。 */
+    private static final int MAX_ATTACHMENTS = 5;
+    /** 所有附件合计字节上限（解码后按字符数近似）。 */
+    private static final int MAX_ATTACHMENT_TOTAL = 1024 * 1024;
+
+    /**
+     * 待发送附件。
+     *
+     * <p>选完文件不往输入框里塞正文——两万字的日志会把输入框撑爆、把用户自己写的问题挤到
+     * 屏幕外，中途想删还得手工选中删除。这里只留文件名，正文等到真正发送时才并进
+     * {@code apiText}；气泡里只显示一行摘要，{@code content} 仍是用户原话。
+     */
     // 长对话分批渲染：首屏只渲染最近 N 条，滑到顶部再补一批，
     // 避免几百条消息（含公式/图片）一次性塞进 WebView 把老设备卡死。
     private static final int INITIAL_VISIBLE_MESSAGES = 40;
@@ -82,6 +94,10 @@ public class MainActivity extends Activity {
     private ImageButton sendButton;
     private ImageButton plusButton;
     private ImageButton expandButton;
+    /** 附件条的滚动外壳（GONE 时整条隐藏）与内部容器。 */
+    private View attachmentScroll;
+    private LinearLayout attachmentBar;
+    private final List<AttachmentText.File> pendingAttachments = new ArrayList<AttachmentText.File>();
     // 发送键长按打断后，本次抬手的 click 不再触发发送
     private boolean sendButtonLongPressed = false;
     private WebView conversationWebView;
@@ -214,17 +230,8 @@ public class MainActivity extends Activity {
      * 避免用户随手点外部区域关掉后，后续再也没机会看到这段声明。
      */
     private void showFirstLaunchDialog() {
-        String msg = "使用说明\n"
-                + "1. 下方输入问题，点右侧纸飞机发送；生成中点方块可停止。\n"
-                + "2. 输入框有内容时，右侧会出现全屏输入按钮。\n"
-                + "3. 长按任意消息可复制、重试、修改、回溯或创建分支。\n"
-                + "4. 设置页可配置模型、联网搜索、429 重试策略与网络请求权限。\n"
-                + "5. 联网搜索与模型调用需要自行填写 API Key。\n\n"
-                + "免责声明\n"
-                + "· 模型输出由第三方服务生成，仅供参考，请自行核实。\n"
-                + "· 联网搜索内容版权归原作者所有。\n"
-                + "· API Key 由你自行提供，相应费用与风险由你承担。\n"
-                + "· 对话内容与密钥只保存在本机，不会上传到任何自有服务器。";
+        // 文案与「关于 → 使用说明」共用一份，避免两处漂移
+        String msg = HelpText.full();
         new AlertDialog.Builder(this)
                 .setTitle("欢迎使用 AiChat")
                 .setMessage(msg)
@@ -303,6 +310,8 @@ public class MainActivity extends Activity {
         sendButton = (ImageButton) findViewById(R.id.send_button);
         plusButton = (ImageButton) findViewById(R.id.plus_button);
         expandButton = (ImageButton) findViewById(R.id.expand_button);
+        attachmentScroll = findViewById(R.id.attachment_scroll);
+        attachmentBar = (LinearLayout) findViewById(R.id.attachment_bar);
         modelSpinner = (Spinner) findViewById(R.id.model_spinner);
         thinkingSpinner = (Spinner) findViewById(R.id.thinking_spinner);
     }
@@ -331,7 +340,7 @@ public class MainActivity extends Activity {
         queueBarText = (TextView) findViewById(R.id.queue_bar_text);
         queue = new MessageQueue(this, new MessageQueue.Host() {
             public boolean isRequestInFlight() { return isRequestInProgress.get(); }
-            public void sendQueued(String text) { sendMessageText(text); }
+            public void sendQueued(String text, String apiText) { sendMessageText(text, apiText); }
             public void interruptForQueued() { interruptRequest(); }
         }, queueBar, queueBarText);
         findViewById(R.id.queue_manage_button).setOnClickListener(new View.OnClickListener() {
@@ -530,18 +539,28 @@ public class MainActivity extends Activity {
     }
 
     /** 后台读文件，回 UI 线程插到光标处；不覆盖用户已经打的内容。 */
+    /**
+     * 读文件 → 挂成待发送附件。
+     *
+     * <p>刻意<b>不</b>往输入框里插入正文：一份几十 KB 的日志会把输入框撑到无法编辑，
+     * 用户写的问题被挤到屏幕外，想删还得手工选中。正文留到发送时才进 {@code apiText}，
+     * 气泡里只显示一行「[附件] name（N 字）」。
+     */
     private void importTextFile(final Uri uri) {
         new Thread(new Runnable() {
             public void run() {
                 String text = null;
                 String err = null;
+                String name = null;
                 try {
+                    name = queryDisplayName(uri);
                     text = readTextLimited(uri, MAX_IMPORT_BYTES);
                 } catch (Exception e) {
                     err = e.getMessage();
                 }
                 final String loaded = text;
                 final String error = err;
+                final String fileName = name;
                 runOnUiThread(new Runnable() {
                     public void run() {
                         if (loaded == null) {
@@ -551,15 +570,113 @@ public class MainActivity extends Activity {
                                     Toast.LENGTH_LONG).show();
                             return;
                         }
-                        int at = inputEditText.getSelectionStart();
-                        if (at < 0) at = inputEditText.getText().length();
-                        inputEditText.getText().insert(at, loaded);
-                        Toast.makeText(MainActivity.this,
-                                "已插入 " + loaded.length() + " 字", Toast.LENGTH_SHORT).show();
+                        addAttachment(fileName, loaded);
                     }
                 });
             }
         }, "aichat-import-text").start();
+    }
+
+    /** 取文件显示名；查询失败时退回 URI 末段，至少比「未命名」强。 */
+    private String queryDisplayName(Uri uri) {
+        Cursor c = null;
+        try {
+            c = getContentResolver().query(uri, new String[]{"_display_name"}, null, null, null);
+            if (c != null && c.moveToFirst()) {
+                String n = c.getString(0);
+                if (n != null && n.length() > 0) return n;
+            }
+        } catch (Exception e) {
+            LogUtil.w(TAG, "queryDisplayName failed: %s", e.getMessage());
+        } finally {
+            if (c != null) {
+                try { c.close(); } catch (Exception ignored) { }
+            }
+        }
+        String p = uri == null ? null : uri.getLastPathSegment();
+        if (p == null || p.length() == 0) return "未命名.txt";
+        int slash = p.lastIndexOf('/');
+        return slash >= 0 ? p.substring(slash + 1) : p;
+    }
+
+    /** 加入待发送队列（只存内存，不落盘——附件是这一次输入的一部分）。 */
+    private void addAttachment(String name, String content) {
+        if (pendingAttachments.size() >= MAX_ATTACHMENTS) {
+            Toast.makeText(this, "最多附加 " + MAX_ATTACHMENTS + " 个文件", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        int total = content == null ? 0 : content.length();
+        for (int i = 0; i < pendingAttachments.size(); i++) {
+            total += pendingAttachments.get(i).content.length();
+        }
+        // 1M 字符在 4.4 上约 2MB 的 char[]，加上拼进请求体后的副本，老设备内存吃紧
+        if (total > MAX_ATTACHMENT_TOTAL) {
+            Toast.makeText(this, "附件总大小超过上限（约 1 MB）", Toast.LENGTH_LONG).show();
+            return;
+        }
+        pendingAttachments.add(new AttachmentText.File(name, content));
+        refreshAttachmentBar();
+        Toast.makeText(this, "已附加 " + name + "（" + content.length() + " 字）",
+                Toast.LENGTH_SHORT).show();
+    }
+
+    /** 重建附件条。条目少（≤5），每次全量重建比维护增删便宜。 */
+    private void refreshAttachmentBar() {
+        if (attachmentBar == null || attachmentScroll == null) return;
+        attachmentBar.removeAllViews();
+        boolean empty = pendingAttachments.isEmpty();
+        attachmentScroll.setVisibility(empty ? View.GONE : View.VISIBLE);
+        if (empty) return;
+
+        int pad10 = dp(10);
+        int pad4 = dp(4);
+        int gap = dp(6);
+        for (int i = 0; i < pendingAttachments.size(); i++) {
+            final int index = i;
+            AttachmentText.File a = pendingAttachments.get(i);
+            TextView chip = new TextView(this);
+            chip.setText(AttachmentText.shortName(a.name) + "  ×");
+            chip.setTextSize(12);
+            chip.setTextColor(getResources().getColor(R.color.text_primary));
+            chip.setBackgroundResource(R.drawable.bg_attachment_chip);
+            chip.setPadding(pad10, pad4, pad10, pad4);
+            chip.setSingleLine(true);
+            chip.setContentDescription("移除附件 " + a.name);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            lp.rightMargin = gap;
+            chip.setLayoutParams(lp);
+            chip.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    if (index < pendingAttachments.size()) {
+                        String removed = pendingAttachments.remove(index).name;
+                        LogUtil.d(TAG, "attachment removed: %s", removed);
+                        refreshAttachmentBar();
+                    }
+                }
+            });
+            attachmentBar.addView(chip);
+        }
+    }
+
+    private int dp(int v) {
+        return (int) (v * getResources().getDisplayMetrics().density + 0.5f);
+    }
+
+    private void clearAttachments() {
+        if (pendingAttachments.isEmpty()) return;
+        pendingAttachments.clear();
+        refreshAttachmentBar();
+    }
+
+    /** 发给模型的文本（附件正文全量），拼装规则见 {@link AttachmentText}。 */
+    private String composeApiText(String text) {
+        return AttachmentText.toApi(text, pendingAttachments);
+    }
+
+    /** 气泡里显示的文本（只有文件名与字数）。 */
+    private String composeDisplayText(String text) {
+        return AttachmentText.toDisplay(text, pendingAttachments);
     }
 
     /**
@@ -763,6 +880,8 @@ public class MainActivity extends Activity {
         // Queued messages belong to the old conversation; drop them before the
         // interrupt handler drains the queue into the new one.
         if (queue != null) queue.clearAll();
+        // 附件属于「这一次输入」，跟着旧会话一起丢掉，别带进新对话
+        clearAttachments();
         if (isRequestInProgress.get()) interruptRequest();
         // 打断的 UI 清理是异步的（还要校验会话没被换掉），而下面这行马上要保存旧会话：
         // 先把末尾的空 AI 占位删掉，否则旧会话文件里会留下一个永远没有内容的空气泡
@@ -915,6 +1034,7 @@ public class MainActivity extends Activity {
                 LogUtil.i(TAG, "switching to conversation: %s", conversationId);
                 // 排队消息属于旧会话：在 interruptRequest 派发的 drain 之前丢弃，避免发进新会话
                 if (queue != null) queue.clearAll();
+                clearAttachments();
                 if (isRequestInProgress.get()) interruptRequest();
                 dropTrailingEmptyAssistant();
                 conversationManager.saveCurrentConversation();
@@ -1166,19 +1286,34 @@ public class MainActivity extends Activity {
      */
     private void sendMessage() {
         String input = inputEditText.getText().toString().trim();
-        if (input.isEmpty()) {
-            LogUtil.w(TAG, "sendMessage ignored: empty input");
+        boolean hasAttachment = !pendingAttachments.isEmpty();
+        // 只挂附件、不写字也允许发送：常见用法就是把文件丢进去问「这段报错什么意思」
+        if (input.isEmpty() && !hasAttachment) {
+            LogUtil.w(TAG, "sendMessage ignored: empty input and no attachment");
             return;
         }
+        // 附件必须在清空之前定稿：排队条目只带文本，晚一步内容就丢了
+        final String display = composeDisplayText(input);
+        final String apiText = composeApiText(input);
         inputEditText.setText("");
+        clearAttachments();
         if (isRequestInProgress.get()) {
-            queue.enqueue(input);
+            queue.enqueue(display, apiText);
             return;
         }
-        sendMessageText(input);
+        sendMessageText(display, apiText);
     }
 
-    private void sendMessageText(final String input) {
+    private void sendMessageText(String input) {
+        sendMessageText(input, input);
+    }
+
+    /**
+     * @param input   显示在气泡里的文本（含附件摘要）
+     * @param apiText 实际发给模型的文本（含附件正文）。两者不同时才单独记到
+     *                {@link Message#apiText}，历史回放与重试都走它。
+     */
+    private void sendMessageText(final String input, final String apiText) {
         LogUtil.i(TAG, "========== sendMessage: len=%d preview=%s ==========",
                 input.length(), LogUtil.preview(input, 200));
 
@@ -1208,6 +1343,10 @@ public class MainActivity extends Activity {
         }
 
         Message userMsg = new Message(Message.ROLE_USER, input);
+        // 附件正文只存在于 apiText：气泡不重复展示，但历史回放与重试必须带上
+        if (apiText != null && !apiText.equals(input)) {
+            userMsg.apiText = apiText;
+        }
         messages.add(userMsg);
         conversationManager.getCurrentConversation().touch();
         LogUtil.d(TAG, "user message appended, total messages=%d", messages.size());
@@ -1808,7 +1947,20 @@ public class MainActivity extends Activity {
 
     // Execute JS in the conversation WebView: evaluateJavascript (API 19+) avoids a
     // full page navigation per call; loadUrl fallback for API 18.
-    private void webViewEvalJs(String js) {
+    private void webViewEvalJs(final String js) {
+        // WebView 的所有方法都必须在创建它的线程（主线程）上调用，否则抛
+        // RuntimeException("A WebView method was called on thread ...")。
+        // 请求线程会通过 Ui.onStatus / onTrace 回调直接走到这里（第一轮 trace 为空时
+        // renderTraceAsync 只更新状态行，那条快路径就在 stream 线程上），
+        // 所以在唯一的出口做线程编组，而不是指望每个调用点自己记得 post。
+        if (android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) {
+            handler.post(new Runnable() {
+                public void run() {
+                    webViewEvalJs(js);
+                }
+            });
+            return;
+        }
         // onDestroy 后 WebView 已 destroy 并置空，迟到的回调直接丢弃
         WebView wv = conversationWebView;
         if (wv == null) return;
@@ -2807,6 +2959,7 @@ public class MainActivity extends Activity {
                 // 与新建/切换会话同一套收口：排队消息属于旧会话，在途请求会继续往
                 // messages 里写。不先停掉，分支切过去后收尾逻辑会按旧下标写到新列表。
                 if (queue != null) queue.clearAll();
+                clearAttachments();
                 if (isRequestInProgress.get()) interruptRequest();
                 dropTrailingEmptyAssistant();
                 // 清空占位后 pos 可能已经越界（最后一条正是那条空 AI 占位）

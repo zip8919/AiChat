@@ -29,8 +29,8 @@ final class MessageQueue {
         /** 当前是否有请求在飞行中。 */
         boolean isRequestInFlight();
 
-        /** 真正发出一条消息（已从队列移除）。 */
-        void sendQueued(String text);
+        /** 真正发出一条消息（已从队列移除）。{@code apiText} 含附件正文。 */
+        void sendQueued(String text, String apiText);
 
         /** 打断当前回复，让队首立刻发出。 */
         void interruptForQueued();
@@ -38,11 +38,15 @@ final class MessageQueue {
 
     private static final class QueuedMessage {
         final int id;
+        /** 气泡里显示的文本；队列条与弹窗都用它。 */
         final String text;
+        /** 实际发给模型的文本，带附件正文；没有附件时与 text 相同。 */
+        final String apiText;
 
-        QueuedMessage(int id, String text) {
+        QueuedMessage(int id, String text, String apiText) {
             this.id = id;
             this.text = text;
+            this.apiText = apiText == null ? text : apiText;
         }
     }
 
@@ -85,9 +89,14 @@ final class MessageQueue {
         return pending.size();
     }
 
-    /** 入队并清空输入框由调用方负责；这里只做队列与提示。 */
+    /** 无附件的普通入队。 */
     void enqueue(String text) {
-        pending.add(new QueuedMessage(nextId++, text));
+        enqueue(text, text);
+    }
+
+    /** 入队并清空输入框由调用方负责；这里只做队列与提示。 */
+    void enqueue(String text, String apiText) {
+        pending.add(new QueuedMessage(nextId++, text, apiText));
         updateBar();
         LogUtil.i(TAG, "enqueued: len=%d pending=%d", text.length(), pending.size());
         Toast.makeText(activity, "已排队 " + pending.size() + " 条，将在当前回复结束后发送",
@@ -113,7 +122,7 @@ final class MessageQueue {
                 refreshManager();
                 LogUtil.i(TAG, "drain: sending id=%d len=%d remaining=%d",
                         next.id, next.text.length(), pending.size());
-                host.sendQueued(next.text);
+                host.sendQueued(next.text, next.apiText);
             }
         });
     }

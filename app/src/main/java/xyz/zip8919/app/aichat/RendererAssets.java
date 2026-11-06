@@ -281,12 +281,19 @@ final class RendererAssets {
             "if(ci>=0&&window.Android)Android.showImageViewer(''+ci,JSON.stringify(all));" +
             "return false;}" +
             "});" +
+            "window.fmtTok=function(n){" +
+            "n=n|0;if(n<1000)return ''+n;" +
+            "if(n<1000000)return (n/1000).toFixed(1)+'k';" +
+            "return (n/1000000).toFixed(1)+'M';};" +
             "window.toggleThinking=function(btn){" +
             "var b=btn.nextElementSibling;if(!b)return;" +
             "if(b.style.display==='none'){b.style.display='block';" +
             "btn.textContent='── 折叠思考 ──';}" +
             "else{b.style.display='none';" +
-            "btn.textContent='── 展开思考（'+b.textContent.length+'字）──';}};" +
+            // 数值取渲染时写进 data-tok 的源码估算值；缺失时（老 DOM）退回按可见文本估算
+            "var t=parseInt(btn.getAttribute('data-tok'),10);" +
+            "if(!(t>0))t=Math.max(1,Math.round(b.textContent.length*2/3));" +
+            "btn.textContent='── 展开思考（'+window.fmtTok(t)+' tokens）──';}};" +
             "window.__toolOpen=window.__toolOpen||{};" +
             "window.applyToolStates=function(root){" +
             "if(!root||!root.querySelectorAll)return;" +

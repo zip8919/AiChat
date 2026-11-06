@@ -26,10 +26,16 @@ public class AboutActivity extends Activity {
         TextView version = (TextView) findViewById(R.id.about_version);
         version.setText("版本 " + versionText());
 
+        Button help = (Button) findViewById(R.id.about_help);
         Button checkUpdate = (Button) findViewById(R.id.about_check_update);
         Button feedback = (Button) findViewById(R.id.about_feedback);
         Button licenses = (Button) findViewById(R.id.about_licenses);
 
+        help.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                showHelp();
+            }
+        });
         checkUpdate.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 Toast.makeText(AboutActivity.this, "检查更新功能待开发", Toast.LENGTH_SHORT).show();
@@ -57,6 +63,21 @@ public class AboutActivity extends Activity {
             LogUtil.w(TAG, "versionText failed: %s", e.getMessage());
             return "未知";
         }
+    }
+
+    /**
+     * 使用说明与首启弹窗同源（{@link HelpText}），随时可回查。
+     */
+    private void showHelp() {
+        new AlertDialog.Builder(this)
+                .setTitle("使用说明")
+                .setMessage(HelpText.full())
+                .setPositiveButton("关闭", new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface d, int w) {
+                        d.dismiss();
+                    }
+                })
+                .show();
     }
 
     /**

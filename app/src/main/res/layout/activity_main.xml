@@ -167,6 +167,26 @@
             android:text="管理"/>
     </LinearLayout>
 
+    <!-- 待发送附件条：选择文件后只在这里显示文件名，不碰输入框。
+         真正的内容在发送时并入 apiText，气泡里只留一行摘要。 -->
+    <HorizontalScrollView
+        android:id="@+id/attachment_scroll"
+        android:scrollbars="none"
+        android:background="@color/background"
+        android:paddingLeft="8dp"
+        android:paddingRight="8dp"
+        android:paddingTop="4dp"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:id="@+id/attachment_bar"
+            android:orientation="horizontal"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"/>
+    </HorizontalScrollView>
+
     <!-- Bottom input bar
          右侧是竖排：上面全屏展开、下面发送。全屏用 GONE 而不是 INVISIBLE：
          它常驻会白占 30dp，窄屏上输入栏一直比改动前高 30dp。

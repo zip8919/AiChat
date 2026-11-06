@@ -315,9 +315,15 @@ public class MessageHtmlRenderer {
                 }
                 String thinking = text.substring(ts + 10, te);
                 blocks++;
+                // 用 token 而不是字数：用户对「这次思考花了多少」的直觉来自
+                // 消息底部的 token 用量，两处单位一致才能横向比较。
+                // 数值按源码长度估算（≈ chars × 2/3），并写进 data-tok，
+                // 折叠时由 JS 直接读回，避免展开/收起后数字跳变。
+                int thinkTok = estimateTokens(thinking.length());
                 html.append("<div class=\"thinking-wrap\">")
-                    .append("<div class=\"thinking-toggle\" onclick=\"toggleThinking(this)\">── 展开思考（")
-                    .append(String.valueOf(thinking.length())).append("字）──</div>")
+                    .append("<div class=\"thinking-toggle\" data-tok=\"").append(thinkTok)
+                    .append("\" onclick=\"toggleThinking(this)\">── 展开思考（")
+                    .append(formatTokens(thinkTok)).append(" tokens）──</div>")
                     .append("<div class=\"thinking-block\" style=\"display:none\">")
                     .append(MarkdownPipeline.render(thinking, ctx))
                     .append("</div></div>");

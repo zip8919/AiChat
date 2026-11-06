@@ -286,13 +286,13 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="最多重试次数（1-5）"/>
+            android:text="最多重试次数（1-20）"/>
         <EditText
             android:id="@+id/retry_429_max_edit"
             android:background="@drawable/edit_text_background"
             android:gravity="center"
             android:inputType="number"
-            android:maxLength="1"
+            android:maxLength="2"
             android:padding="6dp"
             android:layout_width="64dp"
             android:layout_height="wrap_content"

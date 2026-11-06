@@ -1,6 +1,6 @@
 # AiChat
 
-Android 词典笔 AI 对话应用（版本 1.8.0，minSdk 18 / targetSdk 18，真机 Android 4.4.2 / API 19）。基于 WebView + HTML/CSS 渲染 Markdown/LaTeX，通过任意 OpenAI 兼容端点调用大模型，内置 DeepSeek（不含 API Key）与商汤日日新 默认配置，默认模型 `deepseek-v4-flash`（商汤日日新）。
+Android 词典笔 AI 对话应用（版本 1.8.1，minSdk 18 / targetSdk 18，真机 Android 4.4.2 / API 19）。基于 WebView + HTML/CSS 渲染 Markdown/LaTeX，通过任意 OpenAI 兼容端点调用大模型，内置 DeepSeek（不含 API Key）与商汤日日新 默认配置，默认模型 `deepseek-v4-flash`（商汤日日新）。
 
 > 改代码前先看 [ARCHITECTURE.md](ARCHITECTURE.md)：请求链路图、类职责边界、并发约定、「想改 X 去哪」对照表。
 
@@ -8,10 +8,11 @@ Android 词典笔 AI 对话应用（版本 1.8.0，minSdk 18 / targetSdk 18，�
 
 - **多模型 / 多提供商** — 模型配置页可增删提供商与模型，自定义 API URL、Chat Path、API Key；内置 DeepSeek、商汤日日新 及任意 OpenAI 兼容端点
 - **对话** — 流式输出（设置可开关）；回复进行中再发送自动排队，队列支持上移/下移/插队发送（打断当前回复）/删除；长按发送键打断当前请求，思考阶段打断自动补 `[/thinking]` 收尾；请求失败时在用户消息下方显示错误卡片，可查看详情、点击气泡立即重试；回复进行中重试会先确认打断
-- **输入区** — 发送键为纸飞机图标，生成中且输入框为空时变为方块「停止」图标；输入框有内容时才可发送；有文字时右上出现四角图标，点开进入全屏编辑（完成回填、取消丢弃）；发送键左侧加号为附件菜单，当前支持「上传文本文件」导入到输入框（单文件上限 512KB，UTF-8 解码失败自动回退 GBK，超限报错不静默截断）
+- **输入区** — 发送键为纸飞机图标，生成中且输入框为空时变为方块「停止」图标；有文字（或挂了附件）时才可发送；有文字时右上出现四角图标，点开进入全屏编辑（完成回填、取消丢弃）；发送键左侧加号为附件菜单，当前支持「添加文本文件」
+- **附件** — 选中文件后**不往输入框里塞正文**，只在输入框上方显示一个可点掉的文件名标签（单文件 512KB、最多 5 个、合计约 1MB、UTF-8 解码失败自动回退 GBK、超限报错不静默截断）。正文在发送时才并入 `apiText`，气泡里只显示一行「[附件] name（N 字）」，历史回放与重试都走完整正文
 - **消息元信息** — 每条消息底部显示时间（当天 `HH:mm`，跨天 `MM-dd HH:mm`）；AI 消息另显示 token 用量与生成速度（tok/s）；用户消息 token 为字符估算值，以 `~` 前缀标注。端点不支持 `stream_options.include_usage` 时自动降级并记住，后续请求不再携带该字段
-- **429 自动重试** — 仅对 429 生效（5xx / 408 / 超时不重试，避免重复计费）；设置页可配重试次数、基础间隔、最大等待与指数退避；优先采用服务端 `Retry-After`（支持秒数与 HTTP-date）；等待过程可被「停止」立即打断
-- **思考模式** — 关闭/低/中/高四档，思考内容可折叠/展开
+- **429 自动重试** — 仅对 429 生效（5xx / 408 / 超时不重试，避免重复计费）；设置页可配重试次数（1-20）、基础间隔、最大等待与指数退避；优先采用服务端 `Retry-After`（支持秒数与 HTTP-date）；等待过程可被「停止」立即打断
+- **思考模式** — 关闭/低/中/高四档，思考内容可折叠/展开，标题显示本次思考的 token 估算（与消息底部的 token 单位一致）
 - **本地时间工具** — `get_current_time` 读取设备当前日期、时间、星期与时区（含 ISO 8601 与时间戳），不联网、不需要任何 Key；即使关闭联网搜索也可用。涉及「今天/现在/星期几」等时间敏感问题时应先调用，避免模型凭训练数据猜日期
 - **联网搜索** — 设置页总开关（默认开启）；搜索服务可选 **Tavily（默认，免费，经自建网关）** 或 DeepSeek。AI 可通过 `web_search` 工具检索实时网页，通过 `web_fetch` 抓取网页正文；来源独立成可折叠来源区（按 URL 去重，最多 8 条），不写入正文、不进入后续请求；工具轮次不设上限，单轮工具调用数可配置（默认 15，范围 1-50），超出部分按未执行处理；搜索摘要单条限 1200 字符、单次合计限 6000 字符。总开关同时控制工具定义、搜索系统提示词和实际搜索/抓取请求。工具用途说明写在 `tools[].function.description` 里（协议自带字段），不再进 system prompt，每轮省约 200 token
 - **Request 工具** — `http_request` 让 AI 在本机发起 HTTP 请求直接调 API：支持 GET/POST/PUT/DELETE/PATCH/HEAD、自定义请求头、POST body、1-30 秒超时。**默认关闭**，设置页开启。三道安全边界：拒绝环回 / 私有网段 / 链路本地 / 唯一本地地址，禁止跟随 3xx（防公网跳内网），响应体截断 8KB
@@ -26,7 +27,7 @@ Android 词典笔 AI 对话应用（版本 1.8.0，minSdk 18 / targetSdk 18，�
 - **小工具**（长按"历史"按钮进入）— 已保存代码列表（查看/复制/重命名/编辑/预览运行/多选批量删除）；JS 运行器：在 WebView（Chromium 30）中运行 JS/HTML/SVG，输出可复制，支持粘贴、载入已保存文件、保存到 exports；APP 代码环境提示词（复制/插入输入框/直接发送）
 - **代码执行器提示词可配** — 设置页可自定义环境提示词，支持占位符 `{android}` `{api}` `{webview}` `{model}` `{app_version}` `{ua}`，发送时按当前设备实际值填充；未知占位符原样保留。WebView 版本从 `WebSettings.getDefaultUserAgent()` 的 `Chrome/xx` 段提取（`WebViewFactory` 是隐藏 API，不可反射）
 - **设置** — 联网搜索、流式输出、实时渲染、调试日志、快速搜题开关；`http_request` 工具开关；429 重试策略；代码执行器提示词；模型/提供商管理；查询 DeepSeek 余额（显示总余额/充值/赠送）；关于页入口
-- **关于与首次启动** — 关于页显示应用名、版本号（`versionName (versionCode)`）、检查更新、反馈建议、开源许可（commonmark-java / jlatexmath-android / Conscrypt）；检查更新与反馈当前为「功能待开发」占位。首次启动弹出使用说明与免责声明，必须点「同意并继续」才可用；确认前不会发送任何由外部 Intent 带入的消息
+- **关于与使用说明** — 关于页显示应用名、版本号（`versionName (versionCode)`）、**使用说明（与首启弹窗同一份文案）**、检查更新、反馈建议、开源许可（commonmark-java / jlatexmath-android / Conscrypt）；检查更新与反馈当前为「功能待开发」占位。首次启动弹出使用说明与免责声明，必须点「同意并继续」才可用；确认前不会发送任何由外部 Intent 带入的消息
 - **扫描识别** — 横屏扫描界面，调用词典笔系统 OCR 识别文字，支持加载摘抄记录、编辑、复制、插入
 - **快速搜题模式** — 开启后按扫描键直接跳转系统扫描应用，返回自动填入输入框
 - **屏幕旋转** — 右上角 ↻ 按钮切换横屏/竖屏
@@ -120,7 +121,7 @@ Tavily 的密钥在应用内「设置 → Tavily API Key」填写，仅保存在
 
 ```
 ├── app/
-│   ├── build.gradle                # versionName 1.8.0 / versionCode 38 / compileSdk 34
+│   ├── build.gradle                # versionName 1.8.1 / versionCode 39 / compileSdk 34
 │   ├── keystore/mc.jks             # 签名密钥库
 │   └── src/main/
 │       ├── AndroidManifest.xml     # 包名 xyz.zip8919.app.aichat，9 个 Activity
@@ -159,6 +160,8 @@ Tavily 的密钥在应用内「设置 → Tavily API Key」填写，仅保存在
 │       │   ├── FullscreenInputActivity.java # 全屏输入页（取消丢弃 / 完成回填）
 │       │   ├── AboutActivity.java           # 关于页：版本、检查更新、反馈、开源许可
 │       │   ├── MessageQueue.java            # 排队发送：上移、下移、插队
+│       │   ├── AttachmentText.java          # 附件两套文本：给模型的正文 / 给人的摘要
+│       │   ├── HelpText.java                # 使用说明与免责声明（首启与关于页共用）
 │       │   ├── TitleGenerator.java          # 兜底标题与自动标题
 │       │   ├── ExportHelper.java            # 代码导出：语言 → 扩展名
 │       │   ├── SettingsActivity.java        # 设置页：开关、预设、余额查询

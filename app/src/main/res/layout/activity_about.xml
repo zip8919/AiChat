@@ -32,6 +32,13 @@
             android:text="版本 --"/>
 
         <Button
+            android:id="@+id/about_help"
+            android:text="使用说明"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="10dp"/>
+
+        <Button
             android:id="@+id/about_check_update"
             android:text="检查更新"
             android:layout_width="match_parent"
