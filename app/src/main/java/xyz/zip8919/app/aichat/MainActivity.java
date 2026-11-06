@@ -481,7 +481,7 @@ public class MainActivity extends Activity {
         // 空闲且一个字都没输入时禁用，避免「点了没反应」的困惑
         sendButton.setEnabled(stopping || hasText);
         if (expandButton != null) {
-            expandButton.setVisibility(hasText ? View.VISIBLE : View.INVISIBLE);
+            expandButton.setVisibility(hasText ? View.VISIBLE : View.GONE);
         }
     }
 

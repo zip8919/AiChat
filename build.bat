@@ -45,8 +45,8 @@ if defined SENSENOVA_KEY (
 )
 echo.
 
-REM Build
-call gradlew.bat assembleDebug ^
+REM Build (clean 不能省：增量打包会在 APK 里留下约 600KB 的空洞字节)
+call gradlew.bat clean assembleDebug ^
     -PsensenovaKey="%SENSENOVA_KEY%"
 
 if %ERRORLEVEL% NEQ 0 (

@@ -22,7 +22,8 @@ $gradleCmd = if (Test-Path ".\gradlew.bat") { ".\gradlew.bat" }
 elseif (Test-Path "D:\Program Files\gradle-8.2\bin\gradle.bat") { "D:\Program Files\gradle-8.2\bin\gradle.bat" }
 else { "gradle.bat" }
 
-$gradleArgs = @("assembleRelease")
+# clean 不能省：增量打包会在 APK 里留下约 600KB 的空洞字节
+$gradleArgs = @("clean", "assembleRelease")
 if ($SensenovaKey) { $gradleArgs += "-PsensenovaKey=$SensenovaKey" }
 if ($KeystorePassword) { $gradleArgs += "-PkeystorePassword=$KeystorePassword" }
 if ($KeyAlias)       { $gradleArgs += "-PkeyAlias=$KeyAlias" }

@@ -168,8 +168,10 @@
     </LinearLayout>
 
     <!-- Bottom input bar
-         右侧是竖排：上面全屏展开、下面发送。全屏常驻 INVISIBLE 而不是 GONE，
-         否则它显隐的瞬间发送按钮会上下跳一格，手指正好按空。
+         右侧是竖排：上面全屏展开、下面发送。全屏用 GONE 而不是 INVISIBLE：
+         它常驻会白占 30dp，窄屏上输入栏一直比改动前高 30dp。
+         不会导致发送键跳动——外层 gravity=bottom、发送键是列内最后一个子元素，
+         列变高只往上长，发送键底边和输入框底边都不动。
          加号放在发送左边，只负责附件菜单。 -->
     <LinearLayout
         android:gravity="bottom"
@@ -213,7 +215,7 @@
                 android:layout_gravity="end"
                 android:scaleType="fitCenter"
                 android:src="@drawable/ic_expand"
-                android:visibility="invisible"
+                android:visibility="gone"
                 android:contentDescription="@string/fullscreen_input"/>
             <ImageButton
                 android:id="@+id/send_button"

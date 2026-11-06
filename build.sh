@@ -38,8 +38,8 @@ echo ""
 echo "Key Alias:         ${KEY_ALIAS:-mc}"
 echo ""
 
-# Build
-./gradlew assembleRelease \
+# Build（必须先 clean：本工程 AGP 增量打包会在 APK 里留下约 600KB 的空洞字节）
+./gradlew clean assembleRelease \
     ${SENSENOVA_KEY:+-PsensenovaKey="$SENSENOVA_KEY"} \
     ${KEYSTORE_PASSWORD:+-PkeystorePassword="$KEYSTORE_PASSWORD"} \
     ${KEY_ALIAS:+-PkeyAlias="$KEY_ALIAS"}

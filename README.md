@@ -50,8 +50,10 @@ Linux / macOS：
 直接使用 Gradle（Windows 为 `gradlew.bat`）：
 
 ```bash
-gradlew assembleRelease -PsensenovaKey=sk-xxx
+gradlew clean assembleRelease -PsensenovaKey=sk-xxx
 ```
+
+> **`clean` 不能省。** 本工程当前 AGP 版本的增量打包会在 APK 里留下约 600KB 的空洞字节（打出来 5.36MB，clean 后 4.74MB，内容完全一致）。交付包一律走 clean 构建；三个 `build.*` 脚本已内置 `clean`。
 
 不传 `-PsensenovaKey` 时商汤日日新的 API Key 为空（DeepSeek 提供商同样默认不带 Key），需在设备上的模型配置页手动填写。
 
