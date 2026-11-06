@@ -41,6 +41,13 @@
         android:maxLines="6"
         android:minLines="3"
         android:inputType="textMultiLine"/>
+    <TextView
+        android:textSize="11sp"
+        android:textColor="@color/text_secondary"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="16dp"
+        android:text="可用占位符：{android} 系统版本 · {api} API 级别 · {webview} WebView 版本 · {model} 机型 · {app_version} 应用版本 · {ua} UA 字符串。发送时自动替换成当前设备的真实值。"/>
 
     <!-- Preset selector -->
     <LinearLayout
@@ -244,7 +251,61 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginBottom="12dp"
-        android:text="开启后模型可直接请求公网 URL 调用 API（禁止访问本机与内网，响应截断 8 KB）。默认关闭。"/>
+        android:text="开启后模型可直接请求公网 URL 调用 API（默认禁止访问本机与内网，响应截断 8 KB）。默认关闭。"/>
+
+    <!-- 内网访问：默认关闭，与上面的工具开关是两层 -->
+    <LinearLayout
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="4dp">
+        <TextView
+            android:textSize="14sp"
+            android:textColor="@color/text_primary"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="允许访问内网地址"/>
+        <Switch
+            android:id="@+id/http_allow_private_switch"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"/>
+    </LinearLayout>
+    <TextView
+        android:textSize="11sp"
+        android:textColor="#c62828"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="12dp"
+        android:text="风险：模型可访问 192.168.x.x、127.0.0.1、169.254.169.254 等地址，可能读到路由器管理页、NAS 文件或云主机凭证，且结果会随对话发给模型服务商。仅在需要调用局域网 API 时开启。"/>
+
+    <!-- TLS 证书校验：默认严格 -->
+    <LinearLayout
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="4dp">
+        <TextView
+            android:textSize="14sp"
+            android:textColor="@color/text_primary"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="信任所有 HTTPS 证书"/>
+        <Switch
+            android:id="@+id/trust_all_certs_switch"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"/>
+    </LinearLayout>
+    <TextView
+        android:textSize="11sp"
+        android:textColor="#c62828"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="12dp"
+        android:text="风险：关闭证书与主机名校验后，中间人可解密全部流量（含 API Key）。仅用于自签证书的内网服务，用完请关掉。"/>
 
     <!-- 429 限流重试 -->
     <LinearLayout

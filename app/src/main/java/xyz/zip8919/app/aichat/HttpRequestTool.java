@@ -45,7 +45,7 @@ final class HttpRequestTool {
         fn.put("name", TOOL_HTTP);
         fn.put("description",
                 "直接向指定 URL 发起 HTTP 请求，用于调用 REST API 或获取结构化数据。"
-                        + "只能访问公网地址，不能访问本机或内网。响应超过 8 KB 会被截断，"
+                        + "默认只能访问公网地址；若被拒绝，说明用户未开启内网访问。响应超过 8 KB 会被截断，"
                         + "不会自动跟随重定向（3xx 会原样返回状态码与 Location）。");
 
         JSONObject params = new JSONObject();
@@ -88,6 +88,14 @@ final class HttpRequestTool {
 
     /** 执行并返回给模型的 JSON 字符串。任何异常都转成 {"error":...}，不抛给上层。 */
     static String execute(JSONObject args) {
+        return execute(args, NetSecurity.allowPrivateHost());
+    }
+
+    /**
+     * @param allowPrivateHost 是否允许访问环回/私有网段。默认 false；
+     *                         只有用户在设置里显式打开（自建 API 在局域网时）才为 true。
+     */
+    static String execute(JSONObject args, boolean allowPrivateHost) {
         String urlStr = args == null ? "" : args.optString("url", "").trim();
         if (urlStr.length() == 0) return error("缺少 url 参数");
 
@@ -109,7 +117,7 @@ final class HttpRequestTool {
             if (!"http".equalsIgnoreCase(protocol) && !"https".equalsIgnoreCase(protocol)) {
                 return error("只支持 http/https，收到: " + protocol);
             }
-            assertPublicHost(url);
+            if (!allowPrivateHost) assertPublicHost(url);
 
             long start = System.currentTimeMillis();
             conn = (HttpURLConnection) url.openConnection();

@@ -17,7 +17,11 @@ import java.net.HttpURLConnection;
 import android.os.Bundle;
 import android.os.Handler;
 import android.text.Editable;
+import android.text.SpannableString;
+import android.text.Spanned;
 import android.text.TextWatcher;
+import android.text.style.ForegroundColorSpan;
+import android.text.style.RelativeSizeSpan;
 import android.view.KeyEvent;
 import android.view.MenuItem;
 import android.view.MotionEvent;
@@ -64,12 +68,18 @@ public class MainActivity extends Activity {
     private static final int REQUEST_FULLSCREEN = 4;
     /** 附件菜单项 id（单项目前用常量，后续加项改成 menu 资源）。 */
     private static final int MENU_ATTACH_TEXT = 1;
-    /** 导入文本上限：超过直接报错，不截断——半截代码更难排查。 */
-    private static final int MAX_IMPORT_BYTES = 512 * 1024;
-    /** 单条消息最多挂几个附件。老设备内存与端点上下文都扛不住更多。 */
+    /** 单文件上限 10 MB：超过直接报错，不截断——半截代码更难排查。 */
+    private static final int MAX_IMPORT_BYTES = 10 * 1024 * 1024;
+    /** 单条消息最多挂几个附件。 */
     private static final int MAX_ATTACHMENTS = 5;
-    /** 所有附件合计字节上限（解码后按字符数近似）。 */
-    private static final int MAX_ATTACHMENT_TOTAL = 1024 * 1024;
+    /**
+     * 所有附件合计字符上限（Java String 是 UTF-16，1 字符 ≈ 2 字节堆）。
+     *
+     * <p>20M 字符 = 40 MB 的 char[]，再加上解码时的 byte[] 与拼装请求体的副本，
+     * 峰值接近 70 MB——这已经是 API 18 老设备（堆上限常见 128 MB）能承受的边界。
+     * 上限不是为了限制用法，是为了别让用户在点发送的那一刻看到 OOM。
+     */
+    private static final int MAX_ATTACHMENT_TOTAL = 20 * 1000 * 1000;
 
     /**
      * 待发送附件。
@@ -117,6 +127,13 @@ public class MainActivity extends Activity {
     private volatile boolean loadingOlderMessages = false;
 
     private AtomicBoolean isRequestInProgress = new AtomicBoolean(false);
+    /**
+     * 「立即重试」信号：429 等待期间由 JS bridge 置位，请求线程每 200 ms 读一次。
+     *
+     * <p>不用 interrupt 打断线程——那会连带触发「停止」的语义，
+     * 而这两件事的结果正好相反（一个继续、一个终止）。
+     */
+    private final AtomicBoolean retryNowRequested = new AtomicBoolean(false);
     private AtomicInteger requestGeneration = new AtomicInteger(0);
     // 打断并重试的串行化闸门：防止连点导致多个 resendUserAt 并发插入用户消息
     private volatile boolean retryInFlight = false;
@@ -555,7 +572,7 @@ public class MainActivity extends Activity {
     private void importTextFile(final Uri uri) {
         new Thread(new Runnable() {
             public void run() {
-                String text = null;
+                LoadedText text = null;
                 String err = null;
                 String name = null;
                 try {
@@ -564,7 +581,7 @@ public class MainActivity extends Activity {
                 } catch (Exception e) {
                     err = e.getMessage();
                 }
-                final String loaded = text;
+                final LoadedText loaded = text;
                 final String error = err;
                 final String fileName = name;
                 runOnUiThread(new Runnable() {
@@ -576,7 +593,7 @@ public class MainActivity extends Activity {
                                     Toast.LENGTH_LONG).show();
                             return;
                         }
-                        addAttachment(fileName, loaded);
+                        addAttachment(fileName, loaded.text, loaded.bytes);
                     }
                 });
             }
@@ -606,23 +623,25 @@ public class MainActivity extends Activity {
     }
 
     /** 加入待发送队列（只存内存，不落盘——附件是这一次输入的一部分）。 */
-    private void addAttachment(String name, String content) {
+    private void addAttachment(String name, String content, int bytes) {
         if (pendingAttachments.size() >= MAX_ATTACHMENTS) {
             Toast.makeText(this, "最多附加 " + MAX_ATTACHMENTS + " 个文件", Toast.LENGTH_SHORT).show();
             return;
         }
         int total = content == null ? 0 : content.length();
         for (int i = 0; i < pendingAttachments.size(); i++) {
-            total += pendingAttachments.get(i).content.length();
+            total += pendingAttachments.get(i).chars();
         }
-        // 1M 字符在 4.4 上约 2MB 的 char[]，加上拼进请求体后的副本，老设备内存吃紧
         if (total > MAX_ATTACHMENT_TOTAL) {
-            Toast.makeText(this, "附件总大小超过上限（约 1 MB）", Toast.LENGTH_LONG).show();
+            Toast.makeText(this,
+                    "附件合计超过 " + (MAX_ATTACHMENT_TOTAL / 1000000) + "M 字符，老设备内存扛不住",
+                    Toast.LENGTH_LONG).show();
             return;
         }
-        pendingAttachments.add(new AttachmentText.File(name, content));
+        AttachmentText.File f = new AttachmentText.File(name, content, bytes);
+        pendingAttachments.add(f);
         refreshAttachmentBar();
-        Toast.makeText(this, "已附加 " + name + "（" + content.length() + " 字）",
+        Toast.makeText(this, "已附加 " + name + "（" + AttachmentText.sizeAndTokens(f) + "）",
                 Toast.LENGTH_SHORT).show();
     }
 
@@ -642,13 +661,25 @@ public class MainActivity extends Activity {
         for (int i = 0; i < pendingAttachments.size(); i++) {
             final int index = i;
             AttachmentText.File a = pendingAttachments.get(i);
+            // 两行：文件名 + 大小/token。第二行必须小一号并压暗，否则视觉上
+            // 会跟文件名抢注意力，一眼看过去全是数字。
+            String line1 = AttachmentText.shortName(a.name) + "  ×";
+            String line2 = AttachmentText.sizeAndTokens(a);
+            SpannableString label = new SpannableString(line1 + "\n" + line2);
+            int metaFrom = line1.length() + 1;
+            label.setSpan(new RelativeSizeSpan(0.84f), metaFrom, label.length(),
+                    Spanned.SPAN_INCLUSIVE_EXCLUSIVE);
+            label.setSpan(new ForegroundColorSpan(getResources().getColor(R.color.text_secondary)),
+                    metaFrom, label.length(), Spanned.SPAN_INCLUSIVE_EXCLUSIVE);
+
             TextView chip = new TextView(this);
-            chip.setText(AttachmentText.shortName(a.name) + "  ×");
+            chip.setText(label);
             chip.setTextSize(12);
             chip.setTextColor(getResources().getColor(R.color.text_primary));
             chip.setBackgroundResource(R.drawable.bg_attachment_chip);
             chip.setPadding(pad10, pad4, pad10, pad4);
-            chip.setSingleLine(true);
+            chip.setSingleLine(false);
+            chip.setMaxLines(2);
             chip.setContentDescription("移除附件 " + a.name);
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
@@ -691,7 +722,18 @@ public class MainActivity extends Activity {
      * 读取文本文件，超过上限直接失败而不是截断——截一半的代码贴进对话比报错更难排查。
      * UTF-8 解出来要是出现替换字符（U+FFFD），说明大概率是 GBK，再试一次。
      */
-    private String readTextLimited(Uri uri, int maxBytes) throws Exception {
+    /** 读文件的结果：正文 + 原始字节数（附件条要显示真实大小，不能用字数糊弄）。 */
+    private static final class LoadedText {
+        final String text;
+        final int bytes;
+
+        LoadedText(String text, int bytes) {
+            this.text = text;
+            this.bytes = bytes;
+        }
+    }
+
+    private LoadedText readTextLimited(Uri uri, int maxBytes) throws Exception {
         InputStream in = getContentResolver().openInputStream(uri);
         if (in == null) throw new Exception("无法打开文件");
         try {
@@ -702,16 +744,16 @@ public class MainActivity extends Activity {
             while ((n = in.read(buf)) > 0) {
                 total += n;
                 if (total > maxBytes) {
-                    throw new Exception("文件超过 " + (maxBytes / 1024) + " KB");
+                    throw new Exception("文件超过 " + AttachmentText.formatBytes(maxBytes));
                 }
                 bos.write(buf, 0, n);
             }
             byte[] data = bos.toByteArray();
             String utf8 = new String(data, "UTF-8");
-            if (utf8.indexOf('\uFFFD') < 0) return utf8;
+            if (utf8.indexOf('\uFFFD') < 0) return new LoadedText(utf8, total);
             String gbk = new String(data, "GBK");
             LogUtil.d(TAG, "readTextLimited: utf8 had replacement chars, fell back to GBK");
-            return gbk;
+            return new LoadedText(gbk, total);
         } finally {
             try { in.close(); } catch (Exception ignored) { }
         }
@@ -1204,6 +1246,10 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         LogUtil.d(TAG, "onResume");
+        // 设置页改完回到这里，两个网络安全开关必须立刻生效。
+        // 放在 onResume 而不是 onCreate：用户可能一直不退出这个界面。
+        NetSecurity.set(SettingsActivity.isTrustAllCerts(this),
+                SettingsActivity.isHttpAllowPrivateHost(this));
         loadSystemPrompt();
         refreshModelSpinner();
         if (expectingQuickScanResult) {
@@ -1424,6 +1470,7 @@ public class MainActivity extends Activity {
         // 端点上次拒过 stream_options 就不再发，避免每次对话白吃一个 400
         final boolean includeUsage = streamEnabled && !isUsageUnsupported(provider.name);
         activeProviderName = provider.name;
+        retryNowRequested.set(false);
 
         Message aiMsg;
         int aiIndex;
@@ -1531,6 +1578,15 @@ public class MainActivity extends Activity {
             LogUtil.d(TAG, "trace trimmed: render base reset");
         }
 
+        public void onRetryWaiting(int attempt, int maxAttempts, long waitMs,
+                int generation, int aiIndex) {
+            webViewEvalJs("showRetryCard(" + attempt + "," + maxAttempts + "," + waitMs + ")");
+        }
+
+        public void onRetryWaitEnd() {
+            webViewEvalJs("hideRetryCard()");
+        }
+
         public void onUsageUnsupported() {
             String name = activeProviderName;
             if (name == null || name.length() == 0) return;
@@ -1600,6 +1656,10 @@ public class MainActivity extends Activity {
             if (requestGeneration.get() == generation) currentConnection = conn;
         }
 
+        public boolean consumeRetryNow() {
+            return retryNowRequested.getAndSet(false);
+        }
+
         public void onSettled(ChatStreamRunner.Settled settled) {
             settleStream(settled);
         }
@@ -1657,6 +1717,16 @@ public class MainActivity extends Activity {
                                 done.promptTokens = settled.promptTokens;
                                 done.completionTokens = settled.completionTokens;
                                 done.totalTokens = settled.totalTokens;
+                                // 端点没给 usage（不支持 stream_options / 关了流式）：
+                                // 用正文估一个，并标记为估算。空着不显示，用户会以为
+                                // 「这个端点根本不返回 token」，实际是没开统计。
+                                if (done.completionTokens <= 0 && done.content != null
+                                        && done.content.length() > 0) {
+                                    int est = MessageHtmlRenderer.estimateTokens(done.content.length());
+                                    done.completionTokens = est;
+                                    done.totalTokens = est;
+                                    done.tokensEstimated = true;
+                                }
                             }
                             if (domComplete) {
                                 webViewEvalJs("streamFinalize()");
@@ -2016,6 +2086,13 @@ public class MainActivity extends Activity {
                     }
                 }
             });
+        }
+
+        /** 429 等待卡片上的「立即重试」。只置位，等待循环下一轮就读到。 */
+        @JavascriptInterface
+        public void retryNow() {
+            LogUtil.i(TAG, "JsBridge.retryNow: skip 429 wait");
+            retryNowRequested.set(true);
         }
 
         @JavascriptInterface
@@ -2994,6 +3071,7 @@ public class MainActivity extends Activity {
                     copy.promptTokens = src.promptTokens;
                     copy.completionTokens = src.completionTokens;
                     copy.totalTokens = src.totalTokens;
+                    copy.tokensEstimated = src.tokensEstimated;
                     // 纯文本/工具历史也要一起带走，否则分支里的 AI 回复又退回「只有正文」
                     copy.apiText = src.apiText;
                     copy.toolHistory = src.toolHistory;

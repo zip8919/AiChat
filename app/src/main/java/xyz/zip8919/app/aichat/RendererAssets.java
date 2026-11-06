@@ -103,6 +103,13 @@ final class RendererAssets {
             ".tool-empty{padding:8px 10px;color:#90a4ae;font-size:12px;}" +
             ".tool-status{padding:6px 10px;color:#1565c0;font-size:12px;" +
             "font-style:italic;background:#eaf2fd;border-radius:6px;margin:8px 0;}" +
+            // 429 等待卡片上的「立即重试」。float 而不是 flex：Chromium 30 对 flex 的
+            // 支持有坑，float 在这个 WebView 上从 4.x 到 14 表现都一致。
+            ".retry-btn{float:right;margin:-1px 0 -1px 8px;padding:2px 10px;" +
+            "font-size:12px;font-style:normal;color:#fff;background:#1976d2;" +
+            "border:none;border-radius:12px;line-height:18px;" +
+            "-webkit-tap-highlight-color:transparent;}" +
+            ".retry-btn:active{background:#0d47a1;}" +
             // 按钮原本直接写 U+22EF「⋯」。4.3/4.4 的系统字体没有这个字形，
             // 落到 fallback 后渲染成缺字方框（用户描述成「交叉眼」），既认不出也点不准。
             // 改成用 CSS 画三个圆点：不依赖任何字体，任何 ROM 上都长一样；
@@ -428,6 +435,31 @@ final class RendererAssets {
             "if(c&&c.nextSibling)m.insertBefore(s,c.nextSibling);else m.appendChild(s);}" +
             "s.textContent=text;smartScrollToBottom();};" +
             "window.clearStatus=function(){" +
+            "var m=window.__lastAi();if(!m)return;" +
+            "var s=m.querySelector('.tool-status');" +
+            "if(s&&s.parentNode)s.parentNode.removeChild(s);};" +
+            // 429 等待卡片。按钮点击绕道 Java bridge：请求线程在 Java 侧，
+            // 只有那边能叫醒它，JS 自己改不了任何东西。
+            "window.showRetryCard=function(attempt,max,waitMs){" +
+            "var m=window.__lastAi();if(!m)return;" +
+            "var s=m.querySelector('.tool-status');" +
+            "if(!s){s=document.createElement('div');s.className='tool-status';" +
+            "var c=m.querySelector('.content');" +
+            "if(c&&c.nextSibling)m.insertBefore(s,c.nextSibling);else m.appendChild(s);}" +
+            "var left=Math.max(1,Math.ceil(waitMs/1000));" +
+            "var paint=function(){" +
+            "s.innerHTML='<button class=\"retry-btn\" onclick=\"Android.retryNow()\">立即重试</button>'" +
+            "+'<span class=\"retry-text\">请求过于频繁，'+left+' 秒后重试（'+attempt+'/'+max+'）</span>';};" +
+            "paint();" +
+            "if(window.__retryTimer)clearInterval(window.__retryTimer);" +
+            "window.__retryTimer=setInterval(function(){" +
+            "left--;" +
+            "var t=s.querySelector('.retry-text');" +
+            "if(left<=0){clearInterval(window.__retryTimer);window.__retryTimer=null;" +
+            "if(t)t.textContent='正在重试…';return;}" +
+            "if(t)t.textContent='请求过于频繁，'+left+' 秒后重试（'+attempt+'/'+max+'）';},1000);};" +
+            "window.hideRetryCard=function(){" +
+            "if(window.__retryTimer){clearInterval(window.__retryTimer);window.__retryTimer=null;}" +
             "var m=window.__lastAi();if(!m)return;" +
             "var s=m.querySelector('.tool-status');" +
             "if(s&&s.parentNode)s.parentNode.removeChild(s);};" +

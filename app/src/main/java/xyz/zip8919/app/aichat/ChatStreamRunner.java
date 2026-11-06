@@ -55,6 +55,17 @@ final class ChatStreamRunner {
          * 记下来，下次请求不再带这个字段，否则每次对话都要多吃一次 400。
          */
         void onUsageUnsupported();
+
+        /**
+         * 429 等待开始：显示倒计时卡片，右侧带「立即重试」。
+         *
+         * <p>不用 {@link #showStatus} 表达：状态行是纯文本，塞不进按钮，
+         * 而用户最需要的恰恰是「别让我干等 30 秒」。
+         */
+        void onRetryWaiting(int attempt, int maxAttempts, long waitMs, int generation, int aiIndex);
+
+        /** 等待结束（已重发或已中止）：收起卡片。 */
+        void onRetryWaitEnd();
     }
 
     /** 会话侧能力：请求代数、连接句柄、收尾。 */
@@ -66,6 +77,14 @@ final class ChatStreamRunner {
         boolean isAlive(int generation);
 
         void setConnection(HttpURLConnection conn);
+
+        /**
+         * 用户点了「立即重试」：读到一次 true 后必须清除。
+         *
+         * <p>用「消费」而不是「查询」，是因为等待循环每 200 ms 问一次，
+         * 查询式会让一次点击把后面所有等待都跳过。
+         */
+        boolean consumeRetryNow();
 
         /** 请求线程退出前必然调用一次（除非代数已过期）。 */
         void onSettled(Settled settled);
@@ -194,13 +213,14 @@ final class ChatStreamRunner {
                         retryCount++;
                         LogUtil.w(TAG, "HTTP 429, retry %d/%d in %d ms (retryAfter=%d)",
                                 retryCount, job.retryPolicy.maxAttempts, waitMs, retryAfter);
-                        ui.showStatus("请求过于频繁，" + (waitMs / 1000) + " 秒后重试（"
-                                        + retryCount + "/" + job.retryPolicy.maxAttempts + "）",
-                                job.generation, st.trace.toString(), job.aiIndex);
+                        ui.onRetryWaiting(retryCount, job.retryPolicy.maxAttempts, waitMs,
+                                job.generation, job.aiIndex);
                         ChatTransport.close(conn);
                         conn = null;
                         session.setConnection(null);
-                        if (!sleepInterruptible(waitMs, job.generation)) {
+                        boolean alive = sleepInterruptible(waitMs, job.generation);
+                        ui.onRetryWaitEnd();
+                        if (!alive) {
                             LogUtil.i(TAG, "429 retry wait aborted by user");
                             return;
                         }
@@ -345,6 +365,12 @@ final class ChatStreamRunner {
     private boolean sleepInterruptible(long totalMs, int generation) {
         long end = System.currentTimeMillis() + Math.max(0L, totalMs);
         while (true) {
+            // 「立即重试」与「停止」是两条完全相反的出口，必须先判断前者：
+            // 点停止时 isAlive 也变 false，顺序反过来会把「立即重试」当成中止。
+            if (session.consumeRetryNow()) {
+                LogUtil.i(TAG, "429 wait skipped by user (retry now)");
+                return session.isAlive(generation);
+            }
             long left = end - System.currentTimeMillis();
             if (left <= 0) return session.isAlive(generation);
             if (!session.isAlive(generation)) return false;

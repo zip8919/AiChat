@@ -13,6 +13,7 @@ import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLSocket;
 import javax.net.ssl.SSLSocketFactory;
 import javax.net.ssl.TrustManager;
+import javax.net.ssl.TrustManagerFactory;
 import javax.net.ssl.X509TrustManager;
 
 /**
@@ -47,26 +48,54 @@ public final class TlsCompat {
 
     private TlsCompat() {}
 
-    /** 应用到 HttpsURLConnection：trust-all + 协议/套件全开。 */
+    /**
+     * 应用到 HttpsURLConnection：协议/套件全开，证书校验按设置决定。
+     *
+     * <p><b>证书校验默认走系统信任库</b>。之前这里无条件 trust-all（空实现的
+     * {@code checkServerTrusted} + 恒真的 {@code HostnameVerifier}），等于全应用的
+     * HTTPS 都没有中间人防护——那是为了解决老系统握手失败顺手写下的，代价太大。
+     * 真正的握手兼容性来自 {@link #configure} 里放开协议与密码套件，与是否校验证书无关。
+     *
+     * <p>只有在设置里显式打开「信任所有证书」时（自签证书的内网服务），才关掉校验，
+     * 并打 warn 级日志留痕。
+     */
     public static void apply(HttpsURLConnection conn) {
+        boolean trustAll = NetSecurity.trustAllCerts();
         try {
             SSLContext ssl = SSLContext.getInstance("TLSv1.2");
-            ssl.init(null, new TrustManager[]{ new X509TrustManager() {
-                public void checkClientTrusted(java.security.cert.X509Certificate[] chain, String authType) {}
-                public void checkServerTrusted(java.security.cert.X509Certificate[] chain, String authType) {}
-                public java.security.cert.X509Certificate[] getAcceptedIssuers() {
-                    return new java.security.cert.X509Certificate[0];
-                }
-            } }, null);
+            ssl.init(null, trustAll ? TRUST_ALL : systemTrustManagers(), null);
             conn.setSSLSocketFactory(new AllEnabledFactory(ssl.getSocketFactory()));
-            conn.setHostnameVerifier(new HostnameVerifier() {
-                public boolean verify(String hostname, javax.net.ssl.SSLSession session) { return true; }
-            });
-            LogUtil.d(TAG, "apply: TLS compat factory installed for %s", conn.getURL().getHost());
+            if (trustAll) {
+                conn.setHostnameVerifier(ALWAYS_TRUE);
+                LogUtil.w(TAG, "apply: TRUST-ALL enabled for %s — cert check disabled",
+                        conn.getURL().getHost());
+            } else {
+                LogUtil.d(TAG, "apply: TLS compat factory installed for %s", conn.getURL().getHost());
+            }
         } catch (Exception e) {
             LogUtil.e(TAG, "apply failed", e);
         }
     }
+
+    /** 系统信任库（含用户安装的 CA）。显式取一次，避免依赖 provider 的默认行为。 */
+    private static TrustManager[] systemTrustManagers() throws Exception {
+        TrustManagerFactory tmf = TrustManagerFactory.getInstance(
+                TrustManagerFactory.getDefaultAlgorithm());
+        tmf.init((java.security.KeyStore) null);
+        return tmf.getTrustManagers();
+    }
+
+    private static final TrustManager[] TRUST_ALL = new TrustManager[]{ new X509TrustManager() {
+        public void checkClientTrusted(java.security.cert.X509Certificate[] chain, String authType) {}
+        public void checkServerTrusted(java.security.cert.X509Certificate[] chain, String authType) {}
+        public java.security.cert.X509Certificate[] getAcceptedIssuers() {
+            return new java.security.cert.X509Certificate[0];
+        }
+    } };
+
+    private static final HostnameVerifier ALWAYS_TRUE = new HostnameVerifier() {
+        public boolean verify(String hostname, javax.net.ssl.SSLSession session) { return true; }
+    };
 
     static void configure(SSLSocket socket) {
         try {

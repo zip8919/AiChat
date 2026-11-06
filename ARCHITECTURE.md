@@ -47,7 +47,8 @@
 | `FullscreenInputActivity` | 全屏输入编辑，完成后回填主输入框 | 不做草稿持久化（主输入框是唯一数据源） |
 | `AboutActivity` | 版本展示、检查更新、反馈、开源许可 | 不发起版本网络请求（功能待开发） |
 | `MessageQueue` | 排队发送（每条带 display 与 apiText 两份文本） | 不知道消息内容怎么发 |
-| `AttachmentText` | 附件 → 两套文本：给模型的正文、给人的摘要 | 不读文件，不碰 UI |
+| `AttachmentText` | 附件 → 两套文本：给模型的正文、给人的摘要；大小与 token 估算 | 不读文件，不碰 UI |
+| `NetSecurity` | 内网访问 / 证书校验的进程内开关（默认严格） | 纯容器，不读配置 |
 | `HelpText` | 使用说明与免责声明文案 | 不拼 UI，不发请求 |
 | `ConversationManager` | 会话读写、异步落盘队列 | 不碰 UI |
 
@@ -94,7 +95,7 @@
 | `http_request` 工具的能力与安全边界 | `HttpRequestTool`（默认关闭，设置页开关） |
 | 代码执行器提示词、占位符 | `SettingsActivity.getJsEnvPrompt` + `SystemInfo.fillPlaceholders` |
 | 首启引导文案与顺序 | `HelpText` + `MainActivity.showFirstLaunchDialog` + `KEY_FIRST_LAUNCH_DONE` |
-| 附件怎么进提示词 | `AttachmentText.toApi` / `toDisplay` |
+| 附件怎么进提示词 | `AttachmentText.toApi` / `toDisplay` → `ChatHistory.apiContentOf` |
 | 附件 UI（标签、上限） | `MainActivity.refreshAttachmentBar` / `addAttachment` |
 
 ## 调试
@@ -151,3 +152,11 @@ rounds done: sources=5 apiText=842 toolHistory=4
     排队发送时附件正文不丢（`MessageQueue` 带 apiText）
 19. **思考块标题**：展开再收起后，括号里的 token 数不变（走 `data-tok`，不按可见文本重算）
 20. **429 重试上限**：设置里能填到 20，填 21 会被夹回 20；填 0 会被夹回 1
+21. **附件真的被读到了**：附一个 .txt 只写「总结这个文件」，模型回答里必须出现文件内容
+    的关键词；同一会话再追问细节，仍能答上来（说明历史回放也带了正文）
+22. **附件元信息**：标签第二行显示真实大小与 `~tokens`；10 MB 文件能附上，超 10 MB 报错
+23. **立即重试**：把重试次数设 3、间隔 10 s，用限流 Key 触发 429，卡片出现后点「立即重试」，
+    应当立刻重发而不是等满 10 s；点「停止」仍然能中断
+24. **内网开关**：默认关闭时 `http://192.168.1.1` 被拒；开启（弹窗确认后）能连上；
+    取消确认时开关自动拨回
+25. **证书开关**：关闭时访问自签证书站点失败并在错误详情里看到提示；开启后能连上

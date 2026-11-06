@@ -55,6 +55,14 @@ public class Message {
     public int promptTokens;
     public int completionTokens;
     public int totalTokens;
+    /**
+     * 用量是本地估算的，不是端点返回的。
+     *
+     * <p>端点不支持 {@code stream_options.include_usage}（或流式关闭）时拿不到真实用量，
+     * 此时用正文字数粗估填进 token 字段，并置此位——渲染时加 {@code ~} 前缀，
+     * 让用户知道这是估的不是账。混在一起不标，比不显示更糟。
+     */
+    public boolean tokensEstimated;
 
     public Message() {}
 

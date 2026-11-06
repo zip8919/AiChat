@@ -44,12 +44,37 @@ final class ErrorReport {
             String msg = e.getMessage();
             sb.append("异常消息：").append(msg == null || msg.length() == 0 ? "(空)" : msg).append('\n');
         }
+        String hint = sslHint(e);
+        if (hint.length() > 0) {
+            sb.append('\n').append(hint).append('\n');
+        }
         if (responseBody != null && responseBody.trim().length() > 0) {
             String body = responseBody.length() > BODY_PREVIEW
                     ? responseBody.substring(0, BODY_PREVIEW) + "…" : responseBody;
             sb.append("\n响应体（前 ").append(BODY_PREVIEW).append(" 字）：\n").append(body);
         }
         return sb.toString();
+    }
+
+    /**
+     * 证书校验失败时给出可操作的下一步。
+     *
+     * <p>默认严格校验之后，Android 4.x 上最容易踩的坑是「系统根证书库太老」——
+     * 站点用了 2015 年之后才有的根证书，握手直接失败。不提示的话用户只能看到
+     * 一串 {@code javax.net.ssl.SSLHandshakeException}，无从下手。
+     */
+    private static String sslHint(Exception e) {
+        if (e == null || NetSecurity.trustAllCerts()) return "";
+        Throwable t = e;
+        for (int depth = 0; t != null && depth < 6; depth++) {
+            String n = t.getClass().getName();
+            if (n.indexOf("SSL") >= 0 || n.indexOf("Cert") >= 0) {
+                return "提示：TLS 证书校验失败。老系统（Android 4.x）的根证书库可能不认该站点的证书。"
+                        + "确认端点可信后，可在「设置 → 信任所有 HTTPS 证书」中临时开启再试。";
+            }
+            t = t.getCause();
+        }
+        return "";
     }
 
     /** 尽量从 OpenAI 风格错误体里取出可读的 error.message。 */

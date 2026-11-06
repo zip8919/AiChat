@@ -51,18 +51,34 @@ final class SystemInfo {
         return end > start ? "Chrome " + ua.substring(start, end) : "未知";
     }
 
-    /** 完整 UA，占位符 {@code {ua}} 用。 */
-    static String webviewUserAgent(Context ctx) {
+    /**
+     * 完整 UA，占位符 {@code {ua}} 用。
+     *
+     * <p><b>必须缓存</b>：{@code WebSettings.getDefaultUserAgent} 首次调用会初始化
+     * WebView 提供者，在主线程上是几十到几百毫秒的卡顿。而 {@code getSystemPrompt}
+     * 每次 {@code onResume} 都会跑一次替换——不缓存等于每次回主页都卡一下。
+     */
+    static synchronized String webviewUserAgent(Context ctx) {
+        if (uaResolved) return cachedUa;
         if (ctx == null) return "";
         try {
             String ua = WebSettings.getDefaultUserAgent(ctx);
-            return ua == null ? "" : ua;
+            cachedUa = ua == null ? "" : ua;
         } catch (Throwable t) {
-            // 部分 ROM 在 WebView 提供者未就绪时会抛，属于可预期失败
+            // 部分 ROM 在 WebView 提供者未就绪时会抛，属于可预期失败。
+            // 不置 uaResolved：下次 WebView 起来后还能再试。
             LogUtil.w("SystemInfo", "getDefaultUserAgent failed: %s", t.getMessage());
             return "";
         }
+        uaResolved = true;
+        return cachedUa;
     }
+
+    /** 进程内 UA 缓存，见 {@link #webviewUserAgent}。 */
+    private static String cachedUa = "";
+    private static boolean uaResolved;
+    /** 版本号缓存：getPackageInfo 是 IPC，没必要每次替换都走一遍。 */
+    private static String cachedAppVersion;
 
     /** 例如 "Xiaomi MI 3"。 */
     static String deviceModel() {
@@ -78,10 +94,12 @@ final class SystemInfo {
     /** 例如 "1.8.0"。 */
     static String appVersion(Context ctx) {
         if (ctx == null) return "未知";
+        if (cachedAppVersion != null) return cachedAppVersion;
         try {
             PackageInfo info = ctx.getPackageManager()
                     .getPackageInfo(ctx.getPackageName(), 0);
-            return info.versionName == null ? "未知" : info.versionName;
+            cachedAppVersion = info.versionName == null ? "未知" : info.versionName;
+            return cachedAppVersion;
         } catch (Exception e) {
             LogUtil.w("SystemInfo", "appVersion failed: %s", e.getMessage());
             return "未知";
@@ -101,13 +119,23 @@ final class SystemInfo {
      */
     static String fillPlaceholders(String template, Context ctx) {
         if (template == null || template.length() == 0) return "";
+        // 绝大多数提示词里没有任何占位符。先看一眼有没有 '{' 就返回，
+        // 免得为了一段普通文字去初始化 WebView 内核。
+        if (template.indexOf('{') < 0) return template;
+
         String out = template;
         out = out.replace("{android}", androidVersion());
         out = out.replace("{api}", apiLevel());
-        out = out.replace("{webview}", webviewVersion(ctx));
+        if (out.indexOf("{webview}") >= 0) {
+            out = out.replace("{webview}", webviewVersion(ctx));
+        }
         out = out.replace("{model}", deviceModel());
-        out = out.replace("{app_version}", appVersion(ctx));
-        out = out.replace("{ua}", webviewUserAgent(ctx));
+        if (out.indexOf("{app_version}") >= 0) {
+            out = out.replace("{app_version}", appVersion(ctx));
+        }
+        if (out.indexOf("{ua}") >= 0) {
+            out = out.replace("{ua}", webviewUserAgent(ctx));
+        }
         return out;
     }
 }

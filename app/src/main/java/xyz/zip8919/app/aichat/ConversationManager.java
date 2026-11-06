@@ -344,6 +344,9 @@ public class ConversationManager {
                     mj.put("promptTokens", m.promptTokens);
                     mj.put("completionTokens", m.completionTokens);
                     mj.put("totalTokens", m.totalTokens);
+                    // 估算标记必须一起存：只存数字不存来源，重开会话后
+                    // 估算值会被当成端点返回的真实用量，用户对账时对不上。
+                    if (m.tokensEstimated) mj.put("tokensEstimated", true);
                 }
                 if (m.apiText != null && m.apiText.length() > 0) {
                     mj.put("apiText", m.apiText);
@@ -420,6 +423,7 @@ public class ConversationManager {
                     m.promptTokens = mj.optInt("promptTokens", 0);
                     m.completionTokens = mj.optInt("completionTokens", 0);
                     m.totalTokens = mj.optInt("totalTokens", 0);
+                    m.tokensEstimated = mj.optBoolean("tokensEstimated", false);
                     m.sendFailed = mj.optBoolean("sendFailed", false);
                     m.errorDetail = mj.optString("errorDetail", "");
                     m.apiText = mj.optString("apiText", "");

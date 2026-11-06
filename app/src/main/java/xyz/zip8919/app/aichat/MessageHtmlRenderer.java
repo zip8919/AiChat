@@ -125,10 +125,21 @@ public class MessageHtmlRenderer {
         }
 
         int tokens = msg.totalTokens;
-        boolean estimated = false;
-        if (tokens <= 0 && msg.isUser() && msg.content != null && msg.content.length() > 0) {
-            tokens = estimateTokens(msg.content.length());
-            estimated = tokens > 0;
+        boolean estimated = msg.tokensEstimated;
+        if (tokens <= 0 && msg.completionTokens > 0) {
+            tokens = msg.completionTokens;
+        }
+        if (tokens <= 0 && msg.timestamp > 0) {
+            // 用户消息从来没被端点统计过；AI 消息在端点不支持 usage 时也是 0。
+            // 两种都退到本地估算，否则这一行会整段消失，看起来像「没这个功能」。
+            // 没有时间戳的消息（更老的会话或畸形数据）不估算：连时间都没有的消息，
+            // 凭空补一个 token 数只会让整段历史看起来像被篡改过。
+            String src = msg.apiText != null && msg.apiText.length() > 0
+                    ? msg.apiText : msg.content;
+            if (src != null && src.length() > 0) {
+                tokens = estimateTokens(src.length());
+                estimated = true;
+            }
         }
         if (tokens > 0) {
             if (sb.length() > 0) sb.append(" · ");
@@ -136,12 +147,14 @@ public class MessageHtmlRenderer {
             sb.append(formatTokens(tokens)).append(" tokens");
         }
 
-        // 速度只在有真实用量与完成时刻时给：打断/失败的消息没有参考价值
+        // 速度只在有完成时刻时给：打断/失败的消息没有参考价值。
+        // 估算的用量算出来的速度也是估算的，同样带 ~。
         if (msg.isAssistant() && msg.completionTokens > 0 && msg.finishedAt > msg.timestamp) {
             long elapsed = msg.finishedAt - msg.timestamp;
             if (elapsed >= 1000) {
                 double speed = msg.completionTokens * 1000.0 / elapsed;
                 if (sb.length() > 0) sb.append(" · ");
+                if (estimated) sb.append('~');
                 sb.append(String.format(Locale.US, "%.1f tok/s", speed));
             }
         }
@@ -162,14 +175,16 @@ public class MessageHtmlRenderer {
         return fmt.format(new Date(ts));
     }
 
-    private static String formatTokens(int n) {
+    /** 供附件摘要复用；三处数字必须同源。 */
+    static String formatTokens(int n) {
         if (n < 1000) return String.valueOf(n);
         if (n < 1000000) return String.format(Locale.US, "%.1fk", n / 1000.0);
         return String.format(Locale.US, "%.1fM", n / 1000000.0);
     }
 
     /** 中文约 1 字 1 token，英文约 4 字符 1 token，取 2/3 作为折中系数。 */
-    private static int estimateTokens(int chars) {
+    /** 粗估：中文约 1 字 1 token、英文约 4 字符 1 token，取 2/3 折中。 */
+    static int estimateTokens(int chars) {
         return Math.max(1, chars * 2 / 3);
     }
 

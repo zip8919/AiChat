@@ -15,6 +15,7 @@ import android.view.ViewGroup;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
+import android.widget.CompoundButton;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.Spinner;
@@ -50,6 +51,10 @@ public class SettingsActivity extends Activity {
     private static final String KEY_PRESETS = "system_presets";
     /** 是否向模型开放本机 HTTP 请求工具。默认关闭：等于把网络出口交给模型。 */
     private static final String KEY_HTTP_TOOL_ENABLED = "http_tool_enabled";
+    /** 允许 http_request 访问环回/私有网段。默认关闭。 */
+    private static final String KEY_HTTP_ALLOW_PRIVATE = "http_allow_private";
+    /** 关闭 TLS 证书与主机名校验。默认关闭。 */
+    private static final String KEY_TRUST_ALL_CERTS = "trust_all_certs";
     // ---- 429 重试策略 ----
     private static final String KEY_RETRY_429_ENABLED = "retry_429_enabled";
     private static final String KEY_RETRY_429_MAX = "retry_429_max";
@@ -88,6 +93,9 @@ public class SettingsActivity extends Activity {
     private EditText jsEnvPromptEdit;
     private Switch autoTitleSwitch, quickScanSwitch, logSwitch, realtimeRenderSwitch, streamSwitch;
     private Switch webSearchSwitch, httpToolSwitch;
+    private Switch httpAllowPrivateSwitch, trustAllCertsSwitch;
+    /** loadSettings 期间置 true：否则 setChecked 会当成用户操作，弹出风险确认。 */
+    private boolean bindingSwitches;
     private Switch retry429Switch, retry429BackoffSwitch;
     private EditText retry429MaxEdit, retry429BaseEdit, retry429MaxWaitEdit;
     private Spinner titleModelSpinner, presetSpinner, searchBackendSpinner;
@@ -120,6 +128,8 @@ public class SettingsActivity extends Activity {
         quickScanSwitch = (Switch) findViewById(R.id.quick_scan_switch);
         webSearchSwitch = (Switch) findViewById(R.id.web_search_switch);
         httpToolSwitch = (Switch) findViewById(R.id.http_tool_switch);
+        httpAllowPrivateSwitch = (Switch) findViewById(R.id.http_allow_private_switch);
+        trustAllCertsSwitch = (Switch) findViewById(R.id.trust_all_certs_switch);
         retry429Switch = (Switch) findViewById(R.id.retry_429_switch);
         retry429BackoffSwitch = (Switch) findViewById(R.id.retry_429_backoff_switch);
         retry429MaxEdit = (EditText) findViewById(R.id.retry_429_max_edit);
@@ -188,7 +198,55 @@ public class SettingsActivity extends Activity {
                 return false; // 不消费事件，交回 Spinner 自己处理
             }
         });
+        // 两个安全开关：打开时弹一次风险确认，取消或按返回键都回滚。
+        // 不做静默生效——这两个开关一旦打开，防线就没了，用户必须知道自己在做什么。
+        httpAllowPrivateSwitch.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+            public void onCheckedChanged(CompoundButton b, boolean checked) {
+                if (bindingSwitches || !checked) return;
+                confirmRisk("允许访问内网地址",
+                        "开启后，AI 可以通过 http_request 访问 192.168.x.x、127.0.0.1、"
+                                + "169.254.169.254 等地址。\n\n"
+                                + "风险：路由器管理页、NAS 文件、云主机元数据凭证都可能被读到，"
+                                + "而请求结果会原样发给模型服务商。",
+                        b);
+            }
+        });
+        trustAllCertsSwitch.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+            public void onCheckedChanged(CompoundButton b, boolean checked) {
+                if (bindingSwitches || !checked) return;
+                confirmRisk("信任所有 HTTPS 证书",
+                        "开启后不再校验证书与主机名，任何中间人都能解密你与服务器之间的流量，"
+                                + "包括 API Key 和全部对话内容。\n\n"
+                                + "仅建议在访问自签证书的内网服务时临时开启。",
+                        b);
+            }
+        });
+
         LogUtil.d(TAG, "initViews done");
+    }
+
+    /**
+     * 危险开关的二次确认。
+     *
+     * <p>不用「先弹框再返回 boolean」的写法：{@code show()} 是异步的，方法返回时
+     * 用户还没点，拿到的永远是默认值。这里反过来——默认保持勾选，只有明确取消才回滚。
+     */
+    private void confirmRisk(String title, String message, final CompoundButton target) {
+        new AlertDialog.Builder(this)
+                .setTitle(title)
+                .setMessage(message)
+                .setPositiveButton("我已了解，继续开启", null)
+                .setNegativeButton("取消", new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface d, int w) {
+                        target.setChecked(false);
+                    }
+                })
+                .setOnCancelListener(new DialogInterface.OnCancelListener() {
+                    public void onCancel(DialogInterface d) {
+                        target.setChecked(false);
+                    }
+                })
+                .show();
     }
 
     private void loadSettings() {
@@ -197,7 +255,11 @@ public class SettingsActivity extends Activity {
         autoTitleSwitch.setChecked(prefs.getBoolean(KEY_AUTO_TITLE_ENABLED, true));
         quickScanSwitch.setChecked(prefs.getBoolean(KEY_QUICK_SCAN_ENABLED, false));
         webSearchSwitch.setChecked(prefs.getBoolean(KEY_WEB_SEARCH_ENABLED, true));
+        bindingSwitches = true;
         httpToolSwitch.setChecked(prefs.getBoolean(KEY_HTTP_TOOL_ENABLED, false));
+        httpAllowPrivateSwitch.setChecked(prefs.getBoolean(KEY_HTTP_ALLOW_PRIVATE, false));
+        trustAllCertsSwitch.setChecked(prefs.getBoolean(KEY_TRUST_ALL_CERTS, false));
+        bindingSwitches = false;
         retry429Switch.setChecked(isRetry429Enabled(this));
         retry429BackoffSwitch.setChecked(isRetry429Backoff(this));
         retry429MaxEdit.setText(String.valueOf(getRetry429MaxAttempts(this)));
@@ -276,6 +338,8 @@ public class SettingsActivity extends Activity {
         editor.putBoolean(KEY_QUICK_SCAN_ENABLED, quickScanSwitch.isChecked());
         editor.putBoolean(KEY_WEB_SEARCH_ENABLED, webSearchSwitch.isChecked());
         editor.putBoolean(KEY_HTTP_TOOL_ENABLED, httpToolSwitch.isChecked());
+        editor.putBoolean(KEY_HTTP_ALLOW_PRIVATE, httpAllowPrivateSwitch.isChecked());
+        editor.putBoolean(KEY_TRUST_ALL_CERTS, trustAllCertsSwitch.isChecked());
         editor.putBoolean(KEY_RETRY_429_ENABLED, retry429Switch.isChecked());
         editor.putBoolean(KEY_RETRY_429_BACKOFF, retry429BackoffSwitch.isChecked());
         editor.putInt(KEY_RETRY_429_MAX, clampInt(retry429MaxEdit.getText().toString(),
@@ -412,9 +476,15 @@ public class SettingsActivity extends Activity {
         refreshTitleModelSpinner();
     }
 
+    /**
+     * 系统提示词，占位符已替换成当前设备的真实值。
+     *
+     * <p>与代码执行器提示词共用 {@link SystemInfo#fillPlaceholders}：用户写「现在是 Android
+     * {android}，WebView 是 {webview}」，模型拿到的就是这台机器的版本，不用每次手改。
+     */
     public static String getSystemPrompt(Context context) {
         SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, 0);
-        return prefs.getString(KEY_SYSTEM_PROMPT, "");
+        return SystemInfo.fillPlaceholders(prefs.getString(KEY_SYSTEM_PROMPT, ""), context);
     }
 
     public static boolean isAutoTitleEnabled(Context context) {
@@ -548,6 +618,16 @@ public class SettingsActivity extends Activity {
     }
 
     /** 是否向模型开放本机 HTTP 请求工具（默认关闭）。 */
+    public static boolean isHttpAllowPrivateHost(Context context) {
+        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, 0);
+        return prefs.getBoolean(KEY_HTTP_ALLOW_PRIVATE, false);
+    }
+
+    public static boolean isTrustAllCerts(Context context) {
+        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, 0);
+        return prefs.getBoolean(KEY_TRUST_ALL_CERTS, false);
+    }
+
     public static boolean isHttpToolEnabled(Context context) {
         SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, 0);
         return prefs.getBoolean(KEY_HTTP_TOOL_ENABLED, false);
