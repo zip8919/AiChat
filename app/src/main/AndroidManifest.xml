@@ -69,6 +69,14 @@
             android:windowSoftInputMode="adjustResize"
             android:configChanges="screenSize|orientation|keyboardHidden"/>
 
+        <!-- 裁剪页自带顶栏，不能再叠一层系统 ActionBar -->
+        <activity
+            android:label="@string/crop_title"
+            android:name="xyz.zip8919.app.aichat.CropActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.Holo.Light.NoActionBar"
+            android:configChanges="screenSize|orientation|keyboardHidden"/>
+
         <activity
             android:label="关于"
             android:name="xyz.zip8919.app.aichat.AboutActivity"

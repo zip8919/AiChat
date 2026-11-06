@@ -600,6 +600,7 @@ public class MessageHtmlRenderer {
         String error = json.optString("error", "");
         boolean isFetch = WebSearchTool.TOOL_FETCH.equals(tool);
         boolean isTime = WebSearchTool.TOOL_TIME.equals(tool);
+        boolean isImageSearch = WebSearchTool.TOOL_IMAGE.equals(tool);
 
         StringBuilder out = new StringBuilder();
         out.append("<div class=\"tool-card\" data-tool-key=\"")
@@ -608,7 +609,9 @@ public class MessageHtmlRenderer {
             boolean isLimit = "limit".equals(tool);
             out.append("<div class=\"tool-card-head\">")
                .append(isLimit ? "工具调用已达上限"
-                       : (isFetch ? "网页抓取失败" : (isTime ? "获取时间失败" : "搜索失败")))
+                       : (isFetch ? "网页抓取失败"
+                       : (isTime ? "获取时间失败"
+                       : (isImageSearch ? "图片搜索失败" : "搜索失败"))))
                .append("</div>")
                .append("<div class=\"tool-error\">").append(esc(error)).append("</div>")
                .append("</div>");
@@ -642,6 +645,42 @@ public class MessageHtmlRenderer {
             if (json.optBoolean("truncated", false)) out.append(" ...（已截断）");
             out.append("</div>");
             out.append("</div>");
+            out.append("</div>");
+            return out.toString();
+        }
+
+        // 图片搜索：默认展开，图片本身就是内容——折叠起来等于什么都没给。
+        // 这里也不用 .tool-body：那个 class 被 toggleTool/applyToolStates 接管，
+        // 初始渲染时会被统一置成 display:none。
+        if (isImageSearch) {
+            String query = json.optString("query", "");
+            JSONArray imgs = json.optJSONArray("images");
+            int n = imgs == null ? 0 : imgs.length();
+            out.append("<div class=\"tool-card-head\">图片搜索")
+               .append(query.length() > 0 ? "：" + esc(query) : "")
+               .append("（").append(n).append(" 张）</div>");
+            if (n == 0) {
+                String note = json.optString("note", "");
+                out.append("<div class=\"tool-empty\">")
+                   .append(esc(note.length() > 0 ? note : "没有找到图片")).append("</div>");
+            } else {
+                out.append("<div class=\"tool-imgs\">");
+                for (int i = 0; i < n; i++) {
+                    JSONObject item = imgs.optJSONObject(i);
+                    if (item == null) continue;
+                    String url = item.optString("image_url", "");
+                    if (url.length() == 0) continue;
+                    String title = item.optString("title", "");
+                    // 缩略图用 background-image + cover：Chromium 30 没有 object-fit，
+                    // 直接放 <img> 会被拉伸变形。加载失败就露出底色，不出现破图标。
+                    out.append("<div class=\"tool-img-cell\" style=\"background-image:url('")
+                       .append(escAttr(cssUrl(url))).append("')\"")
+                       .append(" onclick=\"Android.openRemoteImage('")
+                       .append(jsArg(url)).append("','").append(jsArg(title)).append("')\"")
+                       .append("></div>");
+                }
+                out.append("</div>");
+            }
             out.append("</div>");
             return out.toString();
         }
@@ -710,5 +749,45 @@ public class MessageHtmlRenderer {
 
     public static String escAttr(String s) {
         return Html.escAttr(s);
+    }
+
+    /**
+     * JS 单引号字符串字面量的转义。
+     *
+     * <p>图片地址与标题来自搜索结果，直接拼进 {@code onclick="Android.x('...')"}
+     * 时，一个单引号就能截断语句、改掉整段 DOM 的事件绑定。HTML 属性用双引号包，
+     * 所以双引号要转成实体，单引号要加反斜杠。
+     */
+    static String jsArg(String s) {
+        if (s == null) return "";
+        StringBuilder sb = new StringBuilder(s.length() + 8);
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            switch (c) {
+                case '\\': sb.append("\\\\"); break;
+                case '\'': sb.append("\\'"); break;
+                case '"': sb.append("&quot;"); break;
+                case '&': sb.append("&amp;"); break;
+                case '<': sb.append("&lt;"); break;
+                case '>': sb.append("&gt;"); break;
+                case '\n': case '\r': case '\t': sb.append(' '); break;
+                default: sb.append(c);
+            }
+        }
+        return sb.toString();
+    }
+
+    /**
+     * 放进 {@code url('...')} 的地址。
+     *
+     * <p>单引号与括号会把 CSS 的字符串提前截断，进而让后面整条内联样式失效；
+     * URL 里这几个字符本来就该是百分号编码。
+     */
+    static String cssUrl(String url) {
+        if (url == null) return "";
+        return url.replace("'", "%27")
+                .replace("(", "%28")
+                .replace(")", "%29")
+                .replace(" ", "%20");
     }
 }

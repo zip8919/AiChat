@@ -47,8 +47,11 @@
 | `FullscreenInputActivity` | 全屏输入编辑，完成后回填主输入框 | 不做草稿持久化（主输入框是唯一数据源） |
 | `AboutActivity` | 版本展示、检查更新、反馈、开源许可 | 不发起版本网络请求（功能待开发） |
 | `MessageQueue` | 排队发送（每条带原话与附件快照） | 不知道消息内容怎么发 |
-| `AttachmentText` | 附件 → 给模型的正文、卡片摘要、老会话迁移；大小与 token 估算 | 不读文件，不碰 UI |
-| `AttachmentFiles` | 图片：拷进私有目录（内容 SHA-1 命名）、缩略图、查看用 data URI | 不做文本解码 |
+| `AttachmentText` | 附件 → 给模型的正文、卡片摘要、老会话迁移；大小与 token 估算（图片走 `ImageTokens`） | 不读文件，不碰 UI |
+| `AttachmentFiles` | 图片：拷进私有目录（内容 SHA-1 命名）、URL/拍照导入、缩略图、API/view 两级 data URI | 不做文本解码 |
+| `ImageTokens` | 图片 token 公式（2048/768 缩放 + 512 瓦片，`85+170×tiles`） | 纯函数，不读文件 |
+| `CropActivity` / `CropView` | 图片裁剪：框选手柄、旋转、输出到私有目录 | 不发网络请求，不进会话 |
+| `MarkdownPage` | .md 文件预览页（MarkdownPipeline 渲染 + 文档样式） | 不做源码高亮（那是 `SourcePage`） |
 | `FileKinds` | 扩展名 → 高亮语言 / 能否预览 / 能否运行 | 纯函数，可单测 |
 | `NetSecurity` | 内网访问 / 证书校验的进程内开关（默认严格） | 纯容器，不读配置 |
 | `HelpText` | 使用说明与免责声明文案 | 不拼 UI，不发请求 |
@@ -99,6 +102,12 @@
 | 系统 / 标题提示词、占位符 | `SettingsActivity.getSystemPrompt` / `getTitlePrompt`（都在主线程调用，`{ua}` 首次取值要初始化 WebView） |
 | 首启引导文案与顺序 | `HelpText` + `MainActivity.showFirstLaunchDialog` + `KEY_FIRST_LAUNCH_DONE` |
 | 附件怎么进提示词 | `AttachmentText.toApi`（由 `apiTextOf` 调用）→ `ChatHistory.apiContentOf` |
+| 多模态请求体（图片进 content 数组） | `ChatHistory.buildConversation`（`visionEnabled` 时装配 `image_url` 块）+ `ModelInfo.supportsVision` |
+| 图片 token 公式 | `ImageTokens.estimate`（AttachmentText 缓存调用） |
+| image_search 工具与图片卡片 | `WebSearchTool` + `TavilyTool` + `RendererAssets`（`.tool-imgs` 网格） |
+| 搜索图注入模型视觉 | `ToolExecutor.injectImages`（vision 开启时把结果图转 data URI 进下一轮） |
+| 图片 URL / 拍照 / 裁剪导入 | `MainActivity` 三个回调 → `CropActivity` → `importImageFile` → `AttachmentFiles` |
+| .md 预览 | `MarkdownPage` + `ViewerController.showDocument` |
 | 附件 UI（标签、上限） | `MainActivity.refreshAttachmentBar` / `addAttachment` |
 
 ## 调试
@@ -187,3 +196,15 @@ rounds done: sources=5 apiText=842 toolHistory=4
     点卡片进图片查看器，可缩放/旋转；杀掉进程重进会话，缩略图与点开都还正常
 37. **图片不进请求体**：附图片后发一句问题，请求体里只有「[图片附件] x.jpg（…）」与
     「未包含图像内容」，不含 base64；模型不会声称看到了图
+38. **多模态输入**：模型配置勾选「支持多模态输入」后附图发问——请求体是 `content` 数组
+    （text + image_url data URI），模型能描述图片内容；取消勾选后回到纯文本路径（同 #37）
+39. **图片 token**：附一张 1024×1024 图，卡片显示 `~765 tokens`（85+170×4）；
+    端点返回 `usage` 时以返回值为准、不带 `~`
+40. **md 预览**：附一个 `.md` → 右上角「预览」→ 渲染成排版文档，按钮变「源码」可切回；
+    超 64K 的 md 只渲染前段
+41. **图片 URL 导入**：加号 → 从链接添加图片 → 输入 https 图片地址，成功后进裁剪页；
+    内网地址被拒（走 `assertPublicHost` 同一道校验）
+42. **拍照 + 裁剪**：拍照 → 裁剪页框选/旋转 → 确认后卡片出现缩略图；
+    选图文件同样先过裁剪页；取消裁剪不落任何附件
+43. **image_search**：问「搜几张橘猫的图」→ 出现图片网格卡片（缩略图 + 张数），
+    点缩略图进图片查看器；视觉开启时追问「图里是什么」模型能答（注入生效）

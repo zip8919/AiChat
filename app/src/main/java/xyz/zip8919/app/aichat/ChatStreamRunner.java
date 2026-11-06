@@ -152,6 +152,24 @@ final class ChatStreamRunner {
         };
     }
 
+    /**
+     * 把本地图片编码成请求体里的 data URI。
+     *
+     * <p>用 data URI 而不是远端 URL：端点未必能访问外网，尤其国内模型
+     * 拿不到境外图床的地址，结果是「图没传上去、模型却说看不到」，比失败更难受。
+     * 编码是同步的（一张 1024px 的图 30~80 ms），只在请求线程上跑。
+     */
+    private static final ChatHistory.ImageProvider VISION_IMAGES = new ChatHistory.ImageProvider() {
+        public String dataUri(AttachmentText.File f) {
+            return AttachmentFiles.apiDataUri(f.path);
+        }
+    };
+
+    private JSONArray buildConversation(String sysPrompt) throws Exception {
+        return ChatHistory.build(job.snapshot, job.aiMessage, sysPrompt,
+                job.vision, VISION_IMAGES);
+    }
+
     /** 阻塞执行，由调用方放进请求线程。 */
     void execute() {
         final long startMs = System.currentTimeMillis();
@@ -161,7 +179,7 @@ final class ChatStreamRunner {
         try {
             JSONArray conversation = job.isResume()
                     ? job.resume.conversation
-                    : ChatHistory.build(job.snapshot, job.aiMessage, job.effectiveSystemPrompt);
+                    : buildConversation(job.effectiveSystemPrompt);
             JSONArray toolDefs = WebSearchTool.buildToolDefinitions(
                     job.webSearchEnabled, job.httpToolEnabled);
             boolean toolsEnabled = true;
@@ -264,7 +282,7 @@ final class ChatStreamRunner {
                     if ((code == 400 || code == 422) && toolsEnabled && round == 0 && !fallbackTried) {
                         fallbackTried = true;
                         toolsEnabled = false;
-                        conversation = ChatHistory.build(job.snapshot, job.aiMessage, job.systemPrompt);
+                        conversation = buildConversation(job.systemPrompt);
                         ui.toast("当前模型不支持工具调用，已按普通对话发送");
                         ChatTransport.close(conn);
                         conn = null;
@@ -439,6 +457,20 @@ final class ChatStreamRunner {
             return job.useTavily
                     ? "{\"error\":\"未配置 Tavily API Key，无法使用联网搜索\"}"
                     : "{\"error\":\"未配置 DeepSeek API Key，无法使用联网搜索\"}";
+        }
+
+        public boolean visionEnabled() {
+            return job.vision;
+        }
+
+        public String imageDataUri(String url) {
+            try {
+                // 768 是视觉模型的短边上限，再大也会被端点缩回去，白占请求体
+                return AttachmentFiles.remoteToDataUri(url, 768);
+            } catch (Exception e) {
+                LogUtil.w("ChatStreamRunner", "imageDataUri failed: %s", e.getMessage());
+                return null;
+            }
         }
 
         public void onUnavailable() {

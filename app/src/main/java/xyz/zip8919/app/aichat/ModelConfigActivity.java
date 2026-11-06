@@ -8,9 +8,11 @@ import android.view.View;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ListView;
+import android.widget.TextView;
 import android.widget.Toast;
 import java.util.ArrayList;
 import java.util.List;
@@ -88,7 +90,8 @@ public class ModelConfigActivity extends Activity {
     private void refreshModelList() {
         List<String> items = new ArrayList<String>();
         for (ModelInfo m : models) {
-            items.add(m.name + " | " + m.provider + (m.supportsThinking ? " | 思考" : ""));
+            items.add(m.name + " | " + m.provider + (m.supportsThinking ? " | 思考" : "")
+                    + (m.supportsVision ? " | 视觉" : ""));
         }
         if (modelAdapter == null) {
             modelAdapter = new ArrayAdapter<String>(this,
@@ -274,6 +277,21 @@ public class ModelConfigActivity extends Activity {
         if (m != null) provEt.setText(m.provider);
         layout.addView(provEt);
 
+        // 多模态开关：勾上才会把图片以 image_url 形式放进请求体。
+        // 不勾时图片附件只写一行「本次为纯文本请求」，避免端点因不认 content 数组直接 400。
+        final CheckBox visionCb = new CheckBox(this);
+        visionCb.setText("支持图片输入（多模态）");
+        visionCb.setChecked(m != null && m.supportsVision);
+        layout.addView(visionCb);
+
+        TextView visionTip = new TextView(this);
+        visionTip.setText("开启后：附加的图片与图片搜索结果会随请求发给模型。"
+                + "请确认该模型确实支持 image_url 格式，否则请求会失败。");
+        visionTip.setTextSize(11);
+        visionTip.setTextColor(0xFF888888);
+        visionTip.setPadding(0, 0, 0, 8);
+        layout.addView(visionTip);
+
         new AlertDialog.Builder(this)
                 .setTitle(isEdit ? "编辑模型" : "添加模型")
                 .setView(layout)
@@ -295,7 +313,10 @@ public class ModelConfigActivity extends Activity {
                         ModelInfo info = isEdit ? m : new ModelInfo();
                         info.name = name;
                         info.provider = prov;
-                        info.supportsThinking = true;
+                        // 编辑时保留原有能力位：这里原来硬编码 true，改个名字就把
+                        // 用户关掉的思考开关又打开了
+                        if (!isEdit) info.supportsThinking = true;
+                        info.supportsVision = visionCb.isChecked();
                         if (!isEdit) models.add(info);
                         configManager.setModels(models);
                         configManager.save();

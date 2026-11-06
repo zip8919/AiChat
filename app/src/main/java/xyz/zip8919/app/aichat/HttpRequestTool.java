@@ -195,7 +195,8 @@ final class HttpRequestTool {
      * 拒绝一切指向本机/内网的地址。DNS 可能返回多个 A 记录，只要有一条落在
      * 内网就整体拒绝——只检查第一条会被绕过。
      */
-    private static void assertPublicHost(URL url) throws Exception {
+    /** 包可见：图片导入（URL 附加）也要走同一道私网校验。 */
+    static void assertPublicHost(URL url) throws Exception {
         String host = url.getHost();
         if (host == null || host.length() == 0) throw new Exception("URL 缺少主机名");
         // IPv6 字面量的 getHost() 带方括号，解析前要去掉

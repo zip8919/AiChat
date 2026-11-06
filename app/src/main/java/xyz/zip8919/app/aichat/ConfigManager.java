@@ -181,6 +181,7 @@ public class ConfigManager {
             mj.put("name", m.name);
             mj.put("provider", m.provider);
             mj.put("supports_thinking", m.supportsThinking);
+            mj.put("supports_vision", m.supportsVision);
             modelArr.put(mj);
         }
         json.put("models", modelArr);
@@ -217,6 +218,8 @@ public class ConfigManager {
             m.name = mj.getString("name");
             m.provider = mj.getString("provider");
             m.supportsThinking = mj.optBoolean("supports_thinking", true);
+            // 老配置没有这个字段：默认 false，行为与 1.9.0 一致（不发图）
+            m.supportsVision = mj.optBoolean("supports_vision", false);
             models.add(m);
         }
 

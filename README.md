@@ -1,6 +1,6 @@
 # AiChat
 
-Android 词典笔 AI 对话应用（版本 1.9.0，minSdk 18 / targetSdk 18，真机 Android 4.4.2 / API 19）。基于 WebView + HTML/CSS 渲染 Markdown/LaTeX，通过任意 OpenAI 兼容端点调用大模型，内置 DeepSeek（不含 API Key）与商汤日日新 默认配置，默认模型 `deepseek-v4-flash`（商汤日日新）。
+Android 词典笔 AI 对话应用（版本 1.10.0，minSdk 18 / targetSdk 18，真机 Android 4.4.2 / API 19）。基于 WebView + HTML/CSS 渲染 Markdown/LaTeX，通过任意 OpenAI 兼容端点调用大模型，内置 DeepSeek（不含 API Key）与商汤日日新 默认配置，默认模型 `deepseek-v4-flash`（商汤日日新）。
 
 > 改代码前先看 [ARCHITECTURE.md](ARCHITECTURE.md)：请求链路图、类职责边界、并发约定、「想改 X 去哪」对照表。
 
@@ -8,15 +8,17 @@ Android 词典笔 AI 对话应用（版本 1.9.0，minSdk 18 / targetSdk 18，�
 
 - **多模型 / 多提供商** — 模型配置页可增删提供商与模型，自定义 API URL、Chat Path、API Key；内置 DeepSeek、商汤日日新 及任意 OpenAI 兼容端点
 - **对话** — 流式输出（设置可开关）；回复进行中再发送自动排队，队列支持上移/下移/插队发送（打断当前回复）/删除；长按发送键打断当前请求，思考阶段打断自动补 `[/thinking]` 收尾；请求失败时在用户消息下方显示错误卡片，可查看详情、点击气泡立即重试；回复进行中重试会先确认打断
-- **输入区** — 发送键为纸飞机图标，生成中且输入框为空时变为方块「停止」图标；有文字（或挂了附件）时才可发送；有文字时右上出现四角图标，点开进入全屏编辑（完成回填、取消丢弃）；发送键左侧加号为附件菜单，支持「添加文本文件」与「添加图片」
+- **输入区** — 发送键为纸飞机图标，生成中且输入框为空时变为方块「停止」图标；有文字（或挂了附件）时才可发送；有文字时右上出现四角图标，点开进入全屏编辑（完成回填、取消丢弃）；发送键左侧加号为附件菜单，支持「添加文本文件」「添加图片」「从链接添加图片」「拍照」；选图与拍照后进入**裁剪页**可框选区域（拖动四角/四边手柄，可旋转）再导入
 - **附件** — 选中文件后**不往输入框里塞正文**，只在输入框上方显示一个可点掉的标签（两行：文件名 + 真实大小与 token 估算）。单文件上限 **10 MB**、最多 5 个、合计 20M 字符（约 40 MB 堆，老设备内存红线）、UTF-8 解码失败自动回退 GBK、超限报错不静默截断。正文随消息存进 `Message.attachments` 并**随请求体发给模型**；气泡下方独立渲染附件卡片（文件名 + 大小 · ~tokens），不混进正文，改消息、复制、重试都不会把附件弄丢；历史回放与重试都走完整正文，1.8.2 及以前的老会话读入时自动迁移成同样的结构。
-- **查看附件** — 点消息下方的附件卡片即可打开：代码/JSON/XML/脚本按扩展名做**语法高亮**（超出 120K 字符自动关高亮、超出 400K 字符只显示前段并提示）；HTML 与 SVG 在查看器**右上角有「预览」**，可切到渲染结果再切回源码；**JS 的右上角是「运行」**，直接进脚本运行器；纯文本（`.log`/`.md` 等）按纯文本折行显示。查看器沿用图片查看器的骨架，有缩放、旋转与复位。**图片附件**用图片查看器打开（拷贝到私有目录后按 1600px 采样解码），气泡里的卡片直接显示缩略图。图片进 `chat/completions` 只写一行说明、不塞 Base64——文本协议塞不下像素，也避免端点把它当正文计费
+- **查看附件** — 点消息下方的附件卡片即可打开：代码/JSON/XML/脚本按扩展名做**语法高亮**（超出 120K 字符自动关高亮、超出 400K 字符只显示前段并提示）；HTML 与 SVG 在查看器**右上角有「预览」**，可切到渲染结果再切回源码；**JS 的右上角是「运行」**，直接进脚本运行器；**Markdown（`.md`）右上角有「预览」**，渲染为排版文档（标题/列表/表格/代码块，64K 截断）；其余纯文本（`.log` 等）按纯文本折行显示。查看器沿用图片查看器的骨架，有缩放、旋转与复位。**图片附件**用图片查看器打开（拷贝到私有目录后按 1600px 采样解码），气泡里的卡片直接显示缩略图。图片进 `chat/completions` 默认只写一行说明、不塞 Base64——文本协议塞不下像素，也避免端点把它当正文计费；模型开启「多模态输入」后改走图像通道（见下）
 - **消息元信息** — 每条消息底部显示时间（当天 `HH:mm`，跨天 `MM-dd HH:mm`）；AI 消息另显示 token 用量与生成速度（tok/s）；用户消息 token 为本地估算值（中文约 0.6 token/字、英文与符号约 0.3 token/字符，按厂商文档系数），以 `~` 前缀标注；端点返回 `usage` 时一律以返回值为准。端点不支持 `stream_options.include_usage` 时自动降级并记住，后续请求不再携带该字段
 - **429 自动重试** — 仅对 429 生效（5xx / 408 / 超时不重试，避免重复计费）；等待期间对话区显示倒计时卡片，右侧「立即重试」可跳过剩余等待；设置页可配重试次数（1-20）、基础间隔、最大等待与指数退避；优先采用服务端 `Retry-After`（支持秒数与 HTTP-date）；等待过程可被「停止」立即打断
 - **思考模式** — 关闭/低/中/高四档，思考内容可折叠/展开，标题显示本次思考的 token 估算（与消息底部的 token 单位一致）
 - **本地时间工具** — `get_current_time` 读取设备当前日期、时间、星期与时区（含 ISO 8601 与时间戳），不联网、不需要任何 Key；即使关闭联网搜索也可用。涉及「今天/现在/星期几」等时间敏感问题时应先调用，避免模型凭训练数据猜日期
-- **联网搜索** — 设置页总开关（默认开启）；搜索服务可选 **Tavily（默认，免费，经自建网关）** 或 DeepSeek。AI 可通过 `web_search` 工具检索实时网页，通过 `web_fetch` 抓取网页正文；来源独立成可折叠来源区（按 URL 去重，最多 8 条），不写入正文、不进入后续请求；工具轮次不设上限，单轮工具调用数可配置（默认 15，范围 1-50），超出部分按未执行处理；搜索摘要单条限 1200 字符、单次合计限 6000 字符。总开关同时控制工具定义、搜索系统提示词和实际搜索/抓取请求。工具用途说明写在 `tools[].function.description` 里（协议自带字段），不再进 system prompt，每轮省约 200 token
+- **联网搜索** — 设置页总开关（默认开启）；搜索服务可选 **Tavily（默认，免费，经自建网关）** 或 DeepSeek。AI 可通过 `web_search` 检索实时网页，通过 `image_search` **搜索图片**（结果以缩略图网格展示，点击进图片查看器看原图），通过 `web_fetch` 抓取网页正文；来源独立成可折叠来源区（按 URL 去重，最多 8 条），不写入正文、不进入后续请求；工具轮次不设上限，单轮工具调用数可配置（默认 15，范围 1-50），超出部分按未执行处理；搜索摘要单条限 1200 字符、单次合计限 6000 字符。总开关同时控制工具定义、搜索系统提示词和实际搜索/抓取请求。工具用途说明写在 `tools[].function.description` 里（协议自带字段），不再进 system prompt，每轮省约 200 token
 - **Request 工具** — `http_request` 让 AI 在本机发起 HTTP 请求直接调 API：支持 GET/POST/PUT/DELETE/PATCH/HEAD、自定义请求头、POST body、1-30 秒超时。**默认关闭**，设置页开启。三道安全边界：拒绝环回 / 私有网段 / 链路本地 / 唯一本地地址，禁止跟随 3xx（防公网跳内网），响应体截断 8KB
+- **多模态输入（看图）** — 模型配置里可勾选「支持多模态输入」（`supports_vision`，按模型能力自行勾选，**默认关闭**）。开启后用户消息带图片附件时，请求体按 OpenAI/DeepSeek 兼容格式装配 `content` 数组（`text` + `image_url` 的 data URI，Base64 内嵌，API 尺寸采样）；`image_search` 找到的图在视觉开启时也会以图像块注入下一轮，模型能直接「看到」图片内容。未开启时保持纯文本协议：图片只写一行说明不塞 Base64，绝不默默多花钱
+- **图片 token 估算** — 图片按 OpenAI 文档公式计 token：缩放到 2048 内 → 短边 768 → 按 512 瓦片计数，`85 + 170×瓦片数`；low detail 固定 85。附件卡片显示「大小 · 尺寸 · ~tokens」（图片按 24 token 入列总估算），视觉请求发出后实际计费以端点 `usage` 返回为准
 - **Markdown 渲染** — WebView + HTML/CSS：标题、粗斜体、删除线、代码块（复制按钮 + 语法高亮）、表格（横向滑动 + 点击放大）、引用、列表、分割线、图片、链接；LaTeX 公式（`$...$`/`$$...$$`/`\(...\)`/`\[...\]`/裸 `\command`/化学式 `\ce{...}`）、脚注、高亮 `==text==`、上下标、内嵌 HTML/SVG 直通
 - **语法高亮** — 支持 Java、Python、JS/TS、Bash/sh/shell、JSON、C/C++、Go、Rust、Kotlin、Swift、C#、SQL、XML、HTML、SVG；未声明语言时按内容嗅探（HTML/SVG/XML 自动识别）
 - **代码查看器** — 所有代码块均可弹出全屏预览（任意语言），支持缩放/旋转/背景切换；代码块可导出保存到应用存储 exports 目录（按语言扩展名，覆盖 SVG/HTML 及各类代码）
@@ -122,10 +124,10 @@ Tavily 的密钥在应用内「设置 → Tavily API Key」填写，仅保存在
 
 ```
 ├── app/
-│   ├── build.gradle                # versionName 1.9.0 / versionCode 43 / compileSdk 34
+│   ├── build.gradle                # versionName 1.10.0 / versionCode 44 / compileSdk 34
 │   ├── keystore/mc.jks             # 签名密钥库
 │   └── src/main/
-│       ├── AndroidManifest.xml     # 包名 xyz.zip8919.app.aichat，9 个 Activity
+│       ├── AndroidManifest.xml     # 包名 xyz.zip8919.app.aichat，10 个 Activity
 │       ├── java/xyz/zip8919/app/aichat/
 │       │   ├── MainActivity.java            # 主界面：视图装配、事件分发、会话状态
 │       │   │
@@ -150,6 +152,7 @@ Tavily 的密钥在应用内「设置 → Tavily API Key」填写，仅保存在
 │       │   ├── 【渲染】
 │       │   ├── MessageHtmlRenderer.java     # 一条消息 → HTML（思考块、工具卡、来源、错误卡）
 │       │   ├── MarkdownPipeline.java        # markdown 流水线：代码/SVG 屏蔽 → 公式 → 解析 → 回填
+│       │   ├── MarkdownPage.java            # .md 文件预览页：MarkdownPipeline 渲染 + 文档样式（64K 截断）
 │       │   ├── MathRenderer.java            # LaTeX / \ce / 裸命令 → 位图
 │       │   ├── RendererAssets.java          # 页面 CSS 与 JS
 │       │   ├── CodeHighlighter.java         # 约 20 种语言的 token 规则
@@ -157,12 +160,15 @@ Tavily 的密钥在应用内「设置 → Tavily API Key」填写，仅保存在
 │       │   ├── TextKit.java                 # 流式纯文本、标题截断
 │       │   │
 │       │   ├── 【界面与交互】
-│       │   ├── ViewerController.java        # 图片 / 表格 / HTML·SVG 全屏预览
+│       │   ├── ViewerController.java        # 图片 / 表格 / HTML·SVG 全屏预览；附件查看（源码 / md 预览 / 运行）
 │       │   ├── FullscreenInputActivity.java # 全屏输入页（取消丢弃 / 完成回填）
 │       │   ├── AboutActivity.java           # 关于页：版本、检查更新、反馈、开源许可
 │       │   ├── MessageQueue.java            # 排队发送：上移、下移、插队
 │       │   ├── AttachmentText.java          # 附件：给模型的正文、卡片摘要、老会话迁移
-│       │   ├── AttachmentFiles.java         # 图片附件：拷贝进私有目录、缩略图、查看用 data URI
+│       │   ├── AttachmentFiles.java         # 图片附件：拷贝进私有目录、URL/拍照导入、裁剪产物落盘、缩略图、data URI
+│       │   ├── ImageTokens.java             # 图片 token 公式（OpenAI：2048/768 缩放 + 512 瓦片）
+│       │   ├── CropActivity.java           # 图片裁剪页（选图/拍照/URL 导入的统一入口）
+│       │   ├── CropView.java               # 裁剪框视图：四角/四边手柄、旋转、输出
 │       │   ├── FileKinds.java               # 扩展名 → 高亮语言 / 能否预览 / 能否运行
 │       │   ├── NetSecurity.java             # 内网访问与证书校验的进程内开关（默认严格）
 │       │   ├── HelpText.java                # 使用说明与免责声明（首启与关于页共用）

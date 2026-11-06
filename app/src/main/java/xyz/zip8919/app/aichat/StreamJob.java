@@ -62,6 +62,16 @@ final class StreamJob {
     final boolean webSearchEnabled;
     /** 是否向模型暴露 http_request 工具（默认关闭，设置页开启）。 */
     final boolean httpToolEnabled;
+    /**
+     * 当前模型是否支持多模态输入。开启后图片附件与图片搜索结果会以
+     * {@code image_url} 块随请求发出；关闭时只写一行文字说明。
+     */
+    final boolean vision;
+    /**
+     * Application context，仅用于把图片下载/编码成 data URI（视觉注入）。
+     * 传 application 而不是 Activity：请求线程会活到请求结束，持有 Activity 是泄漏。
+     */
+    final android.content.Context appContext;
     final boolean useTavily;
     /** 搜索是否真的可用：Tavily 看内置密钥，DeepSeek 看能否解析到提供商。 */
     final boolean searchReady;
@@ -91,6 +101,8 @@ final class StreamJob {
         this.realtimeRender = b.realtimeRender;
         this.webSearchEnabled = b.webSearchEnabled;
         this.httpToolEnabled = b.httpToolEnabled;
+        this.vision = b.vision;
+        this.appContext = b.appContext;
         this.useTavily = b.useTavily;
         this.searchReady = b.searchReady;
         this.maxCallsPerRound = b.maxCallsPerRound;
@@ -132,6 +144,8 @@ final class StreamJob {
         boolean realtimeRender;
         boolean webSearchEnabled;
         boolean httpToolEnabled;
+        boolean vision;
+        android.content.Context appContext;
         boolean useTavily;
         boolean searchReady;
         int maxCallsPerRound;
@@ -157,6 +171,8 @@ final class StreamJob {
         Builder realtimeRender(boolean v) { realtimeRender = v; return this; }
         Builder webSearchEnabled(boolean v) { webSearchEnabled = v; return this; }
         Builder httpToolEnabled(boolean v) { httpToolEnabled = v; return this; }
+        Builder vision(boolean v) { vision = v; return this; }
+        Builder appContext(android.content.Context v) { appContext = v; return this; }
         Builder useTavily(boolean v) { useTavily = v; return this; }
         Builder searchReady(boolean v) { searchReady = v; return this; }
         Builder maxCallsPerRound(int v) { maxCallsPerRound = v; return this; }

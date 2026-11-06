@@ -92,6 +92,14 @@ final class RendererAssets {
             ".tool-hint{color:#90a4ae;font-weight:normal;font-size:11px;}" +
             ".tool-body{display:none;}" +
             ".tool-item{padding:8px 10px;border-top:1px solid #e6eef8;}" +
+            // 图片搜索结果：三列网格。用 background-image + cover 而不是 <img>：
+            // Chromium 30 没有 object-fit，图片会被按格子比例拉变形。
+            ".tool-imgs{padding:8px 8px 2px 8px;font-size:0;}" +
+            ".tool-img-cell{display:inline-block;width:30%;height:86px;" +
+            "margin:0 1.5% 6px 1.5%;vertical-align:top;border-radius:6px;" +
+            "background-color:#eef2f6;background-size:cover;background-position:center;" +
+            "border:1px solid #dbe4ee;" +
+            "-webkit-tap-highlight-color:rgba(100,180,255,0.3);}" +
             ".tool-title{color:#1565c0;font-weight:bold;font-size:13px;text-decoration:none;" +
             "word-wrap:break-word;}" +
             ".tool-meta{color:#90a4ae;font-size:11px;margin-top:2px;word-wrap:break-word;}" +

@@ -12,11 +12,14 @@ import android.content.res.Configuration;
 import android.database.Cursor;
 import android.net.Uri;
 import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import android.os.Bundle;
 import android.os.Handler;
 import android.text.Editable;
+import android.text.InputType;
 import android.text.SpannableString;
 import android.text.Spanned;
 import android.text.TextWatcher;
@@ -67,9 +70,13 @@ public class MainActivity extends Activity {
     private static final int REQUEST_PICK_TEXT = 3;
     private static final int REQUEST_FULLSCREEN = 4;
     private static final int REQUEST_PICK_IMAGE = 5;
+    private static final int REQUEST_TAKE_PHOTO = 6;
+    private static final int REQUEST_CROP = 7;
     /** 附件菜单项 id（单项目前用常量，后续加项改成 menu 资源）。 */
     private static final int MENU_ATTACH_TEXT = 1;
     private static final int MENU_ATTACH_IMAGE = 2;
+    private static final int MENU_ATTACH_IMAGE_URL = 3;
+    private static final int MENU_ATTACH_CAMERA = 4;
     /** 单文件上限 10 MB：超过直接报错，不截断——半截代码更难排查。 */
     private static final int MAX_IMPORT_BYTES = 10 * 1024 * 1024;
     /** 单条消息最多挂几个附件。 */
@@ -110,6 +117,8 @@ public class MainActivity extends Activity {
     private View attachmentScroll;
     private LinearLayout attachmentBar;
     private final List<AttachmentText.File> pendingAttachments = new ArrayList<AttachmentText.File>();
+    /** 相机写入的目标文件；拍照回调里要用它判断拍没拍成。 */
+    private File cameraOutputFile;
     // 发送键长按打断后，本次抬手的 click 不再触发发送
     private boolean sendButtonLongPressed = false;
     private WebView conversationWebView;
@@ -534,6 +543,8 @@ public class MainActivity extends Activity {
         PopupMenu menu = new PopupMenu(this, plusButton);
         menu.getMenu().add(0, MENU_ATTACH_TEXT, 0, R.string.upload_text_file);
         menu.getMenu().add(0, MENU_ATTACH_IMAGE, 1, R.string.upload_image);
+        menu.getMenu().add(0, MENU_ATTACH_CAMERA, 2, R.string.take_photo);
+        menu.getMenu().add(0, MENU_ATTACH_IMAGE_URL, 3, R.string.upload_image_url);
         menu.setOnMenuItemClickListener(new PopupMenu.OnMenuItemClickListener() {
             public boolean onMenuItemClick(MenuItem item) {
                 if (item.getItemId() == MENU_ATTACH_TEXT) {
@@ -542,6 +553,14 @@ public class MainActivity extends Activity {
                 }
                 if (item.getItemId() == MENU_ATTACH_IMAGE) {
                     pickImageFile();
+                    return true;
+                }
+                if (item.getItemId() == MENU_ATTACH_CAMERA) {
+                    takePhoto();
+                    return true;
+                }
+                if (item.getItemId() == MENU_ATTACH_IMAGE_URL) {
+                    showImageUrlDialog();
                     return true;
                 }
                 return false;
@@ -579,6 +598,162 @@ public class MainActivity extends Activity {
             LogUtil.w(TAG, "pickImageFile failed: %s", e.getMessage());
             Toast.makeText(this, "没有可用的图片选择器", Toast.LENGTH_SHORT).show();
         }
+    }
+
+    /**
+     * 拍照。
+     *
+     * <p>用 {@code ACTION_IMAGE_CAPTURE} + {@code EXTRA_OUTPUT} 存原图，而不是读
+     * {@code data} 里那张缩略图：某些 ROM 在 data 里回的是 160×120 的预览图，
+     * 拍完一看全是马赛克。API 18 没有 FileProvider（项目不带 support 库），
+     * 只能给 {@code file://}；targetSdk 18 不会因此抛 FileUriExposedException。
+     */
+    private void takePhoto() {
+        Intent intent = new Intent(android.provider.MediaStore.ACTION_IMAGE_CAPTURE);
+        if (intent.resolveActivity(getPackageManager()) == null) {
+            Toast.makeText(this, "没有可用的相机应用", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        try {
+            File dir = new File(getCacheDir(), "camera");
+            if (!dir.exists() && !dir.mkdirs()) throw new Exception("无法创建缓存目录");
+            sweepOldCameraFiles(dir);
+            cameraOutputFile = new File(dir, "shot-" + System.currentTimeMillis() + ".jpg");
+            intent.putExtra(android.provider.MediaStore.EXTRA_OUTPUT,
+                    Uri.fromFile(cameraOutputFile));
+            startActivityForResult(intent, REQUEST_TAKE_PHOTO);
+        } catch (Exception e) {
+            LogUtil.w(TAG, "takePhoto failed: %s", e.getMessage());
+            Toast.makeText(this, "启动相机失败", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    /** 相机与裁剪的临时文件只删一天前的：正在用的那份时间戳是新的。 */
+    private void sweepOldCameraFiles(File dir) {
+        try {
+            File[] files = dir.listFiles();
+            if (files == null) return;
+            long cutoff = System.currentTimeMillis() - 24L * 60 * 60 * 1000;
+            for (File f : files) {
+                if (f.lastModified() < cutoff && f.delete()) {
+                    LogUtil.d(TAG, "swept camera temp: %s", f.getName());
+                }
+            }
+        } catch (Exception e) {
+            LogUtil.w(TAG, "sweepOldCameraFiles failed: %s", e.getMessage());
+        }
+    }
+
+    /** 相册选图：先拷进 cache 再进裁剪页（内容 Uri 的读权限不跨 Activity 传递）。 */
+    private void stageImageForCrop(final Uri picked) {
+        new Thread(new Runnable() {
+            public void run() {
+                File staged = null;
+                String err = null;
+                String name = null;
+                try {
+                    name = queryDisplayName(picked);
+                    if (!FileKinds.looksLikeImage(name, getContentResolver().getType(picked))) {
+                        throw new Exception("这不是图片文件");
+                    }
+                    staged = AttachmentFiles.stageToCache(MainActivity.this, picked,
+                            AttachmentFiles.MAX_IMAGE_BYTES);
+                } catch (Exception e) {
+                    err = e.getMessage();
+                } catch (OutOfMemoryError e) {
+                    err = "图片太大，内存不足";
+                }
+                final File f = staged;
+                final String error = err;
+                final String displayName = name;
+                runOnUiThread(new Runnable() {
+                    public void run() {
+                        if (f == null) {
+                            LogUtil.w(TAG, "stageImageForCrop failed: %s", error);
+                            Toast.makeText(MainActivity.this,
+                                    "读取图片失败: " + (error == null ? "未知错误" : error),
+                                    Toast.LENGTH_LONG).show();
+                            return;
+                        }
+                        startCrop(f.getAbsolutePath(), displayName);
+                    }
+                });
+            }
+        }, "aichat-stage-image").start();
+    }
+
+    private void startCrop(String srcPath, String name) {
+        Intent intent = new Intent(this, CropActivity.class);
+        intent.putExtra(CropActivity.EXTRA_SRC_PATH, srcPath);
+        intent.putExtra(CropActivity.EXTRA_NAME, name);
+        try {
+            startActivityForResult(intent, REQUEST_CROP);
+        } catch (Exception e) {
+            LogUtil.w(TAG, "startCrop failed: %s", e.getMessage());
+            Toast.makeText(this, "无法打开裁剪页", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    /** 图片链接：填完直接下载导入，下载与解码都在后台。 */
+    private void showImageUrlDialog() {
+        final EditText input = new EditText(this);
+        input.setHint(R.string.image_url_hint);
+        input.setSingleLine(true);
+        input.setInputType(InputType.TYPE_TEXT_VARIATION_URI);
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.upload_image_url)
+                .setView(input)
+                .setPositiveButton("添加", new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface d, int w) {
+                        String url = input.getText().toString().trim();
+                        if (url.length() == 0) {
+                            Toast.makeText(MainActivity.this, "请填写图片地址",
+                                    Toast.LENGTH_SHORT).show();
+                            return;
+                        }
+                        importImageUrl(url);
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    /**
+     * 下载图片并挂成附件。
+     *
+     * <p>不在主线程做任何事：DNS + TLS + 下载 3 MB 在 3G 上是十几秒，
+     * 放主线程直接 ANR。
+     */
+    private void importImageUrl(final String url) {
+        Toast.makeText(this, "正在下载图片…", Toast.LENGTH_SHORT).show();
+        new Thread(new Runnable() {
+            public void run() {
+                AttachmentText.File file = null;
+                String err = null;
+                try {
+                    file = AttachmentFiles.importUrl(MainActivity.this, url,
+                            AttachmentFiles.MAX_IMAGE_BYTES);
+                } catch (Exception e) {
+                    err = e.getMessage();
+                } catch (OutOfMemoryError e) {
+                    err = "图片太大，内存不足";
+                }
+                final AttachmentText.File loaded = file;
+                final String error = err;
+                runOnUiThread(new Runnable() {
+                    public void run() {
+                        if (loaded == null) {
+                            LogUtil.w(TAG, "importImageUrl failed: %s", error);
+                            Toast.makeText(MainActivity.this,
+                                    "下载图片失败: " + (error == null ? "未知错误" : error),
+                                    Toast.LENGTH_LONG).show();
+                            return;
+                        }
+                        addAttachment(loaded);
+                    }
+                });
+            }
+        }, "aichat-import-url").start();
     }
 
     private void openFullscreenInput() {
@@ -633,12 +808,21 @@ public class MainActivity extends Activity {
      * 放在主线程就是一次必然的掉帧。
      */
     private void importImageFile(final Uri uri) {
+        importImageFile(uri, null);
+    }
+
+    /**
+     * @param preferredName 已知的显示名（裁剪/拍照的结果文件名是时间戳，直接展示很难看）；
+     *                      null 时从 Uri 查
+     */
+    private void importImageFile(final Uri uri, final String preferredName) {
         new Thread(new Runnable() {
             public void run() {
                 AttachmentText.File file = null;
                 String err = null;
                 try {
-                    String name = queryDisplayName(uri);
+                    String name = preferredName != null && preferredName.length() > 0
+                            ? preferredName : queryDisplayName(uri);
                     // 有些 ROM 的选择器不认 type 过滤，把 .txt 也放回来；先按扩展名/MIME 挡一道
                     if (!FileKinds.looksLikeImage(name, getContentResolver().getType(uri))) {
                         throw new Exception("这不是图片文件");
@@ -1206,9 +1390,28 @@ public class MainActivity extends Activity {
             Uri picked = data == null ? null : data.getData();
             if (resultCode == RESULT_OK && picked != null) {
                 LogUtil.i(TAG, "picked image: %s", picked);
-                importImageFile(picked);
+                // 选图先进裁剪页：拍照要裁、截图要裁、相册原图更要裁，
+                // 统一走同一条路，用户不用记「哪种来源能裁」
+                stageImageForCrop(picked);
             } else {
                 LogUtil.d(TAG, "pick image cancelled or empty");
+            }
+        } else if (requestCode == REQUEST_TAKE_PHOTO) {
+            if (resultCode == RESULT_OK && cameraOutputFile != null
+                    && cameraOutputFile.length() > 0) {
+                LogUtil.i(TAG, "photo captured: %d bytes", cameraOutputFile.length());
+                startCrop(cameraOutputFile.getAbsolutePath(), "photo.jpg");
+            } else {
+                LogUtil.d(TAG, "take photo cancelled or empty");
+            }
+        } else if (requestCode == REQUEST_CROP) {
+            String out = data == null ? null : data.getStringExtra(CropActivity.EXTRA_OUT_PATH);
+            String name = data == null ? null : data.getStringExtra(CropActivity.EXTRA_NAME);
+            if (resultCode == RESULT_OK && out != null && out.length() > 0) {
+                LogUtil.i(TAG, "crop result: %s", out);
+                importImageFile(Uri.fromFile(new java.io.File(out)), name);
+            } else {
+                LogUtil.d(TAG, "crop cancelled");
             }
         } else if (requestCode == REQUEST_FULLSCREEN) {
             if (resultCode == RESULT_OK && data != null) {
@@ -1538,6 +1741,9 @@ public class MainActivity extends Activity {
         final String effectiveSystemPrompt =
                 WebSearchTool.appendToSystemPrompt(systemPrompt, webSearchEnabled);
         final boolean streamEnabled = SettingsActivity.isStreamEnabled(this);
+        // 模型是否支持图片输入：只有用户勾过才发 image_url 块，否则图片只写一行说明
+        final ModelInfo visionModel = configManager.getModel(currentModel);
+        final boolean vision = visionModel != null && visionModel.supportsVision;
         // 端点上次拒过 stream_options 就不再发，避免每次对话白吃一个 400
         final boolean includeUsage = streamEnabled && !isUsageUnsupported(provider.name);
         activeProviderName = provider.name;
@@ -1598,6 +1804,8 @@ public class MainActivity extends Activity {
                 .realtimeRender(SettingsActivity.isRealtimeRenderEnabled(this))
                 .webSearchEnabled(webSearchEnabled)
                 .httpToolEnabled(SettingsActivity.isHttpToolEnabled(this))
+                .vision(vision)
+                .appContext(getApplicationContext())
                 .useTavily(useTavily)
                 .searchReady(searchReady)
                 .maxCallsPerRound(SettingsActivity.getWebSearchMaxCallsPerRound(this))
@@ -2369,6 +2577,60 @@ public class MainActivity extends Activity {
                     } catch (Exception e) {
                         LogUtil.w(TAG, "showErrorDetail failed: %s", e.getMessage());
                     }
+                }
+            });
+        }
+
+        /**
+         * 图片搜索结果点开：下载 → 采样 → data URI → 交给图片查看器。
+         *
+         * <p>不把远端 URL 直接喂给 WebView：查看器用的是 {@code loadDataWithBaseURL(null,…)}，
+         * 页面 origin 是 null，加载外链图片会被当跨源资源拦掉，表现为「点开一片空白」。
+         */
+        @JavascriptInterface
+        public void openRemoteImage(final String url, final String title) {
+            if (url == null || url.length() == 0) return;
+            LogUtil.d(TAG, "JsBridge.openRemoteImage: %s", LogUtil.preview(url, 120));
+            handler.post(new Runnable() {
+                public void run() {
+                    Toast.makeText(MainActivity.this, "正在加载图片…", Toast.LENGTH_SHORT).show();
+                    new Thread(new Runnable() {
+                        public void run() {
+                            String src = null;
+                            String err = null;
+                            try {
+                                src = AttachmentFiles.remoteToDataUri(url, 1600);
+                            } catch (Exception e) {
+                                err = e.getMessage();
+                            } catch (OutOfMemoryError e) {
+                                err = "图片太大，内存不足";
+                            }
+                            final String data = src;
+                            final String error = err;
+                            runOnUiThread(new Runnable() {
+                                public void run() {
+                                    if (viewer == null) return;
+                                    if (data == null) {
+                                        Toast.makeText(MainActivity.this,
+                                                "加载图片失败: " + (error == null ? "未知错误" : error),
+                                                Toast.LENGTH_LONG).show();
+                                        return;
+                                    }
+                                    try {
+                                        JSONArray arr = new JSONArray();
+                                        JSONObject o = new JSONObject();
+                                        o.put("src", data);
+                                        o.put("alt", title == null ? "" : title);
+                                        o.put("type", "raster");
+                                        arr.put(o);
+                                        viewer.showImage(0, arr.toString());
+                                    } catch (Exception e) {
+                                        LogUtil.w(TAG, "openRemoteImage render failed: %s", e.getMessage());
+                                    }
+                                }
+                            });
+                        }
+                    }, "aichat-open-remote").start();
                 }
             });
         }

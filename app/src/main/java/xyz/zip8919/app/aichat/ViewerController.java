@@ -706,7 +706,7 @@ final class ViewerController {
         Button reset = (Button) view.findViewById(R.id.viewer_reset);
         Button close = (Button) view.findViewById(R.id.viewer_close);
 
-        final boolean canPreview = FileKinds.isPreviewable(docLang);
+        final boolean canPreview = FileKinds.isPreviewable(docName, docLang);
         final boolean canRun = FileKinds.isRunnable(docLang);
         if (canPreview || canRun) {
             docPreviewBtn.setText(canRun ? "运行" : "预览");
@@ -798,6 +798,8 @@ final class ViewerController {
         String html;
         if (docSourceMode) {
             html = buildSourceHtml(docLang, docCode, rotateCss);
+        } else if (FileKinds.isMarkdown(docName)) {
+            html = buildMarkdownHtml(rotateCss);
         } else {
             String trimmed = docCode.trim().toLowerCase();
             boolean isFullDoc = "html".equals(docLang)
@@ -812,6 +814,24 @@ final class ViewerController {
     private String buildSourceHtml(String lang, String code, String rotateCss) {
         String html = SourcePage.build(lang, code, rotateCss, TOOLBAR_INSET_PX);
         LogUtil.d(TAG, "buildSourceHtml: lang=%s chars=%d -> %d", lang, code.length(), html.length());
+        return html;
+    }
+
+    /**
+     * Markdown 预览：先截断再渲染。
+     *
+     * <p>顺序不能反。{@code MarkdownPipeline} 里有代码保护、公式、脚注、上下标
+     * 五六道正则，十万字符跑下来在 API 18 上要好几秒，主线程直接 ANR。
+     */
+    private String buildMarkdownHtml(String rotateCss) {
+        String md = docCode == null ? "" : docCode;
+        String shown = md.length() > MarkdownPage.MAX_CHARS
+                ? md.substring(0, MarkdownPage.MAX_CHARS) : md;
+        long t0 = System.currentTimeMillis();
+        String body = MarkdownPipeline.render(shown, activity);
+        String html = MarkdownPage.build(body, md.length(), rotateCss, TOOLBAR_INSET_PX);
+        LogUtil.d(TAG, "buildMarkdownHtml: chars=%d -> %d in %dms",
+                shown.length(), html.length(), System.currentTimeMillis() - t0);
         return html;
     }
 

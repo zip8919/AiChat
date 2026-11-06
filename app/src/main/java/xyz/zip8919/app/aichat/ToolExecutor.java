@@ -38,6 +38,20 @@ final class ToolExecutor {
         /** 不具备执行能力时写回给模型的错误 JSON。 */
         String unavailableResult();
 
+        /**
+         * 当前模型是否支持多模态输入。开启后，图片搜索的结果会以
+         * {@code image_url} 块追加到请求里，模型能真正看到图像。
+         */
+        boolean visionEnabled();
+
+        /**
+         * 把远端图片下载并编码成 data URI；失败返回 null。
+         *
+         * <p>用 data URI 而不是把链接直接塞给端点：国内模型访问不了境外图床，
+         * 结果是「图没传上去、模型还说看不到」，比直接失败更难排查。
+         */
+        String imageDataUri(String url);
+
         /** 首次遇到「不具备执行能力」时提示用户，实现方自行去重。 */
         void onUnavailable();
 
@@ -72,6 +86,9 @@ final class ToolExecutor {
     private ToolExecutor() {
     }
 
+    /** 单轮最多注入几张图片到请求体。 */
+    static final int MAX_INJECTED_IMAGES = 2;
+
     /**
      * 执行一批工具调用。
      *
@@ -87,6 +104,7 @@ final class ToolExecutor {
             String question, Host host) throws Exception {
         int executed = 0;
         int skipped = 0;
+        boolean visionInjected = false;
         int total = calls == null ? 0 : calls.length();
         for (int i = 0; i < total; i++) {
             // 打断后立刻停手：原来只在每轮末尾检查 isAlive，用户点了停止仍会把
@@ -142,6 +160,11 @@ final class ToolExecutor {
 
             WebSearchTool.extractSources(result, sources);
             ToolCalls.appendResult(conversation, toolHistory, id, result);
+            // 视觉注入只能在 tool 结果之后：顺序反了模型会先看到图、后看到「搜到了什么」，
+            // 多数端点还会因为 tool 与 assistant 不连续直接 400。
+            if (!visionInjected && host.visionEnabled()) {
+                visionInjected = injectImages(conversation, result, host);
+            }
             // 所有工具都打卡片：时间工具此前被跳过，界面上完全看不到
             trace.append(WebSearchTool.buildTraceBlock(name, args, result));
             if (TraceKit.cap(trace)) host.onTraceTrimmed();
@@ -152,6 +175,71 @@ final class ToolExecutor {
             }
         }
         return new Outcome(executed, skipped, false);
+    }
+
+    /**
+     * 把图片搜索结果装成一条多模态 user 消息，接在 tool 结果之后。
+     *
+     * <p>三个刻意的限制：
+     * <ul>
+     *   <li>最多 {@value #MAX_INJECTED_IMAGES} 张——每张 768px 的 JPEG 转 Base64 约
+     *       100 KB，再多会让请求体膨胀到移动网络难以承受；</li>
+     *   <li>整轮只注入一次——模型有时会连搜三次，第二次再塞两张就是六张图；</li>
+     *   <li>一张都下不下来就不注入，退回纯文本（模型至少还有链接与描述可用）。</li>
+     * </ul>
+     */
+    private static boolean injectImages(JSONArray conversation, String result, Host host) {
+        if (conversation == null || result == null || result.length() < 2) return false;
+        JSONArray images;
+        try {
+            JSONObject json = new JSONObject(result);
+            images = json.optJSONArray("images");
+        } catch (Exception e) {
+            return false;
+        }
+        if (images == null || images.length() == 0) return false;
+
+        JSONArray parts = new JSONArray();
+        try {
+            JSONObject text = new JSONObject();
+            text.put("type", "text");
+            text.put("text", "以下是刚才图片搜索得到的图片，请结合图像内容回答用户的问题。"
+                    + "如果图片与问题无关，请忽略并在回答中说明。");
+            parts.put(text);
+
+            int added = 0;
+            for (int i = 0; i < images.length() && added < MAX_INJECTED_IMAGES; i++) {
+                JSONObject item = images.optJSONObject(i);
+                if (item == null) continue;
+                String url = item.optString("image_url", "");
+                if (url.length() == 0) continue;
+                if (!host.isAlive()) break;
+                String uri = host.imageDataUri(url);
+                if (uri == null || uri.length() == 0) {
+                    LogUtil.w("ToolExecutor", "vision: image fetch failed, skipped: %s",
+                            LogUtil.preview(url, 120));
+                    continue;
+                }
+                JSONObject img = new JSONObject();
+                img.put("type", "image_url");
+                JSONObject u = new JSONObject();
+                u.put("url", uri);
+                img.put("image_url", u);
+                parts.put(img);
+                added++;
+            }
+
+            if (added == 0) return false;
+            JSONObject msg = new JSONObject();
+            msg.put("role", "user");
+            msg.put("content", parts);
+            conversation.put(msg);
+            LogUtil.i("ToolExecutor", "vision: injected %d image(s)", added);
+            return true;
+        } catch (Exception e) {
+            LogUtil.w("ToolExecutor", "injectImages failed: %s", e.getMessage());
+            return false;
+        }
     }
 
     /** 参数解析失败时按空对象处理：模型偶尔会截断 arguments，不能因此让整轮失败。 */

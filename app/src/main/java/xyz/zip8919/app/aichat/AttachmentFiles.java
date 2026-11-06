@@ -3,6 +3,8 @@ package xyz.zip8919.app.aichat;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
+import android.graphics.Color;
 import android.net.Uri;
 import android.util.Base64;
 
@@ -10,8 +12,12 @@ import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.security.MessageDigest;
 import java.util.Locale;
+
+import javax.net.ssl.HttpsURLConnection;
 
 /**
  * 图片附件与「查看文件」用到的文件级工具：落盘、缩略图、查看用的 data URI、语言识别。
@@ -39,6 +45,18 @@ final class AttachmentFiles {
     /** 查看器里的最长边。1600px 在手机屏上已经能看清细节，再多只是烧内存。 */
     private static final int VIEW_PX = 1600;
 
+    /**
+     * 发给模型时的最长边。
+     *
+     * <p>不是「越大越准」：1024px 已经覆盖 768 的短边上限，再大也只会被端点缩回去，
+     * 白白让请求体多出几百 KB。1024 的 JPEG 约 120 KB，Base64 后 160 KB，
+     * 三张图也还在可接受的范围内。
+     */
+    static final int API_PX = 1024;
+
+    /** 单张网络图片的下载上限：和本地导入一致，防止一个链接把内存打爆。 */
+    static final int MAX_REMOTE_BYTES = MAX_IMAGE_BYTES;
+
     private AttachmentFiles() {
     }
 
@@ -55,7 +73,16 @@ final class AttachmentFiles {
             throws Exception {
         InputStream in = ctx.getContentResolver().openInputStream(uri);
         if (in == null) throw new Exception("无法打开图片");
+        return importStream(ctx, in, displayName, maxBytes);
+    }
 
+    /**
+     * 从任意输入流导入图片（URL 下载与本地选择共用）。
+     *
+     * <p>调用方负责关闭外层连接；这里只保证 {@code in} 被关闭。
+     */
+    static AttachmentText.File importStream(Context ctx, InputStream in, String displayName,
+            int maxBytes) throws Exception {
         File dir = new File(ctx.getFilesDir(), "attachments");
         if (!dir.exists() && !dir.mkdirs()) throw new Exception("无法创建附件目录");
         sweepTempFiles(dir);
@@ -120,6 +147,146 @@ final class AttachmentFiles {
                 displayName, total, w, h, thumb.length());
         return AttachmentText.File.image(displayName, target.getAbsolutePath(),
                 total, w, h, thumb);
+    }
+
+    /**
+     * 把内容 Uri 拷到 cacheDir，供裁剪页读取。
+     *
+     * <p>必须拷一次：{@code ACTION_GET_CONTENT} 在 API 18 上把读权限授给
+     * 「拿到结果的那个 Activity」，不是整个进程。裁剪页是另一个 Activity，
+     * 直接读原 Uri 会抛 SecurityException，而且这个异常在部分 ROM 上表现为
+     * 打开裁剪页就闪退，很难从堆栈看出根因。
+     */
+    static File stageToCache(Context ctx, Uri uri, int maxBytes) throws Exception {
+        InputStream in = ctx.getContentResolver().openInputStream(uri);
+        if (in == null) throw new Exception("无法打开图片");
+        File dir = new File(ctx.getCacheDir(), "camera");
+        if (!dir.exists() && !dir.mkdirs()) throw new Exception("无法创建缓存目录");
+        File out = new File(dir, "pick-" + System.currentTimeMillis() + ".bin");
+        try {
+            FileOutputStream fos = new FileOutputStream(out);
+            try {
+                byte[] buf = new byte[8192];
+                int n;
+                long total = 0;
+                while ((n = in.read(buf)) > 0) {
+                    total += n;
+                    if (total > maxBytes) {
+                        throw new Exception("图片超过 "
+                                + AttachmentText.formatBytes(maxBytes));
+                    }
+                    fos.write(buf, 0, n);
+                }
+                fos.flush();
+            } finally {
+                try { fos.close(); } catch (Exception ignored) { }
+            }
+            if (out.length() == 0) throw new Exception("图片是空文件");
+            return out;
+        } catch (Exception e) {
+            // 半截文件留在 cache 里只会占地方，下次也读不出图
+            if (out.exists()) out.delete();
+            throw e;
+        } finally {
+            try { in.close(); } catch (Exception ignored) { }
+        }
+    }
+
+    /**
+     * 从图片链接导入。
+     *
+     * <p>两道校验：私网地址（未开内网访问时拒绝）与 Content-Type。后者不能省——
+     * 很多图床对不存在的图片返回 200 + 一张 404 占位图，用户拿到的是张「Not Found」
+     * 的图还以为附上了；而 Content-Type 至少能挡住「链接指向网页」这种。
+     */
+    static AttachmentText.File importUrl(Context ctx, String urlStr, int maxBytes)
+            throws Exception {
+        URL url = new URL(urlStr == null ? "" : urlStr.trim());
+        String protocol = url.getProtocol();
+        if (!"http".equalsIgnoreCase(protocol) && !"https".equalsIgnoreCase(protocol)) {
+            throw new Exception("只支持 http/https 链接");
+        }
+        HttpURLConnection conn = openFollowingRedirects(url);
+        try {
+            int code = conn.getResponseCode();
+            if (code != 200) throw new Exception("HTTP " + code);
+            String type = conn.getContentType();
+            String name = nameFromUrl(url, type);
+            if (!FileKinds.looksLikeImage(name, type)) {
+                throw new Exception(type == null
+                        ? "这个链接不是图片" : "这个链接不是图片（" + type + "）");
+            }
+            InputStream in = conn.getInputStream();
+            if (in == null) throw new Exception("无法读取图片");
+            return importStream(ctx, in, name, maxBytes);
+        } finally {
+            try { conn.disconnect(); } catch (Exception ignored) { }
+        }
+    }
+
+    /**
+     * 手动跟随重定向，顺便把每一跳都过一遍私网校验。
+     *
+     * <p>不能开 {@code setInstanceFollowRedirects(true)}：那样跳转目标是黑盒，
+     * 一个公网地址 302 到 {@code 10.0.0.1} 就能绕开内网限制，把图片导入变成
+     * 内网探测工具。
+     */
+    private static HttpURLConnection openFollowingRedirects(URL url) throws Exception {
+        URL current = url;
+        for (int hop = 0; hop < 4; hop++) {
+            if (!NetSecurity.allowPrivateHost()) HttpRequestTool.assertPublicHost(current);
+            HttpURLConnection conn = (HttpURLConnection) current.openConnection();
+            conn.setConnectTimeout(15000);
+            conn.setReadTimeout(30000);
+            conn.setInstanceFollowRedirects(false);
+            // 不带 UA 的请求会被不少图床直接 403
+            conn.setRequestProperty("User-Agent",
+                    "Mozilla/5.0 (Linux; Android 4.3) AiChat");
+            conn.setRequestProperty("Accept", "image/*,*/*;q=0.8");
+            if (conn instanceof HttpsURLConnection) {
+                TlsCompat.apply((HttpsURLConnection) conn);
+            }
+            int code = conn.getResponseCode();
+            if (code == 301 || code == 302 || code == 303 || code == 307 || code == 308) {
+                String location = conn.getHeaderField("Location");
+                try { conn.disconnect(); } catch (Exception ignored) { }
+                if (location == null || location.length() == 0) {
+                    throw new Exception("重定向缺少目标地址");
+                }
+                current = new URL(current, location);
+                continue;
+            }
+            return conn;
+        }
+        throw new Exception("重定向次数过多");
+    }
+
+    /** 从 URL 的路径段取文件名；没有扩展名时按 Content-Type 补一个。 */
+    private static String nameFromUrl(URL url, String contentType) {
+        String path = url.getPath();
+        String name = "";
+        if (path != null) {
+            int slash = path.lastIndexOf('/');
+            name = slash >= 0 ? path.substring(slash + 1) : path;
+        }
+        try {
+            name = java.net.URLDecoder.decode(name, "UTF-8");
+        } catch (Exception ignored) {
+            // 编码坏了就用原样，文件名只是显示用
+        }
+        if (name.length() == 0 || name.lastIndexOf('.') < 0) {
+            name = (name.length() == 0 ? "image" : name) + extForMime(contentType);
+        }
+        return name;
+    }
+
+    private static String extForMime(String contentType) {
+        String ct = contentType == null ? "" : contentType.toLowerCase(Locale.US);
+        if (ct.startsWith("image/png")) return ".png";
+        if (ct.startsWith("image/gif")) return ".gif";
+        if (ct.startsWith("image/webp")) return ".webp";
+        if (ct.startsWith("image/bmp")) return ".bmp";
+        return ".jpg";
     }
 
     /**
@@ -218,6 +385,140 @@ final class AttachmentFiles {
             return null;
         } finally {
             if (bmp != null) bmp.recycle();
+        }
+    }
+
+    /**
+     * 多模态请求体用的 data URI：压到 {@link #API_PX}、JPEG 82。
+     *
+     * <p>比查看器那份更小更省：这是发给模型的，1024px 已经覆盖视觉模型的
+     * 768 短边上限，再大纯属浪费流量。
+     */
+    static String apiDataUri(String path) {
+        return encodeToDataUri(path, API_PX, 82);
+    }
+
+    /**
+     * 远程图片 → data URI（图片搜索卡片查看、视觉注入）。
+     *
+     * <p>刻意不落盘：搜索结果图是「看一眼就走」的，落盘就得配一套回收逻辑，
+     * 而会话删除时还得判断哪张图还有引用。内存里转一次就扔最省事。
+     */
+    static String remoteToDataUri(String urlStr, int maxSide) throws Exception {
+        byte[] data = downloadBytes(urlStr);
+        Bitmap bmp = null;
+        try {
+            BitmapFactory.Options bounds = new BitmapFactory.Options();
+            bounds.inJustDecodeBounds = true;
+            BitmapFactory.decodeByteArray(data, 0, data.length, bounds);
+            int w = bounds.outWidth;
+            int h = bounds.outHeight;
+            if (w <= 0 || h <= 0) throw new Exception("这个链接不是可识别的图片");
+
+            BitmapFactory.Options o = new BitmapFactory.Options();
+            o.inSampleSize = sampleSize(w, h, maxSide);
+            bmp = BitmapFactory.decodeByteArray(data, 0, data.length, o);
+            if (bmp == null) throw new Exception("图片解码失败");
+            String uri = compressToDataUri(bmp, maxSide, 82);
+            if (uri == null) throw new Exception("图片编码失败");
+            return uri;
+        } finally {
+            if (bmp != null) bmp.recycle();
+        }
+    }
+
+    /** 本地文件 → data URI；任何一步失败返回 null（调用方退回纯文本）。 */
+    static String encodeToDataUri(String path, int maxSide, int quality) {
+        if (path == null || path.length() == 0) return null;
+        File f = new File(path);
+        if (!f.isFile() || f.length() <= 0) return null;
+        Bitmap bmp = null;
+        try {
+            BitmapFactory.Options bounds = new BitmapFactory.Options();
+            bounds.inJustDecodeBounds = true;
+            BitmapFactory.decodeFile(path, bounds);
+            int w = bounds.outWidth;
+            int h = bounds.outHeight;
+            if (w <= 0 || h <= 0) return null;
+
+            BitmapFactory.Options o = new BitmapFactory.Options();
+            o.inSampleSize = sampleSize(w, h, maxSide);
+            bmp = BitmapFactory.decodeFile(path, o);
+            if (bmp == null) return null;
+            return compressToDataUri(bmp, maxSide, quality);
+        } catch (Throwable t) {
+            LogUtil.w(TAG, "encodeToDataUri failed: %s", t.getMessage());
+            return null;
+        } finally {
+            if (bmp != null) bmp.recycle();
+        }
+    }
+
+    /** 缩放 → 铺白底 → JPEG → Base64。不回收 {@code src}，由调用方负责。 */
+    private static String compressToDataUri(Bitmap src, int maxSide, int quality) {
+        Bitmap scaled = null;
+        Bitmap flat = null;
+        try {
+            scaled = scaleTo(src, maxSide);
+            // 透明图直接压 JPEG 会把透明区变黑，模型看到的就是一块黑斑
+            flat = scaled.hasAlpha() ? flattenOnWhite(scaled) : scaled;
+            ByteArrayOutputStream bos = new ByteArrayOutputStream();
+            flat.compress(Bitmap.CompressFormat.JPEG, quality, bos);
+            return "data:image/jpeg;base64,"
+                    + Base64.encodeToString(bos.toByteArray(), Base64.NO_WRAP);
+        } catch (Throwable t) {
+            LogUtil.w(TAG, "compressToDataUri failed: %s", t.getMessage());
+            return null;
+        } finally {
+            if (flat != null && flat != scaled) flat.recycle();
+            if (scaled != null && scaled != src) scaled.recycle();
+        }
+    }
+
+    private static Bitmap flattenOnWhite(Bitmap src) {
+        Bitmap out = Bitmap.createBitmap(src.getWidth(), src.getHeight(), Bitmap.Config.ARGB_8888);
+        Canvas c = new Canvas(out);
+        c.drawColor(Color.WHITE);
+        c.drawBitmap(src, 0, 0, null);
+        return out;
+    }
+
+    /** 下载整张图到内存；大小与 Content-Type 都按导入规则卡死。 */
+    private static byte[] downloadBytes(String urlStr) throws Exception {
+        URL url = new URL(urlStr == null ? "" : urlStr.trim());
+        String protocol = url.getProtocol();
+        if (!"http".equalsIgnoreCase(protocol) && !"https".equalsIgnoreCase(protocol)) {
+            throw new Exception("只支持 http/https 链接");
+        }
+        HttpURLConnection conn = openFollowingRedirects(url);
+        try {
+            int code = conn.getResponseCode();
+            if (code != 200) throw new Exception("HTTP " + code);
+            String type = conn.getContentType();
+            if (type != null && !type.toLowerCase(Locale.US).startsWith("image/")) {
+                throw new Exception("链接不是图片（" + type + "）");
+            }
+            InputStream in = conn.getInputStream();
+            if (in == null) throw new Exception("无法读取图片");
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            try {
+                byte[] buf = new byte[8192];
+                int n;
+                long total = 0;
+                while ((n = in.read(buf)) > 0) {
+                    total += n;
+                    if (total > MAX_REMOTE_BYTES) {
+                        throw new Exception("图片超过 "
+                                + AttachmentText.formatBytes(MAX_REMOTE_BYTES));
+                    }
+                    out.write(buf, 0, n);
+                }
+            } finally {
+                try { in.close(); } catch (Exception ignored) { }
+            }
+            return out.toByteArray();
+        } finally {
+            try { conn.disconnect(); } catch (Exception ignored) { }
         }
     }
 

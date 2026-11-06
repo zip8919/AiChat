@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="#FF111111">
+
+    <RelativeLayout
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:background="#FF1C1C1C">
+
+        <Button
+            android:id="@+id/crop_cancel"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:layout_alignParentLeft="true"
+            android:background="#00000000"
+            android:text="@string/cancel"
+            android:textColor="#FFDDDDDD"
+            android:textSize="15sp"/>
+
+        <TextView
+            android:id="@+id/crop_head"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_centerInParent="true"
+            android:text="@string/crop_title"
+            android:textColor="#FFFFFFFF"
+            android:textSize="16sp"/>
+
+        <Button
+            android:id="@+id/crop_done"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:layout_alignParentRight="true"
+            android:background="#00000000"
+            android:text="@string/done"
+            android:textColor="#FF64B5F6"
+            android:textSize="15sp"/>
+
+    </RelativeLayout>
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+        <xyz.zip8919.app.aichat.CropView
+            android:id="@+id/crop_view"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"/>
+
+    </FrameLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:padding="10dp"
+        android:background="#FF1C1C1C">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="拖动选框移动，拖四角改大小"
+            android:textColor="#FF9E9E9E"
+            android:textSize="12sp"/>
+
+        <Button
+            android:id="@+id/crop_original"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="#00000000"
+            android:text="@string/crop_use_original"
+            android:textColor="#FF64B5F6"
+            android:textSize="13sp"/>
+
+    </LinearLayout>
+
+</LinearLayout>

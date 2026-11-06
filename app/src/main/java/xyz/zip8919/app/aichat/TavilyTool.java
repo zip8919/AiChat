@@ -159,6 +159,79 @@ public class TavilyTool {
         }
     }
 
+    /**
+     * 图片搜索。
+     *
+     * <p>只有 Tavily 能做：DeepSeek 的 {@code /v1/tools/search} 不返回图片字段，
+     * 硬拼也拼不出来，所以没配 Tavily 时如实报错。
+     *
+     * <p>{@code include_image_descriptions} 开与不开的返回结构不同（字符串数组 vs
+     * 对象数组），两种都要认——Tavily 在不同版本里都出现过。
+     */
+    public static String imageSearch(String query, int count, String apiKey,
+            WebSearchTool.RequestGuard guard) {
+        try {
+            if (!hasApiKey(apiKey)) {
+                return error("未配置 Tavily API Key，无法搜索图片。");
+            }
+            JSONObject body = new JSONObject();
+            body.put("query", query);
+            // 只要图片，正文用不上；max_results 给大一点，图片常混在结果里
+            body.put("max_results", Math.max(3, Math.min(10, count)));
+            body.put("search_depth", "basic");
+            body.put("include_images", true);
+            body.put("include_image_descriptions", true);
+
+            LogUtil.i(TAG, "imageSearch -> query=%s count=%d", LogUtil.preview(query, 120), count);
+            PostResult post = postJson("/search", body, SEARCH_TIMEOUT_MS, guard, apiKey);
+            if (post.code != 200) {
+                LogUtil.w(TAG, "imageSearch failed: code=%d error=%s", post.code, post.error);
+                return error("图片搜索失败: " + friendly(post.code, post.error));
+            }
+
+            JSONObject json = new JSONObject(post.body);
+            JSONArray images = json.optJSONArray("images");
+            JSONArray out = new JSONArray();
+            java.util.HashSet<String> seen = new java.util.HashSet<String>();
+            if (images != null) {
+                for (int i = 0; i < images.length() && out.length() < count; i++) {
+                    Object raw = images.opt(i);
+                    String url = "";
+                    String desc = "";
+                    if (raw instanceof String) {
+                        url = (String) raw;
+                    } else if (raw instanceof JSONObject) {
+                        JSONObject o = (JSONObject) raw;
+                        url = o.optString("url", "");
+                        desc = o.optString("description", "");
+                    }
+                    url = url == null ? "" : url.trim();
+                    // 只收 http(s)：data:/file: 之类的地址模型和 WebView 都用不了
+                    if (url.length() == 0 || seen.contains(url)) continue;
+                    if (!url.startsWith("http://") && !url.startsWith("https://")) continue;
+                    seen.add(url);
+                    JSONObject row = new JSONObject();
+                    row.put("image_url", url);
+                    if (desc.length() > 0) row.put("title", truncate(desc, 120));
+                    out.put(row);
+                }
+            }
+
+            JSONObject result = new JSONObject();
+            result.put("query", query);
+            result.put("images", out);
+            result.put("count", out.length());
+            if (out.length() == 0) {
+                result.put("note", "没有找到可用的图片。可以改用 web_search 查文字资料。");
+            }
+            LogUtil.i(TAG, "imageSearch <- %d images", out.length());
+            return result.toString();
+        } catch (Exception e) {
+            LogUtil.e(TAG, "imageSearch failed: " + e.getMessage(), e);
+            return error("图片搜索失败: " + messageOf(e));
+        }
+    }
+
     private static PostResult postJson(String path, JSONObject body, int readTimeout,
             WebSearchTool.RequestGuard guard, String apiKey) {
         PostResult result = new PostResult();

@@ -41,9 +41,27 @@ final class FileKinds {
         return "";
     }
 
-    /** 文件查看器是否支持「预览」：只有能自己渲染的两种。 */
+    /** 文件查看器是否支持「预览」：能自己渲染的几种。 */
     static boolean isPreviewable(String lang) {
         return "html".equals(lang) || "svg".equals(lang);
+    }
+
+    /**
+     * 带文件名的预览判定。
+     *
+     * <p>Markdown 走这里而不是靠 {@link #languageOf}：{@code .md} 不高亮（没有可用的
+     * 高亮规则，硬上一套正则只会把正文涂成花脸），但能渲染成文档，所以两者的
+     * 判据必须分开。
+     */
+    static boolean isPreviewable(String name, String lang) {
+        return isPreviewable(lang) || isMarkdown(name);
+    }
+
+    /** {@code .md} / {@code .markdown} / {@code .mdown} / {@code .mkd}。 */
+    static boolean isMarkdown(String name) {
+        String ext = extension(name);
+        return ext.equals("md") || ext.equals("markdown")
+                || ext.equals("mdown") || ext.equals("mkd");
     }
 
     /** 文件查看器是否支持「运行」。 */

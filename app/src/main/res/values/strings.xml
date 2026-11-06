@@ -32,5 +32,10 @@
     <string name="fullscreen_input">全屏输入</string>
     <string name="stop_generating">停止生成</string>
     <string name="upload_text_file">添加文本文件</string>
-    <string name="upload_image">添加图片</string>
+    <string name="upload_image">从相册选择</string>
+    <string name="take_photo">拍照</string>
+    <string name="upload_image_url">从图片链接添加</string>
+    <string name="image_url_hint">http(s)://…/photo.jpg</string>
+    <string name="crop_title">裁剪图片</string>
+    <string name="crop_use_original">使用原图</string>
 </resources>

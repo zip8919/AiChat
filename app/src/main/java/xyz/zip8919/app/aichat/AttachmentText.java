@@ -60,6 +60,9 @@ final class AttachmentText {
          */
         private int tokensCache = -1;
 
+        /** 图片 token 缓存。-1 表示还没算过；与文本缓存分开，两者口径完全不同。 */
+        private int imageTokensCache = -1;
+
         File(String name, String content) {
             this(name, content, 0L);
         }
@@ -108,6 +111,21 @@ final class AttachmentText {
             }
             return sb.toString();
         }
+
+        /**
+         * 图片按 OpenAI 视觉计费口径估算的 token。
+         *
+         * <p>这里不看「是否开着多模态」：卡片上显示的是「这张图一旦发出去要花多少」，
+         * 用户据此决定要不要开视觉开关、要不要先裁小。真正发给模型的尺寸可能更小
+         * （{@link AttachmentFiles#API_PX}），那是为了控制请求体，显示值取原图口径，
+         * 两处差一点比「显示一个偏小的数字、账单比预期高」好。
+         */
+        int imageTokens() {
+            if (imageTokensCache < 0) {
+                imageTokensCache = ImageTokens.estimate(width, height);
+            }
+            return imageTokensCache;
+        }
     }
 
     /**
@@ -115,6 +133,15 @@ final class AttachmentText {
      * 没写字只丢了文件时补一句「请阅读以下附件」，否则请求体里会出现空的 user 内容。
      */
     static String toApi(String userText, List<File> files) {
+        return toApi(userText, files, false);
+    }
+
+    /**
+     * @param vision 是否把图片以 {@code image_url} 块一起发出。true 时文字部分不再说
+     *               「未包含图像内容」——那句话在视觉模式下是假的，会让模型以为
+     *               自己没看到图而拒绝回答
+     */
+    static String toApi(String userText, List<File> files, boolean vision) {
         String base = userText == null ? "" : userText;
         if (files == null || files.isEmpty()) return base;
         StringBuilder sb = new StringBuilder(base);
@@ -122,13 +149,15 @@ final class AttachmentText {
         for (int i = 0; i < files.size(); i++) {
             File f = files.get(i);
             if (f.isImage()) {
-                // 只写「有这么一张图」，不写像素：content 是纯文本协议，
-                // Base64 塞进去会被当正文计费，多数端点还会直接 400。
-                // 与其让模型对着乱码猜，不如明确告诉它这一轮看不到图。
+                // 图片正文不拼进文字：视觉模式下像素走 image_url 块，这里只留一行
+                // 「有这么一张图」；非视觉模式下明确告诉模型这一轮看不到图，
+                // 免得它对着文件名编内容。
                 sb.append("\n\n[图片附件] ").append(f.name);
                 String meta = f.imageSize();
                 if (meta.length() > 0) sb.append("（").append(meta).append("）");
-                sb.append("\n（本次为纯文本请求，未包含图像内容）");
+                sb.append(vision
+                        ? "\n（图像内容随本条消息一并提供）"
+                        : "\n（本次为纯文本请求，未包含图像内容）");
                 continue;
             }
             sb.append("\n\n<附件 name=\"").append(f.name).append("\">\n")
@@ -146,9 +175,13 @@ final class AttachmentText {
      * 继续按老路取，读到就迁移（见 {@link #migrateLegacy}）。
      */
     static String apiTextOf(Message m) {
+        return apiTextOf(m, false);
+    }
+
+    static String apiTextOf(Message m, boolean vision) {
         if (m == null) return "";
         if (m.attachments != null && !m.attachments.isEmpty()) {
-            return toApi(m.content, m.attachments);
+            return toApi(m.content, m.attachments, vision);
         }
         if (m.apiText != null && m.apiText.trim().length() > 0) return m.apiText;
         return m.content == null ? "" : m.content;
@@ -161,23 +194,41 @@ final class AttachmentText {
      * 而 {@link File#tokens()} 有缓存，整页重渲染不会重复遍历正文。
      */
     static int tokensOf(Message m) {
+        return tokensOf(m, false);
+    }
+
+    static int tokensOf(Message m, boolean vision) {
         if (m == null) return 0;
         int t = MessageHtmlRenderer.estimateTokens(m.content);
         if (m.attachments != null) {
             for (int i = 0; i < m.attachments.size(); i++) {
                 File f = m.attachments.get(i);
-                // 图片只发一行说明，按 24 个 token 估；文本按标签 16 个 token 补
-                t += f.isImage() ? 24 : f.tokens() + 16;
+                if (f.isImage()) {
+                    // 视觉模式：图片真的发过去了，按视觉口径计；否则只有一行说明，按 24 估
+                    t += vision ? f.imageTokens() : 24;
+                } else {
+                    t += f.tokens() + 16;   // 标签本身也进请求体，按经验值 16 个 token 计
+                }
             }
         }
         return t;
     }
 
-    /** 附件条第二行：{@code 12.3 KB · ~3.2k tokens}；图片是 {@code 1.2 MB · 1200×800 · 仅本机}。 */
+    /**
+     * 附件条第二行。
+     *
+     * <p>文本：{@code 12.3 KB · ~3.2k tokens}；
+     * 图片：{@code 1.2 MB · 1200×800 · ~255 tokens}——图片的 token 按视觉计费口径算，
+     * 用户能一眼看出「这张图相当于多少字」，而不是以为贴图不要钱。
+     */
     static String sizeAndTokens(File f) {
         if (f.isImage()) {
+            StringBuilder sb = new StringBuilder();
             String s = f.imageSize();
-            return s.length() == 0 ? "图片 · 仅本机" : s + " · 仅本机";
+            if (s.length() > 0) sb.append(s).append(" · ");
+            sb.append('~').append(MessageHtmlRenderer.formatTokens(f.imageTokens()))
+              .append(" tokens");
+            return sb.toString();
         }
         StringBuilder sb = new StringBuilder();
         if (f.bytes > 0) {

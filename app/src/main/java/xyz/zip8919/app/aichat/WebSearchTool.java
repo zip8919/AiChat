@@ -24,6 +24,8 @@ public class WebSearchTool {
 
     public static final String TOOL_SEARCH = "web_search";
     public static final String TOOL_FETCH = "web_fetch";
+    /** 图片搜索：只走 Tavily；返回图片直链，视觉模型可直接看到图像内容。 */
+    public static final String TOOL_IMAGE = "image_search";
     /** 本地工具：读取设备当前日期时间，不走网络、不需要任何 Key。 */
     public static final String TOOL_TIME = "get_current_time";
 
@@ -109,6 +111,34 @@ public class WebSearchTool {
             fetchFn.put("parameters", fetchParams);
             fetch.put("function", fetchFn);
             tools.put(fetch);
+
+            JSONObject image = new JSONObject();
+            image.put("type", "function");
+            JSONObject imageFn = new JSONObject();
+            imageFn.put("name", TOOL_IMAGE);
+            imageFn.put("description",
+                    "联网搜索图片，返回图片直链与描述。适合需要展示人物、地点、物体、产品外观、"
+                            + "图表、海报等视觉内容的场景。当前模型若支持图片输入，图片会直接随结果提供，"
+                            + "你可以看到图像内容并据此回答；不支持时只能拿到链接与描述，"
+                            + "请在回答里说明无法直接查看图片，不要臆测画面细节。");
+            JSONObject imageParams = new JSONObject();
+            imageParams.put("type", "object");
+            JSONObject imageProps = new JSONObject();
+            JSONObject imageQuery = new JSONObject();
+            imageQuery.put("type", "string");
+            imageQuery.put("description", "图片搜索关键词，1-128 个字符");
+            imageProps.put("query", imageQuery);
+            JSONObject imageCount = new JSONObject();
+            imageCount.put("type", "integer");
+            imageCount.put("description", "返回图片数量，1-8，默认 6");
+            imageCount.put("minimum", 1);
+            imageCount.put("maximum", 8);
+            imageProps.put("count", imageCount);
+            imageParams.put("properties", imageProps);
+            imageParams.put("required", new JSONArray().put("query"));
+            imageFn.put("parameters", imageParams);
+            image.put("function", imageFn);
+            tools.put(image);
         }
 
         // 时间工具不依赖网络、不依赖任何 Key，因此无论联网开关是否开启都提供
@@ -256,6 +286,23 @@ public class WebSearchTool {
                 String ori = originalQuestion == null ? "" : originalQuestion.trim();
                 if (ori.length() > 128) ori = ori.substring(0, 128);
                 return search(provider, query, count, ori, guard);
+            }
+            if (TOOL_IMAGE.equals(toolName)) {
+                String query = args == null ? "" : args.optString("query", "").trim();
+                if (query.length() == 0) return error("图片搜索词不能为空");
+                if (query.length() > 128) query = query.substring(0, 128);
+                int count = args == null ? 6 : args.optInt("count", 6);
+                if (count < 1) count = 1;
+                if (count > 8) count = 8;
+                // DeepSeek 的 /v1/tools/search 没有图片能力，不要给模型一个
+                // 「永远失败的搜索」，直接在结果里说清该去哪开
+                if (!useTavily) {
+                    return error("图片搜索需要 Tavily 后端，请到设置页把搜索后端切到 Tavily。");
+                }
+                if (!TavilyTool.hasApiKey(tavilyKey)) {
+                    return error("未配置 Tavily API Key，无法搜索图片。");
+                }
+                return TavilyTool.imageSearch(query, count, tavilyKey, guard);
             }
             if (TOOL_FETCH.equals(toolName)) {
                 String url = args == null ? "" : args.optString("url", "").trim();
@@ -427,6 +474,30 @@ public class WebSearchTool {
                     display.put("title", sanitizeMarker(result.optString("title", ""), 200));
                     // 正文完整进卡片：不再截断、不再标记 truncated
                     display.put("content", sanitizeMarker(result.optString("content", "")));
+                }
+            } else if (TOOL_IMAGE.equals(toolName)) {
+                if (result != null) {
+                    if (result.has("query")) {
+                        display.put("query", sanitizeMarker(result.optString("query", ""), 200));
+                    }
+                    JSONArray imgs = result.optJSONArray("images");
+                    JSONArray rows = new JSONArray();
+                    if (imgs != null) {
+                        for (int i = 0; i < imgs.length(); i++) {
+                            JSONObject item = imgs.optJSONObject(i);
+                            if (item == null) continue;
+                            JSONObject row = new JSONObject();
+                            // 图片地址必须原样保留，任何加工都会让卡片加载不到图
+                            row.put("image_url", item.optString("image_url", ""));
+                            String t = item.optString("title", "");
+                            if (t.length() > 0) row.put("title", sanitizeMarker(t, 120));
+                            rows.put(row);
+                        }
+                    }
+                    display.put("images", rows);
+                    display.put("count", rows.length());
+                    String note = result.optString("note", "");
+                    if (note.length() > 0) display.put("note", sanitizeMarker(note, 200));
                 }
             } else {
                 if (result != null) {

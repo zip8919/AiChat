@@ -40,17 +40,45 @@ final class ChatHistory {
     /** 序列化后的总长兜底，防止条目极多时把上下文撑爆。 */
     private static final int RESULT_MAX = 3000;
 
+    /**
+     * 单条消息最多带几张图。
+     *
+     * <p>视觉请求的体积是「张数 × base64 长度」：1024px 的 JPEG 约 120 KB，
+     * Base64 后 160 KB。三张就已经占掉 500 KB 请求体，再多在 2G/3G 上
+     * 光是上传就要十几秒，用户会以为卡死了。
+     */
+    static final int MAX_VISION_IMAGES = 3;
+
+    /** 把本地图片变成可放进 {@code image_url.url} 的 data URI；返回 null 表示取不到。 */
+    interface ImageProvider {
+        String dataUri(AttachmentText.File f);
+    }
+
     private ChatHistory() {
     }
 
     /**
-     * 构造请求体的 messages。
+     * 构造请求体的 messages（纯文本，图片只写一行说明）。
      *
      * @param snapshot 当前会话消息快照（调用方保证不在请求线程遍历 UI 集合）
      * @param skip     要跳过的消息（本轮正在生成的 AI 占位），可为 null
      * @param sysPrompt 系统提示词，空则不插入 system 消息
      */
     static JSONArray build(List<Message> snapshot, Message skip, String sysPrompt) throws Exception {
+        return build(snapshot, skip, sysPrompt, false, null);
+    }
+
+    /**
+     * 构造请求体的 messages。
+     *
+     * <p>{@code vision} 为 true 时，带图片附件的用户消息会装成 OpenAI 多模态格式：
+     * <pre>{"role":"user","content":[{"type":"text","text":...},
+     *   {"type":"image_url","image_url":{"url":"data:image/jpeg;base64,..."}}]}</pre>
+     * 这正是 DeepSeek / OpenAI 文档里的形状。取不到任何一张图时退回纯文本，
+     * 而不是发一个只有文字的 content 数组——部分端点对空图片数组会直接 400。
+     */
+    static JSONArray build(List<Message> snapshot, Message skip, String sysPrompt,
+            boolean vision, ImageProvider images) throws Exception {
         JSONArray msgs = new JSONArray();
         if (sysPrompt != null && !sysPrompt.isEmpty()) {
             JSONObject sm = new JSONObject();
@@ -78,7 +106,15 @@ final class ChatHistory {
             // 用户消息必须带上附件正文：content 只有用户原话，附件在 attachments 里，
             // 由 AttachmentText 现拼成「原话 + <附件>…</附件>」。只发 content 的话
             // 模型收不到文件内容，表现为「明明附了文件，AI 却说看不到」。
-            mm.put("content", apiContentOf(m));
+            if (vision && m.isUser() && images != null) {
+                Object multimodal = multimodalContent(m, images);
+                if (multimodal != null) {
+                    mm.put("content", multimodal);
+                    msgs.put(mm);
+                    continue;
+                }
+            }
+            mm.put("content", apiContentOf(m, vision));
             msgs.put(mm);
         }
         return msgs;
@@ -94,10 +130,64 @@ final class ChatHistory {
      * <p>AI 消息的 {@code apiText} 是「去掉 [thinking]/[tool] 标记的正文」，空则回退气泡文本。
      */
     private static String apiContentOf(Message m) {
-        if (m.isUser()) return AttachmentText.apiTextOf(m);
+        return apiContentOf(m, false);
+    }
+
+    private static String apiContentOf(Message m, boolean vision) {
+        if (m.isUser()) return AttachmentText.apiTextOf(m, vision);
         String api = m.apiText;
         if (api != null && api.trim().length() > 0) return api;
         return m.content == null ? "" : m.content;
+    }
+
+    /**
+     * 把一条带图片的用户消息装成多模态 content 数组；没有可用图片时返回 null
+     * （调用方退回纯文本）。
+     *
+     * <p>顺序不能反：text 块在前，图片在后。个别端点会把图片块之前的文本当作
+     * 「图片描述」并丢掉，反过来则不触发这个问题。
+     */
+    private static Object multimodalContent(Message m, ImageProvider images) {
+        if (m.attachments == null || m.attachments.isEmpty()) return null;
+        boolean hasImage = false;
+        for (int i = 0; i < m.attachments.size(); i++) {
+            AttachmentText.File f = m.attachments.get(i);
+            if (f != null && f.isImage()) { hasImage = true; break; }
+        }
+        if (!hasImage) return null;
+
+        try {
+            JSONArray parts = new JSONArray();
+            JSONObject text = new JSONObject();
+            text.put("type", "text");
+            text.put("text", AttachmentText.apiTextOf(m, true));
+            parts.put(text);
+
+            int added = 0;
+            for (int i = 0; i < m.attachments.size() && added < MAX_VISION_IMAGES; i++) {
+                AttachmentText.File f = m.attachments.get(i);
+                if (f == null || !f.isImage()) continue;
+                String uri = images.dataUri(f);
+                if (uri == null || uri.length() == 0) {
+                    LogUtil.w(TAG, "vision: image unavailable, skipped: %s", f.name);
+                    continue;
+                }
+                JSONObject img = new JSONObject();
+                img.put("type", "image_url");
+                JSONObject url = new JSONObject();
+                url.put("url", uri);
+                img.put("image_url", url);
+                parts.put(img);
+                added++;
+            }
+            if (added == 0) return null;
+            LogUtil.d(TAG, "vision: %d image(s) attached for msg len=%d",
+                    added, m.content == null ? 0 : m.content.length());
+            return parts;
+        } catch (Exception e) {
+            LogUtil.w(TAG, "multimodalContent failed, fallback to text: %s", e.getMessage());
+            return null;
+        }
     }
 
     /**
