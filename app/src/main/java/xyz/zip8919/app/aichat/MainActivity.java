@@ -26,6 +26,7 @@ import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 import android.webkit.JavascriptInterface;
+import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import java.util.ArrayList;
@@ -208,13 +209,51 @@ public class MainActivity extends Activity {
         super.onDestroy();
     }
 
+    /**
+     * 视图装配。按「管什么」拆成几个小方法：想改暂停/续跑的逻辑就只看
+     * {@link #bindSendButton()}，想改 WebView 能力就只看 {@link #bindWebView()}，
+     * 不必在 170 行里翻。
+     */
     private void initViews() {
         LogUtil.d(TAG, "initViews");
         viewer = new ViewerController(this);
+        bindViews();
+        bindWebView();
+        bindQueue();
+        bindTopBar();
+        bindSendButton();
+        bindScrollButton();
+        bindThinkingSpinner();
+        refreshModelSpinner();
+    }
+
+    private void bindViews() {
         inputEditText = (EditText) findViewById(R.id.input_edit_text);
         sendButton = (Button) findViewById(R.id.send_button);
         modelSpinner = (Spinner) findViewById(R.id.model_spinner);
         thinkingSpinner = (Spinner) findViewById(R.id.thinking_spinner);
+    }
+
+    private void bindWebView() {
+        conversationWebView = (WebView) findViewById(R.id.message_webview);
+        WebSettings settings = conversationWebView.getSettings();
+        settings.setJavaScriptEnabled(true);
+        settings.setDefaultTextEncodingName("UTF-8");
+        settings.setBuiltInZoomControls(false);
+        settings.setLoadWithOverviewMode(true);
+        settings.setUseWideViewPort(true);
+        settings.setAllowFileAccess(true);
+        settings.setAllowFileAccessFromFileURLs(true);
+        conversationWebView.addJavascriptInterface(new JsBridge(), "Android");
+        conversationWebView.setWebViewClient(new WebViewClient() {
+            public boolean shouldOverrideUrlLoading(WebView view, String url) {
+                // 链接一律不跳转：聊天页里的外链由消息卡片自己处理
+                return true;
+            }
+        });
+    }
+
+    private void bindQueue() {
         queueBar = findViewById(R.id.queue_bar);
         queueBarText = (TextView) findViewById(R.id.queue_bar_text);
         queue = new MessageQueue(this, new MessageQueue.Host() {
@@ -225,22 +264,10 @@ public class MainActivity extends Activity {
         findViewById(R.id.queue_manage_button).setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) { LogUtil.d(TAG, "click: queue_manage"); queue.showManager(); }
         });
-        conversationWebView = (WebView) findViewById(R.id.message_webview);
-        conversationWebView.getSettings().setJavaScriptEnabled(true);
-        conversationWebView.getSettings().setDefaultTextEncodingName("UTF-8");
-        conversationWebView.getSettings().setBuiltInZoomControls(false);
-        conversationWebView.getSettings().setLoadWithOverviewMode(true);
-        conversationWebView.getSettings().setUseWideViewPort(true);
-        conversationWebView.getSettings().setAllowFileAccess(true);
-        conversationWebView.getSettings().setAllowFileAccessFromFileURLs(true);
-        conversationWebView.addJavascriptInterface(new JsBridge(), "Android");
-        conversationWebView.setWebViewClient(new WebViewClient() {
-            public boolean shouldOverrideUrlLoading(WebView view, String url) {
-                return true;
-            }
-        });
+    }
 
-        // Buttons
+    /** 顶栏：新建 / 历史（长按进工具）/ 设置 / 横竖屏 / 扫描。 */
+    private void bindTopBar() {
         findViewById(R.id.new_conversation_button).setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) { LogUtil.d(TAG, "click: new_conversation"); createNewConversation(); }
         });
@@ -257,17 +284,28 @@ public class MainActivity extends Activity {
             public void onClick(View v) {
                 int orient = getResources().getConfiguration().orientation;
                 LogUtil.d(TAG, "click: rotate, current orientation=%d", orient);
-                if (orient == android.content.res.Configuration.ORIENTATION_LANDSCAPE)
+                if (orient == android.content.res.Configuration.ORIENTATION_LANDSCAPE) {
                     setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
-                else
+                } else {
                     setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
+                }
             }
         });
+        findViewById(R.id.scan_button).setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                LogUtil.d(TAG, "click: scan -> launchScan");
+                launchScan();
+            }
+        });
+    }
 
-        // Send button
+    /**
+     * 发送键：短按发送（忙时入队），长按 500ms 打断。
+     * 打断后这次抬手不能触发 click，否则草稿会被立刻发出去。
+     */
+    private void bindSendButton() {
         sendButton.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
-                // 长按已执行打断，这次抬手的 click 直接吞掉，避免把草稿立刻发出去
                 if (sendButtonLongPressed) {
                     sendButtonLongPressed = false;
                     LogUtil.d(TAG, "click: send suppressed after long-press interrupt");
@@ -300,27 +338,21 @@ public class MainActivity extends Activity {
                     case MotionEvent.ACTION_UP:
                     case MotionEvent.ACTION_CANCEL:
                         handler.removeCallbacks(longPressRunnable);
-                        // Short tap while a request is running no longer interrupts:
-                        // sendMessage() queues the text instead. Long press still stops.
+                        // 短按不再打断：忙时由 sendMessage() 入队，长按才停
                         return false;
                 }
                 return false;
             }
         });
+    }
 
-        // Scan button
-        findViewById(R.id.scan_button).setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) {
-                LogUtil.d(TAG, "click: scan -> launchScan");
-                launchScan();
-            }
-        });
-
-        // Scroll-to-bottom button: tap = scroll to bottom, long-press = clear input
+    /** 回到底部：点击滚到底，长按 600ms 清空输入框。 */
+    private void bindScrollButton() {
         final Button scrollBtn = (Button) findViewById(R.id.scroll_to_bottom_button);
         scrollBtn.setOnTouchListener(new View.OnTouchListener() {
             private Runnable longPressRunnable;
             private boolean longPressed = false;
+
             @Override
             public boolean onTouch(View v, MotionEvent event) {
                 switch (event.getAction()) {
@@ -337,8 +369,7 @@ public class MainActivity extends Activity {
                     case MotionEvent.ACTION_UP:
                         handler.removeCallbacks(longPressRunnable);
                         if (!longPressed) {
-                            conversationWebView.loadUrl(
-                                "javascript:smartScrollToBottom(true)");
+                            conversationWebView.loadUrl("javascript:smartScrollToBottom(true)");
                         }
                         return false;
                     case MotionEvent.ACTION_CANCEL:
@@ -348,20 +379,21 @@ public class MainActivity extends Activity {
                 return false;
             }
         });
+    }
 
-        // Thinking spinner
+    private void bindThinkingSpinner() {
         String[] thinkingLevels = {"关闭", "低", "中", "高"};
         ArrayAdapter<String> thinkingAdapter = new ArrayAdapter<String>(this,
                 android.R.layout.simple_spinner_item, thinkingLevels);
         thinkingAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         thinkingSpinner.setAdapter(thinkingAdapter);
 
-        // Set current thinking level
         String level = configManager.getThinkingLevel();
         int levelPos = 2;
         if ("off".equals(level)) levelPos = 0;
         else if ("low".equals(level)) levelPos = 1;
         else if ("high".equals(level)) levelPos = 3;
+        // 先复位再去 setSelection：否则 setSelection 触发的回调会把它当成用户操作写盘
         userPicked = false;
         thinkingSpinner.setSelection(levelPos);
         LogUtil.d(TAG, "thinking level restored: %s -> pos=%d (thinkingEnabled=%s)",
@@ -377,11 +409,9 @@ public class MainActivity extends Activity {
                     configManager.save();
                 }
             }
-            public void onNothingSelected(AdapterView<?> parent) {}
-        });
 
-        // Model spinner
-        refreshModelSpinner();
+            public void onNothingSelected(AdapterView<?> parent) { }
+        });
     }
 
     private void refreshModelSpinner() {
@@ -861,529 +891,91 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * 工具轮次中途失败后的续跑状态：保留已经回放给模型的 tool_calls/tool 结果，
-     * 只重新发最后一次请求，而不是把整条用户消息重发一遍。
+     * 发起一次回复。
+     *
+     * <p>编排全部在 {@link ChatStreamRunner}：这个方法只做四件事——读设置、
+     * 组一份不可变的 {@link StreamJob}、起请求线程、把 UI 与会话能力交出去。
+     * 想知道「失败怎么回滚」「什么时候重试」不用再读 500 行嵌套，
+     * 去 ChatStreamRunner 里按方法名找即可。
      */
-    private static class ResumeState {
-        final int aiIndex;
-        final int round;
-        final String trace;
-        final JSONArray conversation;
-        final List<String[]> sources;
-        final String apiText;
-        final String toolHistoryJson;
-
-        ResumeState(int aiIndex, int round, String trace, JSONArray conversation,
-                List<String[]> sources, String apiText, String toolHistoryJson) {
-            this.aiIndex = aiIndex;
-            this.round = round;
-            this.trace = trace;
-            this.conversation = conversation;
-            this.sources = sources;
-            this.apiText = apiText;
-            this.toolHistoryJson = toolHistoryJson;
-        }
-    }
-
-    private void sendStreamingRequest(final ProviderInfo provider, final String thinkingLevel, final int generation) {
+    private void sendStreamingRequest(ProviderInfo provider, String thinkingLevel, int generation) {
         sendStreamingRequest(provider, thinkingLevel, generation, null);
     }
 
-    private void sendStreamingRequest(final ProviderInfo provider, final String thinkingLevel,
-            final int generation, final ResumeState resume) {
-        final boolean realtimeRenderEnabled = SettingsActivity.isRealtimeRenderEnabled(this);
-        final boolean streamEnabled = SettingsActivity.isStreamEnabled(this);
+    private void sendStreamingRequest(ProviderInfo provider, String thinkingLevel,
+            int generation, StreamJob.Resume resume) {
         final boolean webSearchEnabled = SettingsActivity.isWebSearchEnabled(this);
-        // 搜索后端在 UI 线程先定死：Tavily 走自建网关，不需要 DeepSeek 提供商；
-        // DeepSeek 后端才要求存在带 Key 的 DeepSeek 提供商。
         final boolean useTavily = SettingsActivity.isTavilySearch(this);
-        // 密钥只在运行时从设置读取，不写死、不打进安装包
         final String tavilyKey = SettingsActivity.getTavilyKey(this);
-        // 单轮工具调用上限（web_search + web_fetch 合计），在 UI 线程先读定，避免请求线程反复访问 prefs
-        final int maxCallsPerRound = SettingsActivity.getWebSearchMaxCallsPerRound(this);
-        final String chatEndpoint = provider.apiUrl + provider.chatPath;
-        final String providerName = provider.name;
-        final String modelName = currentModel;
-        // 系统提示按后端拼装：时间工具始终说明，联网工具仅在开关打开时说明
-        final String effectiveSystemPrompt =
-                WebSearchTool.appendToSystemPrompt(systemPrompt, webSearchEnabled);
+        // 搜索后端在 UI 线程先定死：Tavily 走自建网关，不需要 DeepSeek 提供商
         final ProviderInfo searchProvider = (webSearchEnabled && !useTavily)
                 ? WebSearchTool.resolveProvider(configManager, provider) : null;
-        // 搜索是否真的可用：Tavily 只看内置密钥；DeepSeek 需要解析到提供商
         final boolean searchReady = webSearchEnabled
                 && (useTavily ? TavilyTool.hasApiKey(tavilyKey) : searchProvider != null);
-        final long startMs = System.currentTimeMillis();
-        LogUtil.i(TAG, ">>> sendStreamingRequest START: gen=%d url=%s%s model=%s thinking=%s webSearch=%s backend=%s searchProvider=%s",
-                generation, provider.apiUrl, provider.chatPath, currentModel, thinkingLevel,
-                webSearchEnabled, useTavily ? "tavily" : "deepseek",
-                searchProvider == null ? "none" : searchProvider.name);
-        isRequestInProgress.set(true);
+        final String effectiveSystemPrompt =
+                WebSearchTool.appendToSystemPrompt(systemPrompt, webSearchEnabled);
 
-        final Message aiMsg;
-        final int aiIndex;
+        Message aiMsg;
+        int aiIndex;
         if (resume != null) {
             // 续跑：复用已存在的那条 AI 消息，不新增占位、不重复插 DOM
             aiMsg = messages.get(resume.aiIndex);
             aiIndex = resume.aiIndex;
-            LogUtil.i(TAG, "resume request from aiIndex=%d, round=%d, traceLen=%d",
+            LogUtil.i(TAG, "resume request: aiIndex=%d round=%d traceLen=%d",
                     aiIndex, resume.round, resume.trace == null ? 0 : resume.trace.length());
         } else {
             aiMsg = new Message(Message.ROLE_ASSISTANT, "");
             messages.add(aiMsg);
             aiIndex = messages.size() - 1;
         }
-        // 在 UI 线程做一次快照：请求线程遍历时 UI 线程可能结构性修改 messages，
-        // 直接遍历会抛 ConcurrentModificationException
-        final List<Message> requestSnapshot = new ArrayList<Message>(messages);
-        final String originalQuestion = ChatHistory.lastUserContent(requestSnapshot);
-        LogUtil.d(TAG, "AI message at index=%d, total=%d", aiIndex, messages.size());
+        // 在 UI 线程做一次快照：请求线程遍历时 UI 线程可能结构性修改 messages
+        List<Message> snapshot = new ArrayList<Message>(messages);
+        String question = ChatHistory.lastUserContent(snapshot);
 
-        // Append AI placeholder div（续跑时页面里已经有这条消息，只需清掉错误卡片）
+        final int placeholderIndex = aiIndex;
+        final boolean isResume = resume != null;
         runOnUiThread(new Runnable() {
             public void run() {
-                if (resume != null) {
-                    webViewEvalJs("clearAssistantFailed(" + aiIndex + ")");
-                } else {
-                    LogUtil.v(TAG, "webview js: appendAiDiv()");
-                    webViewEvalJs("appendAiDiv()");
-                }
+                webViewEvalJs(isResume
+                        ? "clearAssistantFailed(" + placeholderIndex + ")"
+                        : "appendAiDiv()");
             }
         });
 
-        final WebSearchTool.RequestGuard searchGuard = new WebSearchTool.RequestGuard() {
-            public boolean shouldAbort() {
-                return !isRequestInProgress.get() || requestGeneration.get() != generation;
-            }
-            public void onConnection(HttpURLConnection c) {
-                if (c != null) {
-                    if (isRequestInProgress.get() && requestGeneration.get() == generation) {
-                        currentConnection = c;
-                    }
-                } else if (isRequestInProgress.get() && requestGeneration.get() == generation) {
-                    currentConnection = null;
-                }
-            }
-        };
+        isRequestInProgress.set(true);
+        LogUtil.i(TAG, ">>> request START: gen=%d url=%s%s model=%s thinking=%s webSearch=%s backend=%s",
+                generation, provider.apiUrl, provider.chatPath, currentModel, thinkingLevel,
+                webSearchEnabled, useTavily ? "tavily" : "deepseek");
 
+        StreamJob job = StreamJob.builder()
+                .provider(provider)
+                .modelName(currentModel)
+                .thinkingLevel(thinkingLevel)
+                .generation(generation)
+                .aiIndex(aiIndex)
+                .aiMessage(aiMsg)
+                .snapshot(snapshot)
+                .question(question)
+                .systemPrompt(systemPrompt)
+                .effectiveSystemPrompt(effectiveSystemPrompt)
+                .providerName(provider.name)
+                .chatEndpoint(provider.apiUrl + provider.chatPath)
+                .streamEnabled(SettingsActivity.isStreamEnabled(this))
+                .realtimeRender(SettingsActivity.isRealtimeRenderEnabled(this))
+                .webSearchEnabled(webSearchEnabled)
+                .useTavily(useTavily)
+                .searchReady(searchReady)
+                .maxCallsPerRound(SettingsActivity.getWebSearchMaxCallsPerRound(this))
+                .searchProvider(searchProvider)
+                .tavilyKey(tavilyKey)
+                .resume(resume)
+                .build();
+
+        final ChatStreamRunner runner =
+                new ChatStreamRunner(job, new Channel(), new GenerationSession(generation));
         currentRequestThread = new Thread(new Runnable() {
             public void run() {
-                final StringBuilder rawContent = new StringBuilder();
-                // 本条回复真正发给模型的纯文本（不含 thinking/tool 标记），落盘后供后续轮次回放
-                final StringBuilder apiTextBuilder = new StringBuilder(
-                        resume != null && resume.apiText != null ? resume.apiText : "");
-                // 本条回复产生的工具调用历史（assistant tool_calls + tool 结果）
-                // 续跑时先把之前已经完成的轮次搬进来，避免再次失败时历史丢失
-                final JSONArray toolHistory = new JSONArray();
-                if (resume != null && resume.toolHistoryJson != null
-                        && resume.toolHistoryJson.length() > 2) {
-                    try {
-                        JSONArray prev = new JSONArray(resume.toolHistoryJson);
-                        for (int i = 0; i < prev.length(); i++) toolHistory.put(prev.get(i));
-                    } catch (Exception e) {
-                        LogUtil.w(TAG, "resume: bad toolHistory, starting empty: %s", e.getMessage());
-                    }
-                }
-                final List<String[]> searchSources = resume != null
-                        ? new ArrayList<String[]>(resume.sources) : new ArrayList<String[]>();
-                final boolean[] warnedNoSearchKey = {false};
-                final int[] chunkCount = {0};
-                final int[] thinkingChunks = {0};
-                final int[] contentChunks = {0};
-                final boolean[] renderInFlight = {false};
-                // 请求是否失败（HTTP 非 200 / 解析失败 / 异常）：失败时 finally 需回滚空占位
-                final boolean[] requestFailed = {false};
-
-                String finalContent = "";
-                HttpURLConnection conn = null;
-                // 失败详情：HTTP 分支与异常分支都会写，finally 里交给 UI 生成错误卡片
-                final String[] errorDetail = {""};
-                // 当前轮次：异常分支在 try 外也要读，故用单元素数组
-                final int[] roundRef = {0};
-                // 最后一次 HTTP 状态（-1 表示没拿到响应）：400/422 说明工具格式被拒，
-                // 这类失败「从出错处重试」也没用，应退回整条消息重发。
-                final int[] lastHttpCode = {-1};
-                // Display text kept for the whole request: thinking + tool cards from
-                // every round. Without this the reasoning emitted before a tool call
-                // was discarded and replaced by the next round / status text.
-                // 声明在 try 外：失败分支在 finally 里还要用它落盘已展示的思考/工具卡片。
-                final StringBuilder trace = new StringBuilder(resume != null && resume.trace != null
-                        ? resume.trace : "");
-                // 已经推送到 DOM 的 base（思考 + 工具卡片）文本：只有它变化时才重渲染，
-                // 避免流式期间每帧都重建上面那一大段
-                final String[] baseRendered = {""};
-                try {
-                    JSONArray conversation = resume != null
-                            ? resume.conversation
-                            : ChatHistory.build(requestSnapshot, aiMsg, effectiveSystemPrompt);
-                    // 时间工具始终提供，所以即便联网关闭也要发送 tools
-                    JSONArray toolDefs = WebSearchTool.buildToolDefinitions(webSearchEnabled);
-                    boolean toolsEnabled = true;
-                    boolean fallbackTried = false;
-                    int round = resume != null ? resume.round : 0;
-                    if (resume != null && trace.length() > 0) {
-                        showSearchStatus("正在重新生成...", generation, trace.toString(), aiIndex);
-                    }
-
-                    while (true) {
-                        roundRef[0] = round;
-                        if (!isRequestInProgress.get() || requestGeneration.get() != generation) {
-                            LogUtil.i(TAG, "tool loop aborted before round %d", round);
-                            return;
-                        }
-                        if (round > 0) {
-                            renderSeq.incrementAndGet();
-                            showSearchStatus("正在整理搜索结果...", generation, trace.toString(), aiIndex);
-                        }
-
-                        JSONObject body = ChatTransport.buildRequestBody(modelName, provider, thinkingLevel, conversation,
-                                streamEnabled, toolsEnabled ? toolDefs : null);
-
-                        LogUtil.d(TAG, "opening connection: %s%s (round=%d, thread=%s)",
-                                provider.apiUrl, provider.chatPath, round, LogUtil.thread());
-                        conn = ChatTransport.open(provider);
-                        currentConnection = conn;
-
-                        final String payload = body.toString();
-                        LogUtil.d(TAG, "request body built: len=%d", payload.length());
-                        LogUtil.v(TAG, "request body: %s", LogUtil.preview(payload, 1500));
-
-                        long reqMs = System.currentTimeMillis();
-                        java.io.OutputStream os = conn.getOutputStream();
-                        try {
-                            os.write(payload.getBytes("UTF-8"));
-                        } finally {
-                            os.close();
-                        }
-                        LogUtil.d(TAG, "request body written in %d ms", System.currentTimeMillis() - reqMs);
-
-                        int code = conn.getResponseCode();
-                        LogUtil.i(TAG, "HTTP response: code=%d in %d ms (round=%d)",
-                                code, System.currentTimeMillis() - reqMs, round);
-                        if (code != 200) {
-                            String errBody = ChatTransport.readErrorBody(conn);
-                            LogUtil.e(TAG, "request FAILED: HTTP %d, body=%s", code, LogUtil.preview(errBody, 800));
-
-                            // 部分 OpenAI 兼容端点不认识 tools 参数。首轮 400 时去掉工具
-                            // 与搜索系统提示重试一次，保证原有普通对话不受联网开关影响。
-                            if ((code == 400 || code == 422) && toolsEnabled && round == 0 && !fallbackTried) {
-                                fallbackTried = true;
-                                toolsEnabled = false;
-                                conversation = ChatHistory.build(requestSnapshot, aiMsg, systemPrompt);
-                                LogUtil.w(TAG, "provider rejected tools (HTTP %d), retrying once without web search; body=%s",
-                                        code, LogUtil.preview(errBody, 500));
-                                runOnUiThread(new Runnable() {
-                                    public void run() {
-                                        Toast.makeText(MainActivity.this,
-                                                "当前模型不支持工具调用，已按普通对话发送",
-                                                Toast.LENGTH_SHORT).show();
-                                    }
-                                });
-                                ChatTransport.close(conn);
-                                conn = null;
-                                if (requestGeneration.get() == generation) currentConnection = null;
-                                continue;
-                            }
-
-                            final String err = "HTTP " + code;
-                            requestFailed[0] = true;
-                            lastHttpCode[0] = code;
-                            errorDetail[0] = ErrorReport.build(providerName, modelName, chatEndpoint,
-                                    round, code, errBody, null);
-                            LogUtil.e(TAG, "request FAILED (round %d): %s", round, errorDetail[0]);
-                            runOnUiThread(new Runnable() {
-                                public void run() { Toast.makeText(MainActivity.this, "请求失败: " + err, Toast.LENGTH_SHORT).show(); }
-                            });
-                            return;
-                        }
-
-                        final long[] lastEmit = {0};
-                        SseRound.Result rr = SseRound.read(streamEnabled, conn.getInputStream(),
-                                new SseRound.Progress() {
-                                    public void onProgress(String displayNow, String contentNow) {
-                                        // 节流：最多 200ms 渲染一次；渲染在后台线程，
-                                        // 同时在飞的渲染只保留一个，期间的 tick 直接丢弃。
-                                        // base（已完成轮次的思考/工具卡片）与 tail（本轮增量）
-                                        // 分开更新，否则每个分片都会把上面的卡片打回纯文本。
-                                        long now = System.currentTimeMillis();
-                                        if (realtimeRenderEnabled && now - lastEmit[0] > 200 && !renderInFlight[0]) {
-                                            lastEmit[0] = now;
-                                            renderInFlight[0] = true;
-                                            final String baseNow = trace.toString();
-                                            final String roundNow = displayNow;
-                                            final boolean baseChanged = !baseNow.equals(baseRendered[0]);
-                                            final int mySeq = renderSeq.incrementAndGet();
-                                            new Thread(new Runnable() {
-                                                public void run() {
-                                                    final String baseHtml = baseChanged
-                                                            ? MessageHtmlRenderer.contentToHtml(baseNow, MainActivity.this)
-                                                            : null;
-                                                    final String tailHtml =
-                                                            MessageHtmlRenderer.contentToHtml(roundNow, MainActivity.this);
-                                                    runOnUiThread(new Runnable() {
-                                                        public void run() {
-                                                            renderInFlight[0] = false;
-                                                            if (renderSeq.get() != mySeq) {
-                                                                return; // 被更新的渲染取代
-                                                            }
-                                                            if (requestGeneration.get() == generation && aiIndex < messages.size()) {
-                                                                messages.get(aiIndex).content = baseNow + roundNow;
-                                                                if (baseHtml != null) {
-                                                                    baseRendered[0] = baseNow;
-                                                                    webViewEvalJs("streamBase('" + jsEscape(baseHtml) + "')");
-                                                                }
-                                                                webViewEvalJs("streamTailHtml('" + jsEscape(tailHtml) + "')");
-                                                            } else {
-                                                                LogUtil.w(TAG, "throttled update skipped: aiIndex=%d >= size=%d",
-                                                                        aiIndex, messages.size());
-                                                            }
-                                                        }
-                                                    });
-                                                }
-                                            }).start();
-                                        } else if (!realtimeRenderEnabled && !renderInFlight[0] && now - lastEmit[0] > 120) {
-                                            lastEmit[0] = now;
-                                            final String baseNow = trace.toString();
-                                            final String roundNow = displayNow;
-                                            // 只把本轮增量转成纯文本；整段转会把前面的
-                                            // 工具卡片、思考块、markdown 全抹掉
-                                            final String tailPlain = TextKit.plainForStream(roundNow);
-                                            final boolean baseChanged = !baseNow.equals(baseRendered[0]);
-                                            if (!baseChanged) {
-                                                runOnUiThread(new Runnable() {
-                                                    public void run() {
-                                                        if (requestGeneration.get() == generation && aiIndex < messages.size()) {
-                                                            messages.get(aiIndex).content = baseNow + roundNow;
-                                                            webViewEvalJs("streamTailText('" + jsEscape(tailPlain) + "')");
-                                                        }
-                                                    }
-                                                });
-                                            } else {
-                                                // trace 刚追加了工具卡片：重建一次 base，再续上本轮文字
-                                                renderInFlight[0] = true;
-                                                new Thread(new Runnable() {
-                                                    public void run() {
-                                                        final String baseHtml =
-                                                                MessageHtmlRenderer.contentToHtml(baseNow, MainActivity.this);
-                                                        runOnUiThread(new Runnable() {
-                                                            public void run() {
-                                                                renderInFlight[0] = false;
-                                                                if (requestGeneration.get() == generation && aiIndex < messages.size()) {
-                                                                    baseRendered[0] = baseNow;
-                                                                    messages.get(aiIndex).content = baseNow + roundNow;
-                                                                    webViewEvalJs("streamBase('" + jsEscape(baseHtml) + "')");
-                                                                    webViewEvalJs("streamTailText('" + jsEscape(tailPlain) + "')");
-                                                                }
-                                                            }
-                                                        });
-                                                    }
-                                                }).start();
-                                            }
-                                        }
-                                    }
-                                },
-                                new SseRound.Abort() {
-                                    public boolean isAborted() { return !isRequestInProgress.get(); }
-                                });
-                        final StringBuilder roundDisplay = rr.display;
-                        final StringBuilder roundContent = rr.content;
-                        final JSONArray roundToolCalls = rr.toolCalls;
-                        chunkCount[0] = rr.chunks;
-                        thinkingChunks[0] = rr.thinkingChunks;
-                        contentChunks[0] = rr.contentChunks;
-                        if (rr.error != null) {
-                            requestFailed[0] = true;
-                            errorDetail[0] = ErrorReport.build(providerName, modelName, chatEndpoint,
-                                    round, rr.httpCode, rr.rawBody, rr.cause);
-                            final String err = rr.error;
-                            runOnUiThread(new Runnable() {
-                                public void run() {
-                                    Toast.makeText(MainActivity.this, err, Toast.LENGTH_SHORT).show();
-                                }
-                            });
-                            return;
-                        }
-
-                        ChatTransport.close(conn);
-                        conn = null;
-                        if (requestGeneration.get() == generation) currentConnection = null;
-
-                        if (roundToolCalls.length() > 0 && ToolCalls.hasUsable(roundToolCalls)) {
-                            // Keep this round's reasoning/partial answer visible.
-                            trace.append(roundDisplay);
-                            // 注意：这里不把 roundContent 累进 apiText——工具轮次的正文
-                            // 已经作为 assistant(tool_calls).content 存在于 toolHistory 里，
-                            // 再拼一次会让模型看到重复的同一段回答。
-                            ToolCalls.appendAssistant(conversation, toolHistory,
-                                    roundContent.toString(), roundToolCalls);
-                            // 本轮实际执行计数：超过上限的调用只回一条占位结果，不发请求
-                            int executedThisRound = 0;
-                            for (int i = 0; i < roundToolCalls.length(); i++) {
-                                JSONObject tc = roundToolCalls.getJSONObject(i);
-                                String id = tc.optString("id", "");
-                                String name = tc.optString("name", "");
-                                if (name.length() == 0) continue;
-
-                                // 一轮内所有 tool_calls 都必须有对应的 tool 结果，否则下一轮
-                                // 请求的 assistant/tool 配对不完整，多数端点会直接 400。
-                                if (executedThisRound >= maxCallsPerRound) {
-                                    ToolCalls.appendResult(conversation, toolHistory, id, ToolCalls.limitNotice(maxCallsPerRound));
-                                    LogUtil.w(TAG, "tool call %d/%d NOT executed: per-round limit %d reached (tool=%s)",
-                                            i + 1, roundToolCalls.length(), maxCallsPerRound, name);
-                                    continue;
-                                }
-                                executedThisRound++;
-
-                                String argText = tc.optString("arguments", "");
-                                JSONObject args;
-                                try {
-                                    args = argText.trim().length() == 0 ? new JSONObject() : new JSONObject(argText);
-                                } catch (Exception e) {
-                                    LogUtil.w(TAG, "tool call args parse failed: %s | raw=%s",
-                                            e.getMessage(), LogUtil.preview(argText, 200));
-                                    args = new JSONObject();
-                                }
-
-                                renderSeq.incrementAndGet();
-                                showSearchStatus(ToolCalls.statusText(name, args), generation, trace.toString(), aiIndex);
-                                String toolResult;
-                                if (WebSearchTool.TOOL_TIME.equals(name)) {
-                                    // 本地工具：不依赖搜索密钥，也不受联网开关影响
-                                    toolResult = WebSearchTool.currentTimeResult();
-                                } else if (!searchReady) {
-                                    toolResult = useTavily
-                                            ? "{\"error\":\"未配置 Tavily API Key，无法使用联网搜索\"}"
-                                            : "{\"error\":\"未配置 DeepSeek API Key，无法使用联网搜索\"}";
-                                    if (!warnedNoSearchKey[0]) {
-                                        warnedNoSearchKey[0] = true;
-                                        final String warnText = useTavily
-                                                ? "未配置 Tavily API Key，联网搜索不可用"
-                                                : "未配置 DeepSeek API Key，联网搜索不可用";
-                                        runOnUiThread(new Runnable() {
-                                            public void run() {
-                                                Toast.makeText(MainActivity.this,
-                                                        warnText, Toast.LENGTH_LONG).show();
-                                            }
-                                        });
-                                    }
-                                } else {
-                                    toolResult = WebSearchTool.executeTool(
-                                            searchProvider, name, args, originalQuestion,
-                                            searchGuard, useTavily, tavilyKey);
-                                }
-
-                                WebSearchTool.extractSources(toolResult, searchSources);
-                                ToolCalls.appendResult(conversation, toolHistory, id, toolResult);
-                                // 所有工具都打卡片：时间工具此前被跳过，界面上完全看不到
-                                trace.append(WebSearchTool.buildTraceBlock(name, args, toolResult));
-                                if (requestGeneration.get() == generation) {
-                                    // renderTraceAsync 自己会自增渲染序号，作废进行中的流式渲染
-                                    renderTraceAsync(trace.toString(), generation, null, aiIndex);
-                                }
-
-                                if (!isRequestInProgress.get() || requestGeneration.get() != generation) {
-                                    LogUtil.i(TAG, "tool loop aborted after tool %s", name);
-                                    return;
-                                }
-                            }
-                            round++;
-                            continue;
-                        }
-
-                        trace.append(roundDisplay);
-                        // 最终回复的正文（只有这一轮要作为最后一条 assistant 消息回放）
-                        apiTextBuilder.setLength(0);
-                        apiTextBuilder.append(roundContent);
-                        rawContent.setLength(0);
-                        rawContent.append(trace);
-                        finalContent = rawContent.toString();
-                        break;
-                    }
-
-                    // 来源独立成结构字段：不拼接正文，避免后续每次请求都把来源列表再喂回模型
-                    aiMsg.sources = dedupeSources(searchSources, ConversationManager.MAX_SOURCES);
-                    // 结构化落盘：下一次请求靠 apiText 还原正文、靠 toolHistory 回放工具调用
-                    aiMsg.apiText = apiTextBuilder.toString();
-                    if (toolHistory.length() > 0) aiMsg.toolHistory = toolHistory.toString();
-                    LogUtil.i(TAG, "sources collected: %d, apiText=%d chars, toolHistory=%d entries",
-                            aiMsg.sources.size(), aiMsg.apiText.length(), toolHistory.length());
-                    rawContent.setLength(0);
-                    rawContent.append(finalContent);
-                    renderSeq.incrementAndGet(); // invalidate any in-flight stream render
-                } catch (final Exception e) {
-                    requestFailed[0] = true;
-                    errorDetail[0] = ErrorReport.build(providerName, modelName, chatEndpoint,
-                            roundRef[0], -1, "", e);
-                    LogUtil.e(TAG, "streaming request EXCEPTION: %s", e.getMessage(), e);
-                    // 用户主动打断（打断已自增代数）导致的 Socket closed 不算请求失败，不弹提示
-                    if (requestGeneration.get() == generation) {
-                        runOnUiThread(new Runnable() {
-                            public void run() {
-                                Toast.makeText(MainActivity.this, "请求失败: " + e.getMessage(), Toast.LENGTH_SHORT).show();
-                            }
-                        });
-                    } else {
-                        LogUtil.i(TAG, "stream exception ignored: request was interrupted by user");
-                    }
-                } finally {
-                    LogUtil.i(TAG, "<<< sendStreamingRequest END: elapsed=%d ms, chunks=%d, interrupted=%s",
-                            System.currentTimeMillis() - startMs, chunkCount[0], !isRequestInProgress.get());
-                    if (conn != null) conn.disconnect();
-                    // 只有当前请求代数匹配时才清理状态，防止旧线程污染新请求
-                    if (requestGeneration.get() == generation) {
-                        currentConnection = null;
-                        final int finalIdx = aiIndex;
-                        final boolean failed = requestFailed[0];
-                        final String commitContent = rawContent.toString();
-                        renderSeq.incrementAndGet(); // invalidate any in-flight stream render
-                        // 先渲染（离开主线程）→ 提交内容与 DOM 收尾 → 落盘 → 最后才放行队列。
-                        // 若先 drain，新请求会自增代数，使这条最终回复被代数守卫丢弃。
-                        new Thread(new Runnable() {
-                            public void run() {
-                                try {
-                                    if (failed) {
-                                        // 工具结果已经回传给模型的轮次：保留这条 AI 消息和
-                                        // 已展示的思考/工具卡片，挂「从出错处重试」，不再重发
-                                        // 整条用户消息，也不必重新执行已经跑过的工具。
-                                        if (roundRef[0] > 0 && toolHistory.length() > 0
-                                                && lastHttpCode[0] != 400 && lastHttpCode[0] != 422) {
-                                            markAssistantFailed(finalIdx, errorDetail[0],
-                                                    trace.toString(), toolHistory.toString(),
-                                                    apiTextBuilder.toString(), generation);
-                                            return;
-                                        }
-                                        // 首轮就失败：移除空 assistant 占位，避免空气泡落盘/进入后续请求体
-                                        rollbackEmptyAssistantPlaceholder(finalIdx, generation);
-                                        // 失败标记打到对应的用户消息上（错误卡片 + 点击重试）
-                                        markSendFailed(finalIdx, errorDetail[0], generation);
-                                        return;
-                                    }
-                                    final String html =
-                                            MessageHtmlRenderer.contentToHtml(commitContent, MainActivity.this);
-                                    if (requestGeneration.get() != generation) return;
-                                    runOnUiThread(new Runnable() {
-                                        public void run() {
-                                            if (requestGeneration.get() != generation) return;
-                                            if (finalIdx >= 0 && finalIdx < messages.size()
-                                                    && messages.get(finalIdx).isAssistant()) {
-                                                messages.get(finalIdx).content = commitContent;
-                                            }
-                                            webViewEvalJs("updateLastMsg('" + jsEscape(html) + "')");
-                                            // 来源区独立渲染在 .content 之外，默认折叠
-                                            String srcHtml = MessageHtmlRenderer.renderSourcesInner(aiMsg.sources);
-                                            webViewEvalJs("updateLastSources('" + jsEscape(srcHtml) + "')");
-                                            webViewEvalJs("finalizeLast(" + finalIdx + ")");
-                                            conversationManager.saveCurrentConversation();
-                                        }
-                                    });
-                                } catch (Exception e) {
-                                    LogUtil.e(TAG, "final commit failed: %s", e.getMessage(), e);
-                                } finally {
-                                    if (requestGeneration.get() == generation) finishRequestAndDrain();
-                                }
-                            }
-                        }).start();
-                    }
-                }
+                runner.execute();
             }
         });
         currentRequestThread.setName("aichat-stream-" + System.currentTimeMillis());
@@ -1391,24 +983,137 @@ public class MainActivity extends Activity {
         LogUtil.d(TAG, "request thread started: %s", currentRequestThread.getName());
     }
 
-    /** 来源按 URL 去重，保留首次出现的顺序，最多 limit 条。 */
-    private static List<Message.Source> dedupeSources(List<String[]> raw, int limit) {
-        List<Message.Source> out = new ArrayList<Message.Source>();
-        if (raw == null || raw.isEmpty()) return out;
-        List<String> seen = new ArrayList<String>();
-        for (int i = 0; i < raw.size() && out.size() < limit; i++) {
-            String[] row = raw.get(i);
-            if (row == null || row.length < 2) continue;
-            String url = row[1];
-            if (url == null || url.trim().length() == 0) continue;
-            url = url.trim();
-            if (seen.contains(url)) continue;
-            seen.add(url);
-            String title = row[0];
-            if (title == null || title.trim().length() == 0) title = url;
-            out.add(new Message.Source(title.trim(), url));
+    /** 把 Activity 的视图能力交给 {@link ChatStreamRunner}，每个方法都是一两行转发。 */
+    private final class Channel implements ChatStreamRunner.Ui {
+        public void runOnUi(Runnable task) {
+            runOnUiThread(task);
         }
-        return out;
+
+        public void evalJsHtml(String fn, String html) {
+            webViewEvalJs(fn + "('" + jsEscape(html) + "')");
+        }
+
+        public boolean isCurrent(int generation) {
+            return requestGeneration.get() == generation;
+        }
+
+        public int nextSeq() {
+            return renderSeq.incrementAndGet();
+        }
+
+        public int currentSeq() {
+            return renderSeq.get();
+        }
+
+        public String renderHtml(String markdown) {
+            return MessageHtmlRenderer.contentToHtml(markdown, MainActivity.this);
+        }
+
+        public void setContent(int aiIndex, String content) {
+            if (aiIndex >= 0 && aiIndex < messages.size()) {
+                messages.get(aiIndex).content = content;
+            }
+        }
+
+        public void toast(final String msg) {
+            runOnUiThread(new Runnable() {
+                public void run() {
+                    Toast.makeText(MainActivity.this, msg, Toast.LENGTH_SHORT).show();
+                }
+            });
+        }
+
+        public void showStatus(String text, int generation, String trace, int aiIndex) {
+            showSearchStatus(text, generation, trace, aiIndex);
+        }
+
+        public void renderTrace(String trace, int generation, String status, int aiIndex) {
+            renderTraceAsync(trace, generation, status, aiIndex);
+        }
+    }
+
+    /** 请求代数与连接的收口：旧线程只能看到自己的代数，写不进新请求。 */
+    private final class GenerationSession implements ChatStreamRunner.Session {
+        private final int generation;
+
+        GenerationSession(int generation) {
+            this.generation = generation;
+        }
+
+        public boolean isCurrent(int gen) {
+            return requestGeneration.get() == gen;
+        }
+
+        public boolean isAlive(int gen) {
+            return isRequestInProgress.get() && requestGeneration.get() == gen;
+        }
+
+        public void setConnection(HttpURLConnection conn) {
+            if (requestGeneration.get() == generation) currentConnection = conn;
+        }
+
+        public void onSettled(ChatStreamRunner.Settled settled) {
+            settleStream(settled);
+        }
+    }
+
+    /**
+     * 请求收尾：成功则提交正文与来源，失败则挂错误卡片或回滚空占位。
+     * 渲染离开主线程，落盘与放行队列的顺序不能调换（见方法内注释）。
+     */
+    private void settleStream(final ChatStreamRunner.Settled settled) {
+        final int finalIdx = settled.aiIndex;
+        final boolean failed = settled.failed;
+        renderSeq.incrementAndGet(); // 作废进行中的流式渲染
+        new Thread(new Runnable() {
+            public void run() {
+                try {
+                    if (failed) {
+                        // 工具结果已经回传给模型的轮次：保留这条 AI 消息和已展示的
+                        // 思考/工具卡片，挂「从出错处重试」，不再重发整条用户消息。
+                        // 400/422 说明工具格式被拒，这类失败只能整条重来。
+                        if (settled.round > 0 && settled.toolHistory != null
+                                && settled.toolHistory.length() > 2
+                                && settled.httpCode != 400 && settled.httpCode != 422) {
+                            markAssistantFailed(finalIdx, settled.errorDetail, settled.trace,
+                                    settled.toolHistory, settled.apiText, settled.generation);
+                            return;
+                        }
+                        // 首轮就失败：移除空 assistant 占位，避免空气泡落盘/进入后续请求体
+                        rollbackEmptyAssistantPlaceholder(finalIdx, settled.generation);
+                        markSendFailed(finalIdx, settled.errorDetail, settled.generation);
+                        return;
+                    }
+
+                    final String html =
+                            MessageHtmlRenderer.contentToHtml(settled.content, MainActivity.this);
+                    if (requestGeneration.get() != settled.generation) return;
+                    runOnUiThread(new Runnable() {
+                        public void run() {
+                            if (requestGeneration.get() != settled.generation) return;
+                            if (finalIdx >= 0 && finalIdx < messages.size()
+                                    && messages.get(finalIdx).isAssistant()) {
+                                messages.get(finalIdx).content = settled.content;
+                            }
+                            webViewEvalJs("updateLastMsg('" + jsEscape(html) + "')");
+                            // 来源区独立渲染在 .content 之外，默认折叠
+                            Message am = finalIdx >= 0 && finalIdx < messages.size()
+                                    ? messages.get(finalIdx) : null;
+                            String srcHtml = MessageHtmlRenderer.renderSourcesInner(
+                                    am == null ? null : am.sources);
+                            webViewEvalJs("updateLastSources('" + jsEscape(srcHtml) + "')");
+                            webViewEvalJs("finalizeLast(" + finalIdx + ")");
+                            conversationManager.saveCurrentConversation();
+                        }
+                    });
+                } catch (Exception e) {
+                    LogUtil.e(TAG, "final commit failed: %s", e.getMessage(), e);
+                } finally {
+                    // 最后才放行队列：先 drain 会让新请求自增代数，使这条回复被代数守卫丢弃
+                    if (requestGeneration.get() == settled.generation) finishRequestAndDrain();
+                }
+            }
+        }).start();
     }
 
     /**
@@ -2294,7 +1999,7 @@ public class MainActivity extends Activity {
             LogUtil.i(TAG, "resumeAssistantRequest: pos=%d rounds=%d traceLen=%d",
                     pos, rounds, am.content == null ? 0 : am.content.length());
             sendStreamingRequest(provider, thinkingLevel, gen,
-                    new ResumeState(pos, rounds, am.content == null ? "" : am.content,
+                    new StreamJob.Resume(pos, rounds, am.content == null ? "" : am.content,
                             conversation, sources, am.apiText == null ? "" : am.apiText,
                             am.toolHistory == null ? "" : am.toolHistory));
         } catch (Exception e) {
