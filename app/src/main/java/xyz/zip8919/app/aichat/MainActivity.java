@@ -459,8 +459,13 @@ public class MainActivity extends Activity {
     }
 
     /** 生成中且输入框为空：此时按钮是「停止」。 */
+    /** 有文字或有附件都能发：只挂一个文件问「这段报错什么意思」是常见用法。 */
+    private boolean canSend() {
+        return hasInputText() || !pendingAttachments.isEmpty();
+    }
+
     private boolean isStopState() {
-        return isRequestInProgress.get() && !hasInputText();
+        return isRequestInProgress.get() && !canSend();
     }
 
     private boolean hasInputText() {
@@ -483,12 +488,13 @@ public class MainActivity extends Activity {
             return;
         }
         boolean hasText = hasInputText();
-        boolean stopping = isRequestInProgress.get() && !hasText;
+        boolean hasAttachment = !pendingAttachments.isEmpty();
+        boolean stopping = isRequestInProgress.get() && !canSend();
         sendButton.setImageResource(stopping ? R.drawable.ic_stop : R.drawable.ic_send);
         sendButton.setContentDescription(getString(
                 stopping ? R.string.stop_generating : R.string.send));
-        // 空闲且一个字都没输入时禁用，避免「点了没反应」的困惑
-        sendButton.setEnabled(stopping || hasText);
+        // 空闲且既没输入也没附件时禁用，避免「点了没反应」的困惑
+        sendButton.setEnabled(stopping || canSend());
         if (expandButton != null) {
             expandButton.setVisibility(hasText ? View.VISIBLE : View.GONE);
         }
@@ -626,6 +632,8 @@ public class MainActivity extends Activity {
         attachmentBar.removeAllViews();
         boolean empty = pendingAttachments.isEmpty();
         attachmentScroll.setVisibility(empty ? View.GONE : View.VISIBLE);
+        // 附件也是发送条件之一：加/删之后按钮的可用状态要立刻跟上
+        refreshSendButton();
         if (empty) return;
 
         int pad10 = dp(10);
