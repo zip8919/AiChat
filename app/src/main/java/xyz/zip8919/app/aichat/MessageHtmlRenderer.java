@@ -146,7 +146,10 @@ public class MessageHtmlRenderer {
                (canResume
                    ? "<button class=\"err-btn retry\" onclick=\"if(window.Android)Android.retryFailedAssistant('"
                      + idx + "');event.stopPropagation();return false;\">从出错处重试</button>"
-                   : "") +
+                   // 没有工具历史（手动中断、首轮就断）：给一个重新回复入口，
+                   // 否则这条消息只能看不能动
+                   : "<button class=\"err-btn retry\" onclick=\"if(window.Android)Android.retryInterrupted('"
+                     + idx + "');event.stopPropagation();return false;\">重新回复</button>") +
                "</div></div>";
     }
 
@@ -393,8 +396,11 @@ public class MessageHtmlRenderer {
         out.append("<div class=\"tool-card\" data-tool-key=\"")
            .append(Integer.toHexString(payload.hashCode())).append("\">");
         if (error.length() > 0) {
+            boolean isLimit = "limit".equals(tool);
             out.append("<div class=\"tool-card-head\">")
-               .append(isFetch ? "网页抓取失败" : (isTime ? "获取时间失败" : "搜索失败")).append("</div>")
+               .append(isLimit ? "工具调用已达上限"
+                       : (isFetch ? "网页抓取失败" : (isTime ? "获取时间失败" : "搜索失败")))
+               .append("</div>")
                .append("<div class=\"tool-error\">").append(esc(error)).append("</div>")
                .append("</div>");
             return out.toString();

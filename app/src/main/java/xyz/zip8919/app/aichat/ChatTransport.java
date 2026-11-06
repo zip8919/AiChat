@@ -68,8 +68,11 @@ final class ChatTransport {
         conn.setRequestProperty("Authorization", "Bearer " + provider.apiKey);
         conn.setDoOutput(true);
         conn.setConnectTimeout(30000);
-        // SSE 是长连接：读超时必须为 0，否则思考时间一长就被判超时
-        conn.setReadTimeout(0);
+        // 读超时不能为 0：SSE 本来就是长连接，但「一直等不到字节」和「正在思考」
+        // 必须能区分开。设为 0 时，NAT 静默丢连接或服务端卡死会让界面永远停在
+        // 「正在整理搜索结果」，只能手动打断。120s 内任何字节（含 keep-alive）
+        // 都会重置计时，正常思考不会误伤。
+        conn.setReadTimeout(120000);
         if (conn instanceof HttpsURLConnection) {
             TlsCompat.apply((HttpsURLConnection) conn);
         }

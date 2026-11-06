@@ -93,6 +93,12 @@ final class ToolExecutor {
                 // 超限也要回结果：配对不完整会让下一轮请求直接 400
                 ToolCalls.appendResult(conversation, toolHistory, id,
                         ToolCalls.limitNotice(maxPerRound));
+                // 同时要进 trace，否则界面上看不出「有个调用没执行」
+                String block = ToolCalls.limitTraceBlock(maxPerRound);
+                if (block.length() > 0) {
+                    trace.append(block);
+                    host.onTraceAppended(trace.toString());
+                }
                 skipped++;
                 LogUtil.w("ToolExecutor",
                         "tool %d/%d not executed: per-round limit %d reached (name=%s)",

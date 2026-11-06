@@ -378,11 +378,28 @@ final class RendererAssets {
             "var el=d.firstElementChild;" +
             "if(el){document.getElementById('msgs').appendChild(el);runScripts(el);}" +
             "addCopyBtns();applyToolStates(document);smartScrollToBottom();};" +
+            // 状态行挂在 .msg.ai 下、.content 之外。以前它被拼进 .content 的
+            // innerHTML，下一次 streamTail 重建容器时会被当作 base 的一部分留下，
+            // 表现为「一直卡在正在整理搜索结果」。
+            "window.__lastAi=function(){var a=document.querySelectorAll('.msg.ai');" +
+            "return a.length?a[a.length-1]:null;};" +
+            "window.setStatus=function(text){" +
+            "var m=window.__lastAi();if(!m)return;" +
+            "var s=m.querySelector('.tool-status');" +
+            "if(!s){s=document.createElement('div');s.className='tool-status';" +
+            "var c=m.querySelector('.content');" +
+            "if(c&&c.nextSibling)m.insertBefore(s,c.nextSibling);else m.appendChild(s);}" +
+            "s.textContent=text;smartScrollToBottom();};" +
+            "window.clearStatus=function(){" +
+            "var m=window.__lastAi();if(!m)return;" +
+            "var s=m.querySelector('.tool-status');" +
+            "if(s&&s.parentNode)s.parentNode.removeChild(s);};" +
             "window.updateLastMsg=function(html){" +
             "var ms=document.querySelectorAll('.msg.ai .content');" +
             "if(ms.length>0){ms[ms.length-1].className='content';" +
             "ms[ms.length-1].innerHTML=html;" +
             "applyToolStates(ms[ms.length-1]);}" +
+            "clearStatus();" +
             "addCopyBtns();smartScrollToBottom();};" +
             // 流式输出拆成两段：base（已完成的思考/工具卡片）+ tail（本轮增量）。
             // 以前每个分片都整体重设 .content，工具轮次结束后上面的卡片和已渲染好的
@@ -399,7 +416,7 @@ final class RendererAssets {
             "c.innerHTML='<div class=\"stream-base\"></div><div class=\"stream-tail\"></div>';" +
             "b=c.querySelector('.stream-base');t=c.querySelector('.stream-tail');" +
             "if(keepTail)t.innerHTML=keepTail;}" +
-            "b.innerHTML=html;applyToolStates(b);addCopyBtns(b);};" +
+            "b.innerHTML=html;applyToolStates(b);addCopyBtns(b);clearStatus();};" +
             "window.streamTailHtml=function(html){" +
             "var ms=document.querySelectorAll('.msg.ai .content');" +
             "if(ms.length===0)return;" +
@@ -409,7 +426,7 @@ final class RendererAssets {
             "c.querySelector('.stream-base').innerHTML=keep;" +
             "t=c.querySelector('.stream-tail');}" +
             "t.className='stream-tail';t.innerHTML=html;" +
-            "addCopyBtns(t);smartScrollToBottom();};" +
+            "clearStatus();addCopyBtns(t);smartScrollToBottom();};" +
             "window.streamTailText=function(text){" +
             "var ms=document.querySelectorAll('.msg.ai .content');" +
             "if(ms.length===0)return;" +
@@ -419,7 +436,7 @@ final class RendererAssets {
             "c.querySelector('.stream-base').innerHTML=keep;" +
             "t=c.querySelector('.stream-tail');}" +
             "t.className='stream-tail plain';t.textContent=text;" +
-            "smartScrollToBottom();};" +
+            "clearStatus();smartScrollToBottom();};" +
             // 写入失败卡片（工具轮次中途失败时挂在 AI 气泡下方，支持从出错处重试）
             "window.markAssistantFailed=function(idx,cardHtml){" +
             "var all=document.querySelectorAll('.msg.ai');" +
@@ -463,7 +480,7 @@ final class RendererAssets {
             "var isAi=all[i].className.indexOf('msg ai')>=0;" +
             "if(isAi){var c=all[i].querySelector('.content');if(c){c.className='content';c.innerHTML=html;runScripts(c);}}" +
             "else{var b=all[i].querySelector('.bubble');if(b){b.innerHTML=html;runScripts(b);}}" +
-            "addCopyBtns();return;}}};" +
+            "clearStatus();addCopyBtns();return;}}};" +
             "window.reindexFrom=function(start){" +
             "var all=document.querySelectorAll('.msg');" +
             "for(var i=0;i<all.length;i++){" +

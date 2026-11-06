@@ -123,9 +123,13 @@ final class StreamRenderer {
         // 只把本轮增量转成纯文本；整段转会把前面的工具卡片、思考块、markdown 全抹掉
         final String tailPlain = TextKit.plainForStream(roundNow);
         final boolean baseChanged = !baseNow.equals(baseRendered);
+        final int mySeq = ui.nextSeq();
         if (!baseChanged) {
             ui.runOnUi(new Runnable() {
                 public void run() {
+                    // 序号守卫：renderTraceAsync 刚把工具卡片渲染上去时，这个 tick
+                    // 的 baseNow 还是旧的，写入会把卡片和正文一起打回纯文本
+                    if (ui.currentSeq() != mySeq) return;
                     if (!ui.isCurrent(generation)) return;
                     ui.setContent(aiIndex, baseNow + roundNow);
                     ui.evalJsHtml("streamTailText", tailPlain);
@@ -141,6 +145,7 @@ final class StreamRenderer {
                 ui.runOnUi(new Runnable() {
                     public void run() {
                         inFlight.set(false);
+                        if (ui.currentSeq() != mySeq) return;
                         if (!ui.isCurrent(generation)) return;
                         baseRendered = baseNow;
                         ui.setContent(aiIndex, baseNow + roundNow);

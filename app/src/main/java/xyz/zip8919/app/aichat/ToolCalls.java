@@ -84,7 +84,7 @@ final class ToolCalls {
      * 供后续轮次回放以及「从出错处重试」使用。
      */
     static void appendAssistant(JSONArray conversation, JSONArray mirror, String content,
-            JSONArray calls) throws Exception {
+            JSONArray calls, String reasoning) throws Exception {
         JSONArray payload = new JSONArray();
         for (int i = 0; i < calls.length(); i++) {
             JSONObject tc = calls.getJSONObject(i);
@@ -112,6 +112,13 @@ final class ToolCalls {
         JSONObject assistant = new JSONObject();
         assistant.put("role", "assistant");
         assistant.put("content", content == null || content.length() == 0 ? JSONObject.NULL : content);
+        // DeepSeek thinking 模式的硬要求：带 tool_calls 的 assistant 消息必须把
+        // 该轮的 reasoning_content 原样传回，否则下一轮直接 400
+        // （The `reasoning_content` in the thinking mode must be passed back to the API）。
+        // 只在非空时写：普通模型不接受这个字段，传空串也会被某些端点判为非法。
+        if (reasoning != null && reasoning.length() > 0) {
+            assistant.put("reasoning_content", reasoning);
+        }
         assistant.put("tool_calls", payload);
         conversation.put(assistant);
         if (mirror != null) mirror.put(assistant);
@@ -137,6 +144,21 @@ final class ToolCalls {
             return json.toString();
         } catch (Exception e) {
             return "{\"error\":\"每轮工具调用已超上限，本次调用未执行\"}";
+        }
+    }
+
+    /**
+     * 超限未执行时追加到 trace 的卡片。只写 conversation 不写 trace 的话，
+     * 界面上完全看不出「还有个调用没跑」，用户会以为模型自己漏了一步。
+     */
+    static String limitTraceBlock(int maxPerRound) {
+        try {
+            JSONObject display = new JSONObject();
+            display.put("tool", "limit");
+            display.put("error", "本轮工具调用已达上限（" + maxPerRound + "），这条调用未执行");
+            return WebSearchTool.TRACE_START + display.toString() + WebSearchTool.TRACE_END;
+        } catch (Exception e) {
+            return "";
         }
     }
 

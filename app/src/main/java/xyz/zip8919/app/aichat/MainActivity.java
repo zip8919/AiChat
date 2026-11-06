@@ -107,6 +107,8 @@ public class MainActivity extends Activity {
 
     private String currentModel;
     private String systemPrompt;
+    /** 上次手动选择的模型，Activity 重建后用它恢复，而不是回落到默认模型。 */
+    private static final String KEY_SELECTED_MODEL = "selected_model";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -416,6 +418,14 @@ public class MainActivity extends Activity {
 
     private void refreshModelSpinner() {
         LogUtil.d(TAG, "refreshModelSpinner");
+        // 内存字段在 Activity 重建 / 进程被回收后为空，先读持久化值。
+        // 老设备关屏再亮屏很容易触发重建，只靠字段就会「切回默认模型」。
+        if (currentModel == null && prefs != null) {
+            currentModel = prefs.getString(KEY_SELECTED_MODEL, null);
+            if (currentModel != null) {
+                LogUtil.d(TAG, "restored selected model from prefs: %s", currentModel);
+            }
+        }
         availableModels = configManager.getModels();
         List<String> names = new ArrayList<String>();
         for (ModelInfo m : availableModels) {
@@ -476,6 +486,9 @@ public class MainActivity extends Activity {
         ProviderInfo provider = configManager.getProvider(model.provider);
         if (provider != null) {
             currentModel = model.name;
+            if (prefs != null) {
+                prefs.edit().putString(KEY_SELECTED_MODEL, currentModel).apply();
+            }
             LogUtil.i(TAG, "selectModel: pos=%d model=%s provider=%s url=%s keyLen=%d",
                     pos, model.name, provider.name, provider.apiUrl,
                     provider.apiKey == null ? 0 : provider.apiKey.length());
@@ -536,6 +549,7 @@ public class MainActivity extends Activity {
                 if (!messages.isEmpty()) {
                     Message lastMsg = messages.get(messages.size() - 1);
                     if (lastMsg.isAssistant()) {
+                        final int lastIdx = messages.size() - 1;
                         String content = lastMsg.content;
                         if (content == null || content.isEmpty()) {
                             LogUtil.d(TAG, "interrupt: removing empty AI placeholder, size=%d", messages.size());
@@ -544,6 +558,16 @@ public class MainActivity extends Activity {
                             // finalizeLast 被代数守卫跳过时占位 div 的 data-idx 仍为 -1，
                             // removeRangeFrom(idx>=0) 删不掉它，这里补删未定稿的占位 div
                             removeUnfinalizedAiDiv();
+                            // 一个字都没生成：重试入口挂到用户消息上，否则没有任何可点的东西
+                            int userIdx = lastUserIndexBefore(messages.size());
+                            if (userIdx >= 0) {
+                                Message um = messages.get(userIdx);
+                                um.sendFailed = true;
+                                um.errorDetail = "本次回复已被手动中断。";
+                                String card = MessageHtmlRenderer.renderErrorCard(um, userIdx);
+                                webViewEvalJs("markUserFailed(" + userIdx + ",'" + jsEscape(card) + "')");
+                                conversationManager.saveCurrentConversation();
+                            }
                         } else {
                             // 思考阶段被打断时要补 [/thinking] 收尾，否则未闭合内容
                             // 会被 removeThinkingContent 整段剥离，模型像没收到过该回复
@@ -551,8 +575,14 @@ public class MainActivity extends Activity {
                                 content = content + "[/thinking]";
                             }
                             lastMsg.content = content + " (已打断)";
+                            // 中断也是一种「未完成」：给这条消息挂上重试入口，
+                            // 否则用户只能重新打字，已生成的内容无法续上
+                            lastMsg.sendFailed = true;
+                            lastMsg.errorDetail = "本次回复已被手动中断。";
                             LogUtil.d(TAG, "interrupt: marking AI msg as interrupted, len=%d", content.length());
                             updateAiContent(lastMsg.content);
+                            attachInterruptRetry(lastIdx);
+                            conversationManager.saveCurrentConversation();
                         }
                     } else {
                         LogUtil.d(TAG, "interrupt: last message is not assistant, nothing to mark");
@@ -560,6 +590,21 @@ public class MainActivity extends Activity {
                 }
             }
         });
+    }
+
+    /**
+     * 中断后给 AI 消息挂错误卡片。不走 {@code markAssistantFailed}：那个方法有
+     * 请求代数守卫，而中断本身已经把代数自增了。
+     */
+    private void attachInterruptRetry(final int aiIndex) {
+        if (aiIndex < 0 || aiIndex >= messages.size()) return;
+        Message am = messages.get(aiIndex);
+        if (am == null || !am.isAssistant()) return;
+        webViewEvalJs("finalizeLast(" + aiIndex + ")");
+        String card = MessageHtmlRenderer.renderAssistantErrorCard(am, aiIndex);
+        if (card.length() > 0) {
+            webViewEvalJs("markAssistantFailed(" + aiIndex + ",'" + jsEscape(card) + "')");
+        }
     }
 
     private void openSettings() {
@@ -1206,8 +1251,7 @@ public class MainActivity extends Activity {
         final boolean transientStatus = status != null;
         new Thread(new Runnable() {
             public void run() {
-                final String html = MessageHtmlRenderer.contentToHtml(snapshot, MainActivity.this)
-                        + (status == null ? "" : statusHtml(status));
+                final String html = MessageHtmlRenderer.contentToHtml(snapshot, MainActivity.this);
                 runOnUiThread(new Runnable() {
                     public void run() {
                         if (requestGeneration.get() != generation) return;
@@ -1226,14 +1270,15 @@ public class MainActivity extends Activity {
                             messages.get(aiIndex).content = snapshot;
                         }
                         webViewEvalJs("updateLastMsg('" + jsEscape(html) + "')");
+                        // 状态行是独立节点，不参与正文替换：既不会被下一次
+                        // streamTail 吞进 base，也不会因为内容变长而被误判为旧快照
+                        if (status != null) {
+                            webViewEvalJs("setStatus('" + jsEscape(status) + "')");
+                        }
                     }
                 });
             }
         }).start();
-    }
-
-    private static String statusHtml(String status) {
-        return "<div class=\"tool-status\">" + MessageHtmlRenderer.esc(status) + "</div>";
     }
 
     // ========== WebView helpers ==========
@@ -1506,6 +1551,34 @@ public class MainActivity extends Activity {
                         }
                     } catch (Exception e) {
                         LogUtil.w(TAG, "retryFailedUserMessage failed: %s", e.getMessage());
+                    }
+                }
+            });
+        }
+
+        /** 手动中断、且没有工具历史的 AI 消息：删掉它，从对应的用户消息重新回复。 */
+        @JavascriptInterface
+        public void retryInterrupted(final String idx) {
+            LogUtil.d(TAG, "JsBridge.retryInterrupted: idx=%s", idx);
+            handler.post(new Runnable() {
+                public void run() {
+                    try {
+                        int pos = Integer.parseInt(idx);
+                        if (pos < 0 || pos >= messages.size()) return;
+                        Message m = messages.get(pos);
+                        if (m == null || !m.isAssistant()) return;
+                        if (isRequestInProgress.get()) {
+                            Toast.makeText(MainActivity.this, "当前回复仍在进行，请先停止", Toast.LENGTH_SHORT).show();
+                            return;
+                        }
+                        int userIdx = lastUserIndexBefore(pos);
+                        if (userIdx < 0) {
+                            LogUtil.w(TAG, "retryInterrupted: no user message before %d", pos);
+                            return;
+                        }
+                        resendUserAt(userIdx);
+                    } catch (Exception e) {
+                        LogUtil.w(TAG, "retryInterrupted failed: %s", e.getMessage());
                     }
                 }
             });

@@ -30,6 +30,12 @@ final class SseRound {
     static final class Result {
         final StringBuilder display = new StringBuilder();
         final StringBuilder content = new StringBuilder();
+        /**
+         * 纯推理文本（不含 [thinking] 标记）。
+         * DeepSeek thinking 模式要求 assistant(tool_calls) 把这一轮的 reasoning_content
+         * 原样传回，否则后续轮次直接 400；展示用的 display 带标记，不能拿来回传。
+         */
+        final StringBuilder reasoning = new StringBuilder();
         final JSONArray toolCalls = new JSONArray();
         int chunks;
         int thinkingChunks;
@@ -89,6 +95,7 @@ final class SseRound {
         if (reasoning.length() > 0) {
             r.display.append("[thinking]").append(reasoning).append("[/thinking]");
             r.thinkingChunks++;
+            r.reasoning.append(reasoning);
         }
         String content = message.has("content") && !message.isNull("content")
                 ? message.optString("content", "") : "";
@@ -159,6 +166,7 @@ final class SseRound {
                             LogUtil.d(TAG, "thinking phase START at chunk#%d", r.chunks);
                         }
                         r.display.append(rc);
+                        r.reasoning.append(rc);
                         if (LogUtil.ENABLED) {
                             LogUtil.v(TAG, "reasoning chunk#%d: %s",
                                     r.thinkingChunks, LogUtil.preview(rc, 150));

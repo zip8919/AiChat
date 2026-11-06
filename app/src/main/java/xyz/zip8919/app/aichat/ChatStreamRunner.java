@@ -189,6 +189,9 @@ final class ChatStreamRunner {
                 st.chunks = rr.chunks;
                 if (rr.error != null) {
                     st.failed = true;
+                    // 本轮流式已经吐出来的内容不能丢：错误卡片要挂在这段内容之下，
+                    // 否则用户看到的是「回答突然没了，只剩一张报错卡」
+                    st.trace.append(rr.display);
                     st.errorDetail = ErrorReport.build(job.providerName, job.modelName,
                             job.chatEndpoint, round, rr.httpCode, rr.rawBody, rr.cause);
                     ui.toast(rr.error);
@@ -205,7 +208,7 @@ final class ChatStreamRunner {
                     // 注意：不把 rr.content 累进 apiText——工具轮次的正文已经作为
                     // assistant(tool_calls).content 存在于 toolHistory 里，再拼一次会让模型看到重复内容
                     ToolCalls.appendAssistant(conversation, st.toolHistory,
-                            rr.content.toString(), rr.toolCalls);
+                            rr.content.toString(), rr.toolCalls, rr.reasoning.toString());
                     ToolExecutor.Outcome outcome = ToolExecutor.run(rr.toolCalls,
                             job.maxCallsPerRound, conversation, st.toolHistory, st.trace,
                             st.sources, job.question, toolHost);
