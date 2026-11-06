@@ -1,6 +1,8 @@
 # AiChat
 
-Android 词典笔 AI 对话应用（版本 1.7.1，minSdk 18 / targetSdk 18，真机 Android 4.4.2 / API 19）。基于 WebView + HTML/CSS 渲染 Markdown/LaTeX，通过任意 OpenAI 兼容端点调用大模型，内置 DeepSeek（不含 API Key）与商汤日日新 默认配置，默认模型 `deepseek-v4-flash`（商汤日日新）。
+Android 词典笔 AI 对话应用（版本 1.7.4，minSdk 18 / targetSdk 18，真机 Android 4.4.2 / API 19）。基于 WebView + HTML/CSS 渲染 Markdown/LaTeX，通过任意 OpenAI 兼容端点调用大模型，内置 DeepSeek（不含 API Key）与商汤日日新 默认配置，默认模型 `deepseek-v4-flash`（商汤日日新）。
+
+> 改代码前先看 [ARCHITECTURE.md](ARCHITECTURE.md)：请求链路图、类职责边界、并发约定、「想改 X 去哪」对照表。
 
 ## 功能
 
@@ -102,7 +104,7 @@ Tavily 的密钥在应用内「设置 → Tavily API Key」填写，仅保存在
 - 纯 Android Framework（Activity、WebView、HttpURLConnection），零第三方 HTTP/图片加载库
 - 依赖（`app/build.gradle:53-57`）：conscrypt-android 2.5.2、jlatexmath-android 0.2.0、commonmark 0.21.0 + GFM strikethrough/tables 扩展
 - Markdown 解析：commonmark-java + GFM 扩展；LaTeX：jlatexmath-android
-- 联网搜索：OpenAI `tool_calls` + DeepSeek Search/Fetch API；流式与非流式响应均支持，工具轮次上限 3 轮
+- 联网搜索：OpenAI `tool_calls` + DeepSeek Search/Fetch 或 Tavily；流式与非流式响应均支持；工具轮次不设上限，单轮调用数可配置（默认 15，范围 1-50）
 - 编译：compileSdk 34，Java 8，minSdk/targetSdk 18；用 `splits.abi` 按 ABI 分包（armeabi-v7a / arm64-v8a / x86 / x86_64 + universal 通用包），每个包只带对应 ABI 的 `libconscrypt_jni.so`
 - **TLS / 网络安全**：`TlsCompat.java` 安装 Conscrypt 提供 AES-GCM 等现代套件（兼容 Android 4.4 老设备），启用平台支持的全部协议与套件（仅移除 SSLv3/SSLv2Hello）。**注意：当前实现信任所有证书（trust-all），且主机名校验恒返回 true——不校验任何证书与主机名，存在中间人攻击风险**，请勿在不信任的网络中使用
 
@@ -110,33 +112,61 @@ Tavily 的密钥在应用内「设置 → Tavily API Key」填写，仅保存在
 
 ```
 ├── app/
-│   ├── build.gradle                # 构建配置：versionName 1.7.1 / versionCode 27 / compileSdk 34
+│   ├── build.gradle                # versionName 1.7.4 / versionCode 30 / compileSdk 34
 │   ├── keystore/mc.jks             # 签名密钥库
 │   └── src/main/
 │       ├── AndroidManifest.xml     # 包名 xyz.zip8919.app.aichat，6 个 Activity
 │       ├── java/xyz/zip8919/app/aichat/
-│       │   ├── MainActivity.java        # 主界面：聊天、队列、消息操作、代码查看器、快速搜题、JsBridge
-│       │   ├── ApiClient.java           # HTTP/SSE 请求：流式解析、thinking 处理、余额查询
-│       │   ├── WebSearchTool.java       # 联网工具：DeepSeek Search/Fetch API、工具定义与结果整理
-│       │   ├── TlsCompat.java           # 老设备 TLS 兼容层：安装 Conscrypt、协议/套件全开、trust-all
-│       │   ├── MessageHtmlRenderer.java # Markdown → HTML/CSS 渲染器（思考折叠、代码高亮、JsBridge）
-│       │   ├── CodeHighlighter.java     # 代码语法高亮（约 20 种语言 token 规则）
-│       │   ├── ConfigManager.java       # 提供商/模型/思考等级配置读写
-│       │   ├── ConversationManager.java # 会话索引持久化与标题规范化（自动标题逻辑在 MainActivity）
-│       │   ├── Conversation.java        # 会话数据模型
-│       │   ├── Message.java             # 消息数据模型
-│       │   ├── ProviderInfo.java        # 提供商数据模型（API URL/Path/Key/thinking 类型）
-│       │   ├── ModelInfo.java           # 模型数据模型
-│       │   ├── StorageManager.java      # 存储路径探测、会话/配置/exports 读写
-│       │   ├── SettingsActivity.java    # 设置页：开关、预设、余额查询
-│       │   ├── ModelConfigActivity.java # 模型配置页：提供商/模型增删改
-│       │   ├── ConversationManagerActivity.java # 历史列表：重命名/清空/多选批量删除
-│       │   ├── ToolsActivity.java       # 小工具页：已保存代码管理 + JS 运行器入口
-│       │   ├── JsRunnerActivity.java    # JS 运行器：WebView 执行 JS/HTML/SVG、输出/保存
-│       │   ├── ScanActivity.java        # 扫描识别页：调系统 OCR、摘抄记录
-│       │   ├── LogUtil.java             # 统一日志工具（AiChat/* 前缀，可开关）
-│       │   └── ConversationAdapter.java # 历史列表适配器
+│       │   ├── MainActivity.java            # 主界面：视图装配、事件分发、会话状态
+│       │   │
+│       │   ├── 【请求链路】
+│       │   ├── ChatStreamRunner.java        # 一次回复的编排：轮次循环、失败分类、收尾
+│       │   ├── StreamJob.java               # 请求参数快照（构造后不可变）
+│       │   ├── SseRound.java                # 单轮 SSE / 非流式响应解析
+│       │   ├── ChatTransport.java           # 请求体、连接、错误体
+│       │   ├── ToolExecutor.java            # 一批 tool_calls 的执行与配对
+│       │   ├── ChatHistory.java             # 历史压缩、工具回放、配对校验
+│       │   ├── ToolCalls.java               # tool_calls 规范化与累积
+│       │   ├── StreamRenderer.java          # 流式节流渲染（base / tail 分离）
+│       │   ├── WebSearchTool.java           # 联网工具：搜索、抓取、工具定义、结果整理
+│       │   ├── TavilyTool.java              # Tavily 搜索 / 抓取后端
+│       │   ├── ErrorReport.java             # 错误详情归类
+│       │   ├── ApiClient.java               # 非流式调用：标题生成、余额查询
+│       │   │
+│       │   ├── 【渲染】
+│       │   ├── MessageHtmlRenderer.java     # 一条消息 → HTML（思考块、工具卡、来源、错误卡）
+│       │   ├── MarkdownPipeline.java        # markdown 流水线：代码/SVG 屏蔽 → 公式 → 解析 → 回填
+│       │   ├── MathRenderer.java            # LaTeX / \ce / 裸命令 → 位图
+│       │   ├── RendererAssets.java          # 页面 CSS 与 JS
+│       │   ├── CodeHighlighter.java         # 约 20 种语言的 token 规则
+│       │   ├── Html.java                    # HTML 转义
+│       │   ├── TextKit.java                 # 流式纯文本、标题截断
+│       │   │
+│       │   ├── 【界面与交互】
+│       │   ├── ViewerController.java        # 图片 / 表格 / HTML·SVG 全屏预览
+│       │   ├── MessageQueue.java            # 排队发送：上移、下移、插队
+│       │   ├── TitleGenerator.java          # 兜底标题与自动标题
+│       │   ├── ExportHelper.java            # 代码导出：语言 → 扩展名
+│       │   ├── SettingsActivity.java        # 设置页：开关、预设、余额查询
+│       │   ├── ModelConfigActivity.java     # 提供商 / 模型增删改
+│       │   ├── ConversationManagerActivity.java # 历史列表：重命名、清空、批量删除
+│       │   ├── ConversationAdapter.java     # 历史列表适配器
+│       │   ├── ToolsActivity.java           # 小工具页：已保存代码 + JS 运行器入口
+│       │   ├── JsRunnerActivity.java        # JS 运行器
+│       │   ├── ScanActivity.java            # 扫描识别页
+│       │   │
+│       │   ├── 【数据与平台】
+│       │   ├── ConfigManager.java           # 提供商 / 模型 / 思考等级
+│       │   ├── ConversationManager.java     # 会话持久化（异步写盘队列）
+│       │   ├── Conversation.java            # 会话模型
+│       │   ├── Message.java                 # 消息模型（含 apiText / toolHistory / sources）
+│       │   ├── ProviderInfo.java            # 提供商模型
+│       │   ├── ModelInfo.java               # 模型模型
+│       │   ├── StorageManager.java          # 存储路径探测与读写
+│       │   ├── LogUtil.java                 # 统一日志（可开关）
+│       │   └── TlsCompat.java               # 老设备 TLS 兼容（trust-all，见下方警告）
 │       └── res/
+├── ARCHITECTURE.md                      # 架构说明：请求链路、类职责、并发约定、改动指引
 ├── build.bat / build.ps1 / build.sh     # 构建脚本
 ├── gradlew / gradlew.bat / gradle/      # Gradle Wrapper
 ├── settings.gradle
