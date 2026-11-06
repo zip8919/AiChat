@@ -465,9 +465,9 @@ final class ChatStreamRunner {
 
         public String imageDataUri(String url) {
             try {
-                // 注入走 detail=low，模型推理前反正缩到 512×512，
-                // 这里就按 512px 编码，再大也是被缩回去，白占请求体
-                return AttachmentFiles.remoteToDataUri(url, 512);
+                // 按 ImageTokens.apiSide 的像素预算编码（≤1302²）：模型最多用
+                // 1302² 的像素，再大也是被缩回去，白占请求体
+                return AttachmentFiles.remoteToDataUri(url, AttachmentFiles.API_BUDGET);
             } catch (Exception e) {
                 LogUtil.w("ChatStreamRunner", "imageDataUri failed: %s", e.getMessage());
                 return null;

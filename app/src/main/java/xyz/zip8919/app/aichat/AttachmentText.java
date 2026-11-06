@@ -116,9 +116,9 @@ final class AttachmentText {
          * 图片按 DeepSeek 官方图片 Token 计算器口径估算的 token。
          *
          * <p>这里不看「是否开着多模态」：卡片上显示的是「这张图一旦发出去要花多少」，
-         * 用户据此决定要不要开视觉开关、要不要先裁小。真正发给模型的尺寸可能更小
-         * （{@link AttachmentFiles#API_PX}），那是为了控制请求体，显示值取原图口径，
-         * 两处差一点比「显示一个偏小的数字、账单比预期高」好。
+         * 用户据此决定要不要开视觉开关、要不要先裁小。发图尺寸按
+         * {@link ImageTokens#apiSide} 的像素预算取档（≤1302²），预算内不缩放，
+         * 所以显示值就是端点的实际计费值。
          */
         int imageTokens() {
             if (imageTokensCache < 0) {

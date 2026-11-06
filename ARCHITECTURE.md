@@ -49,7 +49,7 @@
 | `MessageQueue` | 排队发送（每条带原话与附件快照） | 不知道消息内容怎么发 |
 | `AttachmentText` | 附件 → 给模型的正文、卡片摘要、老会话迁移；大小与 token 估算（图片走 `ImageTokens`） | 不读文件，不碰 UI |
 | `AttachmentFiles` | 图片：拷进私有目录（内容 SHA-1 命名）、URL/拍照导入、缩略图、API/view 两级 data URI | 不做文本解码 |
-| `ImageTokens` | 图片 token 估算（DeepSeek 官方计算器：544²~1300² 缩放、上限 1024、`H×(W+1)+2`） | 纯函数，不读文件 |
+| `ImageTokens` | 图片 token 估算（DeepSeek 官方计算器：544²~1300² 缩放、上限 1024、`H×(W+1)+2`）+ 发图像素预算 `apiSide`（1302²） | 纯函数，不读文件 |
 | `CropActivity` / `CropView` | 图片裁剪：框选手柄、旋转、输出到私有目录 | 不发网络请求，不进会话 |
 | `MarkdownPage` | .md 文件预览页（MarkdownPipeline 渲染 + 文档样式） | 不做源码高亮（那是 `SourcePage`） |
 | `FileKinds` | 扩展名 → 高亮语言 / 能否预览 / 能否运行 | 纯函数，可单测 |
@@ -200,7 +200,8 @@ rounds done: sources=5 apiText=842 toolHistory=4
     （升级迁移自动开，用户关掉后不再翻回）；附图发问——请求体是 `content` 数组
     （text + image_url data URI），模型能描述图片内容；取消勾选后回到纯文本路径（同 #37）
 39. **图片 token**：附一张 1024×1024 图，卡片显示 `~652 tokens`（DeepSeek 官方计算器值）；
-    `detail:"low"` 口径约 184；端点返回 `usage` 时以返回值为准、不带 `~`
+    发图尺寸与估算同用 1302² 像素预算，卡片值 = 端点实际计费值；
+    端点返回 `usage` 时以返回值为准、不带 `~`
 40. **md 预览**：附一个 `.md` → 右上角「预览」→ 渲染成排版文档，按钮变「源码」可切回；
     超 64K 的 md 只渲染前段
 41. **图片 URL 导入**：加号 → 从链接添加图片 → 输入 https 图片地址，成功后进裁剪页；
@@ -209,4 +210,4 @@ rounds done: sources=5 apiText=842 toolHistory=4
     选图文件同样先过裁剪页；取消裁剪不落任何附件
 43. **image_search**：问「搜几张橘猫的图」→ 出现图片网格卡片（缩略图 + 张数），
     点缩略图进图片查看器；视觉开启时追问「图里是什么」模型能答（注入生效，
-    只内嵌前 2 张且带 detail=low，约 184 token/张，其余图只留链接）
+    只内嵌前 2 张、原图口径每张最多约 994 token，其余图只留链接）

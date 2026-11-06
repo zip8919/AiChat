@@ -1,6 +1,6 @@
 # AiChat
 
-Android 词典笔 AI 对话应用（版本 1.10.1，minSdk 18 / targetSdk 18，真机 Android 4.4.2 / API 19）。基于 WebView + HTML/CSS 渲染 Markdown/LaTeX，通过任意 OpenAI 兼容端点调用大模型，内置 DeepSeek（不含 API Key）与商汤日日新 默认配置，默认模型 `deepseek-v4-flash`（商汤日日新）。
+Android 词典笔 AI 对话应用（版本 1.10.2，minSdk 18 / targetSdk 18，真机 Android 4.4.2 / API 19）。基于 WebView + HTML/CSS 渲染 Markdown/LaTeX，通过任意 OpenAI 兼容端点调用大模型，内置 DeepSeek（不含 API Key）与商汤日日新 默认配置，默认模型 `deepseek-v4-flash`（商汤日日新）。
 
 > 改代码前先看 [ARCHITECTURE.md](ARCHITECTURE.md)：请求链路图、类职责边界、并发约定、「想改 X 去哪」对照表。
 
@@ -17,8 +17,8 @@ Android 词典笔 AI 对话应用（版本 1.10.1，minSdk 18 / targetSdk 18，�
 - **本地时间工具** — `get_current_time` 读取设备当前日期、时间、星期与时区（含 ISO 8601 与时间戳），不联网、不需要任何 Key；即使关闭联网搜索也可用。涉及「今天/现在/星期几」等时间敏感问题时应先调用，避免模型凭训练数据猜日期
 - **联网搜索** — 设置页总开关（默认开启）；搜索服务可选 **Tavily（默认，免费，经自建网关）** 或 DeepSeek。AI 可通过 `web_search` 检索实时网页，通过 `image_search` **搜索图片**（结果以缩略图网格展示，点击进图片查看器看原图），通过 `web_fetch` 抓取网页正文；来源独立成可折叠来源区（按 URL 去重，最多 8 条），不写入正文、不进入后续请求；工具轮次不设上限，单轮工具调用数可配置（默认 15，范围 1-50），超出部分按未执行处理；搜索摘要单条限 1200 字符、单次合计限 6000 字符。总开关同时控制工具定义、搜索系统提示词和实际搜索/抓取请求。工具用途说明写在 `tools[].function.description` 里（协议自带字段），不再进 system prompt，每轮省约 200 token
 - **Request 工具** — `http_request` 让 AI 在本机发起 HTTP 请求直接调 API：支持 GET/POST/PUT/DELETE/PATCH/HEAD、自定义请求头、POST body、1-30 秒超时。**默认关闭**，设置页开启。三道安全边界：拒绝环回 / 私有网段 / 链路本地 / 唯一本地地址，禁止跟随 3xx（防公网跳内网），响应体截断 8KB
-- **多模态输入（看图）** — 模型配置里可勾选「支持图片输入（多模态）」（`supports_vision`）；**DeepSeek Flash 系列（`deepseek-flash` / `deepseek-v4-flash`）内置默认开启**，其余模型按需自行勾选。开启后用户消息带图片附件时，请求体按 OpenAI/DeepSeek 兼容格式装配 `content` 数组（`text` + `image_url` 的 data URI，Base64 内嵌，API 尺寸采样）；`image_search` 找到的图在视觉开启时也会注入下一轮，模型能直接「看到」图片内容。搜索图**只内嵌前 2 张**且带 `detail:"low"`（约 184 token/张），其余图只留链接不进图像通道。未开启时保持纯文本协议：图片只写一行说明不塞 Base64，绝不默默多花钱
-- **图片 token 估算** — 按 **DeepSeek 官方图片 Token 计算器**口径（进模型前缩放到约 544²~1300² 像素、每张上限 1024、patch 计数 `H×(W+1)+2`）：`detail:"low"` 先缩 512×512（约 184 token），原图口径最多 1024。附件卡片显示「大小 · 尺寸 · ~tokens」，实际计费以端点 `usage` 返回为准
+- **多模态输入（看图）** — 模型配置里可勾选「支持图片输入（多模态）」（`supports_vision`）；**DeepSeek Flash 系列（`deepseek-flash` / `deepseek-v4-flash`）内置默认开启**，其余模型按需自行勾选。开启后用户消息带图片附件时，请求体按 OpenAI/DeepSeek 兼容格式装配 `content` 数组（`text` + `image_url` 的 data URI，Base64 内嵌）；`image_search` 找到的图在视觉开启时也会注入下一轮，模型能直接「看到」图片内容。图片一律按**原图口径**（不传 `detail` 字段）发送，发图尺寸按模型像素预算（≤1302²）等比取档——预算外的像素端点本来就会缩掉，多发纯属浪费请求体。搜索图**只内嵌前 2 张**（每张最多约 994 token），其余图只留链接不进图像通道。未开启时保持纯文本协议：图片只写一行说明不塞 Base64，绝不默默多花钱
+- **图片 token 估算** — 按 **DeepSeek 官方图片 Token 计算器**口径（进模型前缩放到约 544²~1300² 像素、每张上限 1024、patch 计数 `H×(W+1)+2`）：原图口径每张 184~1024 token（满档约 994）。发图尺寸与估算同用一个像素预算（1302²），**卡片显示值就是端点的实际计费值**。附件卡片显示「大小 · 尺寸 · ~tokens」，端点返回 `usage` 时以返回值为准、不带 `~`
 - **Markdown 渲染** — WebView + HTML/CSS：标题、粗斜体、删除线、代码块（复制按钮 + 语法高亮）、表格（横向滑动 + 点击放大）、引用、列表、分割线、图片、链接；LaTeX 公式（`$...$`/`$$...$$`/`\(...\)`/`\[...\]`/裸 `\command`/化学式 `\ce{...}`）、脚注、高亮 `==text==`、上下标、内嵌 HTML/SVG 直通
 - **语法高亮** — 支持 Java、Python、JS/TS、Bash/sh/shell、JSON、C/C++、Go、Rust、Kotlin、Swift、C#、SQL、XML、HTML、SVG；未声明语言时按内容嗅探（HTML/SVG/XML 自动识别）
 - **代码查看器** — 所有代码块均可弹出全屏预览（任意语言），支持缩放/旋转/背景切换；代码块可导出保存到应用存储 exports 目录（按语言扩展名，覆盖 SVG/HTML 及各类代码）
@@ -124,7 +124,7 @@ Tavily 的密钥在应用内「设置 → Tavily API Key」填写，仅保存在
 
 ```
 ├── app/
-│   ├── build.gradle                # versionName 1.10.1 / versionCode 45 / compileSdk 34
+│   ├── build.gradle                # versionName 1.10.2 / versionCode 46 / compileSdk 34
 │   ├── keystore/mc.jks             # 签名密钥库
 │   └── src/main/
 │       ├── AndroidManifest.xml     # 包名 xyz.zip8919.app.aichat，10 个 Activity

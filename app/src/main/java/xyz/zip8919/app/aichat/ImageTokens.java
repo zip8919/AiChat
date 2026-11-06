@@ -10,14 +10,12 @@ package xyz.zip8919.app.aichat;
  * <ol>
  *   <li>进模型前自动缩放：总像素小于约 544×544 的等比放大；更大的等比缩小到约 1300×1300；</li>
  *   <li>每张图 token 上限 1024——2000×2000 与 5000×5000 缩放后消耗相同；</li>
- *   <li>{@code detail:low} 先缩到 512×512 再进模型（更快更省，约为原图口径的 1/5）；</li>
  *   <li>计费口径（v41 档）：patch 14px、3 倍下采样后按 patch 网格计数，
  *       {@code tokens = H×(W+1)+2}（H/W 为下采样后的 patch 数）。</li>
  * </ol>
  *
- * <p>为什么值得单独算：用户对「这张图贵不贵」没有直觉。一张手机原图估算约 1000 token
- * 到顶（1024 上限），搜索图用 low 只要约 184；不显示出来，用户会以为「贴张图不要钱」，
- * 直到账单出来。
+ * <p>为什么值得单独算：用户对「这张图贵不贵」没有直觉。一张图约 184~1024 token 到顶，
+ * 不显示出来，用户会以为「贴张图不要钱」，直接账单出来。
  *
  * <p>这里只做整数/浮点运算，不碰 Bitmap，所以能在 JVM 单测里把官方计算器的数值钉死。
  * 官方页自己也注明「此处为估算值，实际以接口返回的 usage 为准」。
@@ -36,26 +34,34 @@ final class ImageTokens {
     /** 最小像素数：544×544 = 295936。低于就等比放大到这个面积再计。 */
     static final int MIN_PIXELS = 544 * 544;
 
-    /** {@code detail:low} 的推理前缩放尺寸（官方文档：缩放到 512×512）。 */
-    static final int LOW_SIZE = 512;
+    /**
+     * 发图编码的最长边预算（像素预算 = {@code MAX_SIDE²}）：近方形最大 patch 网格
+     * 31×31（31×32+2 = 994 ≤ 1024，再大一格就超），31 网格 × 14px patch × 3 倍下采样 = 1302px。
+     * 按这个面积编码，端点不再缩，1024 token 的网格正好吃满。
+     */
+    static final int MAX_SIDE = PATCH * DOWNSAMPLE * 31;
 
     private ImageTokens() {
     }
 
-    /** 默认按 detail=original 估算——不声明 detail 时端点就是这个口径。 */
-    static int estimate(int width, int height) {
-        return estimate(width, height, true);
+    /**
+     * 发图编码侧的最长边：把 {@link #MAX_SIDE} 的像素预算等比折算到本图，不放大。
+     *
+     * <p>发这个尺寸，卡片上的估算值就是端点的实际计费值（差取整几个 token）；
+     * 比预算大纯属浪费请求体，比预算小则模型少看细节、估值还和账单对不上。
+     */
+    static int apiSide(int width, int height) {
+        if (width <= 0 || height <= 0) return 0;
+        long budget = (long) MAX_SIDE * MAX_SIDE;
+        long area = (long) width * height;
+        if (area <= budget) return Math.max(width, height);
+        double s = Math.sqrt((double) budget / (double) area);
+        return Math.max(1, (int) Math.ceil(Math.max(width, height) * s));
     }
 
-    /**
-     * @param detailHigh {@code false} 表示 {@code detail:"low"}：先缩到 512×512 再计
-     */
-    static int estimate(int width, int height, boolean detailHigh) {
+    /** 按 detail=original（不传 detail 字段）估算——本应用只用这一档。 */
+    static int estimate(int width, int height) {
         if (width <= 0 || height <= 0) return minTokens();
-        if (!detailHigh) {
-            width = LOW_SIZE;
-            height = LOW_SIZE;
-        }
         long w = width;
         long h = height;
         long[] r = resizeInner(w, h);

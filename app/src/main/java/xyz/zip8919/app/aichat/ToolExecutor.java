@@ -184,8 +184,8 @@ final class ToolExecutor {
      * <ul>
      *   <li>最多 {@value #MAX_INJECTED_IMAGES} 张——搜索结果里的其余图只留在工具结果的
      *       URL 列表里（纯文本，几乎不占 token），不进图像通道；</li>
-     *   <li>注入的图带 {@code detail:"low"}——DeepSeek 官方口径先缩到 512×512 再计 token
-     *       （约 184/张），而原图口径最多 1024/张；搜索图只为「看到是什么」，不值得用原图；</li>
+     *   <li>注入的图按 {@link ImageTokens#apiSide} 的像素预算编码（≤1302²），
+     *       每张最多约 994 token——预算外的像素端点也会缩掉，多发纯属浪费请求体；</li>
      *   <li>整轮只注入一次——模型有时会连搜三次，第二次再塞两张就是六张图；</li>
      *   <li>一张都下不下来就不注入，退回纯文本（模型至少还有链接与描述可用）。</li>
      * </ul>
@@ -228,9 +228,6 @@ final class ToolExecutor {
                 img.put("type", "image_url");
                 JSONObject u = new JSONObject();
                 u.put("url", uri);
-                // low：模型推理前缩到 512×512，token 约 184/张（原图口径最多 1024）。
-                // 非 DeepSeek 端点一般忽略这个字段，忽略时也只是按原图计，不会出错。
-                u.put("detail", "low");
                 img.put("image_url", u);
                 parts.put(img);
                 added++;

@@ -46,13 +46,11 @@ final class AttachmentFiles {
     private static final int VIEW_PX = 1600;
 
     /**
-     * 发给模型时的最长边。
-     *
-     * <p>不是「越大越准」：1024px 已经覆盖 768 的短边上限，再大也只会被端点缩回去，
-     * 白白让请求体多出几百 KB。1024 的 JPEG 约 120 KB，Base64 后 160 KB，
-     * 三张图也还在可接受的范围内。
+     * 发给模型的编码档位哨兵：{@code <= 0} 表示按 {@link ImageTokens#apiSide} 的像素预算
+     * （约 1302²，即模型 1024 token 网格的满档）等比取档。比预算再大也会被端点缩回去，
+     * 白白让请求体多出几百 KB；比预算小则模型少看细节、卡片估算还和账单对不上。
      */
-    static final int API_PX = 1024;
+    static final int API_BUDGET = 0;
 
     /** 单张网络图片的下载上限：和本地导入一致，防止一个链接把内存打爆。 */
     static final int MAX_REMOTE_BYTES = MAX_IMAGE_BYTES;
@@ -389,13 +387,13 @@ final class AttachmentFiles {
     }
 
     /**
-     * 多模态请求体用的 data URI：压到 {@link #API_PX}、JPEG 82。
+     * 多模态请求体用的 data URI：压到 {@link ImageTokens#apiSide} 的像素预算、JPEG 82。
      *
-     * <p>比查看器那份更小更省：这是发给模型的，1024px 已经覆盖视觉模型的
-     * 768 短边上限，再大纯属浪费流量。
+     * <p>比查看器那份更省：这是发给模型的，模型只用 1302² 以内的像素，
+     * 多发的像素纯属浪费流量。
      */
     static String apiDataUri(String path) {
-        return encodeToDataUri(path, API_PX, 82);
+        return encodeToDataUri(path, API_BUDGET, 82);
     }
 
     /**
@@ -415,11 +413,12 @@ final class AttachmentFiles {
             int h = bounds.outHeight;
             if (w <= 0 || h <= 0) throw new Exception("这个链接不是可识别的图片");
 
+            int target = maxSide > 0 ? maxSide : ImageTokens.apiSide(w, h);
             BitmapFactory.Options o = new BitmapFactory.Options();
-            o.inSampleSize = sampleSize(w, h, maxSide);
+            o.inSampleSize = sampleSize(w, h, target);
             bmp = BitmapFactory.decodeByteArray(data, 0, data.length, o);
             if (bmp == null) throw new Exception("图片解码失败");
-            String uri = compressToDataUri(bmp, maxSide, 82);
+            String uri = compressToDataUri(bmp, target, 82);
             if (uri == null) throw new Exception("图片编码失败");
             return uri;
         } finally {
@@ -441,11 +440,12 @@ final class AttachmentFiles {
             int h = bounds.outHeight;
             if (w <= 0 || h <= 0) return null;
 
+            int target = maxSide > 0 ? maxSide : ImageTokens.apiSide(w, h);
             BitmapFactory.Options o = new BitmapFactory.Options();
-            o.inSampleSize = sampleSize(w, h, maxSide);
+            o.inSampleSize = sampleSize(w, h, target);
             bmp = BitmapFactory.decodeFile(path, o);
             if (bmp == null) return null;
-            return compressToDataUri(bmp, maxSide, quality);
+            return compressToDataUri(bmp, target, quality);
         } catch (Throwable t) {
             LogUtil.w(TAG, "encodeToDataUri failed: %s", t.getMessage());
             return null;
