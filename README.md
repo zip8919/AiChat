@@ -1,6 +1,6 @@
 # AiChat
 
-Android 词典笔 AI 对话应用（版本 1.8.2，minSdk 18 / targetSdk 18，真机 Android 4.4.2 / API 19）。基于 WebView + HTML/CSS 渲染 Markdown/LaTeX，通过任意 OpenAI 兼容端点调用大模型，内置 DeepSeek（不含 API Key）与商汤日日新 默认配置，默认模型 `deepseek-v4-flash`（商汤日日新）。
+Android 词典笔 AI 对话应用（版本 1.8.3，minSdk 18 / targetSdk 18，真机 Android 4.4.2 / API 19）。基于 WebView + HTML/CSS 渲染 Markdown/LaTeX，通过任意 OpenAI 兼容端点调用大模型，内置 DeepSeek（不含 API Key）与商汤日日新 默认配置，默认模型 `deepseek-v4-flash`（商汤日日新）。
 
 > 改代码前先看 [ARCHITECTURE.md](ARCHITECTURE.md)：请求链路图、类职责边界、并发约定、「想改 X 去哪」对照表。
 
@@ -9,8 +9,8 @@ Android 词典笔 AI 对话应用（版本 1.8.2，minSdk 18 / targetSdk 18，�
 - **多模型 / 多提供商** — 模型配置页可增删提供商与模型，自定义 API URL、Chat Path、API Key；内置 DeepSeek、商汤日日新 及任意 OpenAI 兼容端点
 - **对话** — 流式输出（设置可开关）；回复进行中再发送自动排队，队列支持上移/下移/插队发送（打断当前回复）/删除；长按发送键打断当前请求，思考阶段打断自动补 `[/thinking]` 收尾；请求失败时在用户消息下方显示错误卡片，可查看详情、点击气泡立即重试；回复进行中重试会先确认打断
 - **输入区** — 发送键为纸飞机图标，生成中且输入框为空时变为方块「停止」图标；有文字（或挂了附件）时才可发送；有文字时右上出现四角图标，点开进入全屏编辑（完成回填、取消丢弃）；发送键左侧加号为附件菜单，当前支持「添加文本文件」
-- **附件** — 选中文件后**不往输入框里塞正文**，只在输入框上方显示一个可点掉的标签（两行：文件名 + 真实大小与 token 估算）。单文件上限 **10 MB**、最多 5 个、合计 20M 字符（约 40 MB 堆，老设备内存红线）、UTF-8 解码失败自动回退 GBK、超限报错不静默截断。正文在发送时才并入 `apiText` 并**随请求体发给模型**，气泡里只显示「[附件] name（大小 · ~tokens）」，历史回放与重试都走完整正文
-- **消息元信息** — 每条消息底部显示时间（当天 `HH:mm`，跨天 `MM-dd HH:mm`）；AI 消息另显示 token 用量与生成速度（tok/s）；用户消息 token 为字符估算值，以 `~` 前缀标注。端点不支持 `stream_options.include_usage` 时自动降级并记住，后续请求不再携带该字段
+- **附件** — 选中文件后**不往输入框里塞正文**，只在输入框上方显示一个可点掉的标签（两行：文件名 + 真实大小与 token 估算）。单文件上限 **10 MB**、最多 5 个、合计 20M 字符（约 40 MB 堆，老设备内存红线）、UTF-8 解码失败自动回退 GBK、超限报错不静默截断。正文随消息存进 `Message.attachments` 并**随请求体发给模型**；气泡下方独立渲染附件卡片（文件名 + 大小 · ~tokens），不混进正文，改消息、复制、重试都不会把附件弄丢；历史回放与重试都走完整正文，1.8.2 及以前的老会话读入时自动迁移成同样的结构
+- **消息元信息** — 每条消息底部显示时间（当天 `HH:mm`，跨天 `MM-dd HH:mm`）；AI 消息另显示 token 用量与生成速度（tok/s）；用户消息 token 为本地估算值（中文约 0.6 token/字、英文与符号约 0.3 token/字符，按厂商文档系数），以 `~` 前缀标注；端点返回 `usage` 时一律以返回值为准。端点不支持 `stream_options.include_usage` 时自动降级并记住，后续请求不再携带该字段
 - **429 自动重试** — 仅对 429 生效（5xx / 408 / 超时不重试，避免重复计费）；等待期间对话区显示倒计时卡片，右侧「立即重试」可跳过剩余等待；设置页可配重试次数（1-20）、基础间隔、最大等待与指数退避；优先采用服务端 `Retry-After`（支持秒数与 HTTP-date）；等待过程可被「停止」立即打断
 - **思考模式** — 关闭/低/中/高四档，思考内容可折叠/展开，标题显示本次思考的 token 估算（与消息底部的 token 单位一致）
 - **本地时间工具** — `get_current_time` 读取设备当前日期、时间、星期与时区（含 ISO 8601 与时间戳），不联网、不需要任何 Key；即使关闭联网搜索也可用。涉及「今天/现在/星期几」等时间敏感问题时应先调用，避免模型凭训练数据猜日期
@@ -121,7 +121,7 @@ Tavily 的密钥在应用内「设置 → Tavily API Key」填写，仅保存在
 
 ```
 ├── app/
-│   ├── build.gradle                # versionName 1.8.2 / versionCode 40 / compileSdk 34
+│   ├── build.gradle                # versionName 1.8.3 / versionCode 41 / compileSdk 34
 │   ├── keystore/mc.jks             # 签名密钥库
 │   └── src/main/
 │       ├── AndroidManifest.xml     # 包名 xyz.zip8919.app.aichat，9 个 Activity
@@ -160,7 +160,7 @@ Tavily 的密钥在应用内「设置 → Tavily API Key」填写，仅保存在
 │       │   ├── FullscreenInputActivity.java # 全屏输入页（取消丢弃 / 完成回填）
 │       │   ├── AboutActivity.java           # 关于页：版本、检查更新、反馈、开源许可
 │       │   ├── MessageQueue.java            # 排队发送：上移、下移、插队
-│       │   ├── AttachmentText.java          # 附件两套文本：给模型的正文 / 给人的摘要
+│       │   ├── AttachmentText.java          # 附件：给模型的正文、卡片摘要、老会话迁移
 │       │   ├── NetSecurity.java             # 内网访问与证书校验的进程内开关（默认严格）
 │       │   ├── HelpText.java                # 使用说明与免责声明（首启与关于页共用）
 │       │   ├── TitleGenerator.java          # 兜底标题与自动标题
@@ -177,7 +177,7 @@ Tavily 的密钥在应用内「设置 → Tavily API Key」填写，仅保存在
 │       │   ├── ConfigManager.java           # 提供商 / 模型 / 思考等级
 │       │   ├── ConversationManager.java     # 会话持久化（异步写盘队列）
 │       │   ├── Conversation.java            # 会话模型
-│       │   ├── Message.java                 # 消息模型（含 apiText / toolHistory / sources）
+│       │   ├── Message.java                 # 消息模型（含 attachments / apiText / toolHistory / sources）
 │       │   ├── ProviderInfo.java            # 提供商模型
 │       │   ├── ModelInfo.java               # 模型模型
 │       │   ├── StorageManager.java          # 存储路径探测与读写

@@ -9,6 +9,7 @@ import android.view.View;
 import android.widget.TextView;
 import android.widget.Toast;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -29,8 +30,8 @@ final class MessageQueue {
         /** 当前是否有请求在飞行中。 */
         boolean isRequestInFlight();
 
-        /** 真正发出一条消息（已从队列移除）。{@code apiText} 含附件正文。 */
-        void sendQueued(String text, String apiText);
+        /** 真正发出一条消息（已从队列移除）。{@code files} 为该条的附件，可为 null。 */
+        void sendQueued(String text, List<AttachmentText.File> files);
 
         /** 打断当前回复，让队首立刻发出。 */
         void interruptForQueued();
@@ -38,15 +39,20 @@ final class MessageQueue {
 
     private static final class QueuedMessage {
         final int id;
-        /** 气泡里显示的文本；队列条与弹窗都用它。 */
+        /** 用户原话；队列条与弹窗都用它。 */
         final String text;
-        /** 实际发给模型的文本，带附件正文；没有附件时与 text 相同。 */
-        final String apiText;
+        /**
+         * 附件快照。必须随队列入队时一起拷走：输入框的 pendingAttachments
+         * 在入队那一刻就被清空了，晚一步取就只剩文字，文件悄悄丢失。
+         */
+        final List<AttachmentText.File> files;
 
-        QueuedMessage(int id, String text, String apiText) {
+        QueuedMessage(int id, String text, List<AttachmentText.File> files) {
             this.id = id;
-            this.text = text;
-            this.apiText = apiText == null ? text : apiText;
+            this.text = text == null ? "" : text;
+            this.files = files == null
+                    ? Collections.<AttachmentText.File>emptyList()
+                    : new ArrayList<AttachmentText.File>(files);
         }
     }
 
@@ -91,14 +97,16 @@ final class MessageQueue {
 
     /** 无附件的普通入队。 */
     void enqueue(String text) {
-        enqueue(text, text);
+        enqueue(text, null);
     }
 
     /** 入队并清空输入框由调用方负责；这里只做队列与提示。 */
-    void enqueue(String text, String apiText) {
-        pending.add(new QueuedMessage(nextId++, text, apiText));
+    void enqueue(String text, List<AttachmentText.File> files) {
+        pending.add(new QueuedMessage(nextId++, text, files));
         updateBar();
-        LogUtil.i(TAG, "enqueued: len=%d pending=%d", text.length(), pending.size());
+        LogUtil.i(TAG, "enqueued: len=%d files=%d pending=%d",
+                text == null ? 0 : text.length(),
+                files == null ? 0 : files.size(), pending.size());
         Toast.makeText(activity, "已排队 " + pending.size() + " 条，将在当前回复结束后发送",
                 Toast.LENGTH_SHORT).show();
     }
@@ -122,7 +130,7 @@ final class MessageQueue {
                 refreshManager();
                 LogUtil.i(TAG, "drain: sending id=%d len=%d remaining=%d",
                         next.id, next.text.length(), pending.size());
-                host.sendQueued(next.text, next.apiText);
+                host.sendQueued(next.text, next.files);
             }
         });
     }
@@ -180,6 +188,11 @@ final class MessageQueue {
             QueuedMessage qm = pending.get(i);
             ids[i] = qm.id;
             String s = qm.text.replace('\n', ' ');
+            // 只发附件不写字时 text 是空的：列表里出现「3. 」谁也认不出是哪条
+            if (s.length() == 0 && !qm.files.isEmpty()) {
+                s = "[附件] " + qm.files.get(0).name;
+                if (qm.files.size() > 1) s += " 等 " + qm.files.size() + " 个文件";
+            }
             if (s.length() > 30) s = s.substring(0, 30) + "…";
             items[i] = (i + 1) + ". " + s;
         }

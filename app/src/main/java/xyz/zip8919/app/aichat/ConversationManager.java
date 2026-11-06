@@ -351,11 +351,25 @@ public class ConversationManager {
                 if (m.apiText != null && m.apiText.length() > 0) {
                     mj.put("apiText", m.apiText);
                 }
+                // 附件与正文分开存：content 只有原话，附件正文在这里，一份就够。
+                // 早先附件正文挤在 apiText 里、摘要行挤在 content 里，同一个文件存两遍。
+                if (m.attachments != null && !m.attachments.isEmpty()) {
+                    JSONArray aa = new JSONArray();
+                    for (AttachmentText.File f : m.attachments) {
+                        if (f == null) continue;
+                        JSONObject fo = new JSONObject();
+                        fo.put("name", f.name);
+                        if (f.bytes > 0) fo.put("bytes", f.bytes);
+                        fo.put("content", f.content);
+                        aa.put(fo);
+                    }
+                    if (aa.length() > 0) mj.put("attachments", aa);
+                }
                 if (m.toolHistory != null && m.toolHistory.length() > 2) {
                     mj.put("toolHistory", m.toolHistory);
                 }
                 // 失败标记与错误详情需要重启后仍可见，因此一并落盘；
-                // 但它们只是显示用字段，不会进入请求体（见 MainActivity.buildChatConversation）
+                // 但它们只是显示用字段，不会进入请求体（见 ChatHistory.build）
                 if (m.sendFailed) {
                     mj.put("sendFailed", true);
                     if (m.errorDetail != null && m.errorDetail.length() > 0) {
@@ -428,6 +442,20 @@ public class ConversationManager {
                     m.errorDetail = mj.optString("errorDetail", "");
                     m.apiText = mj.optString("apiText", "");
                     m.toolHistory = mj.optString("toolHistory", "");
+                    JSONArray aa = mj.optJSONArray("attachments");
+                    if (aa != null) {
+                        for (int j = 0; j < aa.length(); j++) {
+                            JSONObject ao = aa.optJSONObject(j);
+                            if (ao == null) continue;
+                            m.attachments.add(new AttachmentText.File(
+                                    ao.optString("name", ""),
+                                    ao.isNull("content") ? "" : ao.optString("content", ""),
+                                    ao.optLong("bytes", 0)));
+                        }
+                    }
+                    // 1.8.2 及以前的用户消息把附件摊在正文里：读进来就地迁移成结构化字段，
+                    // 老会话打开后附件也是独立卡片，编辑正文不会再把它改没。
+                    if (m.attachments.isEmpty()) AttachmentText.migrateLegacy(m);
                     JSONArray sa = mj.optJSONArray("sources");
                     if (sa != null) {
                         for (int j = 0; j < sa.length(); j++) {

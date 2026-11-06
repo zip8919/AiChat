@@ -46,8 +46,8 @@
 | `ViewerController` | 图片 / 表格 / HTML·SVG 全屏预览 | 不持有会话状态 |
 | `FullscreenInputActivity` | 全屏输入编辑，完成后回填主输入框 | 不做草稿持久化（主输入框是唯一数据源） |
 | `AboutActivity` | 版本展示、检查更新、反馈、开源许可 | 不发起版本网络请求（功能待开发） |
-| `MessageQueue` | 排队发送（每条带 display 与 apiText 两份文本） | 不知道消息内容怎么发 |
-| `AttachmentText` | 附件 → 两套文本：给模型的正文、给人的摘要；大小与 token 估算 | 不读文件，不碰 UI |
+| `MessageQueue` | 排队发送（每条带原话与附件快照） | 不知道消息内容怎么发 |
+| `AttachmentText` | 附件 → 给模型的正文、卡片摘要、老会话迁移；大小与 token 估算 | 不读文件，不碰 UI |
 | `NetSecurity` | 内网访问 / 证书校验的进程内开关（默认严格） | 纯容器，不读配置 |
 | `HelpText` | 使用说明与免责声明文案 | 不拼 UI，不发请求 |
 | `ConversationManager` | 会话读写、异步落盘队列 | 不碰 UI |
@@ -95,7 +95,7 @@
 | `http_request` 工具的能力与安全边界 | `HttpRequestTool`（默认关闭，设置页开关） |
 | 代码执行器提示词、占位符 | `SettingsActivity.getJsEnvPrompt` + `SystemInfo.fillPlaceholders` |
 | 首启引导文案与顺序 | `HelpText` + `MainActivity.showFirstLaunchDialog` + `KEY_FIRST_LAUNCH_DONE` |
-| 附件怎么进提示词 | `AttachmentText.toApi` / `toDisplay` → `ChatHistory.apiContentOf` |
+| 附件怎么进提示词 | `AttachmentText.toApi`（由 `apiTextOf` 调用）→ `ChatHistory.apiContentOf` |
 | 附件 UI（标签、上限） | `MainActivity.refreshAttachmentBar` / `addAttachment` |
 
 ## 调试
@@ -148,8 +148,8 @@ rounds done: sources=5 apiText=842 toolHistory=4
 17. **首启引导**：清除数据后首启弹免责声明，确认前不会发出任何外部 Intent 带来的消息；
     「关于」页版本号与实际 APK 一致，「关于 → 使用说明」与首启弹窗文字完全相同
 18. **附件**：选一个 .txt → 输入框内容不变、上方出现文件标签；点标签可移除；
-    发送后气泡只显示「[附件] name（N 字）」，模型确实读到了正文；
-    排队发送时附件正文不丢（`MessageQueue` 带 apiText）
+    发送后正文里不含任何附件元信息，气泡下方是独立的附件卡片；
+    排队发送时附件不丢（`MessageQueue` 带附件快照）
 19. **思考块标题**：展开再收起后，括号里的 token 数不变（走 `data-tok`，不按可见文本重算）
 20. **429 重试上限**：设置里能填到 20，填 21 会被夹回 20；填 0 会被夹回 1
 21. **附件真的被读到了**：附一个 .txt 只写「总结这个文件」，模型回答里必须出现文件内容
@@ -160,3 +160,10 @@ rounds done: sources=5 apiText=842 toolHistory=4
 24. **内网开关**：默认关闭时 `http://192.168.1.1` 被拒；开启（弹窗确认后）能连上；
     取消确认时开关自动拨回
 25. **证书开关**：关闭时访问自签证书站点失败并在错误详情里看到提示；开启后能连上
+26. **改消息不丢附件**：给一条带附件的老消息点「修改」，只改文字并确定——
+    附件卡片必须还在原位，正文里不能冒出「[附件]」这一行
+27. **老会话迁移**：升级前带附件的会话打开后应显示为独立卡片，正文只剩用户原话；
+    再追问一句文件里的细节，模型仍能答上（说明迁移后正文没丢）
+28. **重试保留附件**：对带附件的用户消息点「重试」，重发的那条必须仍带附件卡片
+29. **token 估算**：纯中文 100 字左右应显示 `~60 tokens`，纯英文 400 字符左右应显示
+    `~120 tokens`；端点在流式里返回 `usage` 时应显示不带 `~` 的真实值

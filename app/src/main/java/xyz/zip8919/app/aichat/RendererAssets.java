@@ -146,6 +146,18 @@ final class RendererAssets {
             ".src-item{padding:4px 10px;font-size:12px;line-height:1.5;word-wrap:break-word;}" +
             ".src-item a{color:#1565c0;text-decoration:none;}" +
             ".msg.user.failed .bubble{background:#FFF3E0;}" +
+            // 用户消息下方的附件卡片。独立于 .bubble 存在：编辑正文只会替换气泡，
+            // 附件不会跟着消失；早先附件摘要写在正文里，改一次消息就没了。
+            ".attach-list{margin-top:6px;text-align:right;}" +
+            ".attach-item{display:inline-block;text-align:left;background:#fff;" +
+            "border:1px solid #bbdefb;border-radius:8px;padding:6px 10px;" +
+            "margin:4px 0 0 6px;max-width:100%;vertical-align:top;}" +
+            ".attach-ico{float:left;width:16px;height:20px;margin:2px 8px 0 0;" +
+            "background:#e3f2fd;border:1px solid #90caf9;border-radius:2px 7px 2px 2px;}" +
+            ".attach-body{display:block;overflow:hidden;}" +
+            ".attach-name{display:block;font-size:13px;font-weight:bold;color:#1565c0;" +
+            "line-height:1.3;word-wrap:break-word;}" +
+            ".attach-sub{display:block;font-size:11px;color:#78909c;line-height:1.3;margin-top:1px;}" +
             ".error-card{display:inline-block;text-align:left;margin-top:4px;padding:8px 10px;" +
             "border:1px solid #ffcdd2;border-radius:8px;background:#fff5f5;max-width:85%;}" +
             ".err-title{color:#c62828;font-size:12px;font-weight:bold;}" +
@@ -675,6 +687,17 @@ final class RendererAssets {
             "runScripts(c);}}" +
             "else{var bb=all[i].querySelector('.bubble');if(bb){bb.innerHTML=html;runScripts(bb);}}" +
             "clearStatus();addCopyBtns();return;}}};" +
+            // 整条消息替换（含气泡外的附件卡片）。编辑用户消息走这里：
+            // 只换 .bubble 的话，附件卡片会留在旧位置、也不会因为正文变化重新排布。
+            "window.replaceMsg=function(idx,outerHtml){" +
+            "var all=document.querySelectorAll('.msg');" +
+            "for(var i=0;i<all.length;i++){" +
+            "if(all[i].getAttribute('data-idx')===''+idx){" +
+            "var box=document.createElement('div');box.innerHTML=outerHtml;" +
+            "var fresh=box.firstElementChild;" +
+            "if(!fresh)return;" +
+            "all[i].parentNode.replaceChild(fresh,all[i]);" +
+            "runScripts(fresh);clearStatus();addCopyBtns();return;}}};" +
             "window.reindexFrom=function(start){" +
             "var all=document.querySelectorAll('.msg');" +
             "for(var i=0;i<all.length;i++){" +

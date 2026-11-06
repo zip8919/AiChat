@@ -85,8 +85,13 @@ public class MessageHtmlRenderer {
         if (msg.isUser()) {
             StringBuilder sb = new StringBuilder();
             sb.append("<div class=\"msg user").append(msg.sendFailed ? " failed" : "")
-              .append("\" data-idx=\"").append(idx).append("\">")
-              .append("<div class=\"bubble\">").append(esc(msg.content)).append("</div>");
+              .append("\" data-idx=\"").append(idx).append("\">");
+            // 只发附件、不写字时没有气泡：空气泡会在附件卡片上方留一块蓝色空块
+            String text = msg.content == null ? "" : msg.content;
+            if (text.length() > 0) {
+                sb.append("<div class=\"bubble\">").append(esc(text)).append("</div>");
+            }
+            sb.append(renderAttachmentCards(msg.attachments));
             // 失败卡片：摘要 + 查看详情 + 重试，紧跟在气泡下方
             if (msg.sendFailed) sb.append(renderErrorCard(msg, index));
             sb.append(renderMeta(msg));
@@ -106,6 +111,32 @@ public class MessageHtmlRenderer {
                (msg.sendFailed ? renderAssistantErrorCard(msg, index) : "") +
                renderMeta(msg) +
                "<div class=\"ai-menu-wrap\"><button class=\"msg-menu-btn\" onclick=\"if(window.Android)Android.messageMenu('" + idx + "');event.stopPropagation();return false;\">" + MENU_DOTS + "</button></div></div>\n";
+    }
+
+    /**
+     * 用户气泡下方的附件卡片。
+     *
+     * <p>独立于气泡存在，编辑正文不会碰到它——这正是「改一下消息附件就没了」的修法。
+     * 文件名与「大小 · tokens」分两行：塞一行时 10 MB 的日志会把文件名挤成省略号，
+     * 而大小恰恰是判断「这份文件发不发得出去」的唯一线索。
+     */
+    static String renderAttachmentCards(List<AttachmentText.File> files) {
+        if (files == null || files.isEmpty()) return "";
+        StringBuilder sb = new StringBuilder();
+        sb.append("<div class=\"attach-list\">");
+        for (int i = 0; i < files.size(); i++) {
+            AttachmentText.File f = files.get(i);
+            if (f == null) continue;
+            sb.append("<div class=\"attach-item\">")
+              .append("<span class=\"attach-ico\"></span>")
+              .append("<span class=\"attach-body\">")
+              .append("<span class=\"attach-name\">").append(esc(f.name)).append("</span>")
+              .append("<span class=\"attach-sub\">")
+              .append(esc(AttachmentText.sizeAndTokens(f))).append("</span>")
+              .append("</span></div>");
+        }
+        sb.append("</div>");
+        return sb.toString();
     }
 
     /**
@@ -134,10 +165,18 @@ public class MessageHtmlRenderer {
             // 两种都退到本地估算，否则这一行会整段消失，看起来像「没这个功能」。
             // 没有时间戳的消息（更老的会话或畸形数据）不估算：连时间都没有的消息，
             // 凭空补一个 token 数只会让整段历史看起来像被篡改过。
-            String src = msg.apiText != null && msg.apiText.length() > 0
-                    ? msg.apiText : msg.content;
-            if (src != null && src.length() > 0) {
-                tokens = estimateTokens(src.length());
+            int est;
+            if (msg.isUser()) {
+                // 用户消息的「真实开销」含附件正文，只算气泡里那几个字会低估上千倍。
+                // 分块累加而不是先拼成一个大字符串：10 MB 的附件再复制一份就是 20 MB。
+                est = AttachmentText.tokensOf(msg);
+            } else {
+                String src = msg.apiText != null && msg.apiText.length() > 0
+                        ? msg.apiText : msg.content;
+                est = estimateTokens(src);
+            }
+            if (est > 0) {
+                tokens = est;
                 estimated = true;
             }
         }
@@ -182,10 +221,52 @@ public class MessageHtmlRenderer {
         return String.format(Locale.US, "%.1fM", n / 1000000.0);
     }
 
-    /** 中文约 1 字 1 token，英文约 4 字符 1 token，取 2/3 作为折中系数。 */
-    /** 粗估：中文约 1 字 1 token、英文约 4 字符 1 token，取 2/3 折中。 */
-    static int estimateTokens(int chars) {
-        return Math.max(1, chars * 2 / 3);
+    /**
+     * 本地 token 估算。端点返回 usage 时一律以返回值为准，这里只在拿不到用量时兜底。
+     *
+     * <p>系数按厂商文档：中文（含全角标点）约 0.6 token/字，英文与符号约 0.3 token/字符。
+     * 早先按「字数 × 2/3」一刀切，纯中文消息会被高估一倍多，纯英文代码又被低估——
+     * 附件动辄几十万 token，系数差一倍就是「发得出去」和「必然超限」的区别。
+     *
+     * <p>不同模型分词不同，这始终是估算：调用方必须打 {@code ~}，不能当账目。
+     */
+    static int estimateTokens(CharSequence text) {
+        if (text == null || text.length() == 0) return 0;
+        int wide = 0;
+        int narrow = 0;
+        int n = text.length();
+        for (int i = 0; i < n; i++) {
+            char c = text.charAt(i);
+            // 代理对（emoji、扩展区生僻字）在 UTF-16 里占两个 char，按一个宽字符算，
+            // 否则一条 emoji 密集的消息会被算成两倍的 token
+            if (Character.isHighSurrogate(c) && i + 1 < n
+                    && Character.isLowSurrogate(text.charAt(i + 1))) {
+                i++;
+                wide++;
+            } else if (isWideChar(c)) {
+                wide++;
+            } else {
+                narrow++;
+            }
+        }
+        // 按 0.1 token 为单位做整数运算：wide*6 + narrow*3，再向上取整
+        int tenths = wide * 6 + narrow * 3;
+        return Math.max(1, (tenths + 9) / 10);
+    }
+
+    /** 中日韩字符与全角符号：这些按 0.6 token/字，其余按 0.3。 */
+    private static boolean isWideChar(char c) {
+        return (c >= 0x1100 && c <= 0x115F)      // 谚文字母
+                || (c >= 0x2E80 && c <= 0x303E)  // 中日韩部首、标点
+                || (c >= 0x3041 && c <= 0x33FF)  // 假名、注音、兼容字符
+                || (c >= 0x3400 && c <= 0x4DBF)  // 扩展 A
+                || (c >= 0x4E00 && c <= 0x9FFF)  // 基本区
+                || (c >= 0xA000 && c <= 0xA4CF)  // 彝文
+                || (c >= 0xAC00 && c <= 0xD7A3)  // 谚文音节
+                || (c >= 0xF900 && c <= 0xFAFF)  // 兼容表意
+                || (c >= 0xFE30 && c <= 0xFE4F)  // 兼容标点
+                || (c >= 0xFF00 && c <= 0xFF60)  // 全角字符
+                || (c >= 0xFFE0 && c <= 0xFFE6);
     }
 
     /**
@@ -332,9 +413,9 @@ public class MessageHtmlRenderer {
                 blocks++;
                 // 用 token 而不是字数：用户对「这次思考花了多少」的直觉来自
                 // 消息底部的 token 用量，两处单位一致才能横向比较。
-                // 数值按源码长度估算（≈ chars × 2/3），并写进 data-tok，
+                // 数值按源码估算（中文 0.6 / 英文 0.3 每字符），并写进 data-tok，
                 // 折叠时由 JS 直接读回，避免展开/收起后数字跳变。
-                int thinkTok = estimateTokens(thinking.length());
+                int thinkTok = estimateTokens(thinking);
                 html.append("<div class=\"thinking-wrap\">")
                     .append("<div class=\"thinking-toggle\" data-tok=\"").append(thinkTok)
                     .append("\" onclick=\"toggleThinking(this)\">── 展开思考（")

@@ -75,9 +75,9 @@ final class ChatHistory {
             }
             JSONObject mm = new JSONObject();
             mm.put("role", m.role);
-            // 用户消息必须走 apiText：附件正文只存在那里，content（气泡文本）只有
-            // 一行「[附件] x.txt（1234 字）」摘要。只发 content 的话模型收不到文件内容，
-            // 表现为「明明附了文件，AI 却说看不到」。
+            // 用户消息必须带上附件正文：content 只有用户原话，附件在 attachments 里，
+            // 由 AttachmentText 现拼成「原话 + <附件>…</附件>」。只发 content 的话
+            // 模型收不到文件内容，表现为「明明附了文件，AI 却说看不到」。
             mm.put("content", apiContentOf(m));
             msgs.put(mm);
         }
@@ -87,11 +87,14 @@ final class ChatHistory {
     /**
      * 这条消息该以什么文本发给模型。
      *
-     * <p>{@code Message.apiText} 在两类消息上含义不同：用户消息存「原话 + 附件正文」，
-     * AI 消息存「去掉 [thinking]/[tool] 标记的正文」。两者都是「给模型的那一份」，
-     * 所以统一在这里取，空则回退到气泡文本。
+     * <p>用户消息的正文 = 原话 + 附件正文，由 {@link AttachmentText#apiTextOf} 现拼：
+     * {@code content} 现在只存用户原话，附件在 {@link Message#attachments} 里。
+     * 1.8.2 及以前的老会话没有这个字段，附件正文整段存在 {@code apiText}，那里继续兜底。
+     *
+     * <p>AI 消息的 {@code apiText} 是「去掉 [thinking]/[tool] 标记的正文」，空则回退气泡文本。
      */
     private static String apiContentOf(Message m) {
+        if (m.isUser()) return AttachmentText.apiTextOf(m);
         String api = m.apiText;
         if (api != null && api.trim().length() > 0) return api;
         return m.content == null ? "" : m.content;

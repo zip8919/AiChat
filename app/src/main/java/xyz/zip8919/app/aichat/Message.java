@@ -64,6 +64,18 @@ public class Message {
      */
     public boolean tokensEstimated;
 
+    /**
+     * 该条用户消息附带的文本附件（文件名、字节数、正文）。
+     *
+     * <p>附件是<b>结构化字段</b>，不再拼进 {@link #content}：早先把「[附件] x.txt（12 KB）」
+     * 直接写进正文，编辑一下正文就把这行删了，界面上附件凭空消失；而且正文里混着
+     * 文件元信息，复制、搜索、重新发送都要先剥一遍。
+     *
+     * <p>正文只在这里存一份。发给模型的文本由 {@link AttachmentText#apiTextOf} 现场拼，
+     * 不再另存一份 {@link #apiText}——两处存同一份正文，总会有一处忘同步。
+     */
+    public List<AttachmentText.File> attachments = new ArrayList<AttachmentText.File>();
+
     public Message() {}
 
     public Message(String role, String content) {

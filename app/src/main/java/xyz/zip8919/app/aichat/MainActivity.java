@@ -82,11 +82,11 @@ public class MainActivity extends Activity {
     private static final int MAX_ATTACHMENT_TOTAL = 20 * 1000 * 1000;
 
     /**
-     * 待发送附件。
+     * 待发送附件（仅输入框这一侧；已发送的附件在 {@link Message#attachments}）。
      *
      * <p>选完文件不往输入框里塞正文——两万字的日志会把输入框撑爆、把用户自己写的问题挤到
-     * 屏幕外，中途想删还得手工选中删除。这里只留文件名，正文等到真正发送时才并进
-     * {@code apiText}；气泡里只显示一行摘要，{@code content} 仍是用户原话。
+     * 屏幕外，中途想删还得手工选中删除。这里只留文件名，正文在发送时整体交给
+     * {@link Message#attachments}，气泡里画成独立卡片，不进正文。
      */
     // 长对话分批渲染：首屏只渲染最近 N 条，滑到顶部再补一批，
     // 避免几百条消息（含公式/图片）一次性塞进 WebView 把老设备卡死。
@@ -357,7 +357,9 @@ public class MainActivity extends Activity {
         queueBarText = (TextView) findViewById(R.id.queue_bar_text);
         queue = new MessageQueue(this, new MessageQueue.Host() {
             public boolean isRequestInFlight() { return isRequestInProgress.get(); }
-            public void sendQueued(String text, String apiText) { sendMessageText(text, apiText); }
+            public void sendQueued(String text, List<AttachmentText.File> files) {
+                sendMessageText(text, files);
+            }
             public void interruptForQueued() { interruptRequest(); }
         }, queueBar, queueBarText);
         findViewById(R.id.queue_manage_button).setOnClickListener(new View.OnClickListener() {
@@ -566,8 +568,8 @@ public class MainActivity extends Activity {
      * 读文件 → 挂成待发送附件。
      *
      * <p>刻意<b>不</b>往输入框里插入正文：一份几十 KB 的日志会把输入框撑到无法编辑，
-     * 用户写的问题被挤到屏幕外，想删还得手工选中。正文留到发送时才进 {@code apiText}，
-     * 气泡里只显示一行「[附件] name（N 字）」。
+     * 用户写的问题被挤到屏幕外，想删还得手工选中。正文随消息一起存进
+     * {@link Message#attachments}，气泡下方画成独立卡片（文件名 + 大小 + token 估算）。
      */
     private void importTextFile(final Uri uri) {
         new Thread(new Runnable() {
@@ -706,16 +708,6 @@ public class MainActivity extends Activity {
         if (pendingAttachments.isEmpty()) return;
         pendingAttachments.clear();
         refreshAttachmentBar();
-    }
-
-    /** 发给模型的文本（附件正文全量），拼装规则见 {@link AttachmentText}。 */
-    private String composeApiText(String text) {
-        return AttachmentText.toApi(text, pendingAttachments);
-    }
-
-    /** 气泡里显示的文本（只有文件名与字数）。 */
-    private String composeDisplayText(String text) {
-        return AttachmentText.toDisplay(text, pendingAttachments);
     }
 
     /**
@@ -1346,28 +1338,23 @@ public class MainActivity extends Activity {
             LogUtil.w(TAG, "sendMessage ignored: empty input and no attachment");
             return;
         }
-        // 附件必须在清空之前定稿：排队条目只带文本，晚一步内容就丢了
-        final String display = composeDisplayText(input);
-        final String apiText = composeApiText(input);
+        // 附件必须在清空之前定稿：队列条目与消息都按这份快照走，
+        // 晚一步 clearAttachments() 之后内容就没了
+        final List<AttachmentText.File> files = new ArrayList<AttachmentText.File>(pendingAttachments);
         inputEditText.setText("");
         clearAttachments();
         if (isRequestInProgress.get()) {
-            queue.enqueue(display, apiText);
+            queue.enqueue(input, files);
             return;
         }
-        sendMessageText(display, apiText);
-    }
-
-    private void sendMessageText(String input) {
-        sendMessageText(input, input);
+        sendMessageText(input, files);
     }
 
     /**
-     * @param input   显示在气泡里的文本（含附件摘要）
-     * @param apiText 实际发给模型的文本（含附件正文）。两者不同时才单独记到
-     *                {@link Message#apiText}，历史回放与重试都走它。
+     * @param input 用户原话（气泡正文）。附件不混进来，它们是 {@link Message#attachments}，
+     *              由渲染层单独画成卡片、由 {@link AttachmentText} 单独拼给模型。
      */
-    private void sendMessageText(final String input, final String apiText) {
+    private void sendMessageText(final String input, final List<AttachmentText.File> files) {
         LogUtil.i(TAG, "========== sendMessage: len=%d preview=%s ==========",
                 input.length(), LogUtil.preview(input, 200));
 
@@ -1397,10 +1384,9 @@ public class MainActivity extends Activity {
         }
 
         Message userMsg = new Message(Message.ROLE_USER, input);
-        // 附件正文只存在于 apiText：气泡不重复展示，但历史回放与重试必须带上
-        if (apiText != null && !apiText.equals(input)) {
-            userMsg.apiText = apiText;
-        }
+        // 附件正文随消息走，不再另存一份 apiText：一份正文两个副本，
+        // 迟早有一处忘了同步（1.8.1 的「AI 收不到文件」就是这么来的）
+        if (files != null) userMsg.attachments.addAll(files);
         messages.add(userMsg);
         conversationManager.getCurrentConversation().touch();
         LogUtil.d(TAG, "user message appended, total messages=%d", messages.size());
@@ -1418,10 +1404,16 @@ public class MainActivity extends Activity {
         // 再发一条又会满足 size==1，同一个会话会重复请求标题。
         if (isFirstMsg && !conv.titleGenerated && !conv.titleRequested) {
             conv.titleRequested = true;
+            // 只发附件不写字时没有可用的标题种子，退回文件名——
+            // 否则会话标题会是空白，列表里认不出来
+            String seed = input;
+            if (seed.length() == 0 && files != null && !files.isEmpty()) {
+                seed = files.get(0).name;
+            }
             // 先落一个「消息前 15 字」的兜底标题：自动标题关闭、生成失败或返回空时都保留它
-            TitleGenerator.applyFallback(conversationManager, conv, input);
+            TitleGenerator.applyFallback(conversationManager, conv, seed);
             if (autoTitle) {
-                TitleGenerator.generate(MainActivity.this, configManager, conversationManager, input);
+                TitleGenerator.generate(MainActivity.this, configManager, conversationManager, seed);
             } else {
                 LogUtil.d(TAG, "auto title disabled, keep fallback title");
             }
@@ -1722,7 +1714,7 @@ public class MainActivity extends Activity {
                                 // 「这个端点根本不返回 token」，实际是没开统计。
                                 if (done.completionTokens <= 0 && done.content != null
                                         && done.content.length() > 0) {
-                                    int est = MessageHtmlRenderer.estimateTokens(done.content.length());
+                                    int est = MessageHtmlRenderer.estimateTokens(done.content);
                                     done.completionTokens = est;
                                     done.totalTokens = est;
                                     done.tokensEstimated = true;
@@ -2518,13 +2510,28 @@ public class MainActivity extends Activity {
 
     // 1. 复制
     private void copyMessage(int pos) {
-        String text = getMessageText(messages.get(pos));
+        String text = textWithAttachments(messages.get(pos));
         if (text == null || text.isEmpty()) {
             LogUtil.w(TAG, "copyMessage: empty content at pos=%d", pos);
             Toast.makeText(this, "内容为空", Toast.LENGTH_SHORT).show();
             return;
         }
         copyToClipboard(text);
+    }
+
+    /**
+     * 复制/选择文本用的完整文本：原话 + 附件清单。
+     *
+     * <p>单独一个方法而不是塞进 {@link #getMessageText}：后者还给「修改消息」的
+     * 输入框预填，把附件清单写进去，用户一保存就等于把附件又抄回了正文。
+     */
+    private String textWithAttachments(Message msg) {
+        String text = getMessageText(msg);
+        if (msg != null && msg.isUser()) {
+            if (text == null) text = "";
+            text += AttachmentText.copySuffix(msg.attachments);
+        }
+        return text;
     }
 
     /** 写剪贴板。API 18 上有设备返回的是旧版 android.text.ClipboardManager，需要分支。 */
@@ -2549,7 +2556,7 @@ public class MainActivity extends Activity {
 
     // 2. 选择文本
     private void selectText(int pos) {
-        String text = getMessageText(messages.get(pos));
+        String text = textWithAttachments(messages.get(pos));
         LogUtil.d(TAG, "selectText: pos=%d len=%s", pos, text == null ? "null" : text.length());
         showSelectableText("选择文本", text);
     }
@@ -2694,19 +2701,27 @@ public class MainActivity extends Activity {
                                     msg.toolHistory = "";
                                     msg.sendFailed = false;
                                     msg.errorDetail = "";
+                                } else {
+                                    // 用户消息：附件是独立字段，改正文不该动它。
+                                    // apiText 是老会话的正文副本，正文已变，留着就是错的。
+                                    msg.apiText = "";
                                 }
                                 // DOM update: only update this message's div; render off the UI thread
                                 new Thread(new Runnable() {
                                     @Override
                                     public void run() {
+                                        // 用户消息整条替换：附件卡片在 .bubble 之外，
+                                        // 只换气泡的话「改完附件没了 / 加了附件不显示」都会复现
                                         final String html = msg.isAssistant()
                                             ? MessageHtmlRenderer.contentToHtml(newContent, MainActivity.this)
-                                            : "<div class=\"bubble\">" + MessageHtmlRenderer.esc(newContent) + "</div>";
+                                            : MessageHtmlRenderer.renderMessageDiv(msg, pos, MainActivity.this);
+                                        final boolean wholeDiv = !msg.isAssistant();
                                         runOnUiThread(new Runnable() {
                                             @Override
                                             public void run() {
                                                 String esc = jsEscape(html);
-                                                webViewEvalJs("updateMsgAt(" + pos + ",'" + esc + "')");
+                                                webViewEvalJs((wholeDiv ? "replaceMsg(" : "updateMsgAt(")
+                                                        + pos + ",'" + esc + "')");
                                                 conversationManager.saveCurrentConversation();
                                                 Toast.makeText(MainActivity.this, "已修改", Toast.LENGTH_SHORT).show();
                                             }
@@ -2901,6 +2916,9 @@ public class MainActivity extends Activity {
         removeDomRange(pos);
 
         Message um = new Message(Message.ROLE_USER, content);
+        // 附件要跟着重发：只复制正文的话，用户点一次「重试」，文件就从这条消息里消失了，
+        // 模型下一轮也就读不到文件——这正是「附件改一下就没了」的同源问题
+        if (src.attachments != null) um.attachments.addAll(src.attachments);
         // 新建的消息 sendFailed/errorDetail 均为默认值，失败标记自然被清除
         messages.add(um);
         conversationManager.getCurrentConversation().touch();
@@ -3075,6 +3093,8 @@ public class MainActivity extends Activity {
                     // 纯文本/工具历史也要一起带走，否则分支里的 AI 回复又退回「只有正文」
                     copy.apiText = src.apiText;
                     copy.toolHistory = src.toolHistory;
+                    // 附件跟着分支走，否则分支里的用户消息只剩一句「看这个文件」
+                    if (src.attachments != null) copy.attachments.addAll(src.attachments);
                     // 来源区跟着消息一起分支，否则分支里的回答会丢掉来源
                     if (src.sources != null && !src.sources.isEmpty()) {
                         for (Message.Source s : src.sources) {
