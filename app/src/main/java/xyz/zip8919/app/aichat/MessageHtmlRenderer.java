@@ -22,6 +22,14 @@ import org.json.JSONObject;
 public class MessageHtmlRenderer {
     private static final String TAG = "HtmlRenderer";
 
+    /**
+     * 消息菜单按钮里的三个点。用 CSS 画而不是写 U+22EF「⋯」：4.3/4.4 的系统字体没有
+     * 该字形，实测会落到缺字方框，用户认不出这是按钮。样式见 RendererAssets 的 .mdot。
+     * 修改时两边必须同步（appendAiDiv 里是字符串拼接，没法直接引用本常量）。
+     */
+    static final String MENU_DOTS =
+            "<span class=\"mdot\"></span><span class=\"mdot\"></span><span class=\"mdot\"></span>";
+
     // Per-message HTML render cache: bounded LRU, evicted by entry count and bytes.
     // Streaming throttling produces a new key every tick with near-full text, so
     // oversized renders (e.g. base64 math images) are not cached — otherwise up
@@ -79,7 +87,9 @@ public class MessageHtmlRenderer {
             if (msg.sendFailed) sb.append(renderErrorCard(msg, index));
             sb.append("<div class=\"user-menu-wrap\"><button class=\"msg-menu-btn\" onclick=\"if(window.Android)Android.messageMenu('")
               .append(idx)
-              .append("');event.stopPropagation();return false;\">⋯</button></div></div>\n");
+              .append("');event.stopPropagation();return false;\">")
+              .append(MENU_DOTS)
+              .append("</button></div></div>\n");
             return sb.toString();
         }
         String html = contentToHtml(msg.content, ctx);
@@ -89,7 +99,7 @@ public class MessageHtmlRenderer {
                "<div class=\"sources\">" + renderSourcesInner(msg.sources) + "</div>" +
                // 工具轮次中途失败：保留已展示的思考/工具卡片，卡片提供「从出错处重试」
                (msg.sendFailed ? renderAssistantErrorCard(msg, index) : "") +
-               "<div class=\"ai-menu-wrap\"><button class=\"msg-menu-btn\" onclick=\"if(window.Android)Android.messageMenu('" + idx + "');event.stopPropagation();return false;\">⋯</button></div></div>\n";
+               "<div class=\"ai-menu-wrap\"><button class=\"msg-menu-btn\" onclick=\"if(window.Android)Android.messageMenu('" + idx + "');event.stopPropagation();return false;\">" + MENU_DOTS + "</button></div></div>\n";
     }
 
     /**

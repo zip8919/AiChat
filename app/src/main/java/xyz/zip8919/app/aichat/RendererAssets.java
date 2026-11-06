@@ -103,10 +103,16 @@ final class RendererAssets {
             ".tool-empty{padding:8px 10px;color:#90a4ae;font-size:12px;}" +
             ".tool-status{padding:6px 10px;color:#1565c0;font-size:12px;" +
             "font-style:italic;background:#eaf2fd;border-radius:6px;margin:8px 0;}" +
+            // 按钮原本直接写 U+22EF「⋯」。4.3/4.4 的系统字体没有这个字形，
+            // 落到 fallback 后渲染成缺字方框（用户描述成「交叉眼」），既认不出也点不准。
+            // 改成用 CSS 画三个圆点：不依赖任何字体，任何 ROM 上都长一样；
+            // padding 同时把热区从 ~21px 撑到 ~30px，手指才点得中。
             ".msg-menu-btn{display:inline-block;background:none;border:none;" +
-            "color:#bbb;font-size:17px;padding:2px 8px;line-height:1;" +
-            "-webkit-tap-highlight-color:transparent;}" +
-            ".msg-menu-btn:active{color:#555;background:#e8e8e8;border-radius:12px;}" +
+            "padding:8px 12px;line-height:0;-webkit-tap-highlight-color:transparent;}" +
+            ".mdot{display:inline-block;width:5px;height:5px;margin:0 2px;" +
+            "border-radius:3px;background:#9aa3ab;vertical-align:middle;}" +
+            ".msg-menu-btn:active{background:#e8e8e8;border-radius:14px;}" +
+            ".msg-menu-btn:active .mdot{background:#555;}" +
             ".ai-menu-wrap{text-align:left;margin-top:4px;}" +
             ".user-menu-wrap{text-align:right;margin-top:2px;}" +
             ".tk-kw{color:#d73a49;font-weight:bold;}" +
@@ -595,7 +601,9 @@ final class RendererAssets {
             "<div class=\"stream-tail\"></div></div><div class=\"sources\"></div>" +
             "<div class=\"ai-menu-wrap\"><button class=\"msg-menu-btn\" " +
             "onclick=\"if(window.Android)Android.messageMenu(\\'-1\\');" +
-            "event.stopPropagation();return false;\">⋯</button></div>';" +
+            "event.stopPropagation();return false;\">" +
+            "<span class=\"mdot\"></span><span class=\"mdot\"></span><span class=\"mdot\"></span>" +
+            "</button></div>';" +
             "document.getElementById('msgs').appendChild(d);" +
             "smartScrollToBottom();};" +
             "window.updateMsgAt=function(idx,html){" +

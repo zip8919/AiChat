@@ -2041,7 +2041,9 @@ public class MainActivity extends Activity {
 
     /**
      * 正在生成的气泡：DOM 上的 data-idx 是 -1，messages 里没有稳定的下标。
-     * 常规菜单里的修改/删除/回溯都会破坏请求状态机，这里只给三项安全操作。
+     * 修改/删除/回溯/分支都要按真实下标操作，生成中调用会把请求状态机搅乱
+     * （删了下标会整体前移，正在跑的那条回写就落到别人身上），所以这里只给
+     * 不依赖下标的操作 + 一条「重新生成」（内部先打断再按提问重发）。
      */
     private void showStreamingMenu() {
         if (!isRequestInProgress.get()) {
@@ -2058,7 +2060,7 @@ public class MainActivity extends Activity {
             refreshWebView();
             return;
         }
-        final String[] items = {"复制已生成内容", "选择文本", "停止生成"};
+        final String[] items = {"复制已生成内容", "选择文本", "重新生成", "停止生成"};
         new AlertDialog.Builder(this)
                 .setTitle("操作消息")
                 .setItems(items, new DialogInterface.OnClickListener() {
@@ -2072,12 +2074,36 @@ public class MainActivity extends Activity {
                             } else {
                                 showSelectableText("选择文本", text);
                             }
+                        } else if (which == 2) {
+                            retryStreaming();
                         } else {
                             interruptRequest();
                         }
                     }
                 })
                 .show();
+    }
+
+    /**
+     * 生成中「重新生成」：丢掉这次输出，按最后一条提问整条重发。
+     * 走 interruptAndRetry，它会先自增代数挡住旧线程回写、断开连接、等旧线程退出，
+     * 再截断到提问处重发——不能在 UI 线程上直接改 messages，否则和正在跑的流式
+     * 回调抢同一份列表，下标会错位。
+     */
+    private void retryStreaming() {
+        if (messages == null || messages.isEmpty()) {
+            LogUtil.w(TAG, "retryStreaming: no messages");
+            Toast.makeText(this, "找不到对应的提问，无法重新生成", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        int pos = lastUserIndexBefore(messages.size());
+        if (pos < 0) {
+            LogUtil.w(TAG, "retryStreaming: no user message to retry");
+            Toast.makeText(this, "找不到对应的提问，无法重新生成", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        LogUtil.i(TAG, "retryStreaming: retry from user pos=%d", pos);
+        confirmInterruptAndRetry(pos);
     }
 
     private void copyStreamingText() {
@@ -2315,6 +2341,7 @@ public class MainActivity extends Activity {
 
     /** pos 之前最近一条用户消息的下标，没有则返回 -1。 */
     private int lastUserIndexBefore(int pos) {
+        if (messages == null || messages.isEmpty()) return -1;
         for (int i = Math.min(pos, messages.size()) - 1; i >= 0; i--) {
             if (messages.get(i).isUser()) return i;
         }
