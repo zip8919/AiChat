@@ -1,10 +1,14 @@
 package xyz.zip8919.app.aichat;
 
 import android.content.Context;
+import java.text.SimpleDateFormat;
+import java.util.Calendar;
 import java.util.Collections;
+import java.util.Date;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -85,6 +89,7 @@ public class MessageHtmlRenderer {
               .append("<div class=\"bubble\">").append(esc(msg.content)).append("</div>");
             // 失败卡片：摘要 + 查看详情 + 重试，紧跟在气泡下方
             if (msg.sendFailed) sb.append(renderErrorCard(msg, index));
+            sb.append(renderMeta(msg));
             sb.append("<div class=\"user-menu-wrap\"><button class=\"msg-menu-btn\" onclick=\"if(window.Android)Android.messageMenu('")
               .append(idx)
               .append("');event.stopPropagation();return false;\">")
@@ -99,7 +104,73 @@ public class MessageHtmlRenderer {
                "<div class=\"sources\">" + renderSourcesInner(msg.sources) + "</div>" +
                // 工具轮次中途失败：保留已展示的思考/工具卡片，卡片提供「从出错处重试」
                (msg.sendFailed ? renderAssistantErrorCard(msg, index) : "") +
+               renderMeta(msg) +
                "<div class=\"ai-menu-wrap\"><button class=\"msg-menu-btn\" onclick=\"if(window.Android)Android.messageMenu('" + idx + "');event.stopPropagation();return false;\">" + MENU_DOTS + "</button></div></div>\n";
+    }
+
+    /**
+     * 消息底部的辅助信息：时间 · token · 生成速度。
+     *
+     * <p>三者都拿不到时返回空串——老会话读出来 timestamp 可能是 0、token 也全是 0，
+     * 不能凭空多出一行「00:00 · 0 tokens」。
+     *
+     * <p>用户消息没有真实用量（服务端只在 assistant 轮返回），按字符数估算并用
+     * {@code ~} 标注，避免把估算值伪装成精确值。
+     */
+    public static String renderMeta(Message msg) {
+        if (msg == null) return "";
+        StringBuilder sb = new StringBuilder();
+        if (msg.timestamp > 0) {
+            sb.append(formatClock(msg.timestamp));
+        }
+
+        int tokens = msg.totalTokens;
+        boolean estimated = false;
+        if (tokens <= 0 && msg.isUser() && msg.content != null && msg.content.length() > 0) {
+            tokens = estimateTokens(msg.content.length());
+            estimated = tokens > 0;
+        }
+        if (tokens > 0) {
+            if (sb.length() > 0) sb.append(" · ");
+            if (estimated) sb.append('~');
+            sb.append(formatTokens(tokens)).append(" tokens");
+        }
+
+        // 速度只在有真实用量与完成时刻时给：打断/失败的消息没有参考价值
+        if (msg.isAssistant() && msg.completionTokens > 0 && msg.finishedAt > msg.timestamp) {
+            long elapsed = msg.finishedAt - msg.timestamp;
+            if (elapsed >= 1000) {
+                double speed = msg.completionTokens * 1000.0 / elapsed;
+                if (sb.length() > 0) sb.append(" · ");
+                sb.append(String.format(Locale.US, "%.1f tok/s", speed));
+            }
+        }
+
+        if (sb.length() == 0) return "";
+        return "<div class=\"msg-meta\">" + esc(sb.toString()) + "</div>";
+    }
+
+    /** 当天只显示时分，跨天补上日期，避免昨天的消息看起来像刚刚发的。 */
+    private static String formatClock(long ts) {
+        Calendar now = Calendar.getInstance();
+        Calendar then = Calendar.getInstance();
+        then.setTimeInMillis(ts);
+        boolean sameDay = now.get(Calendar.YEAR) == then.get(Calendar.YEAR)
+                && now.get(Calendar.DAY_OF_YEAR) == then.get(Calendar.DAY_OF_YEAR);
+        SimpleDateFormat fmt = new SimpleDateFormat(
+                sameDay ? "HH:mm" : "MM-dd HH:mm", Locale.getDefault());
+        return fmt.format(new Date(ts));
+    }
+
+    private static String formatTokens(int n) {
+        if (n < 1000) return String.valueOf(n);
+        if (n < 1000000) return String.format(Locale.US, "%.1fk", n / 1000.0);
+        return String.format(Locale.US, "%.1fM", n / 1000000.0);
+    }
+
+    /** 中文约 1 字 1 token，英文约 4 字符 1 token，取 2/3 作为折中系数。 */
+    private static int estimateTokens(int chars) {
+        return Math.max(1, chars * 2 / 3);
     }
 
     /**

@@ -48,15 +48,48 @@ public class SettingsActivity extends Activity {
     private static final String KEY_REALTIME_RENDER = "realtime_render_enabled";
     private static final String KEY_STREAM_ENABLED = "stream_enabled";
     private static final String KEY_PRESETS = "system_presets";
+    /** 是否向模型开放本机 HTTP 请求工具。默认关闭：等于把网络出口交给模型。 */
+    private static final String KEY_HTTP_TOOL_ENABLED = "http_tool_enabled";
+    // ---- 429 重试策略 ----
+    private static final String KEY_RETRY_429_ENABLED = "retry_429_enabled";
+    private static final String KEY_RETRY_429_MAX = "retry_429_max";
+    private static final String KEY_RETRY_429_BASE_S = "retry_429_base_s";
+    private static final String KEY_RETRY_429_BACKOFF = "retry_429_backoff";
+    private static final String KEY_RETRY_429_MAX_WAIT_S = "retry_429_max_wait_s";
+    private static final int DEFAULT_RETRY_429_MAX = 3;
+    private static final int DEFAULT_RETRY_429_BASE_S = 2;
+    private static final int DEFAULT_RETRY_429_MAX_WAIT_S = 30;
+    private static final int MIN_RETRY_429_MAX = 1;
+    private static final int MAX_RETRY_429_MAX = 5;
+    private static final int MIN_RETRY_429_BASE_S = 1;
+    private static final int MAX_RETRY_429_BASE_S = 30;
+    private static final int MIN_RETRY_429_MAX_WAIT_S = 1;
+    private static final int MAX_RETRY_429_MAX_WAIT_S = 120;
+    /** 代码执行器（JS 运行器）的环境提示词，支持 {android}/{api}/{webview} 等占位符。 */
+    private static final String KEY_JS_ENV_PROMPT = "js_env_prompt";
     private static final String DEFAULT_TITLE_MODEL = "Qwen/Qwen3.5-397B-A17B";
     private static final String DEFAULT_TITLE_PROMPT = "你是一个标题生成助手。根据用户消息生成3-15字标题。只输出标题本身，禁止输出任何其他文字、解释、标点或换行。";
+    /**
+     * 默认环境提示词。原来硬编码在 ToolsActivity 里写死「Android 4.4 / Chromium 30」，
+     * 换台机器就是错的；这里改成占位符，运行时按真实设备填充。
+     */
+    private static final String DEFAULT_JS_ENV_PROMPT =
+            "我在一个 Android {android} (API {api}) 的 WebView 里运行 JavaScript，"
+            + "运行环境是 {webview} 内核，不支持 ES6 及以上语法"
+            + "（不能用 let/const、箭头函数、模板字符串、class、Promise、"
+            + "扩展运算符、async/await、for...of）。"
+            + "为避免中文编码问题，请把所有中文文本写成 \\uXXXX 转义形式。"
+            + "只输出一个 ```js 代码块，代码用 var 声明变量，可直接运行并输出结果。";
 
     private SharedPreferences prefs;
     private EditText systemPromptEdit, titlePromptEdit;
     private EditText tavilyKeyEdit;
     private EditText webSearchMaxCallsEdit;
+    private EditText jsEnvPromptEdit;
     private Switch autoTitleSwitch, quickScanSwitch, logSwitch, realtimeRenderSwitch, streamSwitch;
-    private Switch webSearchSwitch;
+    private Switch webSearchSwitch, httpToolSwitch;
+    private Switch retry429Switch, retry429BackoffSwitch;
+    private EditText retry429MaxEdit, retry429BaseEdit, retry429MaxWaitEdit;
     private Spinner titleModelSpinner, presetSpinner, searchBackendSpinner;
     private Button saveButton, cancelButton, balanceButton, manageModelsButton;
     private Button managePresetsButton, savePresetButton;
@@ -86,7 +119,14 @@ public class SettingsActivity extends Activity {
         autoTitleSwitch = (Switch) findViewById(R.id.auto_title_switch);
         quickScanSwitch = (Switch) findViewById(R.id.quick_scan_switch);
         webSearchSwitch = (Switch) findViewById(R.id.web_search_switch);
+        httpToolSwitch = (Switch) findViewById(R.id.http_tool_switch);
+        retry429Switch = (Switch) findViewById(R.id.retry_429_switch);
+        retry429BackoffSwitch = (Switch) findViewById(R.id.retry_429_backoff_switch);
+        retry429MaxEdit = (EditText) findViewById(R.id.retry_429_max_edit);
+        retry429BaseEdit = (EditText) findViewById(R.id.retry_429_base_edit);
+        retry429MaxWaitEdit = (EditText) findViewById(R.id.retry_429_max_wait_edit);
         webSearchMaxCallsEdit = (EditText) findViewById(R.id.web_search_max_calls_edit);
+        jsEnvPromptEdit = (EditText) findViewById(R.id.js_env_prompt_edit);
         logSwitch = (Switch) findViewById(R.id.log_switch);
         realtimeRenderSwitch = (Switch) findViewById(R.id.realtime_render_switch);
         streamSwitch = (Switch) findViewById(R.id.stream_switch);
@@ -102,6 +142,11 @@ public class SettingsActivity extends Activity {
         cancelButton = (Button) findViewById(R.id.cancel_button);
         balanceButton = (Button) findViewById(R.id.balance_button);
         manageModelsButton = (Button) findViewById(R.id.manage_models_button);
+        ((Button) findViewById(R.id.about_button)).setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                startActivity(new Intent(SettingsActivity.this, AboutActivity.class));
+            }
+        });
         presetSpinner = (Spinner) findViewById(R.id.preset_spinner);
         managePresetsButton = (Button) findViewById(R.id.manage_presets_button);
         savePresetButton = (Button) findViewById(R.id.save_preset_button);
@@ -152,10 +197,17 @@ public class SettingsActivity extends Activity {
         autoTitleSwitch.setChecked(prefs.getBoolean(KEY_AUTO_TITLE_ENABLED, true));
         quickScanSwitch.setChecked(prefs.getBoolean(KEY_QUICK_SCAN_ENABLED, false));
         webSearchSwitch.setChecked(prefs.getBoolean(KEY_WEB_SEARCH_ENABLED, true));
+        httpToolSwitch.setChecked(prefs.getBoolean(KEY_HTTP_TOOL_ENABLED, false));
+        retry429Switch.setChecked(isRetry429Enabled(this));
+        retry429BackoffSwitch.setChecked(isRetry429Backoff(this));
+        retry429MaxEdit.setText(String.valueOf(getRetry429MaxAttempts(this)));
+        retry429BaseEdit.setText(String.valueOf(getRetry429BaseSeconds(this)));
+        retry429MaxWaitEdit.setText(String.valueOf(getRetry429MaxWaitSeconds(this)));
         searchBackendSpinner.setSelection(
                 SEARCH_BACKEND_DEEPSEEK.equals(getSearchBackend(this)) ? 1 : 0);
         tavilyKeyEdit.setText(getTavilyKey(this));
         webSearchMaxCallsEdit.setText(String.valueOf(getWebSearchMaxCallsPerRound(this)));
+        jsEnvPromptEdit.setText(prefs.getString(KEY_JS_ENV_PROMPT, DEFAULT_JS_ENV_PROMPT));
         logSwitch.setChecked(prefs.getBoolean(KEY_LOG_ENABLED, true));
         realtimeRenderSwitch.setChecked(prefs.getBoolean(KEY_REALTIME_RENDER, false));
         streamSwitch.setChecked(prefs.getBoolean(KEY_STREAM_ENABLED, true));
@@ -223,6 +275,15 @@ public class SettingsActivity extends Activity {
         editor.putBoolean(KEY_AUTO_TITLE_ENABLED, autoTitle);
         editor.putBoolean(KEY_QUICK_SCAN_ENABLED, quickScanSwitch.isChecked());
         editor.putBoolean(KEY_WEB_SEARCH_ENABLED, webSearchSwitch.isChecked());
+        editor.putBoolean(KEY_HTTP_TOOL_ENABLED, httpToolSwitch.isChecked());
+        editor.putBoolean(KEY_RETRY_429_ENABLED, retry429Switch.isChecked());
+        editor.putBoolean(KEY_RETRY_429_BACKOFF, retry429BackoffSwitch.isChecked());
+        editor.putInt(KEY_RETRY_429_MAX, clampInt(retry429MaxEdit.getText().toString(),
+                DEFAULT_RETRY_429_MAX, MIN_RETRY_429_MAX, MAX_RETRY_429_MAX));
+        editor.putInt(KEY_RETRY_429_BASE_S, clampInt(retry429BaseEdit.getText().toString(),
+                DEFAULT_RETRY_429_BASE_S, MIN_RETRY_429_BASE_S, MAX_RETRY_429_BASE_S));
+        editor.putInt(KEY_RETRY_429_MAX_WAIT_S, clampInt(retry429MaxWaitEdit.getText().toString(),
+                DEFAULT_RETRY_429_MAX_WAIT_S, MIN_RETRY_429_MAX_WAIT_S, MAX_RETRY_429_MAX_WAIT_S));
         editor.putString(KEY_SEARCH_BACKEND,
                 searchBackendSpinner.getSelectedItemPosition() == 1
                         ? SEARCH_BACKEND_DEEPSEEK : SEARCH_BACKEND_TAVILY);
@@ -230,6 +291,11 @@ public class SettingsActivity extends Activity {
         editor.putBoolean(KEY_LOG_ENABLED, logEnabled);
         editor.putBoolean(KEY_REALTIME_RENDER, realtimeRenderSwitch.isChecked());
         editor.putBoolean(KEY_STREAM_ENABLED, streamSwitch.isChecked());
+
+        // 代码执行提示词留空等于恢复默认，避免用户删光后拿到一句空提示
+        String jsEnvPrompt = jsEnvPromptEdit.getText().toString().trim();
+        if (jsEnvPrompt.length() == 0) jsEnvPrompt = DEFAULT_JS_ENV_PROMPT;
+        editor.putString(KEY_JS_ENV_PROMPT, jsEnvPrompt);
 
         // 每轮工具调用上限：空值 / 非数字 / 越界一律回退，绝不把非法值写进配置
         int maxCalls = DEFAULT_WEB_SEARCH_MAX_CALLS;
@@ -430,6 +496,81 @@ public class SettingsActivity extends Activity {
     public static boolean isStreamEnabled(Context context) {
         SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, 0);
         return prefs.getBoolean(KEY_STREAM_ENABLED, true);
+    }
+
+    // ---- 429 重试策略读取 ----
+
+    public static boolean isRetry429Enabled(Context context) {
+        return context.getSharedPreferences(PREFS_NAME, 0)
+                .getBoolean(KEY_RETRY_429_ENABLED, true);
+    }
+
+    public static boolean isRetry429Backoff(Context context) {
+        return context.getSharedPreferences(PREFS_NAME, 0)
+                .getBoolean(KEY_RETRY_429_BACKOFF, true);
+    }
+
+    public static int getRetry429MaxAttempts(Context context) {
+        return clampPref(context, KEY_RETRY_429_MAX, DEFAULT_RETRY_429_MAX,
+                MIN_RETRY_429_MAX, MAX_RETRY_429_MAX);
+    }
+
+    public static int getRetry429BaseSeconds(Context context) {
+        return clampPref(context, KEY_RETRY_429_BASE_S, DEFAULT_RETRY_429_BASE_S,
+                MIN_RETRY_429_BASE_S, MAX_RETRY_429_BASE_S);
+    }
+
+    public static int getRetry429MaxWaitSeconds(Context context) {
+        return clampPref(context, KEY_RETRY_429_MAX_WAIT_S, DEFAULT_RETRY_429_MAX_WAIT_S,
+                MIN_RETRY_429_MAX_WAIT_S, MAX_RETRY_429_MAX_WAIT_S);
+    }
+
+    private static int clampPref(Context context, String key, int def, int min, int max) {
+        int v = context.getSharedPreferences(PREFS_NAME, 0).getInt(key, def);
+        if (v < min) return min;
+        if (v > max) return max;
+        return v;
+    }
+
+    /** 输入框文本转整数并夹取范围；空/非数字一律回默认值。 */
+    private static int clampInt(String text, int def, int min, int max) {
+        int v = def;
+        if (text != null && text.trim().length() > 0) {
+            try {
+                v = Integer.parseInt(text.trim());
+            } catch (NumberFormatException e) {
+                v = def;
+            }
+        }
+        if (v < min) v = min;
+        if (v > max) v = max;
+        return v;
+    }
+
+    /** 是否向模型开放本机 HTTP 请求工具（默认关闭）。 */
+    public static boolean isHttpToolEnabled(Context context) {
+        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, 0);
+        return prefs.getBoolean(KEY_HTTP_TOOL_ENABLED, false);
+    }
+
+    /**
+     * 代码执行器的环境提示词，已把 {android}/{api}/{webview} 等占位符换成真实值。
+     * 拿不到设置时返回填充过占位符的默认文案，绝不会返回空串。
+     */
+    public static String getJsEnvPrompt(Context context) {
+        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, 0);
+        String template = prefs.getString(KEY_JS_ENV_PROMPT, DEFAULT_JS_ENV_PROMPT);
+        if (template == null || template.trim().length() == 0) {
+            template = DEFAULT_JS_ENV_PROMPT;
+        }
+        return SystemInfo.fillPlaceholders(template, context);
+    }
+
+    /** 未填充占位符的原始模板，设置页回填用。 */
+    public static String getJsEnvPromptTemplate(Context context) {
+        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, 0);
+        String v = prefs.getString(KEY_JS_ENV_PROMPT, DEFAULT_JS_ENV_PROMPT);
+        return v == null || v.trim().length() == 0 ? DEFAULT_JS_ENV_PROMPT : v;
     }
 
     public static String getTitleModel(Context context) {

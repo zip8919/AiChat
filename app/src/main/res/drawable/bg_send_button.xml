@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 发送/停止共用的圆形底。禁用态用浅蓝，因为「空闲且输入为空」时按钮不可点，
+     需要一眼看出来不能用，而不是点了没反应。 -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_pressed="true">
+        <shape android:shape="oval">
+            <solid android:color="@color/primary_dark"/>
+        </shape>
+    </item>
+    <item android:state_enabled="false">
+        <shape android:shape="oval">
+            <solid android:color="#90CAF9"/>
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="oval">
+            <solid android:color="@color/primary"/>
+        </shape>
+    </item>
+</selector>

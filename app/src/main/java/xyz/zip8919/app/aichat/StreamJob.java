@@ -56,8 +56,12 @@ final class StreamJob {
     final String chatEndpoint;
 
     final boolean streamEnabled;
+    /** 是否请求服务端返回 token 用量（端点不支持时会被降级掉）。 */
+    final boolean includeUsage;
     final boolean realtimeRender;
     final boolean webSearchEnabled;
+    /** 是否向模型暴露 http_request 工具（默认关闭，设置页开启）。 */
+    final boolean httpToolEnabled;
     final boolean useTavily;
     /** 搜索是否真的可用：Tavily 看内置密钥，DeepSeek 看能否解析到提供商。 */
     final boolean searchReady;
@@ -66,6 +70,8 @@ final class StreamJob {
     final String tavilyKey;
 
     final Resume resume;
+    /** 429 重试策略，随请求固化，避免跑到一半参数被改。 */
+    final RetryPolicy retryPolicy;
 
     StreamJob(Builder b) {
         this.provider = b.provider;
@@ -81,14 +87,18 @@ final class StreamJob {
         this.providerName = b.providerName;
         this.chatEndpoint = b.chatEndpoint;
         this.streamEnabled = b.streamEnabled;
+        this.includeUsage = b.includeUsage;
         this.realtimeRender = b.realtimeRender;
         this.webSearchEnabled = b.webSearchEnabled;
+        this.httpToolEnabled = b.httpToolEnabled;
         this.useTavily = b.useTavily;
         this.searchReady = b.searchReady;
         this.maxCallsPerRound = b.maxCallsPerRound;
         this.searchProvider = b.searchProvider;
         this.tavilyKey = b.tavilyKey;
         this.resume = b.resume;
+        this.retryPolicy = b.retryPolicy == null
+                ? new RetryPolicy(false, 0, 2000L, true, 30000L) : b.retryPolicy;
     }
 
     /** 续跑时沿用原来的消息与轮次，否则从头开始。 */
@@ -118,14 +128,17 @@ final class StreamJob {
         String providerName;
         String chatEndpoint;
         boolean streamEnabled;
+        boolean includeUsage;
         boolean realtimeRender;
         boolean webSearchEnabled;
+        boolean httpToolEnabled;
         boolean useTavily;
         boolean searchReady;
         int maxCallsPerRound;
         ProviderInfo searchProvider;
         String tavilyKey;
         Resume resume;
+        RetryPolicy retryPolicy;
 
         Builder provider(ProviderInfo v) { provider = v; return this; }
         Builder modelName(String v) { modelName = v; return this; }
@@ -140,14 +153,17 @@ final class StreamJob {
         Builder providerName(String v) { providerName = v; return this; }
         Builder chatEndpoint(String v) { chatEndpoint = v; return this; }
         Builder streamEnabled(boolean v) { streamEnabled = v; return this; }
+        Builder includeUsage(boolean v) { includeUsage = v; return this; }
         Builder realtimeRender(boolean v) { realtimeRender = v; return this; }
         Builder webSearchEnabled(boolean v) { webSearchEnabled = v; return this; }
+        Builder httpToolEnabled(boolean v) { httpToolEnabled = v; return this; }
         Builder useTavily(boolean v) { useTavily = v; return this; }
         Builder searchReady(boolean v) { searchReady = v; return this; }
         Builder maxCallsPerRound(int v) { maxCallsPerRound = v; return this; }
         Builder searchProvider(ProviderInfo v) { searchProvider = v; return this; }
         Builder tavilyKey(String v) { tavilyKey = v; return this; }
         Builder resume(Resume v) { resume = v; return this; }
+        Builder retryPolicy(RetryPolicy v) { retryPolicy = v; return this; }
 
         StreamJob build() {
             return new StreamJob(this);

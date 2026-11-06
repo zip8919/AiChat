@@ -179,6 +179,13 @@ final class ToolCalls {
             String url = args == null ? "" : args.optString("url", "");
             return url.length() > 0 ? "正在读取网页：" + TextKit.shorten(url, 60) : "正在读取网页...";
         }
+        if (HttpRequestTool.TOOL_HTTP.equals(name)) {
+            String url = args == null ? "" : args.optString("url", "");
+            String method = args == null ? "GET" : args.optString("method", "GET");
+            return url.length() > 0
+                    ? "正在请求：" + method.toUpperCase(java.util.Locale.US) + " " + TextKit.shorten(url, 60)
+                    : "正在发起请求...";
+        }
         return "正在调用工具：" + TextKit.shorten(name, 40);
     }
 }

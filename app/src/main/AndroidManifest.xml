@@ -60,5 +60,20 @@
             android:exported="false"
             android:configChanges="screenSize|orientation|keyboardHidden"/>
 
+        <!-- 全屏输入自带顶栏，不能再叠一层系统 ActionBar -->
+        <activity
+            android:label="@string/fullscreen_input"
+            android:name="xyz.zip8919.app.aichat.FullscreenInputActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.Holo.Light.NoActionBar"
+            android:windowSoftInputMode="adjustResize"
+            android:configChanges="screenSize|orientation|keyboardHidden"/>
+
+        <activity
+            android:label="关于"
+            android:name="xyz.zip8919.app.aichat.AboutActivity"
+            android:exported="false"
+            android:configChanges="screenSize|orientation|keyboardHidden"/>
+
     </application>
 </manifest>

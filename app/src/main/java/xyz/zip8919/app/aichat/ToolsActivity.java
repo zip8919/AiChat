@@ -632,23 +632,24 @@ public class ToolsActivity extends Activity {
 
     // ---------- env prompt ----------
 
-    private static final String ENV_PROMPT =
-            "我在一个 Android 4.4 (API 19) 的 WebView 里运行 JavaScript，"
-            + "运行环境是 Chromium 30 内核，不支持 ES6 及以上语法"
-            + "（不能用 let/const、箭头函数、模板字符串、class、Promise、"
-            + "扩展运算符、async/await、for...of）。"
-            + "为避免中文编码问题，请把所有中文文本写成 \\uXXXX 转义形式。"
-            + "只输出一个 ```js 代码块，代码用 var 声明变量，可直接运行并输出结果。";
+    /**
+     * 环境提示词已改由设置页维护，这里只负责取「已填充占位符」的最终文本。
+     * 原来写死成「Android 4.4 / Chromium 30」，换一台设备告诉模型的环境就是错的，
+     * 生成的代码可能用上旧内核不支持的语法。
+     */
+    private String envPrompt() {
+        return SettingsActivity.getJsEnvPrompt(this);
+    }
 
     private void copyEnvPrompt() {
-        copyToClipboard(ENV_PROMPT);
+        copyToClipboard(envPrompt());
     }
 
     private void sendEnvPrompt(boolean send) {
         LogUtil.i(TAG, "sendEnvPrompt: send=%s", send);
         Toast.makeText(this, send ? "已发送环境提示词" : "已插入环境提示词",
                 Toast.LENGTH_SHORT).show();
-        startActivity(MainActivity.newPromptIntent(this, ENV_PROMPT, send));
+        startActivity(MainActivity.newPromptIntent(this, envPrompt(), send));
         finish();
     }
 

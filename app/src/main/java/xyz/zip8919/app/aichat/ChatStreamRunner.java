@@ -46,11 +46,15 @@ final class ChatStreamRunner {
         /** 用完整 trace 重渲染（工具卡片追加后调用）。 */
         void renderTrace(String trace, int generation, String status, int aiIndex);
 
-        /**
-         * trace 因超长裁掉了前缀。渲染基准必须作废——裁剪后文本变短，
-         * 仍按旧基准判断会把它当成「过期快照」永久丢弃。
-         */
+        /** trace 因超长裁掉了前缀。渲染基准必须作废——裁剪后文本变短，
+         * 仍按旧基准判断会把它当成「过期快照」永久丢弃。 */
         void onTraceTrimmed();
+
+        /**
+         * 端点拒绝了 {@code stream_options}。宿主需要把「该 provider 不支持用量统计」
+         * 记下来，下次请求不再带这个字段，否则每次对话都要多吃一次 400。
+         */
+        void onUsageUnsupported();
     }
 
     /** 会话侧能力：请求代数、连接句柄、收尾。 */
@@ -79,9 +83,15 @@ final class ChatStreamRunner {
         final String toolHistory;
         final String apiText;
         final String content;
+        /** 多轮累加后的用量，全 0 表示端点没返回。 */
+        final int promptTokens;
+        final int completionTokens;
+        final int totalTokens;
+        final long finishedAt;
 
         Settled(boolean failed, int aiIndex, int generation, int round, int httpCode,
-                String errorDetail, String trace, String toolHistory, String apiText, String content) {
+                String errorDetail, String trace, String toolHistory, String apiText, String content,
+                int promptTokens, int completionTokens, int totalTokens, long finishedAt) {
             this.failed = failed;
             this.aiIndex = aiIndex;
             this.generation = generation;
@@ -92,6 +102,10 @@ final class ChatStreamRunner {
             this.toolHistory = toolHistory;
             this.apiText = apiText;
             this.content = content;
+            this.promptTokens = promptTokens;
+            this.completionTokens = completionTokens;
+            this.totalTokens = totalTokens;
+            this.finishedAt = finishedAt;
         }
     }
 
@@ -129,9 +143,14 @@ final class ChatStreamRunner {
             JSONArray conversation = job.isResume()
                     ? job.resume.conversation
                     : ChatHistory.build(job.snapshot, job.aiMessage, job.effectiveSystemPrompt);
-            JSONArray toolDefs = WebSearchTool.buildToolDefinitions(job.webSearchEnabled);
+            JSONArray toolDefs = WebSearchTool.buildToolDefinitions(
+                    job.webSearchEnabled, job.httpToolEnabled);
             boolean toolsEnabled = true;
             boolean fallbackTried = false;
+            boolean includeUsage = job.includeUsage;
+            boolean usageDowngraded = false;
+            // 429 重试计数：跨轮次累计，一致到本次请求结束
+            int retryCount = 0;
             int round = job.isResume() ? job.resume.round : 0;
             if (job.isResume() && st.trace.length() > 0) {
                 ui.showStatus("正在重新生成...", job.generation, st.trace.toString(), job.aiIndex);
@@ -157,7 +176,7 @@ final class ChatStreamRunner {
 
                 JSONObject body = ChatTransport.buildRequestBody(job.modelName, job.provider,
                         job.thinkingLevel, conversation, job.streamEnabled,
-                        toolsEnabled ? toolDefs : null);
+                        toolsEnabled ? toolDefs : null, includeUsage);
                 conn = ChatTransport.open(job.provider);
                 session.setConnection(conn);
                 writeBody(conn, body.toString());
@@ -167,10 +186,44 @@ final class ChatStreamRunner {
                 LogUtil.i(TAG, "HTTP %d in %d ms (round=%d)", code, System.currentTimeMillis() - reqMs, round);
 
                 if (code != 200) {
+                    // 429 最优先处理：此时 body 还没读，直接关掉重连最干净
+                    if (code == 429 && job.retryPolicy.enabled
+                            && retryCount < job.retryPolicy.maxAttempts) {
+                        int retryAfter = ChatTransport.retryAfterSeconds(conn);
+                        long waitMs = job.retryPolicy.delayFor(retryCount, retryAfter);
+                        retryCount++;
+                        LogUtil.w(TAG, "HTTP 429, retry %d/%d in %d ms (retryAfter=%d)",
+                                retryCount, job.retryPolicy.maxAttempts, waitMs, retryAfter);
+                        ui.showStatus("请求过于频繁，" + (waitMs / 1000) + " 秒后重试（"
+                                        + retryCount + "/" + job.retryPolicy.maxAttempts + "）",
+                                job.generation, st.trace.toString(), job.aiIndex);
+                        ChatTransport.close(conn);
+                        conn = null;
+                        session.setConnection(null);
+                        if (!sleepInterruptible(waitMs, job.generation)) {
+                            LogUtil.i(TAG, "429 retry wait aborted by user");
+                            return;
+                        }
+                        continue;
+                    }
+
                     String errBody = ChatTransport.readErrorBody(conn);
                     LogUtil.e(TAG, "request failed: HTTP %d, body=%s", code, LogUtil.preview(errBody, 800));
 
-                    // 部分 OpenAI 兼容端点不认识 tools 参数。首轮 400 时去掉工具与搜索
+                    // 一级降级：端点不认 stream_options（严格校验参数的网关会直接 400）。
+                    // 去掉它重发，并让宿主记住，避免每次对话都白吃一个 400。
+                    if ((code == 400 || code == 422) && includeUsage && !usageDowngraded) {
+                        usageDowngraded = true;
+                        includeUsage = false;
+                        LogUtil.w(TAG, "endpoint rejected stream_options, retry without usage");
+                        ui.onUsageUnsupported();
+                        ChatTransport.close(conn);
+                        conn = null;
+                        session.setConnection(null);
+                        continue;
+                    }
+
+                    // 二级降级：部分 OpenAI 兼容端点不认识 tools 参数。首轮 400 时去掉工具与搜索
                     // 系统提示重试一次，保证原有普通对话不受联网开关影响。
                     if ((code == 400 || code == 422) && toolsEnabled && round == 0 && !fallbackTried) {
                         fallbackTried = true;
@@ -187,6 +240,9 @@ final class ChatStreamRunner {
                     st.httpCode = code;
                     st.errorDetail = ErrorReport.build(job.providerName, job.modelName,
                             job.chatEndpoint, round, code, errBody, null);
+                    if (retryCount > 0) {
+                        st.errorDetail += "\n\n已自动重试 " + retryCount + " 次仍失败";
+                    }
                     LogUtil.e(TAG, "request failed (round %d): %s", round, st.errorDetail);
                     ui.toast("请求失败: HTTP " + code);
                     return;
@@ -195,6 +251,7 @@ final class ChatStreamRunner {
                 renderer.beginRound();
                 SseRound.Result rr = readRound(conn, st, renderer);
                 st.chunks = rr.chunks;
+                st.addUsage(rr.usage);
                 if (rr.error != null) {
                     // 用户打断时 abort 会让读循环立刻退出，chunks 可能为 0，
                     // 这里会误报「服务端没有返回任何内容」。打断不是失败，静默返回。
@@ -264,8 +321,10 @@ final class ChatStreamRunner {
                 LogUtil.i(TAG, "stream exception ignored: interrupted by user");
             }
         } finally {
-            LogUtil.i(TAG, "<<< request end: elapsed=%d ms, chunks=%d, failed=%s",
-                    System.currentTimeMillis() - startMs, st.chunks, st.failed);
+            st.finishedAt = System.currentTimeMillis();
+            LogUtil.i(TAG, "<<< request end: elapsed=%d ms, chunks=%d, failed=%s, tokens=%d/%d",
+                    st.finishedAt - startMs, st.chunks, st.failed,
+                    st.promptTokens, st.completionTokens);
             if (conn != null) {
                 try { conn.disconnect(); } catch (Exception ignored) { }
             }
@@ -273,6 +332,27 @@ final class ChatStreamRunner {
             if (session.isCurrent(job.generation)) {
                 session.setConnection(null);
                 session.onSettled(st.toSettled(job));
+            }
+        }
+    }
+
+    /**
+     * 可被用户打断的等待。不能直接 {@code Thread.sleep}：单次最多要等 30 秒，
+     * 这期间用户点了停止却毫无反应，看起来就是「卡死了」。
+     *
+     * @return false 表示等待期间请求已被取代/打断，调用方应立即返回
+     */
+    private boolean sleepInterruptible(long totalMs, int generation) {
+        long end = System.currentTimeMillis() + Math.max(0L, totalMs);
+        while (true) {
+            long left = end - System.currentTimeMillis();
+            if (left <= 0) return session.isAlive(generation);
+            if (!session.isAlive(generation)) return false;
+            try {
+                Thread.sleep(Math.min(200L, left));
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return false;
             }
         }
     }
@@ -362,6 +442,25 @@ final class ChatStreamRunner {
         int httpCode = -1;
         int chunks;
         boolean failed;
+        int promptTokens;
+        int completionTokens;
+        int totalTokens;
+        /** 收尾时刻，用于算端到端生成速度。 */
+        long finishedAt;
+
+        /**
+         * 累加一轮的 usage。工具轮次会发多次请求，逐轮相加才是这条消息的真实消耗；
+         * 只取最后一轮会漏掉前面所有工具轮。
+         */
+        void addUsage(JSONObject u) {
+            if (u == null) return;
+            int p = u.optInt("prompt_tokens", 0);
+            int c = u.optInt("completion_tokens", 0);
+            int t = u.optInt("total_tokens", p + c);
+            promptTokens += p;
+            completionTokens += c;
+            totalTokens += t;
+        }
 
         State(StreamJob job) {
             this.trace = new StringBuilder(
@@ -386,7 +485,8 @@ final class ChatStreamRunner {
 
         Settled toSettled(StreamJob job) {
             return new Settled(failed, job.aiIndex, job.generation, round, httpCode,
-                    errorDetail, trace.toString(), toolHistory.toString(), apiText, content);
+                    errorDetail, trace.toString(), toolHistory.toString(), apiText, content,
+                    promptTokens, completionTokens, totalTokens, finishedAt);
         }
     }
 

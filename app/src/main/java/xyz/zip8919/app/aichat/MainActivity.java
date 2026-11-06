@@ -11,17 +11,24 @@ import android.content.SharedPreferences;
 import android.content.res.Configuration;
 import android.database.Cursor;
 import android.net.Uri;
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
 import java.net.HttpURLConnection;
 import android.os.Bundle;
 import android.os.Handler;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.view.KeyEvent;
+import android.view.MenuItem;
 import android.view.MotionEvent;
 import android.view.View;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.ImageButton;
 import android.widget.LinearLayout;
+import android.widget.PopupMenu;
 import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -47,8 +54,18 @@ public class MainActivity extends Activity {
      */
     private static final int VIEWER_TOOLBAR_INSET_PX = 52;
     private static final String PREFS_NAME = "aichat_prefs";
+    /** 按 provider 记住「不支持 stream_options」，值是 boolean，缺省 false。 */
+    private static final String KEY_USAGE_UNSUPPORTED_PREFIX = "usage_unsupported_";
+    /** 首次启动说明与免责声明确认过没有。 */
+    private static final String KEY_FIRST_LAUNCH_DONE = "first_launch_done";
     private static final int REQUEST_CONVERSATION_MANAGER = 1;
     private static final int REQUEST_SCAN = 2;
+    private static final int REQUEST_PICK_TEXT = 3;
+    private static final int REQUEST_FULLSCREEN = 4;
+    /** 附件菜单项 id（单项目前用常量，后续加项改成 menu 资源）。 */
+    private static final int MENU_ATTACH_TEXT = 1;
+    /** 导入文本上限：超过直接报错，不截断——半截代码更难排查。 */
+    private static final int MAX_IMPORT_BYTES = 512 * 1024;
     // 长对话分批渲染：首屏只渲染最近 N 条，滑到顶部再补一批，
     // 避免几百条消息（含公式/图片）一次性塞进 WebView 把老设备卡死。
     private static final int INITIAL_VISIBLE_MESSAGES = 40;
@@ -62,7 +79,9 @@ public class MainActivity extends Activity {
     private SharedPreferences prefs;
 
     private EditText inputEditText;
-    private Button sendButton;
+    private ImageButton sendButton;
+    private ImageButton plusButton;
+    private ImageButton expandButton;
     // 发送键长按打断后，本次抬手的 click 不再触发发送
     private boolean sendButtonLongPressed = false;
     private WebView conversationWebView;
@@ -99,6 +118,8 @@ public class MainActivity extends Activity {
     private volatile String lastPushedContent = "";
     // volatile：请求线程写、UI 线程读，打断时才能可靠 disconnect
     private volatile HttpURLConnection currentConnection;
+    /** 当前请求的 provider 名：端点拒绝 stream_options 时按它记住降级结果。 */
+    private volatile String activeProviderName = "";
     // volatile：后台加载线程回到 UI 线程后判断 initConversation() 是否已执行；
     // 已执行则 loadConversations() 整体替换列表时丢掉了兜底会话，需按 id 补回列表头部。
     private volatile boolean initConversationDone = false;
@@ -178,8 +199,50 @@ public class MainActivity extends Activity {
         initViews();
         loadSystemPrompt();
         initConversation();
-        handlePromptIntent(getIntent());
+        // 首启先让用户读完说明与免责声明，再处理外部传入的 prompt。
+        // 否则从别的应用「发送到 AiChat」时，消息会在引导弹窗背后被发出去。
+        if (prefs.getBoolean(KEY_FIRST_LAUNCH_DONE, false)) {
+            handlePromptIntent(getIntent());
+        } else {
+            showFirstLaunchDialog();
+        }
         LogUtil.i(TAG, "========== onCreate done ==========");
+    }
+
+    /**
+     * 首次启动的使用说明与免责声明。不可取消：必须明确选择「同意」或「退出」，
+     * 避免用户随手点外部区域关掉后，后续再也没机会看到这段声明。
+     */
+    private void showFirstLaunchDialog() {
+        String msg = "使用说明\n"
+                + "1. 下方输入问题，点右侧纸飞机发送；生成中点方块可停止。\n"
+                + "2. 输入框有内容时，右侧会出现全屏输入按钮。\n"
+                + "3. 长按任意消息可复制、重试、修改、回溯或创建分支。\n"
+                + "4. 设置页可配置模型、联网搜索、429 重试策略与网络请求权限。\n"
+                + "5. 联网搜索与模型调用需要自行填写 API Key。\n\n"
+                + "免责声明\n"
+                + "· 模型输出由第三方服务生成，仅供参考，请自行核实。\n"
+                + "· 联网搜索内容版权归原作者所有。\n"
+                + "· API Key 由你自行提供，相应费用与风险由你承担。\n"
+                + "· 对话内容与密钥只保存在本机，不会上传到任何自有服务器。";
+        new AlertDialog.Builder(this)
+                .setTitle("欢迎使用 AiChat")
+                .setMessage(msg)
+                .setCancelable(false)
+                .setPositiveButton("同意并继续", new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface d, int w) {
+                        prefs.edit().putBoolean(KEY_FIRST_LAUNCH_DONE, true).apply();
+                        LogUtil.i(TAG, "first launch accepted");
+                        handlePromptIntent(getIntent());
+                    }
+                })
+                .setNegativeButton("退出", new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface d, int w) {
+                        LogUtil.i(TAG, "first launch declined, finishing");
+                        finish();
+                    }
+                })
+                .show();
     }
 
     @Override
@@ -237,7 +300,9 @@ public class MainActivity extends Activity {
 
     private void bindViews() {
         inputEditText = (EditText) findViewById(R.id.input_edit_text);
-        sendButton = (Button) findViewById(R.id.send_button);
+        sendButton = (ImageButton) findViewById(R.id.send_button);
+        plusButton = (ImageButton) findViewById(R.id.plus_button);
+        expandButton = (ImageButton) findViewById(R.id.expand_button);
         modelSpinner = (Spinner) findViewById(R.id.model_spinner);
         thinkingSpinner = (Spinner) findViewById(R.id.thinking_spinner);
     }
@@ -308,8 +373,12 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * 发送键：短按发送（忙时入队），长按 500ms 打断。
-     * 打断后这次抬手不能触发 click，否则草稿会被立刻发出去。
+     * 发送键的四种状态由 {@link #refreshSendButton()} 统一决定：
+     * 空闲+空输入=禁用发送，空闲+有输入=发送，生成中+空输入=停止，生成中+有输入=发送（入队）。
+     *
+     * <p>长按打断保留：输入框有内容时按钮回到「发送」，想立刻停下只能靠长按，
+     * 否则会把「停止」压在一个同时承担发送的按钮上，误触风险太高。
+     * 长按后这次抬手的 click 由 {@code sendButtonLongPressed} 吞掉。
      */
     private void bindSendButton() {
         sendButton.setOnClickListener(new View.OnClickListener() {
@@ -317,6 +386,11 @@ public class MainActivity extends Activity {
                 if (sendButtonLongPressed) {
                     sendButtonLongPressed = false;
                     LogUtil.d(TAG, "click: send suppressed after long-press interrupt");
+                    return;
+                }
+                if (isStopState()) {
+                    LogUtil.d(TAG, "click: stop");
+                    interruptRequest();
                     return;
                 }
                 LogUtil.d(TAG, "click: send");
@@ -346,12 +420,176 @@ public class MainActivity extends Activity {
                     case MotionEvent.ACTION_UP:
                     case MotionEvent.ACTION_CANCEL:
                         handler.removeCallbacks(longPressRunnable);
-                        // 短按不再打断：忙时由 sendMessage() 入队，长按才停
                         return false;
                 }
                 return false;
             }
         });
+
+        // 输入框是按钮状态与全屏入口的唯一真相来源
+        inputEditText.addTextChangedListener(new TextWatcher() {
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) { }
+            public void onTextChanged(CharSequence s, int start, int before, int count) { }
+            public void afterTextChanged(Editable s) {
+                refreshSendButton();
+            }
+        });
+
+        plusButton.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                showAttachMenu();
+            }
+        });
+        expandButton.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                openFullscreenInput();
+            }
+        });
+
+        refreshSendButton();
+    }
+
+    /** 生成中且输入框为空：此时按钮是「停止」。 */
+    private boolean isStopState() {
+        return isRequestInProgress.get() && !hasInputText();
+    }
+
+    private boolean hasInputText() {
+        return inputEditText != null
+                && inputEditText.getText().toString().trim().length() > 0;
+    }
+
+    /**
+     * 按钮外观的唯一写入口。被 TextWatcher 和请求状态变化调用，必须走 UI 线程。
+     * 全屏按钮用 INVISIBLE 而不是 GONE：显隐时占位不变，发送键不会跳。
+     */
+    private void refreshSendButton() {
+        if (sendButton == null || inputEditText == null) return;
+        if (android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) {
+            handler.post(new Runnable() {
+                public void run() {
+                    refreshSendButton();
+                }
+            });
+            return;
+        }
+        boolean hasText = hasInputText();
+        boolean stopping = isRequestInProgress.get() && !hasText;
+        sendButton.setImageResource(stopping ? R.drawable.ic_stop : R.drawable.ic_send);
+        sendButton.setContentDescription(getString(
+                stopping ? R.string.stop_generating : R.string.send));
+        // 空闲且一个字都没输入时禁用，避免「点了没反应」的困惑
+        sendButton.setEnabled(stopping || hasText);
+        if (expandButton != null) {
+            expandButton.setVisibility(hasText ? View.VISIBLE : View.INVISIBLE);
+        }
+    }
+
+    /**
+     * 请求状态的唯一写入口。直接改 {@link #isRequestInProgress} 会让按钮停留
+     * 在上一个状态（例如停止后仍显示方块），所以统一走这里带上 UI 刷新。
+     */
+    private void setRequestInProgress(boolean value) {
+        isRequestInProgress.set(value);
+        refreshSendButton();
+    }
+
+    private void showAttachMenu() {
+        PopupMenu menu = new PopupMenu(this, plusButton);
+        menu.getMenu().add(0, MENU_ATTACH_TEXT, 0, R.string.upload_text_file);
+        menu.setOnMenuItemClickListener(new PopupMenu.OnMenuItemClickListener() {
+            public boolean onMenuItemClick(MenuItem item) {
+                if (item.getItemId() == MENU_ATTACH_TEXT) {
+                    pickTextFile();
+                    return true;
+                }
+                return false;
+            }
+        });
+        menu.show();
+    }
+
+    /** API 18 没有 Storage Access Framework，只能用 ACTION_GET_CONTENT。 */
+    private void pickTextFile() {
+        Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+        intent.setType("text/*");
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        try {
+            startActivityForResult(Intent.createChooser(intent, getString(R.string.upload_text_file)),
+                    REQUEST_PICK_TEXT);
+        } catch (Exception e) {
+            LogUtil.w(TAG, "pickTextFile failed: %s", e.getMessage());
+            Toast.makeText(this, "没有可用的文件选择器", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void openFullscreenInput() {
+        Intent intent = new Intent(this, FullscreenInputActivity.class);
+        intent.putExtra(FullscreenInputActivity.EXTRA_TEXT, inputEditText.getText().toString());
+        startActivityForResult(intent, REQUEST_FULLSCREEN);
+    }
+
+    /** 后台读文件，回 UI 线程插到光标处；不覆盖用户已经打的内容。 */
+    private void importTextFile(final Uri uri) {
+        new Thread(new Runnable() {
+            public void run() {
+                String text = null;
+                String err = null;
+                try {
+                    text = readTextLimited(uri, MAX_IMPORT_BYTES);
+                } catch (Exception e) {
+                    err = e.getMessage();
+                }
+                final String loaded = text;
+                final String error = err;
+                runOnUiThread(new Runnable() {
+                    public void run() {
+                        if (loaded == null) {
+                            LogUtil.w(TAG, "importTextFile failed: %s", error);
+                            Toast.makeText(MainActivity.this,
+                                    "读取失败: " + (error == null ? "未知错误" : error),
+                                    Toast.LENGTH_LONG).show();
+                            return;
+                        }
+                        int at = inputEditText.getSelectionStart();
+                        if (at < 0) at = inputEditText.getText().length();
+                        inputEditText.getText().insert(at, loaded);
+                        Toast.makeText(MainActivity.this,
+                                "已插入 " + loaded.length() + " 字", Toast.LENGTH_SHORT).show();
+                    }
+                });
+            }
+        }, "aichat-import-text").start();
+    }
+
+    /**
+     * 读取文本文件，超过上限直接失败而不是截断——截一半的代码贴进对话比报错更难排查。
+     * UTF-8 解出来要是出现替换字符（U+FFFD），说明大概率是 GBK，再试一次。
+     */
+    private String readTextLimited(Uri uri, int maxBytes) throws Exception {
+        InputStream in = getContentResolver().openInputStream(uri);
+        if (in == null) throw new Exception("无法打开文件");
+        try {
+            ByteArrayOutputStream bos = new ByteArrayOutputStream();
+            byte[] buf = new byte[8192];
+            int n;
+            int total = 0;
+            while ((n = in.read(buf)) > 0) {
+                total += n;
+                if (total > maxBytes) {
+                    throw new Exception("文件超过 " + (maxBytes / 1024) + " KB");
+                }
+                bos.write(buf, 0, n);
+            }
+            byte[] data = bos.toByteArray();
+            String utf8 = new String(data, "UTF-8");
+            if (utf8.indexOf('\uFFFD') < 0) return utf8;
+            String gbk = new String(data, "GBK");
+            LogUtil.d(TAG, "readTextLimited: utf8 had replacement chars, fell back to GBK");
+            return gbk;
+        } finally {
+            try { in.close(); } catch (Exception ignored) { }
+        }
     }
 
     /** 回到底部：点击滚到底，长按 600ms 清空输入框。 */
@@ -570,7 +808,7 @@ public class MainActivity extends Activity {
         if (!isRequestInProgress.get()) return;
         requestGeneration.incrementAndGet();
         LogUtil.i(TAG, "interruptRequest: disconnecting current connection");
-        isRequestInProgress.set(false);
+        setRequestInProgress(false);
         if (currentConnection != null) {
             try { currentConnection.disconnect(); } catch (Exception ignored) {}
             currentConnection = null;
@@ -723,6 +961,23 @@ public class MainActivity extends Activity {
             } else {
                 LogUtil.w(TAG, "REQUEST_SCAN returned empty/null text");
             }
+        } else if (requestCode == REQUEST_PICK_TEXT) {
+            Uri picked = data == null ? null : data.getData();
+            if (resultCode == RESULT_OK && picked != null) {
+                LogUtil.i(TAG, "picked text file: %s", picked);
+                importTextFile(picked);
+            } else {
+                LogUtil.d(TAG, "pick text cancelled or empty");
+            }
+        } else if (requestCode == REQUEST_FULLSCREEN) {
+            if (resultCode == RESULT_OK && data != null) {
+                String text = data.getStringExtra(FullscreenInputActivity.EXTRA_RESULT);
+                if (text != null) {
+                    LogUtil.i(TAG, "fullscreen input returned: len=%d", text.length());
+                    inputEditText.setText(text);
+                    inputEditText.setSelection(text.length());
+                }
+            }
         } else {
             LogUtil.d(TAG, "onActivityResult unhandled: requestCode=%d resultCode=%d", requestCode, resultCode);
         }
@@ -732,6 +987,12 @@ public class MainActivity extends Activity {
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
+        // 首启引导还没确认时不能直接发：否则从别的应用「发送到 AiChat」，
+        // 消息会在引导弹窗背后被发出去。等用户点「同意」时再统一处理 getIntent()。
+        if (!prefs.getBoolean(KEY_FIRST_LAUNCH_DONE, false)) {
+            LogUtil.d(TAG, "onNewIntent deferred: first launch not confirmed");
+            return;
+        }
         handlePromptIntent(intent);
     }
 
@@ -994,6 +1255,12 @@ public class MainActivity extends Activity {
         sendStreamingRequest(provider, thinkingLevel, generation, null);
     }
 
+    /** 该 provider 是否已经明确拒绝过 stream_options。 */
+    private boolean isUsageUnsupported(String providerName) {
+        if (providerName == null || providerName.length() == 0) return true;
+        return prefs.getBoolean(KEY_USAGE_UNSUPPORTED_PREFIX + providerName, false);
+    }
+
     private void sendStreamingRequest(ProviderInfo provider, String thinkingLevel,
             int generation, StreamJob.Resume resume) {
         final boolean webSearchEnabled = SettingsActivity.isWebSearchEnabled(this);
@@ -1006,6 +1273,10 @@ public class MainActivity extends Activity {
                 && (useTavily ? TavilyTool.hasApiKey(tavilyKey) : searchProvider != null);
         final String effectiveSystemPrompt =
                 WebSearchTool.appendToSystemPrompt(systemPrompt, webSearchEnabled);
+        final boolean streamEnabled = SettingsActivity.isStreamEnabled(this);
+        // 端点上次拒过 stream_options 就不再发，避免每次对话白吃一个 400
+        final boolean includeUsage = streamEnabled && !isUsageUnsupported(provider.name);
+        activeProviderName = provider.name;
 
         Message aiMsg;
         int aiIndex;
@@ -1039,7 +1310,7 @@ public class MainActivity extends Activity {
             }
         });
 
-        isRequestInProgress.set(true);
+        setRequestInProgress(true);
         LogUtil.i(TAG, ">>> request START: gen=%d url=%s%s model=%s thinking=%s webSearch=%s backend=%s",
                 generation, provider.apiUrl, provider.chatPath, currentModel, thinkingLevel,
                 webSearchEnabled, useTavily ? "tavily" : "deepseek");
@@ -1057,14 +1328,17 @@ public class MainActivity extends Activity {
                 .effectiveSystemPrompt(effectiveSystemPrompt)
                 .providerName(provider.name)
                 .chatEndpoint(provider.apiUrl + provider.chatPath)
-                .streamEnabled(SettingsActivity.isStreamEnabled(this))
+                .streamEnabled(streamEnabled)
+                .includeUsage(includeUsage)
                 .realtimeRender(SettingsActivity.isRealtimeRenderEnabled(this))
                 .webSearchEnabled(webSearchEnabled)
+                .httpToolEnabled(SettingsActivity.isHttpToolEnabled(this))
                 .useTavily(useTavily)
                 .searchReady(searchReady)
                 .maxCallsPerRound(SettingsActivity.getWebSearchMaxCallsPerRound(this))
                 .searchProvider(searchProvider)
                 .tavilyKey(tavilyKey)
+                .retryPolicy(RetryPolicy.from(this))
                 .resume(resume)
                 .build();
 
@@ -1108,6 +1382,13 @@ public class MainActivity extends Activity {
             lastStreamTrace = "";
             renderSeq.incrementAndGet();
             LogUtil.d(TAG, "trace trimmed: render base reset");
+        }
+
+        public void onUsageUnsupported() {
+            String name = activeProviderName;
+            if (name == null || name.length() == 0) return;
+            prefs.edit().putBoolean(KEY_USAGE_UNSUPPORTED_PREFIX + name, true).apply();
+            LogUtil.w(TAG, "provider '%s' rejected stream_options, usage off for it", name);
         }
 
         public boolean isCurrent(int generation) {
@@ -1221,7 +1502,14 @@ public class MainActivity extends Activity {
                             if (requestGeneration.get() != settled.generation) return;
                             if (finalIdx >= 0 && finalIdx < messages.size()
                                     && messages.get(finalIdx).isAssistant()) {
-                                messages.get(finalIdx).content = settled.content;
+                                Message done = messages.get(finalIdx);
+                                done.content = settled.content;
+                                // 完成时刻用于算端到端速度；用量可能是 0（端点不支持）
+                                done.finishedAt = settled.finishedAt > 0
+                                        ? settled.finishedAt : System.currentTimeMillis();
+                                done.promptTokens = settled.promptTokens;
+                                done.completionTokens = settled.completionTokens;
+                                done.totalTokens = settled.totalTokens;
                             }
                             if (domComplete) {
                                 webViewEvalJs("streamFinalize()");
@@ -1239,6 +1527,10 @@ public class MainActivity extends Activity {
                             String srcHtml = MessageHtmlRenderer.renderSourcesInner(
                                     am == null ? null : am.sources);
                             webViewEvalJs("updateLastSources('" + jsEscape(srcHtml) + "')");
+                            // 时间/用量/速度和来源一样挂在 .content 之外，
+                            // 必须在 finalizeLast 之前写，之后 DOM 下标就不是 -1 了
+                            webViewEvalJs("updateLastMeta('"
+                                    + jsEscape(MessageHtmlRenderer.renderMeta(am)) + "')");
                             webViewEvalJs("finalizeLast(" + finalIdx + ")");
                             conversationManager.saveCurrentConversation();
                         }
@@ -1482,7 +1774,7 @@ public class MainActivity extends Activity {
     private void finishRequestAndDrain() {
         runOnUiThread(new Runnable() {
             public void run() {
-                isRequestInProgress.set(false);
+                setRequestInProgress(false);
                 if (queue != null) queue.drain();
             }
         });
@@ -2536,6 +2828,11 @@ public class MainActivity extends Activity {
                     copy.role = src.role;
                     copy.content = src.content;
                     copy.timestamp = src.timestamp;
+                    // 时间/用量跟着走，否则分支里的消息会比原会话「少一行」
+                    copy.finishedAt = src.finishedAt;
+                    copy.promptTokens = src.promptTokens;
+                    copy.completionTokens = src.completionTokens;
+                    copy.totalTokens = src.totalTokens;
                     // 纯文本/工具历史也要一起带走，否则分支里的 AI 回复又退回「只有正文」
                     copy.apiText = src.apiText;
                     copy.toolHistory = src.toolHistory;

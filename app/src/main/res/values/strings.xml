@@ -28,4 +28,8 @@
     <string name="insert_to_input">插入到输入框</string>
     <string name="copy_and_insert">复制并插入</string>
     <string name="quick_scan_mode">快速搜题模式</string>
+    <string name="attach">添加附件</string>
+    <string name="fullscreen_input">全屏输入</string>
+    <string name="stop_generating">停止生成</string>
+    <string name="upload_text_file">上传文本文件</string>
 </resources>

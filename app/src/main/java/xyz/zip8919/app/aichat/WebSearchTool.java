@@ -59,7 +59,8 @@ public class WebSearchTool {
         String error;
     }
 
-    public static JSONArray buildToolDefinitions(boolean includeWebTools) throws Exception {
+    public static JSONArray buildToolDefinitions(boolean includeWebTools, boolean includeHttpTool)
+            throws Exception {
         JSONArray tools = new JSONArray();
 
         if (includeWebTools) {
@@ -68,7 +69,9 @@ public class WebSearchTool {
             JSONObject searchFn = new JSONObject();
             searchFn.put("name", TOOL_SEARCH);
             searchFn.put("description",
-                    "联网搜索互联网。用于查询实时信息、新闻、价格、天气、版本、人物事件等你无法确定或可能过时的内容。");
+                    "联网搜索互联网。用于查询实时信息、新闻、价格、天气、版本、人物事件等你无法确定或可能过时的内容。"
+                            + "遇到这类问题时先调用本工具检索，再基于结果回答，并在回答中引用来源链接。"
+                            + "不要编造工具结果；搜索失败时如实说明。简单常识或纯推理问题可以直接回答。");
             JSONObject searchParams = new JSONObject();
             searchParams.put("type", "object");
             JSONObject searchProps = new JSONObject();
@@ -123,29 +126,28 @@ public class WebSearchTool {
         time.put("function", timeFn);
         tools.put(time);
 
+        // 通用 HTTP 工具：默认关闭，只有用户在设置里显式打开才出现在 tools 数组里。
+        // 没打开时模型根本看不到它，也就不可能调用。
+        if (includeHttpTool) {
+            tools.put(HttpRequestTool.definition());
+        }
+
         return tools;
     }
 
+    /**
+     * 工具能力描述已经全部写进 {@code tools[].function.description}——那是协议自带字段，
+     * 每轮本来就要发。以前这里再拼一段中文把同样的信息说一遍，等于每轮白烧约 200 token。
+     *
+     * <p>保留方法签名，是为了让 {@code MainActivity} 与「端点不支持 tools 时回退」的
+     * 路径不用改：回退时这两个函数本来就该返回空。
+     */
     public static String buildSystemPrompt(boolean includeWebTools) {
-        StringBuilder sb = new StringBuilder();
-        if (includeWebTools) {
-            sb.append("你可以使用联网工具：\n")
-              .append("- web_search(query, count)：搜索互联网，返回标题、链接和摘要。\n")
-              .append("- web_fetch(url)：抓取指定网页的正文。\n")
-              .append("遇到实时信息、新闻、价格、天气、版本、人物事件等你不确定或可能过时的内容时，")
-              .append("先调用工具检索，再基于检索结果回答。回答中请引用来源链接。")
-              .append("不要编造工具结果；搜索失败时请说明情况。简单常识或纯推理问题可以直接回答。")
-              .append("\n\n");
-        }
-        sb.append("你可以调用 get_current_time() 获取设备当前的日期、时间、星期与时区。")
-          .append("涉及今天、现在、几号、星期几、今年等问题时必须先调用它，不要凭训练数据推断当前日期。");
-        return sb.toString();
+        return "";
     }
 
     public static String appendToSystemPrompt(String base, boolean includeWebTools) {
-        String toolPrompt = buildSystemPrompt(includeWebTools);
-        if (base == null || base.trim().length() == 0) return toolPrompt;
-        return base + "\n\n" + toolPrompt;
+        return base == null ? "" : base;
     }
 
     /**

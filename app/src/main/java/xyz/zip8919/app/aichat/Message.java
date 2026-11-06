@@ -42,6 +42,20 @@ public class Message {
      */
     public String toolHistory = "";
 
+    /**
+     * 生成完成时刻（毫秒）。0 表示未知：老会话读出来就是 0，此时只显示时间不显示速度。
+     * 用 finishedAt - timestamp 算端到端耗时，包含工具轮次，比单轮耗时有意义。
+     */
+    public long finishedAt;
+
+    /**
+     * 服务端返回的 token 用量。0 表示该端点不支持 {@code stream_options.include_usage}，
+     * 此时界面上不显示 token——宁可没有，也不要拿本地估算值冒充真实用量。
+     */
+    public int promptTokens;
+    public int completionTokens;
+    public int totalTokens;
+
     public Message() {}
 
     public Message(String role, String content) {

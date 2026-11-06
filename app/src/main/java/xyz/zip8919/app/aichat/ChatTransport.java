@@ -30,7 +30,7 @@ final class ChatTransport {
      * 这两种格式不通用，写错端点会直接 400。
      */
     static JSONObject buildRequestBody(String model, ProviderInfo provider, String thinkingLevel,
-            JSONArray messages, boolean stream, JSONArray tools) throws Exception {
+            JSONArray messages, boolean stream, JSONArray tools, boolean includeUsage) throws Exception {
         JSONObject body = new JSONObject();
         body.put("model", model);
         body.put("stream", stream);
@@ -38,6 +38,13 @@ final class ChatTransport {
         if (tools != null && tools.length() > 0) {
             body.put("tools", tools);
             body.put("tool_choice", "auto");
+        }
+        // 流式下 usage 默认不返回，必须显式要。严格校验参数的端点会因此 400，
+        // 由 ChatStreamRunner 的降级链去掉本字段重发。
+        if (stream && includeUsage) {
+            JSONObject opts = new JSONObject();
+            opts.put("include_usage", true);
+            body.put("stream_options", opts);
         }
 
         if ("boolean".equals(provider.thinkingType)) {
@@ -57,6 +64,38 @@ final class ChatTransport {
             }
         }
         return body;
+    }
+
+    /**
+     * 读 {@code Retry-After} 头，返回需要等待的秒数；没有或解析失败返回 -1。
+     *
+     * <p>两种合法格式都要支持：纯秒数（{@code 120}）与 HTTP-date
+     * （{@code Wed, 21 Oct 2015 07:28:00 GMT}）。只认前者会让一半服务端的
+     * 限流提示失效，白白退化成指数退避。
+     */
+    static int retryAfterSeconds(HttpURLConnection conn) {
+        if (conn == null) return -1;
+        try {
+            String raw = conn.getHeaderField("Retry-After");
+            if (raw == null) return -1;
+            raw = raw.trim();
+            if (raw.length() == 0) return -1;
+            try {
+                int sec = Integer.parseInt(raw);
+                return sec < 0 ? -1 : sec;
+            } catch (NumberFormatException ignored) {
+                // 不是纯数字，继续按 HTTP-date 解析
+            }
+            java.text.SimpleDateFormat fmt =
+                    new java.text.SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss zzz",
+                            java.util.Locale.US);
+            java.util.Date when = fmt.parse(raw);
+            long diff = (when.getTime() - System.currentTimeMillis()) / 1000L;
+            return diff > 0 ? (int) diff : 0;
+        } catch (Exception e) {
+            LogUtil.d(TAG, "retryAfterSeconds parse failed: %s", e.getMessage());
+            return -1;
+        }
     }
 
     static HttpURLConnection open(ProviderInfo provider) throws Exception {

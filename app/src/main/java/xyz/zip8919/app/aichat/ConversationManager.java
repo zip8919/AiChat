@@ -338,6 +338,13 @@ public class ConversationManager {
                 mj.put("role", m.role == null ? Message.ROLE_USER : m.role);
                 mj.put("content", m.content == null ? "" : m.content);
                 mj.put("timestamp", m.timestamp);
+                // 只在有值时写：老会话不该因为加了这个功能就整体重写变大
+                if (m.finishedAt > 0) mj.put("finishedAt", m.finishedAt);
+                if (m.totalTokens > 0) {
+                    mj.put("promptTokens", m.promptTokens);
+                    mj.put("completionTokens", m.completionTokens);
+                    mj.put("totalTokens", m.totalTokens);
+                }
                 if (m.apiText != null && m.apiText.length() > 0) {
                     mj.put("apiText", m.apiText);
                 }
@@ -409,6 +416,10 @@ public class ConversationManager {
                             ? Message.ROLE_USER : role;
                     m.content = mj.isNull("content") ? "" : mj.optString("content", "");
                     m.timestamp = mj.optLong("timestamp", System.currentTimeMillis());
+                    m.finishedAt = mj.optLong("finishedAt", 0);
+                    m.promptTokens = mj.optInt("promptTokens", 0);
+                    m.completionTokens = mj.optInt("completionTokens", 0);
+                    m.totalTokens = mj.optInt("totalTokens", 0);
                     m.sendFailed = mj.optBoolean("sendFailed", false);
                     m.errorDetail = mj.optString("errorDetail", "");
                     m.apiText = mj.optString("apiText", "");

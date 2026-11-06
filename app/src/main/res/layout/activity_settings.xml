@@ -218,6 +218,182 @@
         android:layout_marginBottom="12dp"
         android:text="限制单轮 AI 回复中执行的搜索/抓取请求数（1-50，默认 15）；工具轮次不设上限。"/>
 
+    <!-- 本机 HTTP 工具：默认关闭，开启等于把网络出口交给模型 -->
+    <LinearLayout
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="4dp">
+        <TextView
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:textColor="@color/text_primary"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="允许 AI 发起网络请求"/>
+        <Switch
+            android:id="@+id/http_tool_switch"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"/>
+    </LinearLayout>
+    <TextView
+        android:textSize="11sp"
+        android:textColor="@color/text_secondary"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="12dp"
+        android:text="开启后模型可直接请求公网 URL 调用 API（禁止访问本机与内网，响应截断 8 KB）。默认关闭。"/>
+
+    <!-- 429 限流重试 -->
+    <LinearLayout
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="4dp">
+        <TextView
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:textColor="@color/text_primary"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="429 自动重试"/>
+        <Switch
+            android:id="@+id/retry_429_switch"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"/>
+    </LinearLayout>
+    <TextView
+        android:textSize="11sp"
+        android:textColor="@color/text_secondary"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="8dp"
+        android:text="仅对「请求过于频繁」(HTTP 429) 生效；服务端返回 Retry-After 时以它为准。"/>
+
+    <LinearLayout
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="6dp">
+        <TextView
+            android:textSize="13sp"
+            android:textColor="@color/text_primary"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="最多重试次数（1-5）"/>
+        <EditText
+            android:id="@+id/retry_429_max_edit"
+            android:background="@drawable/edit_text_background"
+            android:gravity="center"
+            android:inputType="number"
+            android:maxLength="1"
+            android:padding="6dp"
+            android:layout_width="64dp"
+            android:layout_height="wrap_content"
+            android:hint="3"/>
+    </LinearLayout>
+    <LinearLayout
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="6dp">
+        <TextView
+            android:textSize="13sp"
+            android:textColor="@color/text_primary"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="首次等待（秒，1-30）"/>
+        <EditText
+            android:id="@+id/retry_429_base_edit"
+            android:background="@drawable/edit_text_background"
+            android:gravity="center"
+            android:inputType="number"
+            android:maxLength="2"
+            android:padding="6dp"
+            android:layout_width="64dp"
+            android:layout_height="wrap_content"
+            android:hint="2"/>
+    </LinearLayout>
+    <LinearLayout
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="6dp">
+        <TextView
+            android:textSize="13sp"
+            android:textColor="@color/text_primary"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="单次最长等待（秒，1-120）"/>
+        <EditText
+            android:id="@+id/retry_429_max_wait_edit"
+            android:background="@drawable/edit_text_background"
+            android:gravity="center"
+            android:inputType="number"
+            android:maxLength="3"
+            android:padding="6dp"
+            android:layout_width="64dp"
+            android:layout_height="wrap_content"
+            android:hint="30"/>
+    </LinearLayout>
+    <LinearLayout
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="12dp">
+        <TextView
+            android:textSize="13sp"
+            android:textColor="@color/text_primary"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="指数退避（2s → 4s → 8s）"/>
+        <Switch
+            android:id="@+id/retry_429_backoff_switch"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"/>
+    </LinearLayout>
+
+    <!-- 代码执行器环境提示词：原来写死在 ToolsActivity，换设备就报错 -->
+    <TextView
+        android:textSize="14sp"
+        android:textStyle="bold"
+        android:textColor="@color/text_primary"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="6dp"
+        android:text="代码执行提示词"/>
+    <EditText
+        android:id="@+id/js_env_prompt_edit"
+        android:background="@drawable/edit_text_background"
+        android:gravity="top|start"
+        android:inputType="textMultiLine"
+        android:minLines="4"
+        android:maxLines="10"
+        android:padding="8dp"
+        android:textSize="13sp"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="4dp"/>
+    <TextView
+        android:textSize="11sp"
+        android:textColor="@color/text_secondary"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="12dp"
+        android:text="小工具页的「复制环境提示词」「发送给 AI」会用它。可用占位符：{android} {api} {webview} {model} {app_version} {ua}"/>
+
     <!-- Quick scan switch -->
     <LinearLayout
         android:gravity="center_vertical"
@@ -365,6 +541,15 @@
         android:layout_height="wrap_content"
         android:layout_marginBottom="24dp"
         android:text="查询 DeepSeek 余额"/>
+
+    <!-- About -->
+    <Button
+        android:textSize="14sp"
+        android:id="@+id/about_button"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="24dp"
+        android:text="关于"/>
 
     <!-- Save / Cancel -->
     <LinearLayout

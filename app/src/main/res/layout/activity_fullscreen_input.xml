@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:orientation="vertical"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/white">
+
+    <LinearLayout
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:background="@color/primary"
+        android:padding="6dp"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
+        <Button
+            android:id="@+id/fullscreen_cancel"
+            android:text="@string/cancel"
+            android:textColor="@android:color/white"
+            android:textSize="14sp"
+            android:background="?android:attr/selectableItemBackground"
+            android:paddingLeft="12dp"
+            android:paddingRight="12dp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"/>
+        <TextView
+            android:text="@string/fullscreen_input"
+            android:textColor="@android:color/white"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:gravity="center"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"/>
+        <Button
+            android:id="@+id/fullscreen_done"
+            android:text="@string/done"
+            android:textColor="@android:color/white"
+            android:textSize="14sp"
+            android:background="?android:attr/selectableItemBackground"
+            android:paddingLeft="12dp"
+            android:paddingRight="12dp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"/>
+    </LinearLayout>
+
+    <EditText
+        android:id="@+id/fullscreen_edit"
+        android:gravity="top|start"
+        android:background="@null"
+        android:padding="16dp"
+        android:textSize="16sp"
+        android:inputType="textMultiLine"
+        android:scrollbars="vertical"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"/>
+
+    <TextView
+        android:id="@+id/fullscreen_count"
+        android:gravity="right"
+        android:padding="8dp"
+        android:textSize="12sp"
+        android:textColor="@color/text_secondary"
+        android:background="@color/light_gray"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"/>
+</LinearLayout>

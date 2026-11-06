@@ -35,12 +35,17 @@
 | `StreamRenderer` | 流式节流、base 与 tail 分开更新 | 不解析 markdown |
 | `ChatHistory` | 历史压缩、tool 配对校验、回放 | 不发请求 |
 | `ToolHistoryRecovery` | 旧会话：从正文卡片反推工具历史 | 不碰网络，不改消息 |
+| `HttpRequestTool` | `http_request` 工具：内网拦截、跳转禁跟、响应截断 | 不决定是否启用（由设置 + `StreamJob` 传入） |
+| `RetryPolicy` | 429 重试：退避、`Retry-After`、上限、可打断等待 | 不判断 HTTP 状态，不写 UI |
+| `SystemInfo` | 系统 / WebView 信息与提示词占位符填充 | 不做 IO，不持有 Context |
 | `TraceKit` | trace 长度上限，只在块边界裁剪 | 不做渲染，不判断内容语义 |
 | `MessageHtmlRenderer` | 一条消息 → 一段 HTML（卡片结构） | 不解析 markdown 语法 |
 | `MarkdownPipeline` | markdown → html 的流水线 | 不处理公式位图生成 |
 | `MathRenderer` | `\ce` / LaTeX / 裸命令 → 位图 | 不碰消息结构 |
 | `RendererAssets` | CSS 与 JS 字符串 | — |
 | `ViewerController` | 图片 / 表格 / HTML·SVG 全屏预览 | 不持有会话状态 |
+| `FullscreenInputActivity` | 全屏输入编辑，完成后回填主输入框 | 不做草稿持久化（主输入框是唯一数据源） |
+| `AboutActivity` | 版本展示、检查更新、反馈、开源许可 | 不发起版本网络请求（功能待开发） |
 | `MessageQueue` | 排队发送 | 不知道消息内容怎么发 |
 | `ConversationManager` | 会话读写、异步落盘队列 | 不碰 UI |
 
@@ -82,6 +87,11 @@
 | 公式渲染 | `MathRenderer` |
 | 流式刷新的频率与内容 | `StreamRenderer` |
 | 发送键 / 排队 / 长按行为 | `MainActivity.bindSendButton`、`MessageQueue` |
+| 发送键图标与启用状态（发送 / 停止） | `MainActivity.refreshSendButton`、`isStopState` |
+| 429 重试次数、间隔、退避 | `RetryPolicy` + `SettingsActivity.getRetryPolicy` |
+| `http_request` 工具的能力与安全边界 | `HttpRequestTool`（默认关闭，设置页开关） |
+| 代码执行器提示词、占位符 | `SettingsActivity.getJsEnvPrompt` + `SystemInfo.fillPlaceholders` |
+| 首启引导文案与顺序 | `MainActivity.showFirstLaunchDialog` + `KEY_FIRST_LAUNCH_DONE` |
 
 ## 调试
 
@@ -122,3 +132,13 @@ rounds done: sources=5 apiText=842 toolHistory=4
     滑动不卡顿（验证增量渲染 + `TraceKit`）
 11. 生成中长按正在输出的气泡：弹出「复制已生成内容 / 选择文本 / 停止生成」
 12. 生成中含宽表格的回答：手指在表格上横向拖动，位置不能被重绘拉回
+13. **发送键状态机**：输入框为空且生成中 → 显示方块（停止）；有文字 → 显示纸飞机（发送）；
+    文字清空后立刻回到停止态，不能出现「既能发又能停」的中间态
+14. **全屏输入**：有文字时四角图标出现，点开编辑后「完成」回填、「取消」丢弃，
+    返回键等同于取消且不改动原输入
+15. **429 重试**：断网/限流时自动重试，重试期间「停止」能立即打断等待；
+    重试次数耗尽后错误卡片带「已自动重试 N 次仍失败」
+16. **Token 与时间**：每条消息底部显示时间；AI 消息带 token 与 tok/s；
+    端点不支持 `stream_options` 时应自动降级且只降级一次，后续请求不再带该字段
+17. **首启引导**：清除数据后首启弹免责声明，确认前不会发出任何外部 Intent 带来的消息；
+    「关于」页版本号与实际 APK 一致

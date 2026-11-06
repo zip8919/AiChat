@@ -37,6 +37,11 @@ final class SseRound {
          */
         final StringBuilder reasoning = new StringBuilder();
         final JSONArray toolCalls = new JSONArray();
+        /**
+         * 服务端返回的用量对象（prompt_tokens / completion_tokens / total_tokens），
+         * 没请求或端点不支持时为 null。流式下只出现在最后一帧。
+         */
+        JSONObject usage;
         int chunks;
         int thinkingChunks;
         int contentChunks;
@@ -80,6 +85,7 @@ final class SseRound {
         r.rawBody = sb.toString();
 
         JSONObject json = new JSONObject(r.rawBody);
+        r.usage = json.optJSONObject("usage");
         JSONArray choices = json.optJSONArray("choices");
         JSONObject message = choices != null && choices.length() > 0
                 ? choices.getJSONObject(0).optJSONObject("message") : null;
@@ -151,6 +157,11 @@ final class SseRound {
                             r.chunks, e.getMessage(), LogUtil.preview(data, 300));
                     continue;
                 }
+                // usage 必须在 choices 判空之前取：OpenAI 的最后一帧是
+                // {"choices":[],"usage":{...}}，先 continue 掉就永远读不到。
+                JSONObject usageObj = json.optJSONObject("usage");
+                if (usageObj != null) r.usage = usageObj;
+
                 JSONArray choices = json.optJSONArray("choices");
                 if (choices == null || choices.length() == 0) {
                     LogUtil.v(TAG, "chunk#%d has no choices: %s",

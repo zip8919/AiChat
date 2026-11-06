@@ -115,6 +115,8 @@ final class RendererAssets {
             ".msg-menu-btn:active .mdot{background:#555;}" +
             ".ai-menu-wrap{text-align:left;margin-top:4px;}" +
             ".user-menu-wrap{text-align:right;margin-top:2px;}" +
+            // 时间/用量行。用户侧靠 .msg.user 的 text-align:right 自然右对齐，不用另写规则。
+            ".msg-meta{font-size:11px;color:#90a4ae;margin-top:4px;line-height:1.4;}" +
             ".tk-kw{color:#d73a49;font-weight:bold;}" +
             ".tk-str{color:#032f62;}" +
             ".tk-cmt{color:#6a737d;font-style:italic;}" +
@@ -320,6 +322,20 @@ final class RendererAssets {
             "var ms=document.querySelectorAll('.msg.ai .sources');" +
             "if(ms.length>0){ms[ms.length-1].innerHTML=html;}" +
             "smartScrollToBottom();};" +
+            // 收尾时补一条「时间 · token · 速度」。挂在 .content 之外，
+            // 必须在 finalizeLast 之前调用——之后 data-idx 就变成真实下标了。
+            "window.updateLastMeta=function(html){" +
+            "var ms=document.querySelectorAll('.msg.ai');" +
+            "if(ms.length===0)return;" +
+            "var last=ms[ms.length-1];" +
+            "var old=last.querySelector('.msg-meta');" +
+            "var d=document.createElement('div');d.innerHTML=html||'';" +
+            "var node=d.firstElementChild;" +
+            "if(!node){if(old&&old.parentNode)old.parentNode.removeChild(old);return;}" +
+            "var menu=last.querySelector('.ai-menu-wrap');" +
+            "if(old&&old.parentNode){old.parentNode.replaceChild(node,old);}" +
+            "else if(menu){last.insertBefore(node,menu);}" +
+            "else{last.appendChild(node);}};" +
             // ---- 更早消息的懒加载 ----
             "window.setOlderHint=function(remaining){" +
             "window.__loadingOlder=false;" +

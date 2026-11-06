@@ -128,6 +128,10 @@ final class ToolExecutor {
             if (WebSearchTool.TOOL_TIME.equals(name)) {
                 // 本地工具：不依赖搜索密钥，也不受联网开关影响
                 result = WebSearchTool.currentTimeResult();
+            } else if (HttpRequestTool.TOOL_HTTP.equals(name)) {
+                // 本机直连：同样不依赖搜索 provider。工具定义只在设置开启时才发给模型，
+                // 走到这里说明用户已经显式启用过。
+                result = HttpRequestTool.execute(args);
             } else {
                 result = host.execute(name, args, question);
                 if (result == null) {
