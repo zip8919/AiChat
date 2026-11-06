@@ -1582,11 +1582,7 @@ public class MainActivity extends Activity {
             LogUtil.d(TAG, "JsBridge.messageMenu: idx=%s", idx);
             handler.post(new Runnable() {
                 public void run() {
-                    try {
-                        showMessageMenu(Integer.parseInt(idx));
-                    } catch (Exception e) {
-                        LogUtil.w(TAG, "messageMenu parse failed: idx=%s err=%s", idx, e.getMessage());
-                    }
+                    openMessageMenu(idx);
                 }
             });
         }
@@ -1596,20 +1592,26 @@ public class MainActivity extends Activity {
             LogUtil.d(TAG, "JsBridge.messageLongPress: idx=%s", idx);
             handler.post(new Runnable() {
                 public void run() {
-                    try {
-                        int pos = Integer.parseInt(idx);
-                        // 正在生成的气泡在 DOM 上是 data-idx=-1，messages 里没有对应下标。
-                        // 以前直接交给 showMessageMenu，被 pos<0 的守卫挡掉 —— 生成期间菜单打不开。
-                        if (pos < 0) {
-                            showStreamingMenu();
-                            return;
-                        }
-                        showMessageMenu(pos);
-                    } catch (Exception e) {
-                        LogUtil.w(TAG, "messageLongPress parse failed: idx=%s err=%s", idx, e.getMessage());
-                    }
+                    openMessageMenu(idx);
                 }
             });
+        }
+
+        /**
+         * 「⋯」按钮与长按共用同一条入口。两处都要支持 -1：正在生成的气泡在 DOM 上
+         * 只有 -1，没有稳定下标，以前被 showMessageMenu 的 pos&lt;0 守卫直接挡掉。
+         */
+        private void openMessageMenu(String idx) {
+            try {
+                int pos = Integer.parseInt(idx);
+                if (pos < 0) {
+                    showStreamingMenu();
+                    return;
+                }
+                showMessageMenu(pos);
+            } catch (Exception e) {
+                LogUtil.w(TAG, "openMessageMenu parse failed: idx=%s err=%s", idx, e.getMessage());
+            }
         }
 
         /** 用户滑到顶部时，追加更早的一批消息（在后台线程渲染，避免卡 UI）。 */
@@ -2043,8 +2045,16 @@ public class MainActivity extends Activity {
      */
     private void showStreamingMenu() {
         if (!isRequestInProgress.get()) {
-            // 请求已结束却还挂着 -1：说明 DOM 与消息列表脱节，重新渲染一次即可修复
-            LogUtil.w(TAG, "showStreamingMenu: no request in flight, refreshing view");
+            // 请求其实已经结束，只是 DOM 还挂着 -1（finalizeLast 还没跑到）。
+            // 这时按常规消息处理，别弹精简菜单、也别整页重绘——后者会让用户
+            // 觉得「点了一下屏幕闪一下但什么都没发生」。
+            int pos = messages == null ? -1 : messages.size() - 1;
+            if (pos >= 0 && messages.get(pos) != null && messages.get(pos).isAssistant()) {
+                LogUtil.d(TAG, "showStreamingMenu: request finished, fall back to pos=%d", pos);
+                showMessageMenu(pos);
+                return;
+            }
+            LogUtil.w(TAG, "showStreamingMenu: no assistant message, refreshing view");
             refreshWebView();
             return;
         }
