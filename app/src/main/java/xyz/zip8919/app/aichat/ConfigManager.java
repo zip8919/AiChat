@@ -133,6 +133,12 @@ public class ConfigManager {
         addModel("deepseek-flash", "DeepSeek", true);
         addModel("deepseek-v4-pro", "DeepSeek", true);
 
+        // DeepSeek Flash 是多模态模型（官方图像理解文档），内置默认开图片输入；
+        // 其余模型按需在模型配置里勾选
+        for (ModelInfo m : models) {
+            if (isVisionDefaultName(m.name)) m.supportsVision = true;
+        }
+
         this.defaultModel = "deepseek-v4-flash";
         this.enableThinking = true;
         this.thinkingLevel = "medium";
@@ -147,6 +153,17 @@ public class ConfigManager {
             sb.append(providers.get(i).name);
         }
         return sb.toString();
+    }
+
+    /**
+     * DeepSeek Flash 系列是多模态模型，开箱默认开启图片输入
+     * （{@code deepseek-flash} / {@code deepseek-v4-flash}，见官方图像理解文档）。
+     * 其余模型一律默认关，避免给不支持图像的端点发 content 数组吃 400。
+     */
+    static boolean isVisionDefaultName(String name) {
+        if (name == null) return false;
+        String n = name.toLowerCase();
+        return n.contains("deepseek") && n.contains("flash");
     }
 
     private void addModel(String name, String provider, boolean supportsThinking) {
@@ -189,6 +206,7 @@ public class ConfigManager {
         json.put("default_model", this.defaultModel);
         json.put("enable_thinking", this.enableThinking);
         json.put("thinking_level", this.thinkingLevel);
+        json.put("vision_defaults_v2", true);
 
         return json;
     }
@@ -218,9 +236,17 @@ public class ConfigManager {
             m.name = mj.getString("name");
             m.provider = mj.getString("provider");
             m.supportsThinking = mj.optBoolean("supports_thinking", true);
-            // 老配置没有这个字段：默认 false，行为与 1.9.0 一致（不发图）
+            // 没有这个字段的更老配置：默认 false，行为与 1.9.0 一致（不发图）
             m.supportsVision = mj.optBoolean("supports_vision", false);
             models.add(m);
+        }
+
+        // 一次性迁移（vision_defaults_v2）：DeepSeek Flash 系列多模态默认开。
+        // 只在首次读到旧配置时翻一次，之后完全以 supports_vision 为准，用户关了不会再翻回来。
+        if (!json.optBoolean("vision_defaults_v2", false)) {
+            for (ModelInfo m : models) {
+                if (isVisionDefaultName(m.name)) m.supportsVision = true;
+            }
         }
 
         this.defaultModel = json.optString("default_model",

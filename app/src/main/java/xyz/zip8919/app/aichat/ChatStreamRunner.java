@@ -465,8 +465,9 @@ final class ChatStreamRunner {
 
         public String imageDataUri(String url) {
             try {
-                // 768 是视觉模型的短边上限，再大也会被端点缩回去，白占请求体
-                return AttachmentFiles.remoteToDataUri(url, 768);
+                // 注入走 detail=low，模型推理前反正缩到 512×512，
+                // 这里就按 512px 编码，再大也是被缩回去，白占请求体
+                return AttachmentFiles.remoteToDataUri(url, 512);
             } catch (Exception e) {
                 LogUtil.w("ChatStreamRunner", "imageDataUri failed: %s", e.getMessage());
                 return null;

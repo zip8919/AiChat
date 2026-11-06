@@ -285,7 +285,8 @@ public class ModelConfigActivity extends Activity {
         layout.addView(visionCb);
 
         TextView visionTip = new TextView(this);
-        visionTip.setText("开启后：附加的图片与图片搜索结果会随请求发给模型。"
+        visionTip.setText("开启后：附加的图片（原图口径）与图片搜索结果（最多 2 张、压缩后约 184 token/张）"
+                + "会随请求发给模型。DeepSeek Flash 系列默认已开。"
                 + "请确认该模型确实支持 image_url 格式，否则请求会失败。");
         visionTip.setTextSize(11);
         visionTip.setTextColor(0xFF888888);

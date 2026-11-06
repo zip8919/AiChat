@@ -180,10 +180,12 @@ final class ToolExecutor {
     /**
      * 把图片搜索结果装成一条多模态 user 消息，接在 tool 结果之后。
      *
-     * <p>三个刻意的限制：
+     * <p>四个刻意的限制（都是为了不浪费 token 与请求体）：
      * <ul>
-     *   <li>最多 {@value #MAX_INJECTED_IMAGES} 张——每张 768px 的 JPEG 转 Base64 约
-     *       100 KB，再多会让请求体膨胀到移动网络难以承受；</li>
+     *   <li>最多 {@value #MAX_INJECTED_IMAGES} 张——搜索结果里的其余图只留在工具结果的
+     *       URL 列表里（纯文本，几乎不占 token），不进图像通道；</li>
+     *   <li>注入的图带 {@code detail:"low"}——DeepSeek 官方口径先缩到 512×512 再计 token
+     *       （约 184/张），而原图口径最多 1024/张；搜索图只为「看到是什么」，不值得用原图；</li>
      *   <li>整轮只注入一次——模型有时会连搜三次，第二次再塞两张就是六张图；</li>
      *   <li>一张都下不下来就不注入，退回纯文本（模型至少还有链接与描述可用）。</li>
      * </ul>
@@ -203,8 +205,10 @@ final class ToolExecutor {
         try {
             JSONObject text = new JSONObject();
             text.put("type", "text");
-            text.put("text", "以下是刚才图片搜索得到的图片，请结合图像内容回答用户的问题。"
-                    + "如果图片与问题无关，请忽略并在回答中说明。");
+            text.put("text", "以下是刚才图片搜索结果中的前 "
+                    + Math.min(images.length(), MAX_INJECTED_IMAGES)
+                    + " 张图片（已压缩），请结合图像内容回答用户的问题。"
+                    + "其余图片只提供了链接；如果图片与问题无关，请忽略并在回答中说明。");
             parts.put(text);
 
             int added = 0;
@@ -224,6 +228,9 @@ final class ToolExecutor {
                 img.put("type", "image_url");
                 JSONObject u = new JSONObject();
                 u.put("url", uri);
+                // low：模型推理前缩到 512×512，token 约 184/张（原图口径最多 1024）。
+                // 非 DeepSeek 端点一般忽略这个字段，忽略时也只是按原图计，不会出错。
+                u.put("detail", "low");
                 img.put("image_url", u);
                 parts.put(img);
                 added++;
