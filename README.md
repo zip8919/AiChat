@@ -1,6 +1,6 @@
 # AiChat
 
-Android 词典笔 AI 对话应用（版本 1.7.7，minSdk 18 / targetSdk 18，真机 Android 4.4.2 / API 19）。基于 WebView + HTML/CSS 渲染 Markdown/LaTeX，通过任意 OpenAI 兼容端点调用大模型，内置 DeepSeek（不含 API Key）与商汤日日新 默认配置，默认模型 `deepseek-v4-flash`（商汤日日新）。
+Android 词典笔 AI 对话应用（版本 1.7.8，minSdk 18 / targetSdk 18，真机 Android 4.4.2 / API 19）。基于 WebView + HTML/CSS 渲染 Markdown/LaTeX，通过任意 OpenAI 兼容端点调用大模型，内置 DeepSeek（不含 API Key）与商汤日日新 默认配置，默认模型 `deepseek-v4-flash`（商汤日日新）。
 
 > 改代码前先看 [ARCHITECTURE.md](ARCHITECTURE.md)：请求链路图、类职责边界、并发约定、「想改 X 去哪」对照表。
 
@@ -112,7 +112,7 @@ Tavily 的密钥在应用内「设置 → Tavily API Key」填写，仅保存在
 
 ```
 ├── app/
-│   ├── build.gradle                # versionName 1.7.7 / versionCode 33 / compileSdk 34
+│   ├── build.gradle                # versionName 1.7.8 / versionCode 34 / compileSdk 34
 │   ├── keystore/mc.jks             # 签名密钥库
 │   └── src/main/
 │       ├── AndroidManifest.xml     # 包名 xyz.zip8919.app.aichat，6 个 Activity
@@ -126,7 +126,9 @@ Tavily 的密钥在应用内「设置 → Tavily API Key」填写，仅保存在
 │       │   ├── ChatTransport.java           # 请求体、连接、错误体
 │       │   ├── ToolExecutor.java            # 一批 tool_calls 的执行与配对
 │       │   ├── ChatHistory.java             # 历史压缩、工具回放、配对校验
+│       │   ├── ToolHistoryRecovery.java     # 旧会话：从正文卡片反推工具历史
 │       │   ├── ToolCalls.java               # tool_calls 规范化与累积
+│       │   ├── TraceKit.java                # trace 长度上限：只在块边界裁剪
 │       │   ├── StreamRenderer.java          # 流式节流渲染（base / tail 分离）
 │       │   ├── WebSearchTool.java           # 联网工具：搜索、抓取、工具定义、结果整理
 │       │   ├── TavilyTool.java              # Tavily 搜索 / 抓取后端

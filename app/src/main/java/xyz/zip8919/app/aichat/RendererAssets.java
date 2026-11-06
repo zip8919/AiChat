@@ -430,6 +430,26 @@ final class RendererAssets {
             "if(keep)b.innerHTML=keep;}" +
             "if(html)b.innerHTML=html;" +
             "applyToolStates(b);addCopyBtns(b);clearStatus();};" +
+            // 增量追加：只把「本轮新增的那几张卡片」解析后挂到 base 末尾。
+            // 与 streamBase 的区别是不动已有子树——已经渲染好的公式图片、代码高亮、
+            // 展开状态全部原样保留，也不重新解析几万字的历史 markdown。
+            // 没有骨架时按 streamBase 的兜底把现有内容整体当 base，绝不丢内容。
+            "window.streamAppendBase=function(html){" +
+            "var ms=document.querySelectorAll('.msg.ai .content');" +
+            "if(ms.length===0)return;" +
+            "var c=ms[ms.length-1];" +
+            "var b=c.querySelector('.stream-base');" +
+            "if(!b){" +
+            "var keep=c.innerHTML;" +
+            "c.className='content';" +
+            "c.innerHTML='<div class=\"stream-base\"></div><div class=\"stream-tail\"></div>';" +
+            "b=c.querySelector('.stream-base');" +
+            "if(keep)b.innerHTML=keep;}" +
+            "if(html){var d=document.createElement('div');d.innerHTML=html;" +
+            "var frag=document.createDocumentFragment();" +
+            "while(d.firstChild)frag.appendChild(d.firstChild);" +
+            "b.appendChild(frag);}" +
+            "applyToolStates(b);addCopyBtns(b);clearStatus();};" +
             // 轮次切换：把本轮已经流出去的 tail 并进 base。
             // 这里用 DOM 节点搬移而不是 innerHTML 拼接 —— 不重新解析 markdown、
             // 不重新解码公式图片，视觉上完全不闪，内容也不会重复或丢字。
@@ -519,8 +539,14 @@ final class RendererAssets {
             "for(var i=0;i<all.length;i++){" +
             "if(all[i].getAttribute('data-idx')===''+idx){" +
             "var isAi=all[i].className.indexOf('msg ai')>=0;" +
-            "if(isAi){var c=all[i].querySelector('.content');if(c){c.className='content';c.innerHTML=html;runScripts(c);}}" +
-            "else{var b=all[i].querySelector('.bubble');if(b){b.innerHTML=html;runScripts(b);}}" +
+            "if(isAi){var c=all[i].querySelector('.content');" +
+            "if(c){c.className='content';" +
+            // 保留 base/tail 骨架：整段替换会把它抹掉，之后续跑只能走 fallback
+            // 重建，等于又闪一次；增量渲染也失去可靠的落点。
+            "var b=c.querySelector('.stream-base'),t=c.querySelector('.stream-tail');" +
+            "if(b){b.innerHTML=html;if(t)t.innerHTML='';}else{c.innerHTML=html;}" +
+            "runScripts(c);}}" +
+            "else{var bb=all[i].querySelector('.bubble');if(bb){bb.innerHTML=html;runScripts(bb);}}" +
             "clearStatus();addCopyBtns();return;}}};" +
             "window.reindexFrom=function(start){" +
             "var all=document.querySelectorAll('.msg');" +

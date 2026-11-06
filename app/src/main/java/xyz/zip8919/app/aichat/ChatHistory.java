@@ -88,6 +88,11 @@ final class ChatHistory {
     private static void appendAssistant(JSONArray msgs, Message m, boolean replayTools)
             throws Exception {
         String hist = replayTools ? m.toolHistory : "";
+        if (replayTools && (hist == null || hist.length() <= 2)) {
+            // 旧会话没有 toolHistory 字段，但正文里的 [tool] 卡片还在。
+            // 不回放的话模型完全不知道上一轮搜过什么，是这类会话「失忆」的根因。
+            hist = ToolHistoryRecovery.recover(m.content);
+        }
         if (hist != null && hist.length() > 2) {
             try {
                 appendToolHistory(msgs, hist);

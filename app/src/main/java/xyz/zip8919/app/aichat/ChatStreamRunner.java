@@ -45,6 +45,12 @@ final class ChatStreamRunner {
 
         /** 用完整 trace 重渲染（工具卡片追加后调用）。 */
         void renderTrace(String trace, int generation, String status, int aiIndex);
+
+        /**
+         * trace 因超长裁掉了前缀。渲染基准必须作废——裁剪后文本变短，
+         * 仍按旧基准判断会把它当成「过期快照」永久丢弃。
+         */
+        void onTraceTrimmed();
     }
 
     /** 会话侧能力：请求代数、连接句柄、收尾。 */
@@ -200,6 +206,7 @@ final class ChatStreamRunner {
                     // 本轮流式已经吐出来的内容不能丢：错误卡片要挂在这段内容之下，
                     // 否则用户看到的是「回答突然没了，只剩一张报错卡」
                     st.trace.append(rr.display);
+                    if (TraceKit.cap(st.trace)) ui.onTraceTrimmed();
                     st.errorDetail = ErrorReport.build(job.providerName, job.modelName,
                             job.chatEndpoint, round, rr.httpCode, rr.rawBody, rr.cause);
                     ui.toast(rr.error);
@@ -213,6 +220,7 @@ final class ChatStreamRunner {
                 if (rr.toolCalls.length() > 0 && ToolCalls.hasUsable(rr.toolCalls)) {
                     // 本轮思考/半截回答保留在界面上，不要被下一轮覆盖
                     st.trace.append(rr.display);
+                    if (TraceKit.cap(st.trace)) ui.onTraceTrimmed();
                     // 注意：不把 rr.content 累进 apiText——工具轮次的正文已经作为
                     // assistant(tool_calls).content 存在于 toolHistory 里，再拼一次会让模型看到重复内容
                     ToolCalls.appendAssistant(conversation, st.toolHistory,
@@ -229,6 +237,7 @@ final class ChatStreamRunner {
                 }
 
                 st.trace.append(rr.display);
+                if (TraceKit.cap(st.trace)) ui.onTraceTrimmed();
                 st.apiText = rr.content.toString();
                 break;
             }
@@ -327,6 +336,10 @@ final class ChatStreamRunner {
             if (session.isCurrent(job.generation)) {
                 ui.renderTrace(traceSoFar, job.generation, null, job.aiIndex);
             }
+        }
+
+        public void onTraceTrimmed() {
+            ui.onTraceTrimmed();
         }
 
         private String currentTrace() {

@@ -38,6 +38,13 @@ final class StreamRenderer {
         /** 通知宿主：base 层当前已对应这段文本，避免下次又整段重渲染一遍。 */
         void noteBaseRendered(String base);
 
+        /**
+         * base 层当前对应的文本。读写都走宿主，是为了让流式 tick 与
+         * {@code renderTraceAsync}（工具卡片/状态行走的另一条渲染路径）共享同一份
+         * 状态——两边各自记一份的话，一方追加、另一方整段替换，卡片就会重复或消失。
+         */
+        String baseRendered();
+
         /** 请求代数是否仍是当前这一条，false 表示已被新请求或打断取代。 */
         boolean isCurrent(int generation);
 
@@ -59,8 +66,6 @@ final class StreamRenderer {
 
     private final AtomicBoolean inFlight = new AtomicBoolean(false);
     private volatile long lastEmitMs;
-    /** 已经推到 DOM 的 base 文本，用来判断 base 是否需要重建。 */
-    private volatile String baseRendered = "";
     /** commitTail 已经发出但 UI 还没落地：这段时间内的分片直接跳过，避免写进旧的 tail。 */
     private volatile boolean committing;
 
@@ -92,7 +97,6 @@ final class StreamRenderer {
         if (baseNow == null) baseNow = "";
         committing = true;
         ui.nextSeq();              // 作废正在飞的 tick，避免它回头覆盖搬好的 base
-        baseRendered = baseNow;
         ui.noteBaseRendered(baseNow);
         ui.runOnUi(new Runnable() {
             public void run() {
@@ -129,7 +133,7 @@ final class StreamRenderer {
 
     private void renderHtml(final String baseNow, final String roundNow) {
         inFlight.set(true);
-        final boolean baseChanged = !baseNow.equals(baseRendered);
+        final boolean baseChanged = !baseNow.equals(ui.baseRendered());
         final int mySeq = ui.nextSeq();
         new Thread(new Runnable() {
             public void run() {
@@ -158,9 +162,12 @@ final class StreamRenderer {
                         if (ui.currentSeq() != mySeq) return;
                         if (!ui.isCurrent(generation)) return;
                         ui.setContent(aiIndex, baseNow + roundNow);
-                        if (baseHtml != null) {
-                            baseRendered = baseNow;
+                        // 二次校验必须放在 UI 线程：后台渲染期间 renderTraceAsync 可能
+                        // 已经用 streamAppendBase 把这一段推上去了。此时再整段替换
+                        // 就是拿旧内容盖新内容——卡片会消失，然后下一轮又冒出来。
+                        if (baseHtml != null && !baseNow.equals(ui.baseRendered())) {
                             ui.evalJsHtml("streamBase", baseHtml);
+                            ui.noteBaseRendered(baseNow);
                         }
                         ui.evalJsHtml("streamTailHtml", tailHtml);
                     }
@@ -172,7 +179,7 @@ final class StreamRenderer {
     private void renderPlain(final String baseNow, final String roundNow) {
         // 只把本轮增量转成纯文本；整段转会把前面的工具卡片、思考块、markdown 全抹掉
         final String tailPlain = TextKit.plainForStream(roundNow);
-        final boolean baseChanged = !baseNow.equals(baseRendered);
+        final boolean baseChanged = !baseNow.equals(ui.baseRendered());
         final int mySeq = ui.nextSeq();
         if (!baseChanged) {
             ui.runOnUi(new Runnable() {
@@ -205,9 +212,11 @@ final class StreamRenderer {
                         inFlight.set(false);
                         if (ui.currentSeq() != mySeq) return;
                         if (!ui.isCurrent(generation)) return;
-                        baseRendered = baseNow;
                         ui.setContent(aiIndex, baseNow + roundNow);
-                        ui.evalJsHtml("streamBase", baseHtml);
+                        if (!baseNow.equals(ui.baseRendered())) {
+                            ui.evalJsHtml("streamBase", baseHtml);
+                            ui.noteBaseRendered(baseNow);
+                        }
                         ui.evalJsHtml("streamTailText", tailPlain);
                     }
                 });

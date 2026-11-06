@@ -54,6 +54,14 @@ final class MessageQueue {
 
     private final List<QueuedMessage> pending = new ArrayList<QueuedMessage>();
     private int nextId = 1;
+    /**
+     * 重试进行中时暂停放行。
+     *
+     * <p>不加这个闸门会有一个很隐蔽的失败：用户点「打断并重试」后，旧请求的
+     * 收尾仍可能把队首消息发出去，新请求自增代数，重试流程里的代数校验随即失败，
+     * 于是<b>用户点了重试却什么都没发生</b>——队列消息替他把重试顶掉了。
+     */
+    private boolean paused;
     private AlertDialog managerDialog;
     private AlertDialog actionsDialog;
     /** 动作弹窗打开期间请求过重列，等它关闭后再执行。 */
@@ -91,6 +99,10 @@ final class MessageQueue {
         if (pending.isEmpty()) return;
         handler.post(new Runnable() {
             public void run() {
+                if (paused) {
+                    LogUtil.i(TAG, "drain skipped: paused for retry (pending=%d)", pending.size());
+                    return;
+                }
                 if (host.isRequestInFlight() || pending.isEmpty()) {
                     LogUtil.i(TAG, "drain deferred: inFlight=%s pending=%d",
                             host.isRequestInFlight(), pending.size());
@@ -106,12 +118,31 @@ final class MessageQueue {
         });
     }
 
+    /** 暂停放行：重试流程开始前调用，避免 drain 抢先自增请求代数。 */
+    void pause() {
+        paused = true;
+        LogUtil.d(TAG, "queue paused (pending=%d)", pending.size());
+    }
+
+    /**
+     * 恢复放行。这里主动 drain 一次：重试可能因为 pos 失效而根本没发出请求，
+     * 那种情况下没有任何收尾会再来叫醒队列，排队消息就永远卡住了。
+     * 若重试请求正在飞，drain 内部会因 {@code isRequestInFlight()} 自行跳过。
+     */
+    void resume() {
+        paused = false;
+        LogUtil.d(TAG, "queue resumed (pending=%d)", pending.size());
+        drain();
+    }
+
     /** 丢弃所有排队消息（新建/切换会话时调用，队列属于旧会话）。 */
     void clearAll() {
         if (!pending.isEmpty()) {
             LogUtil.i(TAG, "clearAll: dropping %d queued message(s)", pending.size());
             pending.clear();
         }
+        // 队列都换了，暂停状态不能跟着带过去——否则新会话里排队永远不发
+        paused = false;
         dismissManager();
         updateBar();
     }
@@ -302,5 +333,6 @@ final class MessageQueue {
             actionsDialog = null;
         }
         pending.clear();
+        paused = false;
     }
 }

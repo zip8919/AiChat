@@ -1098,6 +1098,18 @@ public class MainActivity extends Activity {
             lastStreamTrace = base == null ? "" : base;
         }
 
+        public String baseRendered() {
+            return lastStreamTrace == null ? "" : lastStreamTrace;
+        }
+
+        public void onTraceTrimmed() {
+            // 裁剪让 trace 变短，旧的「已推送全文」不再成立。清空基准，
+            // 下一次渲染会走整段 streamBase 重建，DOM 与文本重新对齐。
+            lastStreamTrace = "";
+            renderSeq.incrementAndGet();
+            LogUtil.d(TAG, "trace trimmed: render base reset");
+        }
+
         public boolean isCurrent(int generation) {
             return requestGeneration.get() == generation;
         }
@@ -1216,6 +1228,11 @@ public class MainActivity extends Activity {
                             } else {
                                 webViewEvalJs("updateLastMsg('" + jsEscape(html) + "')");
                             }
+                            // 两条分支都让 base 层等于这条消息的全文：streamFinalize 把
+                            // tail 搬进了 base，updateLastMsg 直接把全文写进 base。
+                            // 不更新的话，续跑时增量渲染会拿「旧 prefix」当基准，
+                            // 把已经显示的内容再追加一遍。
+                            lastStreamTrace = settled.content == null ? "" : settled.content;
                             // 来源区独立渲染在 .content 之外，默认折叠
                             Message am = finalIdx >= 0 && finalIdx < messages.size()
                                     ? messages.get(finalIdx) : null;
@@ -1263,6 +1280,9 @@ public class MainActivity extends Activity {
                         if (aiIndex >= messages.size()) return;
                         webViewEvalJs("finalizeLast(" + aiIndex + ")");
                         webViewEvalJs("updateMsgAt(" + aiIndex + ",'" + jsEscape(html) + "')");
+                        // base 层现在就是这条消息的全文渲染，与 content 对齐；
+                        // 不更新会让续跑的增量渲染把「已推送」当成旧前缀，重复追加。
+                        lastStreamTrace = content == null ? "" : content;
                         String card = MessageHtmlRenderer.renderAssistantErrorCard(messages.get(aiIndex), aiIndex);
                         webViewEvalJs("markAssistantFailed(" + aiIndex + ",'" + jsEscape(card) + "')");
                         conversationManager.saveCurrentConversation();
@@ -1332,7 +1352,9 @@ public class MainActivity extends Activity {
             }
             return;
         }
-        // trace 只会变长，比已推送的更短一定是旧轮次迟到的快照
+        // trace 只会变长，比已推送的更短一定是旧轮次迟到的快照。
+        // 唯一的例外是 TraceKit 裁剪：那条路径会先把 lastStreamTrace 清空，
+        // 所以走到这里 base0 一定还有效。
         if (snapshot.length() < base0.length()) {
             LogUtil.d(TAG, "stale trace render dropped: base=%d, snapshot=%d",
                     base0.length(), snapshot.length());
@@ -1342,10 +1364,21 @@ public class MainActivity extends Activity {
             return;
         }
 
+        // 增量渲染：base 已经固化的内容正好是新快照的前缀时，只渲染尾部。
+        // 工具轮次里每追加一张卡片都重渲染整段历史，成本是 O(轮次²)——
+        // 十几轮搜索之后，低端机上每张卡片都要卡半秒。追加模式只解析新增的
+        // 那一个块，已有的公式图片、代码高亮、展开状态全部原地不动。
+        //
+        // 前提由 ChatStreamRunner 保证：trace 的每次追加都以完整的
+        // [thinking]…[/thinking] 或 [tool]…[/tool] 块为单位，边界处切分不会
+        // 破坏 markdown 结构。
+        final boolean append = base0.length() > 0 && snapshot.startsWith(base0);
+        final String part = append ? snapshot.substring(base0.length()) : snapshot;
+
         final int mySeq = renderSeq.incrementAndGet();
         new Thread(new Runnable() {
             public void run() {
-                final String html = MessageHtmlRenderer.contentToHtml(snapshot, MainActivity.this);
+                final String html = MessageHtmlRenderer.contentToHtml(part, MainActivity.this);
                 runOnUiThread(new Runnable() {
                     public void run() {
                         if (requestGeneration.get() != generation) return;
@@ -1354,8 +1387,12 @@ public class MainActivity extends Activity {
                             return;
                         }
                         lastStreamTrace = snapshot;
-                        // 只写 base 层；tail 上正在流的内容原样保留
-                        webViewEvalJs("streamBase('" + jsEscape(html) + "')");
+                        if (append) {
+                            webViewEvalJs("streamAppendBase('" + jsEscape(html) + "')");
+                        } else {
+                            // 只写 base 层；tail 上正在流的内容原样保留
+                            webViewEvalJs("streamBase('" + jsEscape(html) + "')");
+                        }
                         if (status != null) {
                             webViewEvalJs("setStatus('" + jsEscape(status) + "')");
                         }
@@ -1392,6 +1429,9 @@ public class MainActivity extends Activity {
                         if (conversationWebView == null) return;
                         renderedFrom = from;
                         loadingOlderMessages = false;
+                        // 整页重建，DOM 里不存在上一次流式留下的 base 骨架，
+                        // 「已推送基准」必须作废，否则下一次 trace 渲染会误走增量
+                        lastStreamTrace = "";
                         conversationWebView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null);
                         LogUtil.d(TAG, "webview reloaded: showing %d of %d messages (from=%d)",
                                 snapshot.size() - from, snapshot.size(), from);
@@ -2254,6 +2294,11 @@ public class MainActivity extends Activity {
         retryInFlight = true;
         LogUtil.i(TAG, "interruptAndRetry: pos=%d", pos);
 
+        // 先暂停队列放行：否则旧请求的收尾可能把队首消息发出去，新请求自增代数后
+        // 重试的代数校验就会失败，用户看到的是「点了重试但什么都没发生」。
+        // 暂停不丢消息，重试真正发出后由 resume() 交还给正常的收尾流程。
+        if (queue != null) queue.pause();
+
         // 顺序：先自增代数（旧线程的所有回写都会被守卫挡掉）→ 置结束 → 断开连接
         final int newGen = requestGeneration.incrementAndGet();
         isRequestInProgress.set(false);
@@ -2301,6 +2346,9 @@ public class MainActivity extends Activity {
                             }
                         } finally {
                             retryInFlight = false;
+                            // 无论是正常重发、pos 失效还是被新请求取代，都要把队列交还回去：
+                            // 这一路把 isRequestInProgress 置成 false 了，没人再会来叫醒 drain。
+                            if (queue != null) queue.resume();
                         }
                     }
                 });

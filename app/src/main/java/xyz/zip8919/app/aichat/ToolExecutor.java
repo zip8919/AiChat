@@ -46,6 +46,12 @@ final class ToolExecutor {
 
         /** 一次工具执行完毕、卡片已追加到 trace 后回调，arg 是追加后的完整 trace。 */
         void onTraceAppended(String traceSoFar);
+
+        /**
+         * trace 因超长被裁掉了前缀。调用方必须重置「base 已推送」的标记，
+         * 否则下一次渲染会因为文本变短而被当成过期快照丢掉。
+         */
+        void onTraceTrimmed();
     }
 
     static final class Outcome {
@@ -104,6 +110,7 @@ final class ToolExecutor {
                 String block = ToolCalls.limitTraceBlock(maxPerRound);
                 if (block.length() > 0) {
                     trace.append(block);
+                    if (TraceKit.cap(trace)) host.onTraceTrimmed();
                     host.onTraceAppended(trace.toString());
                 }
                 skipped++;
@@ -133,6 +140,7 @@ final class ToolExecutor {
             ToolCalls.appendResult(conversation, toolHistory, id, result);
             // 所有工具都打卡片：时间工具此前被跳过，界面上完全看不到
             trace.append(WebSearchTool.buildTraceBlock(name, args, result));
+            if (TraceKit.cap(trace)) host.onTraceTrimmed();
             host.onTraceAppended(trace.toString());
 
             if (!host.isAlive()) {
