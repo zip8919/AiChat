@@ -11,6 +11,7 @@ import android.view.ViewTreeObserver;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Button;
+import android.widget.RelativeLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 import java.util.ArrayList;
@@ -67,6 +68,17 @@ final class ViewerController {
     private int codeBg;
     private String codeLang;
     private String codeText;
+
+    // ---- 文件查看器状态（附件「查看文件」）----
+    private AlertDialog docDialog;
+    private WebView docWebView;
+    private int docRotation;
+    private String docName;
+    private String docLang;
+    /** 完整正文：预览/运行永远用完整版，截断只影响「源码」这一屏。 */
+    private String docCode;
+    private boolean docSourceMode;
+    private Button docPreviewBtn;
 
     ViewerController(Activity activity) {
         this.activity = activity;
@@ -640,6 +652,169 @@ final class ViewerController {
                 "</body></html>";
     }
 
+    // ==================== 文件查看器（附件） ====================
+
+    /**
+     * 附件「查看文件」：默认显示带高亮的源码，HTML / SVG 右上角可切到渲染预览，
+     * JS 右上角是「运行」。
+     *
+     * @param name 文件名（标题栏显示，也用来判断语言）
+     * @param lang {@link FileKinds#languageOf} 的结果，空串表示当纯文本
+     */
+    void showDocument(String name, String lang, String code) {
+        LogUtil.i(TAG, "showDocument: name=%s lang=%s len=%d",
+                name, lang, code == null ? -1 : code.length());
+        if (docDialog != null && docDialog.isShowing()) {
+            docDialog.dismiss();
+        }
+        if (code == null || code.length() == 0) {
+            Toast.makeText(activity, "文件内容为空", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        docName = name == null ? "" : name;
+        docLang = lang == null ? "" : lang;
+        docCode = code;
+        docRotation = 0;
+        // 默认看源码：用户点「查看文件」的意图多半是「这几行到底写了什么」，
+        // 想看成品的再点一下右上角的预览。
+        docSourceMode = true;
+
+        View view = activity.getLayoutInflater().inflate(R.layout.dialog_image_viewer, null);
+        docWebView = (WebView) view.findViewById(R.id.viewer_webview);
+        docPreviewBtn = (Button) view.findViewById(R.id.viewer_preview);
+        TextView title = (TextView) view.findViewById(R.id.viewer_title);
+
+        // 这三个是图片/表格专用的：单文件没有上一张下一张
+        view.findViewById(R.id.viewer_prev).setVisibility(View.GONE);
+        view.findViewById(R.id.viewer_next).setVisibility(View.GONE);
+        view.findViewById(R.id.viewer_counter).setVisibility(View.GONE);
+        // 源码只有浅色一版，背景切换按钮会调出白底黑字的对比灾难，直接不显示
+        view.findViewById(R.id.viewer_bg_toggle).setVisibility(View.GONE);
+
+        title.setText(docName);
+        title.setVisibility(View.VISIBLE);
+        // 标题右侧要让开「预览」按钮；没有预览按钮时只让开关闭按钮，
+        // 否则长文件名的尾部会被压到 ✕ 底下（GONE 的锚点规则会被忽略）。
+        RelativeLayout.LayoutParams titleLp =
+                (RelativeLayout.LayoutParams) title.getLayoutParams();
+        titleLp.addRule(RelativeLayout.LEFT_OF, R.id.viewer_close);
+
+        Button zoomOut = (Button) view.findViewById(R.id.viewer_zoom_out);
+        Button zoomIn = (Button) view.findViewById(R.id.viewer_zoom_in);
+        Button rotate = (Button) view.findViewById(R.id.viewer_rotate);
+        Button reset = (Button) view.findViewById(R.id.viewer_reset);
+        Button close = (Button) view.findViewById(R.id.viewer_close);
+
+        final boolean canPreview = FileKinds.isPreviewable(docLang);
+        final boolean canRun = FileKinds.isRunnable(docLang);
+        if (canPreview || canRun) {
+            docPreviewBtn.setText(canRun ? "运行" : "预览");
+            docPreviewBtn.setVisibility(View.VISIBLE);
+            // 预览按钮占的位置要一起让出来，否则标题会压在按钮下面
+            titleLp.addRule(RelativeLayout.LEFT_OF, R.id.viewer_preview);
+            docPreviewBtn.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    if (canRun) {
+                        // JS 没有「渲染」这回事，扔给已有的脚本运行器（带控制台与报错）
+                        activity.startActivity(MainActivity.newJsRunnerIntent(
+                                activity, docCode, docLang));
+                        return;
+                    }
+                    docSourceMode = !docSourceMode;
+                    docPreviewBtn.setText(docSourceMode ? "预览" : "源码");
+                    loadDocument();
+                }
+            });
+        }
+
+        configureWebView(docWebView, Color.WHITE);
+
+        zoomOut.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { evalJs(docWebView, "viewerZoom(0.8)"); }
+        });
+        zoomIn.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { evalJs(docWebView, "viewerZoom(1.25)"); }
+        });
+        rotate.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                docRotation = (docRotation + 90) % 360;
+                loadDocument();
+            }
+        });
+        reset.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                docRotation = 0;
+                // 重新加载本身就是一次复位：缩放变量 vZoom 也跟着回到 1
+                loadDocument();
+            }
+        });
+        close.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                if (docDialog != null) docDialog.dismiss();
+            }
+        });
+
+        final AlertDialog dlg = new AlertDialog.Builder(activity)
+                .setView(view)
+                .setCancelable(true)
+                .create();
+        final WebView ownedWv = docWebView;
+        dlg.setOnDismissListener(new DialogInterface.OnDismissListener() {
+            public void onDismiss(DialogInterface dialog) {
+                if (ownedWv != null) {
+                    try { ownedWv.destroy(); } catch (Exception ignored) {}
+                }
+                if (docWebView == ownedWv) docWebView = null;
+                if (docDialog == dlg) {
+                    docDialog = null;
+                    docCode = null;
+                    docName = null;
+                    docLang = null;
+                }
+            }
+        });
+        docDialog = dlg;
+        docDialog.getWindow().setLayout(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT);
+        docDialog.show();
+
+        loadAfterLayout(docWebView, new Runnable() {
+            public void run() { loadDocument(); }
+        });
+    }
+
+    private void loadDocument() {
+        if (docWebView == null || docCode == null) return;
+
+        int boxW = docWebView.getWidth();
+        int boxH = docWebView.getHeight();
+        if (boxW <= 0) boxW = activity.getResources().getDisplayMetrics().widthPixels;
+        if (boxH <= 0) boxH = activity.getResources().getDisplayMetrics().heightPixels;
+        String rotateCss = rotateTransformWrap(docRotation, boxW, boxH);
+        boolean sideways = (docRotation == 90 || docRotation == 270);
+
+        String html;
+        if (docSourceMode) {
+            html = buildSourceHtml(docLang, docCode, rotateCss);
+        } else {
+            String trimmed = docCode.trim().toLowerCase();
+            boolean isFullDoc = "html".equals(docLang)
+                    && (trimmed.startsWith("<!doctype") || trimmed.startsWith("<html"));
+            html = buildCodePreviewHtml(docCode, docLang, "#FFFFFF", rotateCss, isFullDoc,
+                    sideways ? boxH : 0);
+        }
+        docWebView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null);
+    }
+
+    /** 源码页由 {@link SourcePage} 生成（纯字符串逻辑，可单测）。 */
+    private String buildSourceHtml(String lang, String code, String rotateCss) {
+        String html = SourcePage.build(lang, code, rotateCss, TOOLBAR_INSET_PX);
+        LogUtil.d(TAG, "buildSourceHtml: lang=%s chars=%d -> %d", lang, code.length(), html.length());
+        return html;
+    }
+
     // ==================== 公共 ====================
 
     /** 预览 WebView 的统一配置：可缩放、禁用外部跳转、指定底色。 */
@@ -765,6 +940,10 @@ final class ViewerController {
             codeDialog.getWindow().setLayout(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
         }
+        if (docDialog != null && docDialog.isShowing()) {
+            docDialog.getWindow().setLayout(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
+        }
     }
 
     /** 页面销毁时释放三个预览 WebView，避免持有已销毁的 Activity。 */
@@ -781,6 +960,10 @@ final class ViewerController {
             codeWebView.destroy();
             codeWebView = null;
         }
+        if (docWebView != null) {
+            docWebView.destroy();
+            docWebView = null;
+        }
         if (imageDialog != null) {
             imageDialog.dismiss();
             imageDialog = null;
@@ -792,6 +975,10 @@ final class ViewerController {
         if (codeDialog != null) {
             codeDialog.dismiss();
             codeDialog = null;
+        }
+        if (docDialog != null) {
+            docDialog.dismiss();
+            docDialog = null;
         }
     }
 }

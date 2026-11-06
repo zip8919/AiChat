@@ -91,7 +91,7 @@ public class MessageHtmlRenderer {
             if (text.length() > 0) {
                 sb.append("<div class=\"bubble\">").append(esc(text)).append("</div>");
             }
-            sb.append(renderAttachmentCards(msg.attachments));
+            sb.append(renderAttachmentCards(msg.attachments, index));
             // 失败卡片：摘要 + 查看详情 + 重试，紧跟在气泡下方
             if (msg.sendFailed) sb.append(renderErrorCard(msg, index));
             sb.append(renderMeta(msg));
@@ -119,21 +119,37 @@ public class MessageHtmlRenderer {
      * <p>独立于气泡存在，编辑正文不会碰到它——这正是「改一下消息附件就没了」的修法。
      * 文件名与「大小 · tokens」分两行：塞一行时 10 MB 的日志会把文件名挤成省略号，
      * 而大小恰恰是判断「这份文件发不发得出去」的唯一线索。
+     *
+     * <p>整张卡片可点，点开走 {@code Android.openAttachment(msgIndex, attIndex)}：
+     * 传下标而不是内容——10 MB 的正文过一次 JsBridge 要复制两遍字符串，
+     * 而且 WebView 里根本没有存它的必要。
      */
-    static String renderAttachmentCards(List<AttachmentText.File> files) {
+    static String renderAttachmentCards(List<AttachmentText.File> files, int msgIndex) {
         if (files == null || files.isEmpty()) return "";
         StringBuilder sb = new StringBuilder();
         sb.append("<div class=\"attach-list\">");
         for (int i = 0; i < files.size(); i++) {
             AttachmentText.File f = files.get(i);
             if (f == null) continue;
-            sb.append("<div class=\"attach-item\">")
-              .append("<span class=\"attach-ico\"></span>")
-              .append("<span class=\"attach-body\">")
+            sb.append("<div class=\"attach-item\" onclick=\"if(window.Android)Android.openAttachment('")
+              .append(msgIndex).append("','").append(i).append("');event.stopPropagation();return false;\">");
+            if (f.isImage()) {
+                // 缩略图当背景图用：Chromium 30 上 object-fit 不可靠，background-size:cover 稳
+                sb.append("<span class=\"attach-thumb\"");
+                if (f.thumb.length() > 0) {
+                    sb.append(" style=\"background-image:url(").append(f.thumb).append(")\"");
+                }
+                sb.append("></span>");
+            } else {
+                sb.append("<span class=\"attach-ico\"></span>");
+            }
+            sb.append("<span class=\"attach-body\">")
               .append("<span class=\"attach-name\">").append(esc(f.name)).append("</span>")
               .append("<span class=\"attach-sub\">")
               .append(esc(AttachmentText.sizeAndTokens(f))).append("</span>")
-              .append("</span></div>");
+              .append("</span>")
+              .append("<span class=\"attach-view\">查看 ›</span>")
+              .append("</div>");
         }
         sb.append("</div>");
         return sb.toString();

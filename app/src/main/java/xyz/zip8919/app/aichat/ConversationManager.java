@@ -360,7 +360,17 @@ public class ConversationManager {
                         JSONObject fo = new JSONObject();
                         fo.put("name", f.name);
                         if (f.bytes > 0) fo.put("bytes", f.bytes);
-                        fo.put("content", f.content);
+                        if (f.isImage()) {
+                            // 图片不落正文：路径 + 尺寸 + 缩略图足够重画卡片与重新打开查看器。
+                            // 正文（content）对图片本来就是空串，写字面量只会让 JSON 多一行。
+                            fo.put("kind", AttachmentText.KIND_IMAGE);
+                            if (f.path.length() > 0) fo.put("path", f.path);
+                            if (f.width > 0) fo.put("w", f.width);
+                            if (f.height > 0) fo.put("h", f.height);
+                            if (f.thumb.length() > 0) fo.put("thumb", f.thumb);
+                        } else {
+                            fo.put("content", f.content);
+                        }
                         aa.put(fo);
                     }
                     if (aa.length() > 0) mj.put("attachments", aa);
@@ -450,7 +460,12 @@ public class ConversationManager {
                             m.attachments.add(new AttachmentText.File(
                                     ao.optString("name", ""),
                                     ao.isNull("content") ? "" : ao.optString("content", ""),
-                                    ao.optLong("bytes", 0)));
+                                    ao.optLong("bytes", 0),
+                                    ao.optString("kind", AttachmentText.KIND_TEXT),
+                                    ao.optString("path", ""),
+                                    ao.optInt("w", 0),
+                                    ao.optInt("h", 0),
+                                    ao.optString("thumb", "")));
                         }
                     }
                     // 1.8.2 及以前的用户消息把附件摊在正文里：读进来就地迁移成结构化字段，

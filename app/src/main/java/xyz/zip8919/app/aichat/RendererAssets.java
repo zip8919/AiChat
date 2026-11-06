@@ -149,15 +149,22 @@ final class RendererAssets {
             // 用户消息下方的附件卡片。独立于 .bubble 存在：编辑正文只会替换气泡，
             // 附件不会跟着消失；早先附件摘要写在正文里，改一次消息就没了。
             ".attach-list{margin-top:6px;text-align:right;}" +
-            ".attach-item{display:inline-block;text-align:left;background:#fff;" +
-            "border:1px solid #bbdefb;border-radius:8px;padding:6px 10px;" +
-            "margin:4px 0 0 6px;max-width:100%;vertical-align:top;}" +
+            // padding-right 给「查看 ›」留位：它用绝对定位压在右侧，而不是 float——
+            // Chromium 30 里 float 与 overflow:hidden 的 .attach-body 相撞会把卡片撑变形。
+            ".attach-item{display:inline-block;position:relative;text-align:left;background:#fff;" +
+            "border:1px solid #bbdefb;border-radius:8px;padding:6px 10px 6px 10px;" +
+            "padding-right:44px;margin:4px 0 0 6px;max-width:100%;vertical-align:top;}" +
             ".attach-ico{float:left;width:16px;height:20px;margin:2px 8px 0 0;" +
             "background:#e3f2fd;border:1px solid #90caf9;border-radius:2px 7px 2px 2px;}" +
+            ".attach-thumb{float:left;width:36px;height:36px;margin:1px 8px 0 0;" +
+            "border-radius:3px;border:1px solid #bbdefb;background:#eceff1;" +
+            "background-size:cover;background-position:center;}" +
             ".attach-body{display:block;overflow:hidden;}" +
             ".attach-name{display:block;font-size:13px;font-weight:bold;color:#1565c0;" +
             "line-height:1.3;word-wrap:break-word;}" +
             ".attach-sub{display:block;font-size:11px;color:#78909c;line-height:1.3;margin-top:1px;}" +
+            ".attach-view{position:absolute;right:8px;top:50%;margin-top:-9px;" +
+            "font-size:11px;color:#1976d2;line-height:18px;}" +
             ".error-card{display:inline-block;text-align:left;margin-top:4px;padding:8px 10px;" +
             "border:1px solid #ffcdd2;border-radius:8px;background:#fff5f5;max-width:85%;}" +
             ".err-title{color:#c62828;font-size:12px;font-weight:bold;}" +

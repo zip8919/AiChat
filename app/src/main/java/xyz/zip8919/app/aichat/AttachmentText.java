@@ -24,12 +24,32 @@ final class AttachmentText {
     private AttachmentText() {
     }
 
-    /** 一个待发送的文本附件。正文只存在内存与 {@link Message} 里。 */
+    /** 文本附件。 */
+    static final String KIND_TEXT = "text";
+    /**
+     * 图片附件。
+     *
+     * <p>图片不进请求体：{@code chat/completions} 的 content 是纯文本，塞 Base64 会被
+     * 端点当普通文字计费、或者直接 400。它在这里是「本地留档 + 查看」，
+     * 给模型的那份只写一行说明（见 {@link #toApi}），不假装发送过像素。
+     */
+    static final String KIND_IMAGE = "image";
+
+    /** 一个待发送的附件。正文只存在内存与 {@link Message} 里。 */
     static final class File {
         final String name;
+        /** 文本附件正文；图片为空串。 */
         final String content;
         /** 原始文件字节数；0 表示来源未知（程序内部构造的），显示时退回字数。 */
         final long bytes;
+        /** {@link #KIND_TEXT} 或 {@link #KIND_IMAGE}。 */
+        final String kind;
+        /** 图片在应用私有目录里的绝对路径（已拷贝，原 URI 的读权限活不过重启）。 */
+        final String path;
+        final int width;
+        final int height;
+        /** 图片缩略图（base64 data URI，约 3~8 KB），卡片上直接当背景图用；文本为空串。 */
+        final String thumb;
 
         /**
          * token 估算缓存。-1 表示还没算过。
@@ -45,9 +65,27 @@ final class AttachmentText {
         }
 
         File(String name, String content, long bytes) {
+            this(name, content, bytes, KIND_TEXT, "", 0, 0, "");
+        }
+
+        File(String name, String content, long bytes, String kind, String path,
+                int width, int height, String thumb) {
             this.name = name == null || name.length() == 0 ? "未命名.txt" : name;
             this.content = content == null ? "" : content;
             this.bytes = Math.max(0L, bytes);
+            this.kind = KIND_IMAGE.equals(kind) ? KIND_IMAGE : KIND_TEXT;
+            this.path = path == null ? "" : path;
+            this.width = Math.max(0, width);
+            this.height = Math.max(0, height);
+            this.thumb = thumb == null ? "" : thumb;
+        }
+
+        static File image(String name, String path, long bytes, int width, int height, String thumb) {
+            return new File(name, "", bytes, KIND_IMAGE, path, width, height, thumb);
+        }
+
+        boolean isImage() {
+            return KIND_IMAGE.equals(kind);
         }
 
         int chars() {
@@ -58,6 +96,17 @@ final class AttachmentText {
         int tokens() {
             if (tokensCache < 0) tokensCache = MessageHtmlRenderer.estimateTokens(content);
             return tokensCache;
+        }
+
+        /** 图片的「大小 · 尺寸」摘要；文本附件返回空串。 */
+        String imageSize() {
+            StringBuilder sb = new StringBuilder();
+            if (bytes > 0) sb.append(formatBytes(bytes));
+            if (width > 0 && height > 0) {
+                if (sb.length() > 0) sb.append(" · ");
+                sb.append(width).append('×').append(height);
+            }
+            return sb.toString();
         }
     }
 
@@ -72,6 +121,16 @@ final class AttachmentText {
         if (sb.length() == 0) sb.append("请阅读以下附件。");
         for (int i = 0; i < files.size(); i++) {
             File f = files.get(i);
+            if (f.isImage()) {
+                // 只写「有这么一张图」，不写像素：content 是纯文本协议，
+                // Base64 塞进去会被当正文计费，多数端点还会直接 400。
+                // 与其让模型对着乱码猜，不如明确告诉它这一轮看不到图。
+                sb.append("\n\n[图片附件] ").append(f.name);
+                String meta = f.imageSize();
+                if (meta.length() > 0) sb.append("（").append(meta).append("）");
+                sb.append("\n（本次为纯文本请求，未包含图像内容）");
+                continue;
+            }
             sb.append("\n\n<附件 name=\"").append(f.name).append("\">\n")
                     .append(f.content)
                     .append("\n</附件>");
@@ -107,15 +166,19 @@ final class AttachmentText {
         if (m.attachments != null) {
             for (int i = 0; i < m.attachments.size(); i++) {
                 File f = m.attachments.get(i);
-                // 标签本身也进请求体，按经验值 16 个 token 计
-                t += f.tokens() + 16;
+                // 图片只发一行说明，按 24 个 token 估；文本按标签 16 个 token 补
+                t += f.isImage() ? 24 : f.tokens() + 16;
             }
         }
         return t;
     }
 
-    /** 附件条第二行：{@code 12.3 KB · ~3.2k tokens}。 */
+    /** 附件条第二行：{@code 12.3 KB · ~3.2k tokens}；图片是 {@code 1.2 MB · 1200×800 · 仅本机}。 */
     static String sizeAndTokens(File f) {
+        if (f.isImage()) {
+            String s = f.imageSize();
+            return s.length() == 0 ? "图片 · 仅本机" : s + " · 仅本机";
+        }
         StringBuilder sb = new StringBuilder();
         if (f.bytes > 0) {
             sb.append(formatBytes(f.bytes)).append(" · ");

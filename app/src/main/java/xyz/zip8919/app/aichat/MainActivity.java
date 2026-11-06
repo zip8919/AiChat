@@ -66,8 +66,10 @@ public class MainActivity extends Activity {
     private static final int REQUEST_SCAN = 2;
     private static final int REQUEST_PICK_TEXT = 3;
     private static final int REQUEST_FULLSCREEN = 4;
+    private static final int REQUEST_PICK_IMAGE = 5;
     /** 附件菜单项 id（单项目前用常量，后续加项改成 menu 资源）。 */
     private static final int MENU_ATTACH_TEXT = 1;
+    private static final int MENU_ATTACH_IMAGE = 2;
     /** 单文件上限 10 MB：超过直接报错，不截断——半截代码更难排查。 */
     private static final int MAX_IMPORT_BYTES = 10 * 1024 * 1024;
     /** 单条消息最多挂几个附件。 */
@@ -531,10 +533,15 @@ public class MainActivity extends Activity {
     private void showAttachMenu() {
         PopupMenu menu = new PopupMenu(this, plusButton);
         menu.getMenu().add(0, MENU_ATTACH_TEXT, 0, R.string.upload_text_file);
+        menu.getMenu().add(0, MENU_ATTACH_IMAGE, 1, R.string.upload_image);
         menu.setOnMenuItemClickListener(new PopupMenu.OnMenuItemClickListener() {
             public boolean onMenuItemClick(MenuItem item) {
                 if (item.getItemId() == MENU_ATTACH_TEXT) {
                     pickTextFile();
+                    return true;
+                }
+                if (item.getItemId() == MENU_ATTACH_IMAGE) {
+                    pickImageFile();
                     return true;
                 }
                 return false;
@@ -554,6 +561,23 @@ public class MainActivity extends Activity {
         } catch (Exception e) {
             LogUtil.w(TAG, "pickTextFile failed: %s", e.getMessage());
             Toast.makeText(this, "没有可用的文件选择器", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    /**
+     * 图片单独走一条路：不做文本解码、不走 token 估算，只需要「拷进来 + 缩略图」。
+     * 混进文本通道会在 {@code new String(bytes, "UTF-8")} 上把 JPEG 解成一串替换字符。
+     */
+    private void pickImageFile() {
+        Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+        intent.setType("image/*");
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        try {
+            startActivityForResult(Intent.createChooser(intent, getString(R.string.upload_image)),
+                    REQUEST_PICK_IMAGE);
+        } catch (Exception e) {
+            LogUtil.w(TAG, "pickImageFile failed: %s", e.getMessage());
+            Toast.makeText(this, "没有可用的图片选择器", Toast.LENGTH_SHORT).show();
         }
     }
 
@@ -602,6 +626,50 @@ public class MainActivity extends Activity {
         }, "aichat-import-text").start();
     }
 
+    /**
+     * 读图片 → 拷进私有目录 → 挂成待发送附件。
+     *
+     * <p>拷贝与缩略图都在后台线程做：一张 4000×3000 的图解码采样要几十毫秒到几百毫秒，
+     * 放在主线程就是一次必然的掉帧。
+     */
+    private void importImageFile(final Uri uri) {
+        new Thread(new Runnable() {
+            public void run() {
+                AttachmentText.File file = null;
+                String err = null;
+                try {
+                    String name = queryDisplayName(uri);
+                    // 有些 ROM 的选择器不认 type 过滤，把 .txt 也放回来；先按扩展名/MIME 挡一道
+                    if (!FileKinds.looksLikeImage(name, getContentResolver().getType(uri))) {
+                        throw new Exception("这不是图片文件");
+                    }
+                    file = AttachmentFiles.importImage(MainActivity.this, uri, name,
+                            AttachmentFiles.MAX_IMAGE_BYTES);
+                } catch (Exception e) {
+                    err = e.getMessage();
+                } catch (OutOfMemoryError e) {
+                    // 超大图解码失败是这种设备上的常见结局，必须兜住，否则直接崩
+                    err = "图片太大，内存不足";
+                    LogUtil.w(TAG, "importImageFile OOM: %s", e.getMessage());
+                }
+                final AttachmentText.File loaded = file;
+                final String error = err;
+                runOnUiThread(new Runnable() {
+                    public void run() {
+                        if (loaded == null) {
+                            LogUtil.w(TAG, "importImageFile failed: %s", error);
+                            Toast.makeText(MainActivity.this,
+                                    "读取图片失败: " + (error == null ? "未知错误" : error),
+                                    Toast.LENGTH_LONG).show();
+                            return;
+                        }
+                        addAttachment(loaded);
+                    }
+                });
+            }
+        }, "aichat-import-image").start();
+    }
+
     /** 取文件显示名；查询失败时退回 URI 末段，至少比「未命名」强。 */
     private String queryDisplayName(Uri uri) {
         Cursor c = null;
@@ -626,11 +694,15 @@ public class MainActivity extends Activity {
 
     /** 加入待发送队列（只存内存，不落盘——附件是这一次输入的一部分）。 */
     private void addAttachment(String name, String content, int bytes) {
+        addAttachment(new AttachmentText.File(name, content, bytes));
+    }
+
+    private void addAttachment(AttachmentText.File f) {
         if (pendingAttachments.size() >= MAX_ATTACHMENTS) {
             Toast.makeText(this, "最多附加 " + MAX_ATTACHMENTS + " 个文件", Toast.LENGTH_SHORT).show();
             return;
         }
-        int total = content == null ? 0 : content.length();
+        int total = f.chars();
         for (int i = 0; i < pendingAttachments.size(); i++) {
             total += pendingAttachments.get(i).chars();
         }
@@ -640,10 +712,9 @@ public class MainActivity extends Activity {
                     Toast.LENGTH_LONG).show();
             return;
         }
-        AttachmentText.File f = new AttachmentText.File(name, content, bytes);
         pendingAttachments.add(f);
         refreshAttachmentBar();
-        Toast.makeText(this, "已附加 " + name + "（" + AttachmentText.sizeAndTokens(f) + "）",
+        Toast.makeText(this, "已附加 " + f.name + "（" + AttachmentText.sizeAndTokens(f) + "）",
                 Toast.LENGTH_SHORT).show();
     }
 
@@ -1130,6 +1201,14 @@ public class MainActivity extends Activity {
                 importTextFile(picked);
             } else {
                 LogUtil.d(TAG, "pick text cancelled or empty");
+            }
+        } else if (requestCode == REQUEST_PICK_IMAGE) {
+            Uri picked = data == null ? null : data.getData();
+            if (resultCode == RESULT_OK && picked != null) {
+                LogUtil.i(TAG, "picked image: %s", picked);
+                importImageFile(picked);
+            } else {
+                LogUtil.d(TAG, "pick image cancelled or empty");
             }
         } else if (requestCode == REQUEST_FULLSCREEN) {
             if (resultCode == RESULT_OK && data != null) {
@@ -2309,6 +2388,21 @@ public class MainActivity extends Activity {
             });
         }
 
+        /** 附件卡片上的「查看」：正文 / 图片两条路，具体分派在 {@link #openAttachmentAt}。 */
+        @JavascriptInterface
+        public void openAttachment(final String idxStr, final String attStr) {
+            LogUtil.d(TAG, "JsBridge.openAttachment: idx=%s att=%s", idxStr, attStr);
+            handler.post(new Runnable() {
+                public void run() {
+                    try {
+                        openAttachmentAt(Integer.parseInt(idxStr), Integer.parseInt(attStr));
+                    } catch (Exception e) {
+                        LogUtil.w(TAG, "openAttachment failed: %s", e.getMessage());
+                    }
+                }
+            });
+        }
+
         @JavascriptInterface
         public void showTableViewer(final String tableHtml) {
             handler.post(new Runnable() {
@@ -2532,6 +2626,76 @@ public class MainActivity extends Activity {
             text += AttachmentText.copySuffix(msg.attachments);
         }
         return text;
+    }
+
+    // ========== 附件查看 ==========
+
+    /**
+     * 把消息下标与附件下标读成对象再打开。容器可能是跨线程的（回调来自 WebView），
+     * 所以先 post 到主线程，再按「点开时此刻」的列表取值——期间用户可能已经删了这条消息。
+     */
+    private void openAttachmentAt(int pos, int attIdx) {
+        if (viewer == null) return;
+        if (pos < 0 || messages == null || pos >= messages.size()) {
+            LogUtil.w(TAG, "openAttachmentAt: bad pos=%d", pos);
+            return;
+        }
+        Message m = messages.get(pos);
+        List<AttachmentText.File> files = m == null ? null : m.attachments;
+        if (files == null || attIdx < 0 || attIdx >= files.size()) {
+            LogUtil.w(TAG, "openAttachmentAt: bad att=%d (size=%s)",
+                    attIdx, files == null ? "null" : String.valueOf(files.size()));
+            return;
+        }
+        final AttachmentText.File f = files.get(attIdx);
+        if (f == null) return;
+        if (f.isImage()) {
+            openImageAttachment(f);
+            return;
+        }
+        String lang = FileKinds.languageOf(f.name);
+        LogUtil.i(TAG, "openAttachment: name=%s lang=%s len=%d",
+                f.name, lang.length() == 0 ? "(plain)" : lang, f.chars());
+        viewer.showDocument(f.name, lang, f.content);
+    }
+
+    /**
+     * 图片要走一遍解码 → 采样 → 压缩 → Base64，必须离开主线程。
+     * 一张原图在主线程做这件事就是几百毫秒的白屏。
+     */
+    private void openImageAttachment(final AttachmentText.File f) {
+        if (f.path.length() == 0) {
+            Toast.makeText(this, "这张图片没有本地副本，无法查看", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        new Thread(new Runnable() {
+            public void run() {
+                final String src = AttachmentFiles.viewDataUri(f.path);
+                runOnUiThread(new Runnable() {
+                    public void run() {
+                        if (viewer == null) return;
+                        if (src == null) {
+                            Toast.makeText(MainActivity.this,
+                                    "图片文件已丢失（可能被系统清理），请重新附加",
+                                    Toast.LENGTH_LONG).show();
+                            return;
+                        }
+                        try {
+                            JSONArray arr = new JSONArray();
+                            JSONObject o = new JSONObject();
+                            o.put("src", src);
+                            o.put("alt", f.name);
+                            o.put("type", "raster");
+                            arr.put(o);
+                            viewer.showImage(0, arr.toString());
+                        } catch (Exception e) {
+                            LogUtil.w(TAG, "openImageAttachment failed: %s", e.getMessage());
+                            Toast.makeText(MainActivity.this, "打开图片失败", Toast.LENGTH_SHORT).show();
+                        }
+                    }
+                });
+            }
+        }, "aichat-open-image").start();
     }
 
     /** 写剪贴板。API 18 上有设备返回的是旧版 android.text.ClipboardManager，需要分支。 */
