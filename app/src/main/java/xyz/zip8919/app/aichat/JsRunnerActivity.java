@@ -248,7 +248,7 @@ public class JsRunnerActivity extends Activity {
             return;
         }
         // 复用导出扩展名映射：不再把 html/svg 之外的语言（py/go/md…）一律写成 .js
-        String ext = MainActivity.exportExtForLang(lang);
+        String ext = ExportHelper.extForLang(lang);
         String name = "code_" + System.currentTimeMillis() + "." + ext;
         String path = StorageManager.getInstance().saveExport(name, code);
         LogUtil.i(TAG, "saveToExports: lang=%s path=%s", lang, path);

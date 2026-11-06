@@ -1,0 +1,106 @@
+package xyz.zip8919.app.aichat;
+
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import javax.net.ssl.HttpsURLConnection;
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+/**
+ * 对话接口的 HTTP 层：拼请求体、建连接、读错误体、关连接。
+ *
+ * <p>从 MainActivity 抽出。所有方法都是无状态的，抽出后请求线程只依赖本类，
+ * 不再往 Activity 上挂纯协议细节。连接超时 30s、读超时 0（SSE 长连接不能设读超时，
+ * 否则模型思考超过阈值就会被动断开）。
+ */
+final class ChatTransport {
+
+    private static final String TAG = "ChatTransport";
+
+    private ChatTransport() {
+    }
+
+    /**
+     * OpenAI 兼容的 chat/completions 请求体。
+     *
+     * <p>思考参数按 provider 声明的方式二选一：{@code boolean} 型直接放开关 + budget，
+     * 其余走 {@code {"type":"enabled|disabled"}} 对象 + reasoning_effort。
+     * 这两种格式不通用，写错端点会直接 400。
+     */
+    static JSONObject buildRequestBody(String model, ProviderInfo provider, String thinkingLevel,
+            JSONArray messages, boolean stream, JSONArray tools) throws Exception {
+        JSONObject body = new JSONObject();
+        body.put("model", model);
+        body.put("stream", stream);
+        body.put("messages", messages);
+        if (tools != null && tools.length() > 0) {
+            body.put("tools", tools);
+            body.put("tool_choice", "auto");
+        }
+
+        if ("boolean".equals(provider.thinkingType)) {
+            if (!"off".equals(thinkingLevel)) {
+                body.put(provider.thinkingParamName, true);
+                int budget = 4096;
+                if ("low".equals(thinkingLevel)) budget = 2048;
+                else if ("high".equals(thinkingLevel)) budget = 32768;
+                body.put("thinking_budget", budget);
+            }
+        } else {
+            JSONObject tObj = new JSONObject();
+            tObj.put("type", "off".equals(thinkingLevel) ? "disabled" : "enabled");
+            body.put(provider.thinkingParamName, tObj);
+            if (!"off".equals(thinkingLevel)) {
+                body.put("reasoning_effort", "high".equals(thinkingLevel) ? "max" : "high");
+            }
+        }
+        return body;
+    }
+
+    static HttpURLConnection open(ProviderInfo provider) throws Exception {
+        String endpoint = provider.apiUrl + provider.chatPath;
+        LogUtil.d(TAG, "open: %s", endpoint);
+        HttpURLConnection conn = (HttpURLConnection) new URL(endpoint).openConnection();
+        conn.setRequestMethod("POST");
+        conn.setRequestProperty("Content-Type", "application/json");
+        conn.setRequestProperty("Authorization", "Bearer " + provider.apiKey);
+        conn.setDoOutput(true);
+        conn.setConnectTimeout(30000);
+        // SSE 是长连接：读超时必须为 0，否则思考时间一长就被判超时
+        conn.setReadTimeout(0);
+        if (conn instanceof HttpsURLConnection) {
+            TlsCompat.apply((HttpsURLConnection) conn);
+        }
+        return conn;
+    }
+
+    static void close(HttpURLConnection conn) {
+        if (conn == null) return;
+        try {
+            conn.disconnect();
+        } catch (Exception ignored) {
+        }
+    }
+
+    /** 读取错误响应体，最多 4KB——够看错误原因，又不至于把日志撑爆。 */
+    static String readErrorBody(HttpURLConnection conn) {
+        if (conn == null) return "";
+        try {
+            InputStream es = conn.getErrorStream();
+            if (es == null) return "";
+            ByteArrayOutputStream bos = new ByteArrayOutputStream();
+            byte[] buf = new byte[1024];
+            int n;
+            int total = 0;
+            while (total < 4096 && (n = es.read(buf, 0, Math.min(buf.length, 4096 - total))) > 0) {
+                bos.write(buf, 0, n);
+                total += n;
+            }
+            return new String(bos.toByteArray(), "UTF-8");
+        } catch (Exception e) {
+            return "";
+        }
+    }
+}

@@ -10,18 +10,13 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.res.Configuration;
 import android.database.Cursor;
-import android.graphics.Color;
-import android.graphics.drawable.ColorDrawable;
 import android.net.Uri;
 import java.net.HttpURLConnection;
-import java.util.regex.Matcher;
 import android.os.Bundle;
 import android.os.Handler;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
-import android.view.ViewGroup;
-import android.view.ViewTreeObserver;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
@@ -74,6 +69,7 @@ public class MainActivity extends Activity {
     private Spinner thinkingSpinner;
     private View queueBar;
     private TextView queueBarText;
+    private MessageQueue queue;
     private boolean userPicked = false;
 
     private List<Message> messages;
@@ -102,29 +98,8 @@ public class MainActivity extends Activity {
     private Thread currentRequestThread;
     private Handler handler = new Handler();
 
-    // Image viewer dialog state
-    private AlertDialog imageViewerDialog;
-    private WebView imageViewerWebView;
-    private TextView imageCounterText;
-    private Button prevButton, nextButton, zoomOutBtn, zoomInBtn, rotateBtn, resetBtn, bgToggleBtn;
-    private List<ImageInfo> currentImageList;
-    private int currentImageIndex;
-    private int currentRotation;
-    private int currentBgColor; // 0=white, 1=gray, 2=black
-
-    // Table viewer dialog state
-    private AlertDialog tableViewerDialog;
-    private WebView tableViewerWebView;
-    private int tableRotation;
-    private int tableBgColor; // 0=white, 1=gray, 2=black
-
-    // Code preview dialog state (HTML / SVG)
-    private AlertDialog codePreviewDialog;
-    private WebView codePreviewWebView;
-    private int codePreviewRotation;
-    private int codePreviewBgColor;
-    private String currentPreviewLang;
-    private String currentPreviewCode;
+    // 全屏预览器（图片 / 表格 / HTML·SVG 代码），自持 dialog 与 WebView 生命周期
+    private ViewerController viewer;
 
     // Quick scan mode state
     private boolean expectingQuickScanResult = false;
@@ -220,6 +195,14 @@ public class MainActivity extends Activity {
             conversationWebView.destroy();
             conversationWebView = null;
         }
+        if (viewer != null) {
+            viewer.destroy();
+            viewer = null;
+        }
+        if (queue != null) {
+            queue.destroy();
+            queue = null;
+        }
         // 兜底：onPause 之后可能又有保存入队，销毁前再清一次
         conversationManager.flushSaves();
         super.onDestroy();
@@ -227,14 +210,20 @@ public class MainActivity extends Activity {
 
     private void initViews() {
         LogUtil.d(TAG, "initViews");
+        viewer = new ViewerController(this);
         inputEditText = (EditText) findViewById(R.id.input_edit_text);
         sendButton = (Button) findViewById(R.id.send_button);
         modelSpinner = (Spinner) findViewById(R.id.model_spinner);
         thinkingSpinner = (Spinner) findViewById(R.id.thinking_spinner);
         queueBar = findViewById(R.id.queue_bar);
         queueBarText = (TextView) findViewById(R.id.queue_bar_text);
+        queue = new MessageQueue(this, new MessageQueue.Host() {
+            public boolean isRequestInFlight() { return isRequestInProgress.get(); }
+            public void sendQueued(String text) { sendMessageText(text); }
+            public void interruptForQueued() { interruptRequest(); }
+        }, queueBar, queueBarText);
         findViewById(R.id.queue_manage_button).setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) { LogUtil.d(TAG, "click: queue_manage"); showQueueManager(); }
+            public void onClick(View v) { LogUtil.d(TAG, "click: queue_manage"); queue.showManager(); }
         });
         conversationWebView = (WebView) findViewById(R.id.message_webview);
         conversationWebView.getSettings().setJavaScriptEnabled(true);
@@ -485,12 +474,7 @@ public class MainActivity extends Activity {
         LogUtil.i(TAG, "createNewConversation (requestInProgress=%s)", isRequestInProgress.get());
         // Queued messages belong to the old conversation; drop them before the
         // interrupt handler drains the queue into the new one.
-        if (!pendingQueue.isEmpty()) {
-            LogUtil.i(TAG, "createNewConversation: dropping %d queued message(s)", pendingQueue.size());
-            pendingQueue.clear();
-            dismissQueueManager();
-            updateQueueBar();
-        }
+        if (queue != null) queue.clearAll();
         if (isRequestInProgress.get()) interruptRequest();
         loadSystemPrompt();
         Conversation conv = conversationManager.createNewConversation();
@@ -517,7 +501,7 @@ public class MainActivity extends Activity {
         runOnUiThread(new Runnable() {
             public void run() {
                 if (isFinishing()) return;
-                drainPendingQueue();
+                if (queue != null) queue.drain();
                 if (messages.size() != msgCountAtInterrupt) return;
                 if (!messages.isEmpty()) {
                     Message lastMsg = messages.get(messages.size() - 1);
@@ -572,12 +556,7 @@ public class MainActivity extends Activity {
             if (conversationId != null) {
                 LogUtil.i(TAG, "switching to conversation: %s", conversationId);
                 // 排队消息属于旧会话：在 interruptRequest 派发的 drain 之前丢弃，避免发进新会话
-                if (!pendingQueue.isEmpty()) {
-                    LogUtil.i(TAG, "onActivityResult: dropping %d queued message(s)", pendingQueue.size());
-                    pendingQueue.clear();
-                    dismissQueueManager();
-                    updateQueueBar();
-                }
+                if (queue != null) queue.clearAll();
                 if (isRequestInProgress.get()) interruptRequest();
                 conversationManager.saveCurrentConversation();
                 new Thread(new Runnable() {
@@ -687,7 +666,7 @@ public class MainActivity extends Activity {
             lang = detectLang(code);
         }
         LogUtil.i(TAG, "handleCodePreviewIntent: lang=%s len=%d", lang, code.length());
-        showCodePreviewDialog(lang, code);
+        viewer.showCode(lang, code);
     }
 
     /**
@@ -744,21 +723,7 @@ public class MainActivity extends Activity {
         super.onConfigurationChanged(newConfig);
         LogUtil.d(TAG, "onConfigurationChanged: orient=%s",
                 newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE ? "landscape" : "portrait");
-        if (imageViewerDialog != null && imageViewerDialog.isShowing()) {
-            imageViewerDialog.getWindow().setLayout(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT);
-        }
-        if (tableViewerDialog != null && tableViewerDialog.isShowing()) {
-            tableViewerDialog.getWindow().setLayout(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT);
-        }
-        if (codePreviewDialog != null && codePreviewDialog.isShowing()) {
-            codePreviewDialog.getWindow().setLayout(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT);
-        }
+        if (viewer != null) viewer.onConfigurationChanged();
     }
 
     // Scan key codes (same as ScanActivity)
@@ -812,255 +777,22 @@ public class MainActivity extends Activity {
         }
     }
 
-    // Messages typed while a request is streaming wait here and are sent in order
-    // once the current reply finishes. Touched on the UI thread only.
-    // Each entry carries a stable id: dialogs hold the id, never the position, so
-    // an action still lands on the message the user picked after the drain has
-    // already sent one of its neighbours.
-    static class QueuedMessage {
-        final int id;
-        final String text;
-
-        QueuedMessage(int id, String text) {
-            this.id = id;
-            this.text = text;
-        }
-    }
-
-    private final List<QueuedMessage> pendingQueue = new ArrayList<QueuedMessage>();
-    private int nextQueueId = 1;
-    private AlertDialog queueManagerDialog;
-    private AlertDialog queueActionsDialog;
-    /** A relist was requested while the action sheet was open; applied on the sheet's dismiss. */
-    private boolean queueManagerDirty;
-    /** True when the action sheet was closed by picking an action rather than by 取消. */
-    private boolean queueActionTaken;
-
-    /** Current position of the queued message with this id, or -1 when it is gone. */
-    private int findQueueIndex(int id) {
-        for (int i = 0; i < pendingQueue.size(); i++) {
-            if (pendingQueue.get(i).id == id) return i;
-        }
-        return -1;
-    }
-
+    /**
+     * 发送键：空闲时直接发，正在回复时入队。
+     * 队列本身（排序/插队/弹窗）在 {@link MessageQueue}，这里只管输入框这一侧。
+     */
     private void sendMessage() {
-        if (isRequestInProgress.get()) {
-            String queued = inputEditText.getText().toString().trim();
-            if (queued.isEmpty()) {
-                LogUtil.w(TAG, "sendMessage ignored: empty input");
-                return;
-            }
-            pendingQueue.add(new QueuedMessage(nextQueueId++, queued));
-            inputEditText.setText("");
-            updateQueueBar();
-            LogUtil.i(TAG, "sendMessage queued: len=%d pending=%d", queued.length(), pendingQueue.size());
-            Toast.makeText(this, "已排队 " + pendingQueue.size() + " 条，将在当前回复结束后发送",
-                    Toast.LENGTH_SHORT).show();
-            return;
-        }
         String input = inputEditText.getText().toString().trim();
         if (input.isEmpty()) {
             LogUtil.w(TAG, "sendMessage ignored: empty input");
             return;
         }
         inputEditText.setText("");
-        sendMessageText(input);
-    }
-
-    private void drainPendingQueue() {
-        if (pendingQueue.isEmpty()) return;
-        handler.post(new Runnable() {
-            public void run() {
-                if (isRequestInProgress.get() || pendingQueue.isEmpty()) {
-                    LogUtil.i(TAG, "drainPendingQueue: deferred, inProgress=%s pending=%d",
-                            isRequestInProgress.get(), pendingQueue.size());
-                    return;
-                }
-                QueuedMessage next = pendingQueue.remove(0);
-                updateQueueBar();
-                refreshQueueManager();
-                LogUtil.i(TAG, "drainPendingQueue: sending queued message id=%d len=%d remaining=%d",
-                        next.id, next.text.length(), pendingQueue.size());
-                sendMessageText(next.text);
-            }
-        });
-    }
-
-    /** Shows/hides the queued-message bar above the input row. UI thread only. */
-    private void updateQueueBar() {
-        if (queueBar == null || queueBarText == null) return;
-        int n = pendingQueue.size();
-        if (n == 0) {
-            queueBar.setVisibility(View.GONE);
-        } else {
-            queueBar.setVisibility(View.VISIBLE);
-            queueBarText.setText("排队 " + n + " 条，将在当前回复结束后依次发送");
-        }
-    }
-
-    private void showQueueManager() {
-        if (pendingQueue.isEmpty()) {
-            Toast.makeText(this, "没有排队中的消息", Toast.LENGTH_SHORT).show();
-            updateQueueBar();
-            return;
-        }
-        final String[] items = new String[pendingQueue.size()];
-        final int[] ids = new int[pendingQueue.size()];
-        for (int i = 0; i < pendingQueue.size(); i++) {
-            QueuedMessage qm = pendingQueue.get(i);
-            ids[i] = qm.id;
-            String s = qm.text.replace('\n', ' ');
-            if (s.length() > 30) s = s.substring(0, 30) + "…";
-            items[i] = (i + 1) + ". " + s;
-        }
-        queueManagerDialog = new AlertDialog.Builder(this)
-                .setTitle("排队中的消息")
-                .setItems(items, new DialogInterface.OnClickListener() {
-                    public void onClick(DialogInterface d, int which) {
-                        showQueueItemActions(ids[which]);
-                    }
-                })
-                .setPositiveButton("关闭", null)
-                .setNeutralButton("全部清空", new DialogInterface.OnClickListener() {
-                    public void onClick(DialogInterface d, int which) {
-                        LogUtil.i(TAG, "queue: clear all (%d)", pendingQueue.size());
-                        pendingQueue.clear();
-                        updateQueueBar();
-                    }
-                })
-                .show();
-    }
-
-    /**
-     * Relists the manager dialog when the queue changed underneath it (a message
-     * was sent by the drain while the dialog was open). Without this the rows
-     * would keep pointing at messages that are no longer at those positions.
-     *
-     * <p>While the per-message action sheet is open the relist is deferred: showing
-     * the manager again would stack it on top of the sheet the user is using.
-     * Deferring is safe because every action resolves its message by id and reports
-     * 「该消息已发送」when the drain got there first.
-     */
-    private void refreshQueueManager() {
-        if (queueActionsDialog != null && queueActionsDialog.isShowing()) {
-            queueManagerDirty = true;
-            return;
-        }
-        if (queueManagerDialog == null || !queueManagerDialog.isShowing()) return;
-        queueManagerDialog.dismiss();
-        queueManagerDialog = null;
-        if (pendingQueue.isEmpty()) return;
-        showQueueManager();
-    }
-
-    private void dismissQueueManager() {
-        if (queueManagerDialog != null) {
-            queueManagerDialog.dismiss();
-            queueManagerDialog = null;
-        }
-    }
-
-    /** Operates on a queued message by its stable id, not by its position. */
-    private void showQueueItemActions(final int id) {
-        final int index = findQueueIndex(id);
-        if (index < 0) {
-            LogUtil.i(TAG, "queue: action on id=%d dropped, already sent (pending=%d)",
-                    id, pendingQueue.size());
-            Toast.makeText(this, "该消息已发送", Toast.LENGTH_SHORT).show();
-            refreshQueueManager();
-            return;
-        }
-        final String[] actions = {"上移", "下移", "插队发送（打断当前回复）", "删除"};
-        queueActionsDialog = new AlertDialog.Builder(this)
-                .setTitle("第 " + (index + 1) + " 条")
-                .setItems(actions, new DialogInterface.OnClickListener() {
-                    public void onClick(DialogInterface d, int which) {
-                        queueActionTaken = true;
-                        if (which == 0) moveQueueItem(id, -1);
-                        else if (which == 1) moveQueueItem(id, 1);
-                        else if (which == 2) jumpQueue(id);
-                        else deleteQueueItem(id);
-                    }
-                })
-                .setNegativeButton("取消", null)
-                .setOnDismissListener(new DialogInterface.OnDismissListener() {
-                    public void onDismiss(DialogInterface d) {
-                        queueActionsDialog = null;
-                        // Picking an action returns to the list so several edits can be
-                        // made in a row; 取消 closes the whole stack.
-                        boolean reopen = queueActionTaken;
-                        queueActionTaken = false;
-                        if (queueManagerDirty || (reopen && !pendingQueue.isEmpty())) {
-                            queueManagerDirty = false;
-                            refreshQueueManager();
-                            if (reopen && (queueManagerDialog == null || !queueManagerDialog.isShowing())) {
-                                showQueueManager();
-                            }
-                        }
-                    }
-                })
-                .show();
-    }
-
-    private void moveQueueItem(int id, int delta) {
-        int from = findQueueIndex(id);
-        if (from < 0) {
-            Toast.makeText(this, "该消息已发送", Toast.LENGTH_SHORT).show();
-            refreshQueueManager();
-            return;
-        }
-        int to = from + delta;
-        if (to < 0 || to >= pendingQueue.size()) {
-            Toast.makeText(this, delta < 0 ? "已经在最前" : "已经在最后", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        QueuedMessage moved = pendingQueue.remove(from);
-        pendingQueue.add(to, moved);
-        LogUtil.i(TAG, "queue: move id=%d %d -> %d (pending=%d)", id, from, to, pendingQueue.size());
-        updateQueueBar();
-        refreshQueueManager();
-    }
-
-    private void deleteQueueItem(int id) {
-        int index = findQueueIndex(id);
-        if (index < 0) {
-            Toast.makeText(this, "该消息已发送", Toast.LENGTH_SHORT).show();
-            refreshQueueManager();
-            return;
-        }
-        QueuedMessage removed = pendingQueue.remove(index);
-        LogUtil.i(TAG, "queue: delete id=%d idx=%d len=%d (pending=%d)",
-                id, index, removed.text.length(), pendingQueue.size());
-        updateQueueBar();
-        refreshQueueManager();
-        if (pendingQueue.isEmpty()) {
-            Toast.makeText(this, "队列已清空", Toast.LENGTH_SHORT).show();
-        }
-    }
-
-    /**
-     * Sends the selected queued message next: it moves to the head of the queue,
-     * then the in-flight reply is stopped so the drain picks it up immediately.
-     */
-    private void jumpQueue(int id) {
-        int index = findQueueIndex(id);
-        if (index < 0) {
-            Toast.makeText(this, "该消息已发送", Toast.LENGTH_SHORT).show();
-            refreshQueueManager();
-            return;
-        }
-        QueuedMessage moved = pendingQueue.remove(index);
-        pendingQueue.add(0, moved);
-        LogUtil.i(TAG, "queue: jump id=%d idx=%d to head (pending=%d, inProgress=%s)",
-                id, index, pendingQueue.size(), isRequestInProgress.get());
-        updateQueueBar();
-        refreshQueueManager();
         if (isRequestInProgress.get()) {
-            interruptRequest();
-        } else {
-            drainPendingQueue();
+            queue.enqueue(input);
+            return;
         }
+        sendMessageText(input);
     }
 
     private void sendMessageText(final String input) {
@@ -1111,9 +843,9 @@ public class MainActivity extends Activity {
         if (isFirstMsg && !conv.titleGenerated && !conv.titleRequested) {
             conv.titleRequested = true;
             // 先落一个「消息前 15 字」的兜底标题：自动标题关闭、生成失败或返回空时都保留它
-            applyFallbackTitle(conv, input);
+            TitleGenerator.applyFallback(conversationManager, conv, input);
             if (autoTitle) {
-                generateTitle(input);
+                TitleGenerator.generate(MainActivity.this, configManager, conversationManager, input);
             } else {
                 LogUtil.d(TAG, "auto title disabled, keep fallback title");
             }
@@ -1303,12 +1035,12 @@ public class MainActivity extends Activity {
                             showSearchStatus("正在整理搜索结果...", generation, trace.toString(), aiIndex);
                         }
 
-                        JSONObject body = buildChatRequestBody(modelName, provider, thinkingLevel, conversation,
+                        JSONObject body = ChatTransport.buildRequestBody(modelName, provider, thinkingLevel, conversation,
                                 streamEnabled, toolsEnabled ? toolDefs : null);
 
                         LogUtil.d(TAG, "opening connection: %s%s (round=%d, thread=%s)",
                                 provider.apiUrl, provider.chatPath, round, LogUtil.thread());
-                        conn = openChatConnection(provider);
+                        conn = ChatTransport.open(provider);
                         currentConnection = conn;
 
                         final String payload = body.toString();
@@ -1328,7 +1060,7 @@ public class MainActivity extends Activity {
                         LogUtil.i(TAG, "HTTP response: code=%d in %d ms (round=%d)",
                                 code, System.currentTimeMillis() - reqMs, round);
                         if (code != 200) {
-                            String errBody = readErrorBody(conn);
+                            String errBody = ChatTransport.readErrorBody(conn);
                             LogUtil.e(TAG, "request FAILED: HTTP %d, body=%s", code, LogUtil.preview(errBody, 800));
 
                             // 部分 OpenAI 兼容端点不认识 tools 参数。首轮 400 时去掉工具
@@ -1346,7 +1078,7 @@ public class MainActivity extends Activity {
                                                 Toast.LENGTH_SHORT).show();
                                     }
                                 });
-                                closeChatConnection(conn);
+                                ChatTransport.close(conn);
                                 conn = null;
                                 if (requestGeneration.get() == generation) currentConnection = null;
                                 continue;
@@ -1364,159 +1096,20 @@ public class MainActivity extends Activity {
                             return;
                         }
 
-                        final StringBuilder roundDisplay = new StringBuilder();
-                        final StringBuilder roundContent = new StringBuilder();
-                        final boolean[] roundThinkingActive = {false};
-                        final boolean[] roundThinkingFinished = {false};
-                        final JSONArray roundToolCalls = new JSONArray();
-
-                        if (!streamEnabled) {
-                            // Non-streaming: the body is one JSON object, no SSE frames.
-                            StringBuilder sb = new StringBuilder();
-                            java.io.BufferedReader reader = new java.io.BufferedReader(
-                                    new java.io.InputStreamReader(conn.getInputStream(), "UTF-8"));
-                            try {
-                                String line;
-                                while ((line = reader.readLine()) != null) sb.append(line);
-                            } finally {
-                                reader.close();
-                            }
-
-                            JSONObject json = new JSONObject(sb.toString());
-                            JSONArray choices = json.optJSONArray("choices");
-                            JSONObject message = choices != null && choices.length() > 0
-                                    ? choices.getJSONObject(0).optJSONObject("message") : null;
-                            if (message == null) {
-                                LogUtil.e(TAG, "non-stream response missing choices[0].message");
-                                final String err = "响应解析失败";
-                                requestFailed[0] = true;
-                                errorDetail[0] = ErrorReport.build(providerName, modelName, chatEndpoint,
-                                        round, 200, sb.toString(),
-                                        new Exception("非流式响应缺少 choices[0].message"));
-                                runOnUiThread(new Runnable() {
-                                    public void run() { Toast.makeText(MainActivity.this, err, Toast.LENGTH_SHORT).show(); }
-                                });
-                                return;
-                            }
-
-                            String reasoning = message.has("reasoning_content") && !message.isNull("reasoning_content")
-                                    ? message.optString("reasoning_content", "") : "";
-                            if (reasoning.length() > 0) {
-                                roundDisplay.append("[thinking]").append(reasoning).append("[/thinking]");
-                                thinkingChunks[0]++;
-                            }
-                            String content = message.has("content") && !message.isNull("content")
-                                    ? message.optString("content", "") : "";
-                            roundDisplay.append(content);
-                            roundContent.append(content);
-                            if (content.length() > 0) contentChunks[0]++;
-                            JSONArray rawCalls = message.optJSONArray("tool_calls");
-                            if (rawCalls != null) ToolCalls.normalize(rawCalls, roundToolCalls);
-                            if (content.length() == 0 && reasoning.length() == 0
-                                    && roundToolCalls.length() == 0) {
-                                LogUtil.e(TAG, "non-stream response has no content and no tool calls");
-                                final String err = "响应解析失败";
-                                requestFailed[0] = true;
-                                errorDetail[0] = ErrorReport.build(providerName, modelName, chatEndpoint,
-                                        round, 200, sb.toString(),
-                                        new Exception("响应既无 content 也无 tool_calls"));
-                                runOnUiThread(new Runnable() {
-                                    public void run() { Toast.makeText(MainActivity.this, err, Toast.LENGTH_SHORT).show(); }
-                                });
-                                return;
-                            }
-                            LogUtil.i(TAG, "non-stream round %d: raw=%d content=%d tools=%d",
-                                    round, sb.length(), content.length(), roundToolCalls.length());
-                        } else {
-                            LogUtil.i(TAG, "SSE stream started (round %d)", round);
-                            java.io.BufferedReader reader = new java.io.BufferedReader(
-                                    new java.io.InputStreamReader(conn.getInputStream(), "UTF-8"));
-                            String line;
-                            long lastUpdate = 0;
-                            try {
-                                while (isRequestInProgress.get() && (line = reader.readLine()) != null) {
-                                    line = line.trim();
-                                    // SSE 规范里冒号后的空格可选，兼容 "data:" 与 "data: "
-                                    if (!line.startsWith("data:")) {
-                                        if (line.length() > 0) {
-                                            LogUtil.v(TAG, "skip non-data line: %s", LogUtil.preview(line, 120));
-                                        }
-                                        continue;
-                                    }
-                                    String data = line.substring(5).trim();
-                                    if ("[DONE]".equals(data)) {
-                                        LogUtil.i(TAG, "SSE [DONE] received after %d chunks", chunkCount[0]);
-                                        break;
-                                    }
-                                    chunkCount[0]++;
-
-                                    try {
-                                        JSONObject json = new JSONObject(data);
-                                        JSONArray choices = json.optJSONArray("choices");
-                                        if (choices == null || choices.length() == 0) {
-                                            LogUtil.v(TAG, "chunk#%d has no choices: %s", chunkCount[0], LogUtil.preview(data, 200));
-                                            continue;
-                                        }
-                                        JSONObject delta = choices.getJSONObject(0).optJSONObject("delta");
-                                        if (delta == null) {
-                                            LogUtil.v(TAG, "chunk#%d has no delta", chunkCount[0]);
-                                            continue;
-                                        }
-
-                                        if (delta.has("reasoning_content") && !delta.isNull("reasoning_content")) {
-                                            String rc = delta.getString("reasoning_content");
-                                            thinkingChunks[0]++;
-                                            if (!roundThinkingActive[0]) {
-                                                roundThinkingActive[0] = true;
-                                                roundDisplay.append("[thinking]");
-                                                LogUtil.d(TAG, "thinking phase START at chunk#%d", chunkCount[0]);
-                                            }
-                                            roundDisplay.append(rc);
-                                            if (LogUtil.ENABLED) {
-                                                LogUtil.v(TAG, "reasoning chunk#%d: %s", thinkingChunks[0], LogUtil.preview(rc, 150));
-                                            }
-                                        }
-
-                                        if (delta.has("content") && !delta.isNull("content")) {
-                                            String ct = delta.getString("content");
-                                            contentChunks[0]++;
-                                            // Only a non-empty content chunk ends the thinking
-                                            // phase. The API emits "content":"" on every
-                                            // reasoning chunk, which used to end the phase on
-                                            // the first reasoning chunk and froze the
-                                            // "展开思考（N字）" count at a couple of chars.
-                                            if (ct.length() > 0 && roundThinkingActive[0] && !roundThinkingFinished[0]) {
-                                                roundThinkingFinished[0] = true;
-                                                roundDisplay.append("[/thinking]");
-                                                LogUtil.d(TAG, "thinking phase END at chunk#%d (thinkingChunks=%d)",
-                                                        chunkCount[0], thinkingChunks[0]);
-                                            }
-                                            roundDisplay.append(ct);
-                                            roundContent.append(ct);
-                                            if (LogUtil.ENABLED) {
-                                                LogUtil.v(TAG, "content chunk#%d: %s", contentChunks[0], LogUtil.preview(ct, 150));
-                                            }
-                                        }
-
-                                        JSONArray deltaCalls = delta.optJSONArray("tool_calls");
-                                        if (deltaCalls != null && deltaCalls.length() > 0) {
-                                            ToolCalls.accumulate(roundToolCalls, deltaCalls);
-                                        }
-
-                                        // Throttle: re-render markdown at most every 200ms.
-                                        // Rendering takes hundreds of ms on old devices, so
-                                        // it runs off the UI thread and only one render is
-                                        // in flight at a time; ticks that arrive meanwhile
-                                        // are dropped.
-                                        // 刷新分成 base（已完成的思考/工具卡片）和 tail（本轮增量）：
-                                        // 只重画 tail，否则每个分片都把上面的卡片与 markdown
-                                        // 一起打回纯文本。
+                        final long[] lastEmit = {0};
+                        SseRound.Result rr = SseRound.read(streamEnabled, conn.getInputStream(),
+                                new SseRound.Progress() {
+                                    public void onProgress(String displayNow, String contentNow) {
+                                        // 节流：最多 200ms 渲染一次；渲染在后台线程，
+                                        // 同时在飞的渲染只保留一个，期间的 tick 直接丢弃。
+                                        // base（已完成轮次的思考/工具卡片）与 tail（本轮增量）
+                                        // 分开更新，否则每个分片都会把上面的卡片打回纯文本。
                                         long now = System.currentTimeMillis();
-                                        if (realtimeRenderEnabled && now - lastUpdate > 200 && !renderInFlight[0]) {
-                                            lastUpdate = now;
+                                        if (realtimeRenderEnabled && now - lastEmit[0] > 200 && !renderInFlight[0]) {
+                                            lastEmit[0] = now;
                                             renderInFlight[0] = true;
                                             final String baseNow = trace.toString();
-                                            final String roundNow = roundDisplay.toString();
+                                            final String roundNow = displayNow;
                                             final boolean baseChanged = !baseNow.equals(baseRendered[0]);
                                             final int mySeq = renderSeq.incrementAndGet();
                                             new Thread(new Runnable() {
@@ -1530,7 +1123,7 @@ public class MainActivity extends Activity {
                                                         public void run() {
                                                             renderInFlight[0] = false;
                                                             if (renderSeq.get() != mySeq) {
-                                                                return; // superseded by a newer render
+                                                                return; // 被更新的渲染取代
                                                             }
                                                             if (requestGeneration.get() == generation && aiIndex < messages.size()) {
                                                                 messages.get(aiIndex).content = baseNow + roundNow;
@@ -1547,10 +1140,10 @@ public class MainActivity extends Activity {
                                                     });
                                                 }
                                             }).start();
-                                        } else if (!realtimeRenderEnabled && !renderInFlight[0] && now - lastUpdate > 120) {
-                                            lastUpdate = now;
+                                        } else if (!realtimeRenderEnabled && !renderInFlight[0] && now - lastEmit[0] > 120) {
+                                            lastEmit[0] = now;
                                             final String baseNow = trace.toString();
-                                            final String roundNow = roundDisplay.toString();
+                                            final String roundNow = displayNow;
                                             // 只把本轮增量转成纯文本；整段转会把前面的
                                             // 工具卡片、思考块、markdown 全抹掉
                                             final String tailPlain = TextKit.plainForStream(roundNow);
@@ -1586,24 +1179,31 @@ public class MainActivity extends Activity {
                                                 }).start();
                                             }
                                         }
-                                    } catch (Exception e) {
-                                        LogUtil.w(TAG, "failed to parse SSE chunk#%d: %s | raw=%s",
-                                                chunkCount[0], e.getMessage(), LogUtil.preview(data, 300));
                                     }
+                                },
+                                new SseRound.Abort() {
+                                    public boolean isAborted() { return !isRequestInProgress.get(); }
+                                });
+                        final StringBuilder roundDisplay = rr.display;
+                        final StringBuilder roundContent = rr.content;
+                        final JSONArray roundToolCalls = rr.toolCalls;
+                        chunkCount[0] = rr.chunks;
+                        thinkingChunks[0] = rr.thinkingChunks;
+                        contentChunks[0] = rr.contentChunks;
+                        if (rr.error != null) {
+                            requestFailed[0] = true;
+                            errorDetail[0] = ErrorReport.build(providerName, modelName, chatEndpoint,
+                                    round, rr.httpCode, rr.rawBody, rr.cause);
+                            final String err = rr.error;
+                            runOnUiThread(new Runnable() {
+                                public void run() {
+                                    Toast.makeText(MainActivity.this, err, Toast.LENGTH_SHORT).show();
                                 }
-                            } finally {
-                                reader.close();
-                            }
-                            if (roundThinkingActive[0] && !roundThinkingFinished[0]) {
-                                roundDisplay.append("[/thinking]");
-                                LogUtil.d(TAG, "thinking phase left open at stream end: closed with [/thinking]");
-                            }
-                            LogUtil.i(TAG, "stream round %d finished: chunks=%d tools=%d contentLen=%d displayLen=%d",
-                                    round, chunkCount[0], roundToolCalls.length(),
-                                    roundContent.length(), roundDisplay.length());
+                            });
+                            return;
                         }
 
-                        closeChatConnection(conn);
+                        ChatTransport.close(conn);
                         conn = null;
                         if (requestGeneration.get() == generation) currentConnection = null;
 
@@ -1791,78 +1391,6 @@ public class MainActivity extends Activity {
         LogUtil.d(TAG, "request thread started: %s", currentRequestThread.getName());
     }
 
-    private JSONObject buildChatRequestBody(String model, ProviderInfo provider, String thinkingLevel,
-            JSONArray msgs, boolean stream, JSONArray tools) throws Exception {
-        JSONObject body = new JSONObject();
-        body.put("model", model);
-        body.put("stream", stream);
-        body.put("messages", msgs);
-        if (tools != null && tools.length() > 0) {
-            body.put("tools", tools);
-            body.put("tool_choice", "auto");
-        }
-
-        if ("boolean".equals(provider.thinkingType)) {
-            if (!"off".equals(thinkingLevel)) {
-                body.put(provider.thinkingParamName, true);
-                int budget = 4096;
-                if ("low".equals(thinkingLevel)) budget = 2048;
-                else if ("high".equals(thinkingLevel)) budget = 32768;
-                body.put("thinking_budget", budget);
-            }
-        } else {
-            JSONObject tObj = new JSONObject();
-            tObj.put("type", "off".equals(thinkingLevel) ? "disabled" : "enabled");
-            body.put(provider.thinkingParamName, tObj);
-            if (!"off".equals(thinkingLevel)) {
-                body.put("reasoning_effort", "high".equals(thinkingLevel) ? "max" : "high");
-            }
-        }
-        return body;
-    }
-
-    private static HttpURLConnection openChatConnection(ProviderInfo provider) throws Exception {
-        String endpoint = provider.apiUrl + provider.chatPath;
-        java.net.URL url = new java.net.URL(endpoint);
-        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-        conn.setRequestMethod("POST");
-        conn.setRequestProperty("Content-Type", "application/json");
-        conn.setRequestProperty("Authorization", "Bearer " + provider.apiKey);
-        conn.setDoOutput(true);
-        conn.setConnectTimeout(30000);
-        conn.setReadTimeout(0);
-        if (conn instanceof javax.net.ssl.HttpsURLConnection) {
-            TlsCompat.apply((javax.net.ssl.HttpsURLConnection) conn);
-        }
-        return conn;
-    }
-
-    private static void closeChatConnection(HttpURLConnection conn) {
-        if (conn == null) return;
-        try {
-            conn.disconnect();
-        } catch (Exception ignored) {}
-    }
-
-    private static String readErrorBody(HttpURLConnection conn) {
-        if (conn == null) return "";
-        try {
-            java.io.InputStream es = conn.getErrorStream();
-            if (es == null) return "";
-            java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
-            byte[] buf = new byte[1024];
-            int n;
-            int total = 0;
-            while (total < 4096 && (n = es.read(buf, 0, Math.min(buf.length, 4096 - total))) > 0) {
-                bos.write(buf, 0, n);
-                total += n;
-            }
-            return new String(bos.toByteArray(), "UTF-8");
-        } catch (Exception e) {
-            return "";
-        }
-    }
-
     /** 来源按 URL 去重，保留首次出现的顺序，最多 limit 条。 */
     private static List<Message.Source> dedupeSources(List<String[]> raw, int limit) {
         List<Message.Source> out = new ArrayList<Message.Source>();
@@ -1951,24 +1479,6 @@ public class MainActivity extends Activity {
         });
     }
 
-    /**
-     * 仅当标题仍是「新对话」或空、且尚未由模型生成过标题时才设置兜底标题。
-     * 用户手动改过名（titleGenerated=true）时绝不覆盖。
-     */
-    private void applyFallbackTitle(Conversation conv, String firstMessage) {
-        if (conv == null || conv.titleGenerated) return;
-        String cur = conv.title == null ? "" : conv.title.trim();
-        if (cur.length() > 0 && !"新对话".equals(cur)) {
-            LogUtil.d(TAG, "applyFallbackTitle skipped: title already '%s'", cur);
-            return;
-        }
-        String ft = TextKit.fallbackTitle(firstMessage);
-        if (ft.length() == 0) return;
-        conv.title = ft;
-        conversationManager.saveCurrentConversation();
-        LogUtil.i(TAG, "fallback title set: '%s'", ft);
-    }
-
     private void showSearchStatus(final String text, final int generation, final String traceText,
             final int aiIndex) {
         renderTraceAsync(traceText, generation, text, aiIndex);
@@ -2019,97 +1529,6 @@ public class MainActivity extends Activity {
 
     private static String statusHtml(String status) {
         return "<div class=\"tool-status\">" + MessageHtmlRenderer.esc(status) + "</div>";
-    }
-
-    private void generateTitle(final String firstMessage) {
-        LogUtil.d(TAG, "generateTitle called for message: %s", LogUtil.preview(firstMessage, 100));
-        // 记录发起标题生成时的会话 id：异步回调回来时若已切会话，丢弃，
-        // 否则会把上一个会话的标题写到当前会话
-        final String titleConvId = conversationManager.getCurrentConversation().id;
-        new Thread(new Runnable() {
-            public void run() {
-                try {
-                    // Get title model from settings, then find its provider
-                    String titleModel = SettingsActivity.getTitleModel(MainActivity.this);
-                    LogUtil.d(TAG, "generateTitle: titleModel=%s", titleModel);
-                    ModelInfo tmi = configManager.getModel(titleModel);
-                    if (tmi == null) {
-                        LogUtil.w(TAG, "generateTitle aborted: model '%s' not found", titleModel);
-                        return;
-                    }
-                    ProviderInfo titleProvider = configManager.getProvider(tmi.provider);
-                    if (titleProvider == null) {
-                        LogUtil.w(TAG, "generateTitle aborted: provider '%s' not found", tmi.provider);
-                        return;
-                    }
-                    LogUtil.d(TAG, "generateTitle: using %s @ %s", tmi.name, titleProvider.name);
-
-                    String titlePrompt = SettingsActivity.getTitlePrompt(MainActivity.this);
-                    List<Message> titleMsgs = new ArrayList<Message>();
-                    Message sysMsg = new Message(Message.ROLE_SYSTEM, titlePrompt);
-                    Message userMsg = new Message(Message.ROLE_USER,
-                            "根据以上要求，为以下对话生成标题：\n" + firstMessage);
-                    titleMsgs.add(sysMsg);
-                    titleMsgs.add(userMsg);
-
-                    long titleMs = System.currentTimeMillis();
-                    ApiClient.CallResult result = ApiClient.callWithError(titleProvider,
-                            titleModel, titleMsgs, "", "off");
-                    LogUtil.d(TAG, "generateTitle: api returned in %d ms, response=%s, error=%s",
-                            System.currentTimeMillis() - titleMs,
-                            LogUtil.preview(result == null ? null : result.response, 400),
-                            result == null ? "null-result" : result.error);
-
-                    if (result.response != null) {
-                        org.json.JSONObject json = new org.json.JSONObject(result.response);
-                        org.json.JSONArray choices = json.optJSONArray("choices");
-                        if (choices != null && choices.length() > 0) {
-                            org.json.JSONObject msg = choices.getJSONObject(0).optJSONObject("message");
-                            if (msg != null) {
-                                String raw = TextKit.stripThinkTags(msg.optString("content", ""));
-                                String title = raw.trim()
-                                        .replaceAll("[\"''\"'.:;,!，。：；！？]", "").trim();
-                                if (title.length() > 20) title = title.substring(0, 20);
-                                LogUtil.i(TAG, "generateTitle: raw=%s -> title=%s",
-                                        LogUtil.preview(raw, 120), title);
-
-                                if (title.length() == 0) {
-                                    // 模型返回空标题：保留发送时写入的「前 15 字」兜底标题
-                                    LogUtil.i(TAG, "generateTitle: empty result, keep fallback title");
-                                    return;
-                                }
-                                final String finalTitle = title;
-                                runOnUiThread(new Runnable() {
-                                    public void run() {
-                                        Conversation conv = conversationManager.getCurrentConversation();
-                                        if (conv == null || !titleConvId.equals(conv.id)) {
-                                            LogUtil.d(TAG, "title dropped: conversation changed (started=%s, now=%s)",
-                                                    titleConvId, conv == null ? "-" : conv.id);
-                                            return;
-                                        }
-                                        if (!conv.titleGenerated) {
-                                            conv.title = finalTitle;
-                                            conv.titleGenerated = true;
-                                            conversationManager.saveCurrentConversation();
-                                            LogUtil.i(TAG, "conversation title set to: %s", finalTitle);
-                                        } else {
-                                            LogUtil.d(TAG, "title not applied (conv=%s, generated=%s)",
-                                                    conv, conv == null ? "-" : conv.titleGenerated);
-                                        }
-                                    }
-                                });
-                            } else {
-                                LogUtil.w(TAG, "generateTitle: response has no message object");
-                            }
-                        } else {
-                            LogUtil.w(TAG, "generateTitle: response has no choices");
-                        }
-                    }
-                } catch (final Exception e) {
-                    LogUtil.e(TAG, "generateTitle EXCEPTION: " + e.getMessage(), e);
-                }
-            }
-        }) {{ setName("aichat-title-" + System.currentTimeMillis()); }}.start();
     }
 
     // ========== WebView helpers ==========
@@ -2190,7 +1609,7 @@ public class MainActivity extends Activity {
         runOnUiThread(new Runnable() {
             public void run() {
                 isRequestInProgress.set(false);
-                drainPendingQueue();
+                if (queue != null) queue.drain();
             }
         });
     }
@@ -2243,15 +1662,6 @@ public class MainActivity extends Activity {
                 // ES5 里 U+2028/U+2029 仍是行终止符，直接出现在字符串字面量中是语法错误
                 .replace("\u2028", "\\u2028")
                 .replace("\u2029", "\\u2029");
-    }
-
-    // ========== Image info ==========
-
-    private static class ImageInfo {
-        String src;
-        String alt;
-        String svg;   // raw SVG HTML for pure vector SVGs (AI-generated)
-        String type;  // "raster" or "svg"
     }
 
     // ========== JavaScript bridge ==========
@@ -2457,7 +1867,7 @@ public class MainActivity extends Activity {
             handler.post(new Runnable() {
                 public void run() {
                     try {
-                        showImageViewerDialog(Integer.parseInt(indexStr), imagesJson);
+                        viewer.showImage(Integer.parseInt(indexStr), imagesJson);
                     } catch (Exception e) {
                         Toast.makeText(MainActivity.this, "查看图片失败", Toast.LENGTH_SHORT).show();
                     }
@@ -2469,7 +1879,7 @@ public class MainActivity extends Activity {
         public void showTableViewer(final String tableHtml) {
             handler.post(new Runnable() {
                 public void run() {
-                    showTableViewerDialog(tableHtml);
+                    viewer.showTable(tableHtml);
                 }
             });
         }
@@ -2480,7 +1890,7 @@ public class MainActivity extends Activity {
                     lang, code == null ? "null" : code.length());
             handler.post(new Runnable() {
                 public void run() {
-                    saveCodeToExport(lang, code);
+                    ExportHelper.saveCode(MainActivity.this, lang, code);
                 }
             });
         }
@@ -2489,7 +1899,7 @@ public class MainActivity extends Activity {
         public void previewCode(final String lang, final String code) {
             handler.post(new Runnable() {
                 public void run() {
-                    showCodePreviewDialog(lang, code);
+                    viewer.showCode(lang, code);
                 }
             });
         }
@@ -2542,879 +1952,6 @@ public class MainActivity extends Activity {
     static final String EXTRA_PROMPT_SEND = "extra_prompt_send";
     static final String EXTRA_PREVIEW_LANG = "extra_preview_lang";
     static final String EXTRA_PREVIEW_CODE = "extra_preview_code";
-
-    // ========== 图片查看器 ==========
-
-    private void showImageViewerDialog(int index, String imagesJson) {
-        LogUtil.i(TAG, "showImageViewerDialog: open idx=%d imagesJson len=%d",
-                index, imagesJson == null ? -1 : imagesJson.length());
-        if (imageViewerDialog != null && imageViewerDialog.isShowing()) {
-            imageViewerDialog.dismiss();
-        }
-
-        List<ImageInfo> images = new ArrayList<>();
-        try {
-            JSONArray arr = new JSONArray(imagesJson);
-            for (int i = 0; i < arr.length(); i++) {
-                JSONObject obj = arr.getJSONObject(i);
-                ImageInfo info = new ImageInfo();
-                info.src = obj.optString("src", "");
-                info.alt = obj.optString("alt", "");
-                info.type = obj.optString("type", "raster");
-                info.svg = obj.optString("svg", "");
-                images.add(info);
-            }
-        } catch (Exception e) {
-            Toast.makeText(this, "无法加载图片列表", Toast.LENGTH_SHORT).show();
-            return;
-        }
-
-        if (images.isEmpty() || index < 0 || index >= images.size()) {
-            Toast.makeText(this, "图片不可用", Toast.LENGTH_SHORT).show();
-            return;
-        }
-
-        currentImageList = images;
-        currentImageIndex = index;
-        currentRotation = 0;
-        // Default bg: white for SVG (often dark lines on transparent), black for raster
-        ImageInfo firstInfo = images.get(index);
-        currentBgColor = ("svg".equals(firstInfo.type)) ? 0 : 2;
-
-        View view = getLayoutInflater().inflate(R.layout.dialog_image_viewer, null);
-        imageViewerWebView = (WebView) view.findViewById(R.id.viewer_webview);
-        imageCounterText = (TextView) view.findViewById(R.id.viewer_counter);
-        prevButton = (Button) view.findViewById(R.id.viewer_prev);
-        nextButton = (Button) view.findViewById(R.id.viewer_next);
-        zoomOutBtn = (Button) view.findViewById(R.id.viewer_zoom_out);
-        zoomInBtn = (Button) view.findViewById(R.id.viewer_zoom_in);
-        rotateBtn = (Button) view.findViewById(R.id.viewer_rotate);
-        resetBtn = (Button) view.findViewById(R.id.viewer_reset);
-        bgToggleBtn = (Button) view.findViewById(R.id.viewer_bg_toggle);
-        Button closeBtn = (Button) view.findViewById(R.id.viewer_close);
-
-        // Configure WebView for pinch-to-zoom and double-tap zoom
-        imageViewerWebView.getSettings().setJavaScriptEnabled(true);
-        imageViewerWebView.getSettings().setBuiltInZoomControls(true);
-        imageViewerWebView.getSettings().setDisplayZoomControls(false);
-        imageViewerWebView.getSettings().setUseWideViewPort(true);
-        imageViewerWebView.getSettings().setLoadWithOverviewMode(true);
-        imageViewerWebView.getSettings().setSupportZoom(true);
-        imageViewerWebView.setBackgroundColor(Color.BLACK);
-        imageViewerWebView.setWebViewClient(new WebViewClient() {
-            public boolean shouldOverrideUrlLoading(WebView view, String url) {
-                return true;
-            }
-        });
-
-        prevButton.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) {
-                if (currentImageIndex > 0) {
-                    currentImageIndex--;
-                    loadCurrentImage();
-                }
-            }
-        });
-
-        nextButton.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) {
-                if (currentImageIndex < currentImageList.size() - 1) {
-                    currentImageIndex++;
-                    loadCurrentImage();
-                }
-            }
-        });
-
-        zoomOutBtn.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) {
-                viewerEvalJs(imageViewerWebView, "viewerZoom(0.8)");
-            }
-        });
-
-        zoomInBtn.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) {
-                viewerEvalJs(imageViewerWebView, "viewerZoom(1.25)");
-            }
-        });
-
-        rotateBtn.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) {
-                currentRotation = (currentRotation + 90) % 360;
-                loadCurrentImage();
-            }
-        });
-
-        resetBtn.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) {
-                currentRotation = 0;
-                loadCurrentImage();
-            }
-        });
-
-        bgToggleBtn.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) {
-                currentBgColor = (currentBgColor + 1) % 3;
-                applyBgColor();
-            }
-        });
-
-        closeBtn.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) {
-                if (imageViewerDialog != null) imageViewerDialog.dismiss();
-            }
-        });
-
-        imageViewerDialog = new AlertDialog.Builder(this)
-                .setView(view)
-                .setCancelable(true)
-                .create();
-
-        imageViewerDialog.setOnDismissListener(new DialogInterface.OnDismissListener() {
-            public void onDismiss(DialogInterface dialog) {
-                if (imageViewerWebView != null) {
-                    imageViewerWebView.destroy();
-                    imageViewerWebView = null;
-                }
-                imageViewerDialog = null;
-            }
-        });
-
-        imageViewerDialog.getWindow().setLayout(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT);
-        imageViewerDialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.BLACK));
-
-        imageViewerDialog.show();
-        loadAfterLayout(imageViewerWebView, new Runnable() {
-            public void run() { loadCurrentImage(); }
-        });
-    }
-
-    private void loadCurrentImage() {
-        if (currentImageList == null || imageCounterText == null
-                || imageViewerWebView == null) return;
-
-        ImageInfo info = currentImageList.get(currentImageIndex);
-        LogUtil.d(TAG, "loadCurrentImage: idx=%d/%d type=%s src=%s",
-                currentImageIndex, currentImageList.size(), info.type, LogUtil.preview(info.src, 120));
-        imageCounterText.setText((currentImageIndex + 1) + "/" + currentImageList.size());
-        prevButton.setEnabled(currentImageIndex > 0);
-        nextButton.setEnabled(currentImageIndex < currentImageList.size() - 1);
-
-        String bgColor = getBgColorHex(currentBgColor);
-
-        String rotateCss = rotateTransform(currentRotation);
-
-        String html;
-        if ("svg".equals(info.type) && info.svg != null && !info.svg.isEmpty()) {
-            // Pure vector SVG — no flex centering, natural flow with scrolling
-            String svgHtml = info.svg;
-            html = "<!DOCTYPE html><html><head>" +
-                    "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1.0,user-scalable=yes\">" +
-                    "<style>" +
-                    "*{margin:0;padding:0;}" +
-                    "html,body{width:100%;min-height:100%;background:" + bgColor + ";" +
-                    "overflow:auto;-webkit-transform-origin:0 0;transform-origin:0 0;}" +
-                    ".svg-wrap{width:100%;max-width:100%;" + rotateCss + "}" +
-                    ".svg-wrap svg{width:100%;height:auto;max-width:100%;display:block;}" +
-                    "</style>" +
-                    "<script>var vZoom=1;function viewerZoom(f){vZoom=Math.min(5,Math.max(0.1,vZoom*f));" +
-                    "var t='scale('+vZoom+')';" +
-                    "document.body.style.webkitTransform=t;document.body.style.transform=t;}" +
-                    "function viewerSetBg(c){document.body.style.backgroundColor=c;}</script>" +
-                    "</head><body>" +
-                    "<div class=\"svg-wrap\">" + svgHtml + "</div>" +
-                    "</body></html>";
-        } else {
-            // Raster image. The image is laid out inside a swap box whose
-            // width/height follow the rotation: at 90/270 the usable width is the
-            // viewport HEIGHT, otherwise a wide formula (e.g. 400x42) is squeezed
-            // to 95% of the 226px viewport and then clipped by the rotate
-            // transform — the "truncated after rotate" bug.
-            String src = MessageHtmlRenderer.escAttr(info.src);
-            String alt = MessageHtmlRenderer.escAttr(info.alt);
-            boolean swapped = (currentRotation == 90 || currentRotation == 270);
-            int boxW = swapped ? imageViewerWebView.getHeight() : imageViewerWebView.getWidth();
-            int boxH = swapped ? imageViewerWebView.getWidth() : imageViewerWebView.getHeight();
-            if (boxW <= 0) boxW = 226;
-            if (boxH <= 0) boxH = 871;
-            float fill = swapped ? 0.62f : 0.95f;
-            int maxW = Math.max(1, (int) (boxW * fill));
-            int maxH = Math.max(1, (int) (boxH * fill));
-            html = "<!DOCTYPE html><html><head>" +
-                    "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1.0,user-scalable=yes\">" +
-                    "<style>" +
-                    "*{margin:0;padding:0;}" +
-                    "html{width:100%;height:100%;}" +
-                    "html,body{background:" + bgColor + ";overflow:auto;" +
-                    "-webkit-transform-origin:0 0;transform-origin:0 0;}" +
-                    "body{width:100%;height:100%;display:table;}" +
-                    ".img-cell{display:table-cell;vertical-align:middle;text-align:center;width:100%;height:" + boxH + "px;}" +
-                    "img,svg{display:inline-block;vertical-align:middle;max-width:" + maxW + "px;" +
-                    "max-height:" + maxH + "px;" + rotateCss + "}" +
-                    "</style>" +
-                    "<script>var vZoom=1;function viewerZoom(f){vZoom=Math.min(5,Math.max(0.1,vZoom*f));" +
-                    "var t='scale('+vZoom+')';" +
-                    "document.body.style.webkitTransform=t;document.body.style.transform=t;}" +
-                    "function viewerSetBg(c){document.body.style.backgroundColor=c;document.documentElement.style.backgroundColor=c;}" +
-                    "</script>" +
-                    "</head><body>" +
-                    "<div class=\"img-cell\"><img src=\"" + src + "\" alt=\"" + alt + "\"></div>" +
-                    "</body></html>";
-        }
-
-        imageViewerWebView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null);
-    }
-
-    // ========== 表格查看器 ==========
-
-    private void showTableViewerDialog(String tableHtml) {
-        LogUtil.i(TAG, "showTableViewerDialog: open, html len=%d",
-                tableHtml == null ? -1 : tableHtml.length());
-        if (tableViewerDialog != null && tableViewerDialog.isShowing()) {
-            tableViewerDialog.dismiss();
-        }
-
-        if (tableHtml == null || tableHtml.isEmpty()) {
-            Toast.makeText(this, "表格内容为空", Toast.LENGTH_SHORT).show();
-            return;
-        }
-
-        tableRotation = 0;
-        tableBgColor = 0; // default white for table viewer
-
-        View view = getLayoutInflater().inflate(R.layout.dialog_image_viewer, null);
-        tableViewerWebView = (WebView) view.findViewById(R.id.viewer_webview);
-
-        // Hide image-specific controls
-        view.findViewById(R.id.viewer_prev).setVisibility(View.GONE);
-        view.findViewById(R.id.viewer_next).setVisibility(View.GONE);
-        view.findViewById(R.id.viewer_counter).setVisibility(View.GONE);
-        view.findViewById(R.id.viewer_bg_toggle).setVisibility(View.GONE);
-
-        Button zoomOutBtn = (Button) view.findViewById(R.id.viewer_zoom_out);
-        Button zoomInBtn = (Button) view.findViewById(R.id.viewer_zoom_in);
-        Button rotateBtn = (Button) view.findViewById(R.id.viewer_rotate);
-        Button resetBtn = (Button) view.findViewById(R.id.viewer_reset);
-        Button bgToggleBtn = (Button) view.findViewById(R.id.viewer_bg_toggle);
-        Button closeBtn = (Button) view.findViewById(R.id.viewer_close);
-
-        tableViewerWebView.getSettings().setJavaScriptEnabled(true);
-        tableViewerWebView.getSettings().setBuiltInZoomControls(true);
-        tableViewerWebView.getSettings().setDisplayZoomControls(false);
-        tableViewerWebView.getSettings().setUseWideViewPort(true);
-        tableViewerWebView.getSettings().setLoadWithOverviewMode(true);
-        tableViewerWebView.getSettings().setSupportZoom(true);
-        tableViewerWebView.setBackgroundColor(Color.WHITE);
-        tableViewerWebView.setWebViewClient(new WebViewClient() {
-            public boolean shouldOverrideUrlLoading(WebView view, String url) {
-                return true;
-            }
-        });
-
-        zoomOutBtn.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) { viewerEvalJs(tableViewerWebView, "viewerZoom(0.8)"); }
-        });
-        zoomInBtn.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) { viewerEvalJs(tableViewerWebView, "viewerZoom(1.25)"); }
-        });
-        rotateBtn.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) {
-                tableRotation = (tableRotation + 90) % 360;
-                loadTableContent(tableHtml);
-            }
-        });
-        resetBtn.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) {
-                tableRotation = 0;
-                loadTableContent(tableHtml);
-            }
-        });
-        bgToggleBtn.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) {
-                tableBgColor = (tableBgColor + 1) % 3;
-                applyBgColor();
-            }
-        });
-        closeBtn.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) {
-                if (tableViewerDialog != null) tableViewerDialog.dismiss();
-            }
-        });
-
-        tableViewerDialog = new AlertDialog.Builder(this)
-                .setView(view)
-                .setCancelable(true)
-                .create();
-
-        tableViewerDialog.setOnDismissListener(new DialogInterface.OnDismissListener() {
-            public void onDismiss(DialogInterface dialog) {
-                if (tableViewerWebView != null) {
-                    tableViewerWebView.destroy();
-                    tableViewerWebView = null;
-                }
-                tableViewerDialog = null;
-            }
-        });
-
-        tableViewerDialog.getWindow().setLayout(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT);
-        tableViewerDialog.show();
-
-        loadAfterLayout(tableViewerWebView, new Runnable() {
-            public void run() { loadTableContent(tableHtml); }
-        });
-    }
-
-    private void loadTableContent(String tableHtml) {
-        if (tableViewerWebView == null) return;
-
-        LogUtil.d(TAG, "loadTableContent: len=%d rot=%d", tableHtml.length(), tableRotation);
-        String rotateCss = "";
-        String rotateJs = "";
-        if (tableRotation != 0) {
-            rotateCss = "-webkit-transform:rotate(" + tableRotation + "deg);"
-                      + "transform:rotate(" + tableRotation + "deg);";
-            // Make wrapper a square large enough to hold the rotated table,
-            // so the layout box covers the full visual area (API 18 doesn't
-            // add scroll overflow for CSS transforms).
-            rotateJs = "<script>" +
-                "(function fix(a){" +
-                "var w=document.querySelector('.table-wrap');" +
-                "var t=w&&w.querySelector('table');" +
-                "if(!t)return;" +
-                "var ow=t.offsetWidth,oh=t.offsetHeight;" +
-                "if((!ow||!oh)&&a<20){setTimeout(function(){fix(a+1);},50);return;}" +
-                "var s=Math.max(ow,oh);" +
-                "w.style.width=s+'px';" +
-                "w.style.height=s+'px';" +
-                "var m=document.querySelector('meta[name=viewport]');" +
-                "if(m)m.setAttribute('content','width='+s+',user-scalable=yes');" +
-                "})(0);" +
-                "</script>";
-        }
-
-        String bgColor = getBgColorHex(tableBgColor);
-
-        String html = "<!DOCTYPE html><html><head>" +
-                "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1.0,user-scalable=yes\">" +
-                "<style>" +
-                "*{margin:0;padding:0;}" +
-                "html,body{background:" + bgColor + ";padding:8px;overflow:auto;" +
-                "-webkit-transform-origin:0 0;transform-origin:0 0;}" +
-                ".table-wrap{display:inline-block;" + rotateCss + "}" +
-                "table{border-collapse:collapse;font-size:14px;}" +
-                "th,td{border:1px solid #ddd;padding:8px 12px;text-align:left;}" +
-                "th{background:#f0f0f0;font-weight:bold;white-space:nowrap;}" +
-                "td{white-space:nowrap;}" +
-                "</style>" +
-                "<script>var vZoom=1;function viewerZoom(f){vZoom=Math.min(5,Math.max(0.1,vZoom*f));" +
-                "var t='scale('+vZoom+')';" +
-                "document.body.style.webkitTransform=t;document.body.style.transform=t;}" +
-                "function viewerSetBg(c){document.body.style.backgroundColor=c;}</script>" +
-                "</head><body>" +
-                "<div class=\"table-wrap\">" + tableHtml + "</div>" +
-                rotateJs +
-                "</body></html>";
-
-        tableViewerWebView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null);
-    }
-
-    // ========== 代码块导出 ==========
-
-    private void saveCodeToExport(final String lang, final String code) {
-        if (code == null || code.trim().isEmpty()) {
-            Toast.makeText(this, "代码内容为空，无法保存", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        final String ext = exportExtForLang(lang);
-        final String type = exportTypeForLang(lang);
-        final EditText input = new EditText(this);
-        input.setSingleLine(true);
-        input.setText("code_" + type + "_" + System.currentTimeMillis());
-        input.setSelection(input.getText().length());
-        new AlertDialog.Builder(this)
-                .setTitle("保存代码")
-                .setMessage("文件名（自动追加 ." + ext + "）")
-                .setView(input)
-                .setPositiveButton("保存", new DialogInterface.OnClickListener() {
-                    public void onClick(DialogInterface d, int w) {
-                        String name = sanitizeExportName(input.getText().toString());
-                        if (name.isEmpty()) {
-                            name = "code_" + type + "_" + System.currentTimeMillis();
-                        }
-                        final String fileName = name + "." + ext;
-                        if (StorageManager.getInstance().exportExists(fileName)) {
-                            confirmOverwrite(fileName, lang, code);
-                            return;
-                        }
-                        doSaveExport(fileName, lang, code);
-                    }
-                })
-                .setNegativeButton("取消", null)
-                .show();
-    }
-
-    private void doSaveExport(String fileName, String lang, String code) {
-        String path = StorageManager.getInstance().saveExport(fileName, code);
-        LogUtil.i(TAG, "saveCodeToExport: lang=%s file=%s path=%s", lang, fileName, path);
-        if (path == null) {
-            Toast.makeText(this, "保存失败", Toast.LENGTH_SHORT).show();
-        } else {
-            Toast.makeText(this, "已保存到 " + path, Toast.LENGTH_LONG).show();
-        }
-    }
-
-    private void confirmOverwrite(final String fileName, final String lang, final String code) {
-        new AlertDialog.Builder(this)
-                .setTitle("文件已存在")
-                .setMessage(fileName + " 已存在，是否覆盖？")
-                .setPositiveButton("覆盖", new DialogInterface.OnClickListener() {
-                    public void onClick(DialogInterface d, int w) {
-                        doSaveExport(fileName, lang, code);
-                    }
-                })
-                .setNegativeButton("取消", null)
-                .show();
-    }
-
-    static String exportExtForLang(String lang) {
-        String key = normalizeLangToken(lang);
-        if (key.isEmpty()) {
-            return "txt";
-        }
-        if ("html".equals(key) || "htm".equals(key) || "xhtml".equals(key)) {
-            return "html";
-        }
-        if ("svg".equals(key)) {
-            return "svg";
-        }
-        if ("js".equals(key) || "javascript".equals(key) || "node".equals(key) || "jsx".equals(key)) {
-            return "js";
-        }
-        if ("ts".equals(key) || "typescript".equals(key)) {
-            return "ts";
-        }
-        if ("py".equals(key) || "python".equals(key) || "python3".equals(key)) {
-            return "py";
-        }
-        if ("kt".equals(key) || "kotlin".equals(key)) {
-            return "kt";
-        }
-        if ("sh".equals(key) || "shell".equals(key) || "bash".equals(key)
-                || "zsh".equals(key) || "console".equals(key)) {
-            return "sh";
-        }
-        if ("c++".equals(key) || "cpp".equals(key) || "cxx".equals(key)) {
-            return "cpp";
-        }
-        if ("c#".equals(key) || "cs".equals(key) || "csharp".equals(key)) {
-            return "cs";
-        }
-        if ("yml".equals(key) || "yaml".equals(key)) {
-            return "yaml";
-        }
-        if ("md".equals(key) || "markdown".equals(key)) {
-            return "md";
-        }
-        if ("rs".equals(key) || "rust".equals(key)) {
-            return "rs";
-        }
-        if ("rb".equals(key) || "ruby".equals(key)) {
-            return "rb";
-        }
-        if ("pl".equals(key) || "perl".equals(key)) {
-            return "pl";
-        }
-        if ("ps1".equals(key) || "powershell".equals(key)) {
-            return "ps1";
-        }
-        if ("objective-c".equals(key) || "objc".equals(key)) {
-            return "m";
-        }
-        if ("plaintext".equals(key) || "text".equals(key) || "txt".equals(key)) {
-            return "txt";
-        }
-        // Already a usable extension token (java, json, xml, go, sql, css, php, swift,
-        // dart, lua, scala, groovy, ini, properties, r, diff, patch, ...).
-        if (key.matches("[a-z0-9_+-]{1,10}")) {
-            return key;
-        }
-        return "txt";
-    }
-
-    /**
-     * The type marker used in the default export file name, taken straight from the
-     * code block's declared language so ```python saves as code_python_&lt;ts&gt;.py
-     * instead of collapsing every unknown language into "txt".
-     */
-    static String exportTypeForLang(String lang) {
-        String key = normalizeLangToken(lang);
-        return key.isEmpty() ? "txt" : key;
-    }
-
-    private static String normalizeLangToken(String lang) {
-        if (lang == null) {
-            return "";
-        }
-        return lang.trim().toLowerCase().replaceAll("[^a-z0-9_+.#-]", "");
-    }
-
-    /** Strips path separators and characters Android's filesystem rejects. */
-    static String sanitizeExportName(String name) {
-        if (name == null) {
-            return "";
-        }
-        return name.trim().replaceAll("[/\\\\:*?\"<>|]", "_");
-    }
-
-    // ========== HTML / SVG 代码预览 ==========
-
-    private void showCodePreviewDialog(String lang, String code) {
-        LogUtil.i(TAG, "showCodePreviewDialog: open lang=%s code len=%d",
-                lang, code == null ? -1 : code.length());
-        if (codePreviewDialog != null && codePreviewDialog.isShowing()) {
-            codePreviewDialog.dismiss();
-        }
-
-        if (code == null || code.isEmpty()) {
-            Toast.makeText(this, "代码内容为空", Toast.LENGTH_SHORT).show();
-            return;
-        }
-
-        codePreviewRotation = 0;
-        codePreviewBgColor = 0;
-        currentPreviewLang = lang;
-        currentPreviewCode = code;
-
-        View view = getLayoutInflater().inflate(R.layout.dialog_image_viewer, null);
-        codePreviewWebView = (WebView) view.findViewById(R.id.viewer_webview);
-
-        // Hide image-specific controls
-        view.findViewById(R.id.viewer_prev).setVisibility(View.GONE);
-        view.findViewById(R.id.viewer_next).setVisibility(View.GONE);
-        view.findViewById(R.id.viewer_counter).setVisibility(View.GONE);
-
-        Button zoomOutBtn = (Button) view.findViewById(R.id.viewer_zoom_out);
-        Button zoomInBtn = (Button) view.findViewById(R.id.viewer_zoom_in);
-        Button rotateBtn = (Button) view.findViewById(R.id.viewer_rotate);
-        Button resetBtn = (Button) view.findViewById(R.id.viewer_reset);
-        Button bgToggleBtn = (Button) view.findViewById(R.id.viewer_bg_toggle);
-        Button closeBtn = (Button) view.findViewById(R.id.viewer_close);
-
-        codePreviewWebView.getSettings().setJavaScriptEnabled(true);
-        codePreviewWebView.getSettings().setBuiltInZoomControls(true);
-        codePreviewWebView.getSettings().setDisplayZoomControls(false);
-        codePreviewWebView.getSettings().setUseWideViewPort(true);
-        codePreviewWebView.getSettings().setLoadWithOverviewMode(true);
-        codePreviewWebView.getSettings().setSupportZoom(true);
-        codePreviewWebView.setBackgroundColor(Color.WHITE);
-        codePreviewWebView.setWebViewClient(new WebViewClient() {
-            public boolean shouldOverrideUrlLoading(WebView view, String url) {
-                return true;
-            }
-        });
-        zoomOutBtn.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) { viewerEvalJs(codePreviewWebView, "viewerZoom(0.8)"); }
-        });
-        zoomInBtn.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) { viewerEvalJs(codePreviewWebView, "viewerZoom(1.25)"); }
-        });
-        rotateBtn.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) {
-                codePreviewRotation = (codePreviewRotation + 90) % 360;
-                loadCodePreview();
-            }
-        });
-        resetBtn.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) {
-                codePreviewRotation = 0;
-                loadCodePreview();
-            }
-        });
-        bgToggleBtn.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) {
-                codePreviewBgColor = (codePreviewBgColor + 1) % 3;
-                applyCodePreviewBg();
-            }
-        });
-        closeBtn.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) {
-                if (codePreviewDialog != null) codePreviewDialog.dismiss();
-            }
-        });
-
-        codePreviewDialog = new AlertDialog.Builder(this)
-                .setView(view)
-                .setCancelable(true)
-                .create();
-
-        codePreviewDialog.setOnDismissListener(new DialogInterface.OnDismissListener() {
-            public void onDismiss(DialogInterface dialog) {
-                if (codePreviewWebView != null) {
-                    codePreviewWebView.destroy();
-                    codePreviewWebView = null;
-                }
-                codePreviewDialog = null;
-            }
-        });
-
-        codePreviewDialog.getWindow().setLayout(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT);
-        codePreviewDialog.show();
-
-        loadAfterLayout(codePreviewWebView, new Runnable() {
-            public void run() { loadCodePreview(); }
-        });
-    }
-
-    /**
-     * Run the initial viewer load only after the dialog WebView has been laid
-     * out. Loading before the first layout pass renders the page into a 0×0
-     * viewport (blank/garbled preview until the user hits reset "#", which
-     * reloads at the correct size).
-     */
-    private void loadAfterLayout(final WebView wv, final Runnable load) {
-        if (wv.getWidth() > 0 && wv.getHeight() > 0) {
-            load.run();
-            return;
-        }
-        wv.getViewTreeObserver().addOnGlobalLayoutListener(
-                new ViewTreeObserver.OnGlobalLayoutListener() {
-            public void onGlobalLayout() {
-                wv.getViewTreeObserver().removeOnGlobalLayoutListener(this);
-                load.run();
-            }
-        });
-    }
-
-    private void loadCodePreview() {
-        if (codePreviewWebView == null || currentPreviewCode == null) return;
-
-        LogUtil.d(TAG, "loadCodePreview: lang=%s code len=%d rot=%d",
-                currentPreviewLang, currentPreviewCode.length(), codePreviewRotation);
-        String bgColor = getBgColorHex(codePreviewBgColor);
-
-        // Box the preview wrapper actually has. Needed because the rotated
-        // wrapper must be sized to the swapped axis (see rotateTransformWrap).
-        int boxW = codePreviewWebView.getWidth();
-        int boxH = codePreviewWebView.getHeight();
-        if (boxW <= 0) boxW = getResources().getDisplayMetrics().widthPixels;
-        if (boxH <= 0) boxH = getResources().getDisplayMetrics().heightPixels;
-        String rotateCss = rotateTransformWrap(codePreviewRotation, boxW, boxH);
-        // When rotated 90/270 the wrapper's content box becomes portrait
-        // (boxH wide). An SVG that declares width="600" would still be clamped
-        // by its own max-width:100% against that narrower box and shrink to a
-        // sliver. Tell the page how wide the rotated content box actually is so
-        // the SVG can scale up to fill it.
-        boolean rotatedSideways = (codePreviewRotation == 90 || codePreviewRotation == 270);
-
-        String html;
-        if ("svg".equals(currentPreviewLang)) {
-            html = buildCodePreviewHtml(currentPreviewCode, currentPreviewLang,
-                    bgColor, rotateCss, false, rotatedSideways ? boxH : 0);
-        } else {
-            // HTML: detect if it's a full document or fragment
-            String trimmed = currentPreviewCode.trim().toLowerCase();
-            boolean isFullDoc = trimmed.startsWith("<!doctype") || trimmed.startsWith("<html");
-            html = buildCodePreviewHtml(currentPreviewCode, currentPreviewLang,
-                    bgColor, rotateCss, isFullDoc, rotatedSideways ? boxH : 0);
-        }
-
-        codePreviewWebView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null);
-    }
-
-    private String buildCodePreviewHtml(String code, String lang,
-            String bgColor, String rotateCss, boolean isFullHtmlDoc, int sideW) {
-        String zoomJs =
-                "var vZoom=1;" +
-                "function viewerZoom(f){vZoom=Math.min(5,Math.max(0.1,vZoom*f));" +
-                "var t='scale('+vZoom+')';" +
-                "document.body.style.webkitTransform=t;document.body.style.transform=t;}" +
-                "function viewerSetBg(c){document.body.style.backgroundColor=c;}";
-
-        if ("svg".equals(lang)) {
-            // Wrap SVG code in a minimal HTML page.
-            //
-            // The viewer toolbar (↻/#/◐/✕) is an overlay painted on top of this
-            // WebView, so content starting at y=0 is hidden behind it — inset
-            // the page by the toolbar height.
-            //
-            // Rotation is applied to the SVG's own wrapper. Rotating an inner
-            // element while an ancestor still clips to the unrotated layout box
-            // hides the rotated overflow ("truncated/blank after rotate"), so the
-            // rotated box is given an explicit size on both axes instead of
-            // relying on min-height:100%.
-            String wrapCss = rotateCss.isEmpty() ? "" : rotateCss + "!important;";
-            String svgW = sideW > 0 ? ("width:100%;max-width:none;") : "max-width:100%;";
-            return "<!DOCTYPE html><html><head>" +
-                    "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1.0,user-scalable=yes\">" +
-                    "<style>" +
-                    "*{margin:0;padding:0;}" +
-                    "html{width:100%;height:100%;background:" + bgColor + ";" +
-                    "overflow:hidden;-webkit-transform-origin:0 0;transform-origin:0 0;}" +
-                    "body{width:100%;height:100%;background:" + bgColor + ";" +
-                    "overflow:hidden;-webkit-transform-origin:0 0;transform-origin:0 0;" +
-                    "padding:" + VIEWER_TOOLBAR_INSET_PX + "px 0 0 0;" +
-                    "-webkit-box-sizing:border-box;box-sizing:border-box;}" +
-                    ".preview-wrap{display:block;width:100%;overflow:visible;" + wrapCss + "}" +
-                    ".preview-wrap svg{" + svgW + "height:auto;display:block;}" +
-                    "</style>" +
-                    "<script>" + zoomJs + "</script>" +
-                    "</head><body>" +
-                    "<div class=\"preview-wrap\">" + code + "</div>" +
-                    "</body></html>";
-        }
-
-        if (isFullHtmlDoc) {
-            // A full HTML document brings its own body/html rules, so rotating
-            // body directly lets those rules fight the rotation compensation and
-            // the whole document slides off-screen (blank preview after rotate).
-            // Instead wrap the document content in a dedicated element whose
-            // rotation geometry we fully control.
-            String wrapCss = ".viewer-rot{"
-                    + (rotateCss.isEmpty() ? "" : rotateCss + "!important;")
-                    + "-webkit-transform-origin:0 0 !important;transform-origin:0 0 !important;"
-                    + "}" +
-                    // The viewer toolbar is an overlay on top of this WebView, so a
-                    // document starting at y=0 renders behind it. Force the inset
-                    // with !important because the document brings its own body rules.
-                    "body{padding-top:" + VIEWER_TOOLBAR_INSET_PX + "px !important;" +
-                    "-webkit-box-sizing:border-box !important;box-sizing:border-box !important;}";
-            String inject = "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1.0,user-scalable=yes\">"
-                    + "<style>" + wrapCss + "</style>"
-                    + "<script>" + zoomJs + "</script>";
-            String doc;
-            String openTag;
-            if (code.toLowerCase().contains("<head>")) {
-                doc = code.replaceFirst("(?i)<head[^>]*>", "$0" + Matcher.quoteReplacement(inject));
-                openTag = "<body[^>]*>";
-            } else if (code.toLowerCase().contains("<html>")) {
-                doc = code.replaceFirst("(?i)<html[^>]*>",
-                        "$0<head>" + Matcher.quoteReplacement(inject) + "</head>");
-                openTag = "<body[^>]*>";
-            } else {
-                doc = "<!DOCTYPE html><html><head>" + inject
-                        + "</head><body>" + code + "</body></html>";
-                openTag = "<body[^>]*>";
-            }
-            // Wrap the document body content so rotation applies to our element.
-            if (rotateCss.isEmpty()) {
-                return doc;
-            }
-            if (doc.matches("(?is).*<body[^>]*>.*</body>.*")) {
-                doc = doc.replaceFirst("(?is)(<body[^>]*>)", "$1<div class=\"viewer-rot\">");
-                doc = doc.replaceFirst("(?is)</body>", "</div></body>");
-            }
-            return doc;
-        }
-
-        // HTML fragment — wrap in minimal page
-        return "<!DOCTYPE html><html><head>" +
-                "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1.0,user-scalable=yes\">" +
-                "<style>" +
-                "*{margin:0;padding:0;}" +
-                "html,body{width:100%;min-height:100%;background:" + bgColor + ";" +
-                "overflow:auto;-webkit-transform-origin:0 0;transform-origin:0 0;}" +
-                "body{padding:" + VIEWER_TOOLBAR_INSET_PX + "px 0 0 0;" +
-                "-webkit-box-sizing:border-box;box-sizing:border-box;}" +
-                ".preview-wrap{" + rotateCss + "}" +
-                "</style>" +
-                "<script>" + zoomJs + "</script>" +
-                "</head><body>" +
-                "<div class=\"preview-wrap\">" + code + "</div>" +
-                "</body></html>";
-    }
-
-    private void applyCodePreviewBg() {
-        String color = getBgColorHex(codePreviewBgColor);
-        if (codePreviewWebView != null) {
-            viewerEvalJs(codePreviewWebView, "viewerSetBg('" + color + "')");
-        }
-    }
-
-    private String getBgColorHex(int state) {
-        switch (state) {
-            case 1: return "#888888";
-            case 2: return "#000000";
-            default: return "#FFFFFF";
-        }
-    }
-
-    /**
-     * Rotation CSS that keeps the rotated content inside positive coordinates.
-     * A plain rotate() spins around the element center (or 0 0 without
-     * compensation), pushing part of the content into negative x/y where it is
-     * clipped and NOT scroll-reachable — the "truncated after rotate" bug.
-     * translate percentages are relative to the element's own box (W×H), so for
-     * 90°/270° the wrapper must be sized to the swapped (portrait↔landscape)
-     * box, otherwise the translation lands on the wrong axis and content is
-     * pushed off-screen entirely.
-     */
-    private String rotateTransform(int deg) {
-        switch (deg) {
-            case 90:
-                return "-webkit-transform:rotate(90deg) translateY(-100%);" +
-                        "transform:rotate(90deg) translateY(-100%);" +
-                        "-webkit-transform-origin:0 0;transform-origin:0 0;";
-            case 180:
-                return "-webkit-transform:translate(100%,100%) rotate(180deg);" +
-                        "transform:translate(100%,100%) rotate(180deg);" +
-                        "-webkit-transform-origin:0 0;transform-origin:0 0;";
-            case 270:
-                return "-webkit-transform:translateY(100%) rotate(270deg);" +
-                        "transform:translateY(100%) rotate(270deg);" +
-                        "-webkit-transform-origin:0 0;transform-origin:0 0;";
-            default:
-                return "";
-        }
-    }
-
-    /**
-     * Rotation CSS for the code/SVG/HTML preview wrapper.
-     *
-     * A wrapper div is full-width (W = viewport width, H = content height) and
-     * the plain rotateTransform() above uses percentage translations relative to
-     * that box. For 90°/270° the visual content must occupy the swapped box, so
-     * a bare translateY(-100%) moves it by the wrapper's *height* on the rotated
-     * axis — the content ends up entirely outside the visible area (the
-     * "blank after rotate" bug). Compensating with explicit pixel widths on the
-     * swapped axes keeps the rotated content inside positive coordinates and
-     * reachable by scrolling.
-     */
-    private String rotateTransformWrap(int deg, int boxW, int boxH) {
-        if (deg == 90) {
-            // rotate(90) then pull back by the box height along the rotated Y.
-            return "width:" + boxH + "px;" +
-                    "-webkit-transform:rotate(90deg) translate(0,-100%);" +
-                    "transform:rotate(90deg) translate(0,-100%);" +
-                    "-webkit-transform-origin:0 0;transform-origin:0 0;";
-        }
-        if (deg == 270) {
-            return "width:" + boxH + "px;" +
-                    "-webkit-transform:rotate(-90deg) translate(-100%,0);" +
-                    "transform:rotate(-90deg) translate(-100%,0);" +
-                    "-webkit-transform-origin:0 0;transform-origin:0 0;";
-        }
-        if (deg == 180) {
-            return "-webkit-transform:translate(100%,100%) rotate(180deg);" +
-                    "transform:translate(100%,100%) rotate(180deg);" +
-                    "-webkit-transform-origin:0 0;transform-origin:0 0;";
-        }
-        return "";
-    }
-
-    private void applyBgColor() {
-        String color = getBgColorHex(currentBgColor);
-        if (imageViewerWebView != null) {
-            viewerEvalJs(imageViewerWebView, "viewerSetBg('" + color + "')");
-        }
-        if (tableViewerWebView != null) {
-            viewerEvalJs(tableViewerWebView, "viewerSetBg('" + color + "')");
-        }
-    }
 
     // ========== 快速搜题 ==========
 
@@ -3481,18 +2018,6 @@ public class MainActivity extends Activity {
                 }
             }
         }, "aichat-quick-scan").start();
-    }
-
-    // Execute JS in viewer WebView, using evaluateJavascript (API 19+) when available,
-    // falling back to loadUrl for API 18.
-    private void viewerEvalJs(WebView wv, String js) {
-        if (wv == null) return;
-        if (android.os.Build.VERSION.SDK_INT >= 19) {
-            wv.evaluateJavascript(js, null);
-        } else {
-            LogUtil.v(TAG, "viewerEvalJs: API<19 fallback loadUrl: %s", LogUtil.preview(js, 120));
-            wv.loadUrl("javascript:" + js);
-        }
     }
 
     // ========== 消息长按菜单 ==========

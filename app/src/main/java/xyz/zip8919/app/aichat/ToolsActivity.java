@@ -421,7 +421,7 @@ public class ToolsActivity extends Activity {
                 .setView(input)
                 .setPositiveButton("确定", new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
-                        final String name = MainActivity.sanitizeExportName(input.getText().toString());
+                        final String name = ExportHelper.sanitizeName(input.getText().toString());
                         if (name.isEmpty()) {
                             Toast.makeText(ToolsActivity.this, "文件名不能为空", Toast.LENGTH_SHORT).show();
                             return;
@@ -627,7 +627,7 @@ public class ToolsActivity extends Activity {
         LogUtil.i(TAG, "runJs: len=%d", code.length());
         String lang = currentJsFileName == null || currentJsFileName.isEmpty()
                 ? sniffLang(code) : extOf(currentJsFileName);
-        startActivity(MainActivity.newJsRunnerIntent(this, code, MainActivity.exportExtForLang(lang)));
+        startActivity(MainActivity.newJsRunnerIntent(this, code, ExportHelper.extForLang(lang)));
     }
 
     // ---------- env prompt ----------
