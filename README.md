@@ -1,6 +1,6 @@
 # AiChat
 
-Android 词典笔 AI 对话应用（版本 1.8.3，minSdk 18 / targetSdk 18，真机 Android 4.4.2 / API 19）。基于 WebView + HTML/CSS 渲染 Markdown/LaTeX，通过任意 OpenAI 兼容端点调用大模型，内置 DeepSeek（不含 API Key）与商汤日日新 默认配置，默认模型 `deepseek-v4-flash`（商汤日日新）。
+Android 词典笔 AI 对话应用（版本 1.8.4，minSdk 18 / targetSdk 18，真机 Android 4.4.2 / API 19）。基于 WebView + HTML/CSS 渲染 Markdown/LaTeX，通过任意 OpenAI 兼容端点调用大模型，内置 DeepSeek（不含 API Key）与商汤日日新 默认配置，默认模型 `deepseek-v4-flash`（商汤日日新）。
 
 > 改代码前先看 [ARCHITECTURE.md](ARCHITECTURE.md)：请求链路图、类职责边界、并发约定、「想改 X 去哪」对照表。
 
@@ -25,7 +25,7 @@ Android 词典笔 AI 对话应用（版本 1.8.3，minSdk 18 / targetSdk 18，�
 - **自动标题** — 首次对话自动生成标题，标题生成模型与提示词可在设置中配置
 - **系统提示词** — 自定义系统提示词，支持保存/管理/切换多个预设
 - **小工具**（长按"历史"按钮进入）— 已保存代码列表（查看/复制/重命名/编辑/预览运行/多选批量删除）；JS 运行器：在 WebView（Chromium 30）中运行 JS/HTML/SVG，输出可复制，支持粘贴、载入已保存文件、保存到 exports；APP 代码环境提示词（复制/插入输入框/直接发送）
-- **代码执行器提示词可配** — 设置页可自定义环境提示词，支持占位符 `{android}` `{api}` `{webview}` `{model}` `{app_version}` `{ua}`，发送时按当前设备实际值填充；未知占位符原样保留。WebView 版本从 `WebSettings.getDefaultUserAgent()` 的 `Chrome/xx` 段提取（`WebViewFactory` 是隐藏 API，不可反射）
+- **代码执行器提示词可配** — 设置页可自定义环境提示词，支持占位符 `{android}` `{api}` `{webview}` `{model}` `{app_version}` `{ua}`，发送时按当前设备实际值填充；未知占位符原样保留。系统提示词与标题生成提示词使用同一套占位符规则。WebView 版本从 `WebSettings.getDefaultUserAgent()` 的 `Chrome/xx` 段提取（`WebViewFactory` 是隐藏 API，不可反射）
 - **设置** — 联网搜索、流式输出、实时渲染、调试日志、快速搜题开关；`http_request` 工具开关；429 重试策略；代码执行器提示词；模型/提供商管理；查询 DeepSeek 余额（显示总余额/充值/赠送）；关于页入口
 - **关于与使用说明** — 关于页显示应用名、版本号（`versionName (versionCode)`）、**使用说明（与首启弹窗同一份文案）**、检查更新、反馈建议、开源许可（commonmark-java / jlatexmath-android / Conscrypt）；检查更新与反馈当前为「功能待开发」占位。首次启动弹出使用说明与免责声明，必须点「同意并继续」才可用；确认前不会发送任何由外部 Intent 带入的消息
 - **扫描识别** — 横屏扫描界面，调用词典笔系统 OCR 识别文字，支持加载摘抄记录、编辑、复制、插入
@@ -121,7 +121,7 @@ Tavily 的密钥在应用内「设置 → Tavily API Key」填写，仅保存在
 
 ```
 ├── app/
-│   ├── build.gradle                # versionName 1.8.3 / versionCode 41 / compileSdk 34
+│   ├── build.gradle                # versionName 1.8.4 / versionCode 42 / compileSdk 34
 │   ├── keystore/mc.jks             # 签名密钥库
 │   └── src/main/
 │       ├── AndroidManifest.xml     # 包名 xyz.zip8919.app.aichat，9 个 Activity

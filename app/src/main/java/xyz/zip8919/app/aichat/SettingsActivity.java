@@ -658,9 +658,16 @@ public class SettingsActivity extends Activity {
         return prefs.getString(KEY_TITLE_MODEL, DEFAULT_TITLE_MODEL);
     }
 
+    /**
+     * 标题生成提示词，已把 {@code {android}} / {@code {ua}} 等占位符换成真实值。
+     *
+     * <p>与 {@link #getSystemPrompt} 同一套规则。注意调用方必须在<b>主线程</b>调用：
+     * {@code {ua}} 首次取值要初始化 WebView 内核，WebView 只认主线程。
+     */
     public static String getTitlePrompt(Context context) {
         SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, 0);
-        return prefs.getString(KEY_TITLE_PROMPT, DEFAULT_TITLE_PROMPT);
+        return SystemInfo.fillPlaceholders(
+                prefs.getString(KEY_TITLE_PROMPT, DEFAULT_TITLE_PROMPT), context);
     }
 
     // ---- Presets ----

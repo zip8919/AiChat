@@ -555,11 +555,19 @@
         android:padding="12dp"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginBottom="16dp"
+        android:layout_marginBottom="6dp"
         android:hint="根据用户消息生成3-15字标题。只输出标题本身。"
         android:maxLines="3"
         android:minLines="2"
         android:inputType="textMultiLine"/>
+
+    <TextView
+        android:textSize="11sp"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="16dp"
+        android:textColor="@color/text_secondary"
+        android:text="同样支持占位符：{android} {api} {webview} {model} {app_version} {ua}，生成标题时替换成当前设备的真实值。"/>
 
     <!-- Title model -->
     <LinearLayout

@@ -94,6 +94,7 @@
 | 429 重试次数、间隔、退避 | `RetryPolicy` + `SettingsActivity.getRetryPolicy` |
 | `http_request` 工具的能力与安全边界 | `HttpRequestTool`（默认关闭，设置页开关） |
 | 代码执行器提示词、占位符 | `SettingsActivity.getJsEnvPrompt` + `SystemInfo.fillPlaceholders` |
+| 系统 / 标题提示词、占位符 | `SettingsActivity.getSystemPrompt` / `getTitlePrompt`（都在主线程调用，`{ua}` 首次取值要初始化 WebView） |
 | 首启引导文案与顺序 | `HelpText` + `MainActivity.showFirstLaunchDialog` + `KEY_FIRST_LAUNCH_DONE` |
 | 附件怎么进提示词 | `AttachmentText.toApi`（由 `apiTextOf` 调用）→ `ChatHistory.apiContentOf` |
 | 附件 UI（标签、上限） | `MainActivity.refreshAttachmentBar` / `addAttachment` |
@@ -167,3 +168,8 @@ rounds done: sources=5 apiText=842 toolHistory=4
 28. **重试保留附件**：对带附件的用户消息点「重试」，重发的那条必须仍带附件卡片
 29. **token 估算**：纯中文 100 字左右应显示 `~60 tokens`，纯英文 400 字符左右应显示
     `~120 tokens`；端点在流式里返回 `usage` 时应显示不带 `~` 的真实值
+30. **429 退避按轮次独立**：基数设 1 s，用限流 Key 触发一次带工具的回复——
+    第 1 轮连吃两次 429 后等 1 s、2 s；第 2 轮再遇到 429 必须重新等 1 s，
+    不能变成 4 s（`V` 用例用本地端点覆盖了这条，真机再确认一次体感）
+31. **标题提示词占位符**：把标题提示词改成含 `{model}` 的文案，新会话生成标题后
+    检查请求体里机器型号已被替换（日志里 `generate:` 一行可见）

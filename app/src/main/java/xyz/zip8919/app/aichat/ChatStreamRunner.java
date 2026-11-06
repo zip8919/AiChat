@@ -168,7 +168,17 @@ final class ChatStreamRunner {
             boolean fallbackTried = false;
             boolean includeUsage = job.includeUsage;
             boolean usageDowngraded = false;
-            // 429 重试计数：跨轮次累计，一致到本次请求结束
+            /**
+             * 429 重试计数：按「单个 HTTP 请求」独立，不能跨轮次累计。
+             *
+             * <p>{@code retryRound} 记住当前计数属于哪一轮，进入下一轮（工具轮次）就清零；
+             * 同一轮里的多次重试 {@code round} 不变，计数继续累加。
+             *
+             * <p>早期版本把 retryCount 声明在轮次循环之外，一次回复里只要第 1 轮重试过 2 次，
+             * 第 2 轮遇到 429 时第一次重试就要等 {@code base×4}、第二次等 {@code base×8}，
+             * 而且重试机会已经被前面那轮吃光了——用户看到的是「越到后面越卡、最后直接失败」。
+             */
+            int retryRound = -1;
             int retryCount = 0;
             int round = job.isResume() ? job.resume.round : 0;
             if (job.isResume() && st.trace.length() > 0) {
@@ -181,6 +191,12 @@ final class ChatStreamRunner {
                     job.realtimeRender);
             while (true) {
                 st.round = round;
+                // 换轮次就重置 429 计数：每一轮都是一个新的 HTTP 请求，
+                // 它该有自己的退避曲线和自己的重试预算
+                if (round != retryRound) {
+                    retryRound = round;
+                    retryCount = 0;
+                }
                 if (!session.isAlive(job.generation)) {
                     LogUtil.i(TAG, "round loop aborted before round %d", round);
                     return;

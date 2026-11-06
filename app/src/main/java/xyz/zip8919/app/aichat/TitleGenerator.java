@@ -48,6 +48,9 @@ final class TitleGenerator {
         LogUtil.d(TAG, "generate called for message: %s", LogUtil.preview(firstMessage, 100));
         // 记录发起时的会话 id：回调回来若已切会话就丢弃
         final String convId = cm.getCurrentConversation().id;
+        // 提示词在主线程读：里面的 {ua} 占位符首次取值会初始化 WebView 内核，
+        // 而 WebView 的核心方法只认主线程，放到下面的请求线程上做有概率直接崩。
+        final String titlePrompt = SettingsActivity.getTitlePrompt(activity);
         new Thread(new Runnable() {
             public void run() {
                 try {
@@ -65,7 +68,6 @@ final class TitleGenerator {
                     }
                     LogUtil.d(TAG, "generate: using %s @ %s", tmi.name, provider.name);
 
-                    String titlePrompt = SettingsActivity.getTitlePrompt(activity);
                     List<Message> msgs = new ArrayList<Message>();
                     msgs.add(new Message(Message.ROLE_SYSTEM, titlePrompt));
                     msgs.add(new Message(Message.ROLE_USER,
