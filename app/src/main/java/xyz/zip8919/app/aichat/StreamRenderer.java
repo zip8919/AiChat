@@ -32,6 +32,12 @@ final class StreamRenderer {
         /** 执行 {@code fn('...')}，html 由实现负责转义。 */
         void evalJsHtml(String fn, String html);
 
+        /** 执行一段无参脚本，用于 {@code streamCommitTail()} 这类纯 DOM 操作。 */
+        void evalJs(String code);
+
+        /** 通知宿主：base 层当前已对应这段文本，避免下次又整段重渲染一遍。 */
+        void noteBaseRendered(String base);
+
         /** 请求代数是否仍是当前这一条，false 表示已被新请求或打断取代。 */
         boolean isCurrent(int generation);
 
@@ -55,6 +61,8 @@ final class StreamRenderer {
     private volatile long lastEmitMs;
     /** 已经推到 DOM 的 base 文本，用来判断 base 是否需要重建。 */
     private volatile String baseRendered = "";
+    /** commitTail 已经发出但 UI 还没落地：这段时间内的分片直接跳过，避免写进旧的 tail。 */
+    private volatile boolean committing;
 
     StreamRenderer(Ui ui, int aiIndex, int generation, boolean realtime) {
         this.ui = ui;
@@ -72,6 +80,33 @@ final class StreamRenderer {
     }
 
     /**
+     * 本轮结束（或要插入工具卡片）：把已经流出去的 tail 并进 base。
+     *
+     * <p>为什么必须做这一步：下一轮的 {@code baseNow} 是「旧 trace + 本轮正文」，
+     * 而 DOM 里那段正文还在 tail 上。不搬过去，下一轮要么把 base 整段重渲染一遍
+     * （长回答在低端机上是肉眼可见的一次闪烁），要么 tail 被新的分片覆盖（丢内容）。
+     *
+     * <p>搬移是纯 DOM 操作，不解析 markdown，所以没有重排代价。
+     */
+    void commitTail(String baseNow) {
+        if (baseNow == null) baseNow = "";
+        committing = true;
+        ui.nextSeq();              // 作废正在飞的 tick，避免它回头覆盖搬好的 base
+        baseRendered = baseNow;
+        ui.noteBaseRendered(baseNow);
+        ui.runOnUi(new Runnable() {
+            public void run() {
+                try {
+                    if (ui.isCurrent(generation)) ui.evalJs("streamCommitTail()");
+                } finally {
+                    committing = false;
+                }
+            }
+        });
+        lastEmitMs = 0;
+    }
+
+    /**
      * 收到一个流式分片。
      *
      * @param baseNow  当前累计的思考/工具卡片文本（{@code trace}）
@@ -80,6 +115,7 @@ final class StreamRenderer {
     void onProgress(String baseNow, String roundNow) {
         if (baseNow == null) baseNow = "";
         if (roundNow == null) roundNow = "";
+        if (committing) return;
         long now = System.currentTimeMillis();
         long interval = realtime ? INTERVAL_HTML_MS : INTERVAL_TEXT_MS;
         if (now - lastEmitMs < interval || inFlight.get()) return;

@@ -91,6 +91,9 @@ public class MainActivity extends Activity {
     // 提到字段上是因为 renderTraceAsync 与流式 tick 都要用它做互斥。
     private final java.util.concurrent.atomic.AtomicInteger renderSeq =
             new java.util.concurrent.atomic.AtomicInteger();
+    // 已经推到 WebView 的 trace（base 层）文本。流式期间状态行与工具卡片会交替
+    // 下发，内容没变就只更新状态行，别再整段重渲染——那是低端机上最明显的闪烁源。
+    private volatile String lastStreamTrace = "";
     // volatile：请求线程写、UI 线程读，打断时才能可靠 disconnect
     private volatile HttpURLConnection currentConnection;
     // volatile：后台加载线程回到 UI 线程后判断 initConversation() 是否已执行；
@@ -979,6 +982,9 @@ public class MainActivity extends Activity {
 
         final int placeholderIndex = aiIndex;
         final boolean isResume = resume != null;
+        // base 层的内容基准：新请求从空白开始，续跑从上次的 trace 开始。
+        // 不清会把上一条消息的 trace 当成「已推送」，导致工具卡片永远不出现。
+        lastStreamTrace = isResume && resume.trace != null ? resume.trace : "";
         runOnUiThread(new Runnable() {
             public void run() {
                 webViewEvalJs(isResume
@@ -1036,6 +1042,14 @@ public class MainActivity extends Activity {
 
         public void evalJsHtml(String fn, String html) {
             webViewEvalJs(fn + "('" + jsEscape(html) + "')");
+        }
+
+        public void evalJs(String code) {
+            webViewEvalJs(code);
+        }
+
+        public void noteBaseRendered(String base) {
+            lastStreamTrace = base == null ? "" : base;
         }
 
         public boolean isCurrent(int generation) {
@@ -1235,20 +1249,39 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * Render the accumulated trace (thinking + tool cards) off the UI thread and
-     * push it to the last AI bubble. {@code status}, when non-null, is appended as
-     * a transient status line that the next render will replace.
+     * 把累计的 trace（思考块 + 工具卡片）渲染到 AI 气泡的 <b>base 层</b>。
+     *
+     * <p>这里刻意不用 {@code updateLastMsg}：那个函数会把整个 {@code .content}
+     * 的 innerHTML 换掉，正在流出的 {@code .stream-tail} 会跟着被抹——
+     * 表现就是「回答闪一下，然后少了一大截」。base 与 tail 分层之后，
+     * 写 base 不会影响 tail，两者拼起来才是完整回答。
+     *
+     * <p>{@code status} 非空时另挂一条独立状态行，它同样不碰正文。
      */
     private void renderTraceAsync(final String traceText, final int generation, final String status,
             final int aiIndex) {
         final String snapshot = traceText == null ? "" : traceText;
-        // 两个守卫各管一件事：
-        //   1) 渲染序号——迟到的渲染不能盖掉更新的那次（状态行与工具卡片会交替下发）；
-        //   2) 长度单调——trace 只会变长，比当前短的快照一定是旧轮次的。
-        // 旧实现只有 (2)，但状态行（status）天然比已完成正文短，「正在搜索…」
-        // 这类提示因此从来没显示过。
+        final String base0 = lastStreamTrace == null ? "" : lastStreamTrace;
+
+        // 内容没变（最常见：只换了状态文案）就只写状态行。
+        // 长回答 + 代码块时整段重渲染是几百毫秒的空白帧，低端机上非常扎眼。
+        if (snapshot.equals(base0)) {
+            if (status != null) {
+                webViewEvalJs("setStatus('" + jsEscape(status) + "')");
+            }
+            return;
+        }
+        // trace 只会变长，比已推送的更短一定是旧轮次迟到的快照
+        if (snapshot.length() < base0.length()) {
+            LogUtil.d(TAG, "stale trace render dropped: base=%d, snapshot=%d",
+                    base0.length(), snapshot.length());
+            if (status != null) {
+                webViewEvalJs("setStatus('" + jsEscape(status) + "')");
+            }
+            return;
+        }
+
         final int mySeq = renderSeq.incrementAndGet();
-        final boolean transientStatus = status != null;
         new Thread(new Runnable() {
             public void run() {
                 final String html = MessageHtmlRenderer.contentToHtml(snapshot, MainActivity.this);
@@ -1259,19 +1292,9 @@ public class MainActivity extends Activity {
                             LogUtil.d(TAG, "trace render superseded: seq %d/%d", mySeq, renderSeq.get());
                             return;
                         }
-                        if (!transientStatus && aiIndex >= 0 && aiIndex < messages.size()
-                                && messages.get(aiIndex).isAssistant()) {
-                            String cur = messages.get(aiIndex).content;
-                            if (cur != null && cur.length() > snapshot.length()) {
-                                LogUtil.d(TAG, "stale trace render dropped: cur=%d, snapshot=%d",
-                                        cur.length(), snapshot.length());
-                                return;
-                            }
-                            messages.get(aiIndex).content = snapshot;
-                        }
-                        webViewEvalJs("updateLastMsg('" + jsEscape(html) + "')");
-                        // 状态行是独立节点，不参与正文替换：既不会被下一次
-                        // streamTail 吞进 base，也不会因为内容变长而被误判为旧快照
+                        lastStreamTrace = snapshot;
+                        // 只写 base 层；tail 上正在流的内容原样保留
+                        webViewEvalJs("streamBase('" + jsEscape(html) + "')");
                         if (status != null) {
                             webViewEvalJs("setStatus('" + jsEscape(status) + "')");
                         }

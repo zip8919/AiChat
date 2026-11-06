@@ -142,8 +142,10 @@ final class ChatStreamRunner {
                     return;
                 }
                 if (round > 0) {
-                    // 作废进行中的流式渲染，避免上一轮最后一片覆盖状态行
-                    ui.nextSeq();
+                    // 上一轮的正文还挂在 tail 上，先原地并进 base 再挂状态行。
+                    // 不搬的话，下一轮第一片会把 tail 覆盖成新的增量，
+                    // 用户看到的就是「屏幕闪一下，回答少了一截」。
+                    renderer.commitTail(st.trace.toString());
                     ui.showStatus("正在整理搜索结果...", job.generation, st.trace.toString(), job.aiIndex);
                 }
 

@@ -411,12 +411,27 @@ final class RendererAssets {
             "var b=c.querySelector('.stream-base');" +
             "var t=c.querySelector('.stream-tail');" +
             "if(!b||!t){" +
-            "var keepTail=t?t.innerHTML:'';" +
+            // 历史消息 / 续跑等没有骨架的情况：把已有内容整体当 base 保住，
+            // 再补出 tail，后续写入就只动各自的层
+            "var keep=c.innerHTML;" +
             "c.className='content';" +
             "c.innerHTML='<div class=\"stream-base\"></div><div class=\"stream-tail\"></div>';" +
             "b=c.querySelector('.stream-base');t=c.querySelector('.stream-tail');" +
-            "if(keepTail)t.innerHTML=keepTail;}" +
-            "b.innerHTML=html;applyToolStates(b);addCopyBtns(b);clearStatus();};" +
+            "if(keep)b.innerHTML=keep;}" +
+            "if(html)b.innerHTML=html;" +
+            "applyToolStates(b);addCopyBtns(b);clearStatus();};" +
+            // 轮次切换：把本轮已经流出去的 tail 并进 base。
+            // 这里用 DOM 节点搬移而不是 innerHTML 拼接 —— 不重新解析 markdown、
+            // 不重新解码公式图片，视觉上完全不闪，内容也不会重复或丢字。
+            "window.streamCommitTail=function(){" +
+            "var ms=document.querySelectorAll('.msg.ai .content');" +
+            "if(ms.length===0)return;" +
+            "var c=ms[ms.length-1];" +
+            "var b=c.querySelector('.stream-base');" +
+            "var t=c.querySelector('.stream-tail');" +
+            "if(!b||!t)return;" +
+            "while(t.firstChild)b.appendChild(t.firstChild);" +
+            "t.className='stream-tail';t.innerHTML='';};" +
             "window.streamTailHtml=function(html){" +
             "var ms=document.querySelectorAll('.msg.ai .content');" +
             "if(ms.length===0)return;" +
@@ -464,10 +479,15 @@ final class RendererAssets {
             "var ms=document.querySelectorAll('.msg.ai .content');" +
             "if(ms.length>0){ms[ms.length-1].textContent=text;}" +
             "smartScrollToBottom();};" +
+            // 骨架从第一帧就固定成 base + tail 两层：后续所有流式写入只动其中一层。
+            // 以前这里只有一个空 .content，第一片到达时才在 JS 里临时拆骨架，
+            // 而 updateLastMsg 又会把 .content 整个 innerHTML 重设，把正在流出的
+            // tail 一起抹掉 —— 用户看到的就是「回答闪一下然后凭空消失」。
             "window.appendAiDiv=function(){" +
             "var d=document.createElement('div');" +
             "d.className='msg ai';d.setAttribute('data-idx','-1');" +
-            "d.innerHTML='<div class=\"content\"></div><div class=\"sources\"></div>" +
+            "d.innerHTML='<div class=\"content\"><div class=\"stream-base\"></div>" +
+            "<div class=\"stream-tail\"></div></div><div class=\"sources\"></div>" +
             "<div class=\"ai-menu-wrap\"><button class=\"msg-menu-btn\" " +
             "onclick=\"if(window.Android)Android.messageMenu(\\'-1\\');" +
             "event.stopPropagation();return false;\">⋯</button></div>';" +
