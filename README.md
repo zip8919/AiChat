@@ -1,6 +1,6 @@
 # AiChat
 
-Android 词典笔 AI 对话应用（版本 1.13.1，minSdk 18 / targetSdk 18，真机 Android 4.4.2 / API 19）。基于 WebView + HTML/CSS 渲染 Markdown/LaTeX，通过任意 OpenAI 兼容端点调用大模型，内置 DeepSeek（不含 API Key）与商汤日日新 默认配置，默认模型 `deepseek-v4-flash`（商汤日日新）。
+Android 词典笔 AI 对话应用（版本 1.13.2，minSdk 18 / targetSdk 18，真机 Android 4.4.2 / API 19）。基于 WebView + HTML/CSS 渲染 Markdown/LaTeX，通过任意 OpenAI 兼容端点调用大模型，内置 DeepSeek（不含 API Key）与商汤日日新 默认配置，默认模型 `deepseek-v4-flash`（商汤日日新）。
 
 > 改代码前先看 [ARCHITECTURE.md](ARCHITECTURE.md)：请求链路图、类职责边界、并发约定、「想改 X 去哪」对照表。
 
@@ -25,6 +25,7 @@ Android 词典笔 AI 对话应用（版本 1.13.1，minSdk 18 / targetSdk 18，�
 - **智能自动滚动** — AI 生成时底部跟随，上翻不打扰，滚回底部恢复；实时渲染（200ms 节流）可在设置中开关
 - **回到底部按钮** — 单击回底，长按清空输入框
 - **对话管理** — 多对话、历史列表；历史支持重命名、清空、多选/全选/反选/批量删除；消息支持复制/选择文本/修改/删除/重试/回溯到此处/创建分支
+- **历史列表索引** — 元数据单独存 `conversations.idx`（NDJSON：标题、更新时间、消息条数、文件字节数、mtime）。打开列表时逐个文件只比 `mtime + 字节数`，命中就直接用索引，不再把每个会话 JSON 连同图片缩略图 Base64 全量读一遍；仅改动过的那一个文件回退解析。索引随会话写盘增量更新，丢失、坏行或版本不符会自动全量重建，**只影响快慢、不影响数据正确性**。升级后第一次打开列表会建一次索引
 - **存储空间管理**（设置页进入）— 概览把占用拆成五类：对话记录、图片附件、已保存文件、临时文件、其他，显示已用 / 可用与占比条；点分类进详情，条目可定位回原会话或原文件页。图片与文件支持多选批量删除，删除前按**会话引用计数**判断归属，引用索引读不全时自动暂停「一键清理图片」；一键清理只动可安全释放的部分：无引用图片，以及超过 1 小时、确定为残留的 `.tmp`（写文件先落 `.tmp` 再改名，进程被杀会留下），清理前先算「可安全释放」的总量
 - **用量统计**（设置页进入）— 按自定义起止日期汇总请求数、prompt / completion token、缓存命中 token 与平均生成速度，并按模型、服务商、工具三个维度拆分。端点没返回 `usage`（例如中途打断）时记为本地估算并单独标注，不与「账单口径」混算；事件上限 2 万条，超出后从最旧的一条开始淘汰
 - **自动标题** — 首次对话自动生成标题，标题生成模型与提示词可在设置中配置
@@ -126,7 +127,7 @@ Tavily 的密钥在应用内「设置 → Tavily API Key」填写，仅保存在
 
 ```
 ├── app/
-│   ├── build.gradle                # versionName 1.13.1 / versionCode 59 / compileSdk 34
+│   ├── build.gradle                # versionName 1.13.2 / versionCode 60 / compileSdk 34
 │   ├── keystore/mc.jks             # 签名密钥库
 │   └── src/main/
 │       ├── AndroidManifest.xml     # 包名 xyz.zip8919.app.aichat，10 个 Activity
@@ -191,6 +192,7 @@ Tavily 的密钥在应用内「设置 → Tavily API Key」填写，仅保存在
 │       │   ├── 【数据与平台】
 │       │   ├── ConfigManager.java           # 提供商 / 模型 / 思考等级
 │       │   ├── ConversationManager.java     # 会话持久化（异步写盘队列）
+│       │   ├── ConversationIndex.java      # 历史元数据索引：NDJSON、指纹校准、原子写回
 │       │   ├── Conversation.java            # 会话模型
 │       │   ├── Message.java                 # 消息模型（含 attachments / apiText / toolHistory / sources）
 │       │   ├── ProviderInfo.java            # 提供商模型

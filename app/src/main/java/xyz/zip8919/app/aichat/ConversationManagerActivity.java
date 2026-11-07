@@ -394,7 +394,9 @@ public class ConversationManagerActivity extends Activity {
      * 直接回到主界面并把会话切过去，返回键回到本页。
      */
     private void showStorageDetail(final Conversation conv) {
-        int count = conv.messages == null ? 0 : conv.messages.size();
+        // 列表项可能只有索引元数据、没有 messages，条数优先取 messageCount
+        int count = conv.messageCount > 0 ? conv.messageCount
+                : (conv.messages == null ? 0 : conv.messages.size());
         String msg = "消息 " + count + " 条\n"
                 + "占用 " + StorageReport.size(conv.fileBytes) + "\n"
                 + "最后更新 " + android.text.format.DateFormat.format("yyyy-MM-dd HH:mm",

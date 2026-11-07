@@ -175,7 +175,11 @@ public class ConversationAdapter extends BaseAdapter {
         // 副行 = 时间 · 条数 · 体积。体积是用户决定「删哪个」的唯一依据，
         // 只给时间的话，列表只能按「看起来新不新」猜占用。
         StringBuilder sub = new StringBuilder(timeText);
-        int msgCount = conv.messages == null ? 0 : conv.messages.size();
+        // 列表项来自索引时 messages 是空的，条数必须取索引里的 messageCount；
+        // 只有完整解析出来的会话（messageCount 为 0 但 messages 可能因新建为空）
+        // 才退回实际列表长度。
+        int msgCount = conv.messageCount > 0 ? conv.messageCount
+                : (conv.messages == null ? 0 : conv.messages.size());
         sub.append(" · ").append(msgCount).append(" 条");
         if (conv.fileBytes > 0) {
             sub.append(" · ").append(StorageReport.size(conv.fileBytes));

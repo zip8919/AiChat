@@ -40,6 +40,23 @@ public class Conversation {
      */
     public long fileBytes;
 
+    /**
+     * 消息条数。列表页只显示这个数字，不需要把 {@link #messages} 反序列化出来。
+     *
+     * <p>从索引构造的列表项 {@code messages} 是空的，靠这个字段保证「N 条消息」显示正确；
+     * {@code fromJson} 解析出来的会话也会同步填一次，两条路径取值一致。
+     */
+    public int messageCount;
+
+    /**
+     * {@link #messages} 是否已从磁盘读出来。
+     *
+     * <p>列表页为了快，只读索引，构造出来的对象这里是 {@code false}——此时 {@code messages}
+     * 为空但<b>不代表会话是空的</b>。切到这条会话前必须先补读，否则界面会显示一片空白
+     * 并在下一条消息保存时把原历史覆盖掉。
+     */
+    public boolean messagesLoaded = true;
+
     private static long lastId = 0;
 
     public Conversation() {

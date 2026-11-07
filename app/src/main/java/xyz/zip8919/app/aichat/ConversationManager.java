@@ -32,6 +32,15 @@ public class ConversationManager {
     private final java.util.Set<String> deletedIds =
             java.util.Collections.synchronizedSet(new java.util.HashSet<String>());
 
+    /**
+     * 会话列表索引。列表页只读它拿标题/时间/条数，不再逐个解析会话文件。
+     * 所有读写都在 {@link #indexLock} 内：加载在后台线程，保存在 saveExecutor，
+     * 删除可能来自主线程，三边会碰同一个 map。
+     */
+    private ConversationIndex index;
+    private String indexDirPath;
+    private final Object indexLock = new Object();
+
     private ConversationManager() {
         this.storageManager = StorageManager.getInstance();
         this.conversations = new ArrayList<Conversation>();
@@ -113,17 +122,38 @@ public class ConversationManager {
             return;
         }
         boolean ok = storageManager.saveConversation(conv.id, json);
+        if (ok) {
+            // 索引跟着落盘：下次打开历史列表只读这一份元数据，不再解析本文件。
+            // 必须在写完文件之后取 mtime/长度，否则记下的是旧值，下次必然判定失效。
+            java.io.File dir = new java.io.File(storageManager.getConversationsPath());
+            java.io.File f = new java.io.File(dir, conv.id + ".json");
+            ConversationIndex idx = indexFor(dir);
+            synchronized (indexLock) {
+                idx.put(conv, f.lastModified(), f.length());
+                if (idx.isDirty()) idx.save(dir);
+            }
+        }
         LogUtil.d(TAG, "saveCurrentConversation: id=%s msgs=%d jsonLen=%d ok=%s",
                 conv.id, conv.messages.size(), json.length(), ok);
     }
 
     /** 异步保存任意会话（列表页重命名等场景），不要求它是 current。 */
-    public void saveConversationAsync(Conversation conv) {
-        if (conv == null || conv.messages == null) return;
-        final Conversation snapshot = snapshotOf(conv);
+    public void saveConversationAsync(final Conversation conv) {
+        if (conv == null) return;
         saveExecutor.execute(new Runnable() {
             public void run() {
-                writeConversation(snapshot);
+                // 列表项来自索引，messages 是空的。不先补读就保存，会把整段历史覆盖成空文件——
+                // 重命名这种「只改标题」的操作尤其危险，用户看起来一切正常，回去后对话没了。
+                ensureMessagesLoaded(conv);
+                // 只拦「补读失败」：索引说有消息、却一条都没读出来，此时写盘会用空列表
+                // 覆盖磁盘上的完整历史。不能用 isEmpty() 一刀切——0 条消息的会话本来就是空的，
+                // 重命名它也该能落盘，否则用户改完标题重启后又变回去。
+                if (conv.messages == null
+                        || (conv.messages.isEmpty() && conv.messageCount > 0)) {
+                    LogUtil.w(TAG, "saveConversationAsync skipped: id=%s load incomplete, refuse overwrite", conv.id);
+                    return;
+                }
+                writeConversation(snapshotOf(conv));
             }
         });
     }
@@ -168,6 +198,7 @@ public class ConversationManager {
         // Try to find in memory
         for (Conversation c : this.conversations) {
             if (c.id.equals(conversationId)) {
+                ensureMessagesLoaded(c);
                 this.currentConversation = c;
                 LogUtil.d(TAG, "switchConversation: found in memory, msgs=%d", c.messages.size());
                 return;
@@ -186,6 +217,43 @@ public class ConversationManager {
             this.conversations.add(0, this.currentConversation);
             LogUtil.w(TAG, "switchConversation: '%s' not on disk, created empty", conversationId);
         }
+    }
+
+    /**
+     * 补齐会话正文。
+     *
+     * <p>列表页为了快只读索引，构造出来的 Conversation 只有元数据，{@code messages} 是空列表
+     * 但会话其实不空。切到它之前必须补读——否则界面一片空白，更糟的是下一条消息保存时
+     * 会用这份空列表覆盖磁盘上的完整历史。
+     */
+    private synchronized void ensureMessagesLoaded(Conversation c) {
+        if (c == null || c.messagesLoaded) return;
+        String content = storageManager.loadConversation(c.id);
+        if (content == null || content.length() == 0) {
+            // 文件没了：当作空会话，至少不会崩，也不会写坏别的东西。
+            // messageCount 保留索引里的原值，saveConversationAsync 据此拒绝覆盖写盘。
+            c.messagesLoaded = true;
+            LogUtil.w(TAG, "ensureMessagesLoaded: '%s' missing on disk, treated as empty", c.id);
+            return;
+        }
+        Conversation full = fromJson(content);
+        // 解析不完整时 fromJson 内部吞掉异常、返回带空 messages 的壳。索引里记着有消息，
+        // 说明文件本该有内容：此时绝不能用空列表覆盖 c.messages，否则用户重命名一次
+        // 就会把磁盘上的完整历史写成空文件。标 loaded 是为了不再反复读这个坏文件。
+        if (full == null || full.messages == null
+                || (full.messages.isEmpty() && c.messageCount > 0)) {
+            c.messagesLoaded = true;
+            LogUtil.w(TAG, "ensureMessagesLoaded: '%s' parse incomplete (index says %d msgs), keep empty, refuse overwrite",
+                    c.id, c.messageCount);
+            return;
+        }
+        // 只补正文与条数，不用磁盘值回写 title / updatedAt 等元数据。
+        // 「重命名」的调用链是 改 title → saveConversationAsync → 本方法 → 写盘，
+        // 这里若拿磁盘上的旧 title 覆盖，用户改的名字会在落盘前被抹掉，表现为「重命名没生效」。
+        c.messages = full.messages;
+        c.messageCount = full.messages.size();
+        c.messagesLoaded = true;
+        LogUtil.i(TAG, "ensureMessagesLoaded: %s msgs=%d", c.id, c.messages.size());
     }
 
     public void deleteConversation(String conversationId) {
@@ -210,6 +278,14 @@ public class ConversationManager {
             }
         }
         boolean ok = storageManager.deleteConversation(conversationId);
+        // 索引里同步剔除，否则下次进列表这条会以「文件已不存在」的形式再被清一次，
+        // 白跑一趟 retainOnly
+        java.io.File dir = new java.io.File(storageManager.getConversationsPath());
+        ConversationIndex idx = indexFor(dir);
+        synchronized (indexLock) {
+            idx.remove(conversationId);
+            if (idx.isDirty()) idx.save(dir);
+        }
         // 回收只被这条会话引用的图片。异步执行、失败静默：
         // 删会话本身已经成功，回收失败最多是留几张孤儿图，不影响用户操作
         StorageCleaner.recycleAsync(storageManager, ownAttachments);
@@ -219,28 +295,60 @@ public class ConversationManager {
 
     public List<Conversation> loadConversations() {
         LogUtil.i(TAG, "loadConversations (%s)", LogUtil.thread());
+        long started = System.currentTimeMillis();
+        java.io.File dir = new java.io.File(storageManager.getConversationsPath());
+        ConversationIndex idx = indexFor(dir);
         List<Conversation> loaded = new ArrayList<Conversation>();
+        java.util.Set<String> alive = new java.util.HashSet<String>();
+        int fromIndex = 0;
+        int parsed = 0;
         String[] files = storageManager.getConversationFiles();
         if (files != null) {
             LogUtil.d(TAG, "loadConversations: %d files on disk", files.length);
             for (String file : files) {
                 if (!file.endsWith(".json")) continue;
                 String conversationId = file.substring(0, file.length() - 5);
+                alive.add(conversationId);
+                java.io.File f = new java.io.File(dir, file);
+                long mtime = f.lastModified();
+                long bytes = f.length();
+                ConversationIndex.Entry hit;
+                synchronized (indexLock) {
+                    hit = idx.get(conversationId);
+                }
+                // 索引命中且文件没被动过：直接用元数据，不读文件内容。
+                // mtime 之外还要比字节数——部分老文件系统 lastModified 只有秒级精度，
+                // 同一秒内改过又恰好长度相同的话，光看时间会漏掉更新。
+                if (hit != null && hit.mtime == mtime && hit.fileBytes == bytes) {
+                    loaded.add(hit.toConversation());
+                    fromIndex++;
+                    continue;
+                }
                 String content = storageManager.loadConversation(conversationId);
                 if (content == null || content.length() == 0) continue;
                 try {
                     Conversation conv = fromJson(content);
                     // 体积取磁盘实际字节，不按正文字符数估：JSON 转义、缩略图 Base64、
                     // 中文 UTF-8 多字节都会让字符数与文件大小差出好几倍
-                    conv.fileBytes = new java.io.File(
-                            storageManager.getConversationsPath(), file).length();
+                    conv.fileBytes = bytes;
+                    conv.messagesLoaded = true;
+                    synchronized (indexLock) {
+                        idx.put(conv, mtime, bytes);
+                    }
                     loaded.add(conv);
+                    parsed++;
                 } catch (Exception e) {
                     LogUtil.e(TAG, "loadConversations: failed to parse '%s': %s", file, e.getMessage(), e);
                 }
             }
         } else {
             LogUtil.w(TAG, "loadConversations: file list is null");
+        }
+
+        // 索引里剩下磁盘上已经没有的 id（删掉的会话），剔除后写回
+        synchronized (indexLock) {
+            idx.retainOnly(alive);
+            if (idx.isDirty()) idx.save(dir);
         }
 
         // Sort: newest updatedAt first
@@ -257,8 +365,21 @@ public class ConversationManager {
         this.conversations = loaded;
         // 列表已从磁盘重建，之前暂存的消息列表不再对应任何会话
         this.orphanMessages = null;
-        LogUtil.i(TAG, "loadConversations done: %d conversations", this.conversations.size());
+        LogUtil.i(TAG, "loadConversations done: %d conversations (index=%d, parsed=%d, %dms)",
+                this.conversations.size(), fromIndex, parsed,
+                System.currentTimeMillis() - started);
         return this.conversations;
+    }
+
+    /** 索引按目录缓存：存储根切换（内部/外部）时目录变了要重新加载。 */
+    private ConversationIndex indexFor(java.io.File dir) {
+        synchronized (indexLock) {
+            if (index == null || !dir.getAbsolutePath().equals(indexDirPath)) {
+                index = ConversationIndex.load(dir);
+                indexDirPath = dir.getAbsolutePath();
+            }
+            return index;
+        }
     }
 
     public List<Conversation> getConversations() {
@@ -561,6 +682,10 @@ public class ConversationManager {
         } catch (Exception e) {
             LogUtil.e(TAG, "fromJson failed: " + e.getMessage(), e);
         }
+        // 消息条数在这里统一填一次：列表页可能只有索引、没有 messages，
+        // 但「N 条消息」要跟真实文件一致
+        conv.messageCount = conv.messages.size();
+        conv.messagesLoaded = true;
         LogUtil.v(TAG, "fromJson: id=%s title=%s msgs=%d", conv.id, conv.title, conv.messages.size());
         return conv;
     }

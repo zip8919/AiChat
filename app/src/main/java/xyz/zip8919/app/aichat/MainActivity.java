@@ -2591,16 +2591,24 @@ public class MainActivity extends Activity {
         StringBuilder sb = new StringBuilder("本会话 ");
         sb.append(MessageHtmlRenderer.formatTokens(
                 (int) Math.min(total, Integer.MAX_VALUE))).append(" tokens");
+        // 明细单独一行：11sp 下「本会话 1.1k tokens · 命中 800（72%） · 33.4 tok/s」
+        // 约 280dp，而 258dp 屏的可用宽只有 230dp，单行必被 ellipsize 截成省略号。
+        // 第一行放总量（对账的主数字），第二行放命中与速度（明细），两行都不省。
+        StringBuilder detail = new StringBuilder();
         if (cached > 0) {
-            sb.append(" · 命中 ").append(MessageHtmlRenderer.formatTokens(
+            detail.append("命中 ").append(MessageHtmlRenderer.formatTokens(
                     (int) Math.min(cached, Integer.MAX_VALUE)));
             if (prompt > 0) {
-                sb.append("（").append(Math.round(cached * 100f / prompt)).append("%）");
+                detail.append("（").append(Math.round(cached * 100f / prompt)).append("%）");
             }
         }
         if (completion > 0 && genMs >= 1000) {
-            sb.append(" · ").append(String.format(Locale.US, "%.1f tok/s",
+            if (detail.length() > 0) detail.append(" · ");
+            detail.append(String.format(Locale.US, "%.1f tok/s",
                     completion * 1000.0 / genMs));
+        }
+        if (detail.length() > 0) {
+            sb.append("\n").append(detail);
         }
         usageBar.setText(sb.toString());
         usageBar.setVisibility(View.VISIBLE);
