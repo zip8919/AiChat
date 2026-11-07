@@ -20,7 +20,7 @@ import org.json.JSONObject;
  *       否则一句 {@code http://192.168.1.1/admin} 就能摸到用户路由器。</li>
  *   <li>不跟随重定向：3xx 原样返回给模型。跟着跳转就绕过了上面的网段校验
  *       （公网 URL 302 到 127.0.0.1 是经典绕过手法）。</li>
- *   <li>响应截断 8 KB：避免一条大响应把上下文窗口撑爆、也避免把整个网页塞进对话。</li>
+ *   <li>响应截断 32 KB：避免一条大响应把上下文窗口撑爆、也避免把整个网页塞进对话。</li>
  * </ol>
  */
 final class HttpRequestTool {
@@ -29,11 +29,21 @@ final class HttpRequestTool {
 
     static final String TOOL_HTTP = "http_request";
 
-    private static final int MAX_RESPONSE_BYTES = 8 * 1024;
+    private static final int MAX_RESPONSE_BYTES = 32 * 1024;
     private static final int DEFAULT_TIMEOUT_MS = 15000;
     private static final int MIN_TIMEOUT_MS = 1000;
     private static final int MAX_TIMEOUT_MS = 30000;
     private static final int MAX_HEADERS = 20;
+
+    /** 实际生效的响应上限：设置里可改，默认 32 KB。 */
+    private static int responseLimit() {
+        return Limits.toolMaxBytes > 0 ? Limits.toolMaxBytes : MAX_RESPONSE_BYTES;
+    }
+
+    /** 实际生效的超时上限：设置里可改，默认 30s。 */
+    private static int timeoutLimit() {
+        return Limits.httpTimeoutMs > 0 ? Limits.httpTimeoutMs : MAX_TIMEOUT_MS;
+    }
 
     private HttpRequestTool() {
     }
@@ -45,7 +55,8 @@ final class HttpRequestTool {
         fn.put("name", TOOL_HTTP);
         fn.put("description",
                 "直接向指定 URL 发起 HTTP 请求，用于调用 REST API 或获取结构化数据。"
-                        + "默认只能访问公网地址；若被拒绝，说明用户未开启内网访问。响应超过 8 KB 会被截断，"
+                        + "默认只能访问公网地址；若被拒绝，说明用户未开启内网访问。响应超过 "
+                        + (responseLimit() / 1024) + " KB 会被截断，"
                         + "不会自动跟随重定向（3xx 会原样返回状态码与 Location）。");
 
         JSONObject params = new JSONObject();
@@ -76,7 +87,7 @@ final class HttpRequestTool {
 
         JSONObject timeout = new JSONObject();
         timeout.put("type", "integer");
-        timeout.put("description", "超时毫秒数，1000-30000，默认 15000");
+        timeout.put("description", "超时毫秒数，1000-" + timeoutLimit() + "，默认 15000");
         props.put("timeout_ms", timeout);
 
         params.put("properties", props);
@@ -105,7 +116,7 @@ final class HttpRequestTool {
 
         int timeout = args.optInt("timeout_ms", DEFAULT_TIMEOUT_MS);
         if (timeout < MIN_TIMEOUT_MS) timeout = MIN_TIMEOUT_MS;
-        if (timeout > MAX_TIMEOUT_MS) timeout = MAX_TIMEOUT_MS;
+        if (timeout > timeoutLimit()) timeout = timeoutLimit();
 
         String body = args.optString("body", "");
         JSONObject headers = args.optJSONObject("headers");
@@ -153,8 +164,13 @@ final class HttpRequestTool {
             LogUtil.i(TAG, "http_request %s %s -> %d in %d ms", method, urlStr, code, cost);
 
             InputStream in = code >= 400 ? conn.getErrorStream() : conn.getInputStream();
-            byte[] raw = readLimitedBytes(in, MAX_RESPONSE_BYTES);
-            boolean truncated = raw.length >= MAX_RESPONSE_BYTES;
+            int limit = responseLimit();
+            byte[] raw = readLimitedBytes(in, limit);
+            boolean truncated = raw.length >= limit;
+            // 按「字节」截断可能正好把一个多字节 UTF-8 字符切成两半，
+            // new String 会在末尾留下一个替换字符（乱码方块）。截断时
+            // 回退到最后一个完整字符边界再解码，保证 body 是干净文本。
+            if (truncated) raw = trimIncompleteUtf8(raw);
             String text = new String(raw, "UTF-8");
 
             JSONObject out = new JSONObject();
@@ -236,6 +252,51 @@ final class HttpRequestTool {
         } finally {
             try { in.close(); } catch (Exception ignored) { }
         }
+    }
+
+    /**
+     * 去掉尾部不完整的 UTF-8 序列。只在「确实发生了截断」时调用：
+     * 未截断的响应本来就是完整字节流，无需回退。
+     */
+    private static byte[] trimIncompleteUtf8(byte[] raw) {
+        int end = raw.length;
+        int i = end - 1;
+        int back = 0;
+        while (i >= 0 && back < 4) {
+            int b = raw[i] & 0xFF;
+            if ((b & 0xC0) != 0x80) {          // 起始字节（非 10xxxxxx 续字节）
+                int need = b < 0x80 ? 1 : b < 0xE0 ? 2 : b < 0xF0 ? 3 : 4;
+                if (end - i >= need) return raw;   // 末尾这个字符是完整的
+                break;                              // 被截断：从这个起始字节处切断
+            }
+            i--;
+            back++;
+        }
+        if (i < 0) i = 0;
+        byte[] out = new byte[i];
+        System.arraycopy(raw, 0, out, 0, i);
+        return out;
+    }
+
+    /**
+     * 把完整 JSON 字符串缩进美化（2 空格）。非 JSON、或结构不完整（被截断
+     * 到一半的响应体）一律返回 null，由调用方退回原文并标注「可能不完整」——
+     * 绝不把半截 JSON 当成完整结果展示，也绝不因解析失败让卡片消失。
+     *
+     * <p>包可见：工具结果卡片展示时复用同一套美化规则。
+     */
+    static String prettyJson(String text) {
+        if (text == null) return null;
+        String t = text.trim();
+        if (t.length() < 2) return null;
+        try {
+            char c = t.charAt(0);
+            if (c == '{') return new JSONObject(t).toString(2);
+            if (c == '[') return new org.json.JSONArray(t).toString(2);
+        } catch (Exception ignored) {
+            return null;
+        }
+        return null;
     }
 
     private static String nullToEmpty(String s) {

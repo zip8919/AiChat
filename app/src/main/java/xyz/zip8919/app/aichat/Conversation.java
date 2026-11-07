@@ -17,6 +17,28 @@ public class Conversation {
      * 分开：请求失败/返回空/还在进行中时也不会被下一条消息再次触发。
      */
     public boolean titleRequested;
+    /**
+     * 本会话第一次真正发出 AI 请求的时刻（毫秒）。0 表示还没发过。
+     *
+     * <p>与 {@link #createdAt} 分开：会话可能是先建好、隔几天才用。
+     */
+    public long firstRequestAt;
+    /**
+     * 首次请求时刻的**已格式化字符串**，例如 {@code 2026-11-07 17:26 星期五（GMT+8）}。
+     *
+     * <p>刻意存字符串而不是每次用时间戳重新格式化：重新格式化取的是「当前时区 +
+     * 当前系统时间」，用户换时区或调了系统时间，这句就会变——同一个会话里前后两条
+     * 消息对模型说两个不同的「开始时间」，比不注入更糟。
+     */
+    public String firstRequestStamp;
+
+    /**
+     * 会话文件占用的字节数，只在 {@code loadConversations} 时按磁盘实际大小填一次。
+     *
+     * <p>会话语义上没有「大小」这个概念，它是文件系统属性；塞进 JSON 里既冗余
+     * 又会写错（保存后大小已变）。存储管理页与按体积排序都用这个运行期值。
+     */
+    public long fileBytes;
 
     private static long lastId = 0;
 
@@ -34,6 +56,8 @@ public class Conversation {
         this.systemPrompt = "";
         this.titleGenerated = false;
         this.titleRequested = false;
+        this.firstRequestAt = 0;
+        this.firstRequestStamp = "";
     }
 
     public Conversation(String id) {

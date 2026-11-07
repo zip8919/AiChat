@@ -72,7 +72,7 @@ public class TavilyTool {
             int rawTotal = 0;
             int keptTotal = 0;
             // 与 DeepSeek 后端共用同一套摘要预算，保证切换后端时上下文开销一致
-            int budget = WebSearchTool.MAX_TOTAL_SUMMARY_CHARS;
+            int budget = Limits.searchTotalSummaryChars;
             if (results != null) {
                 for (int i = 0; i < results.length(); i++) {
                     JSONObject item = results.optJSONObject(i);
@@ -84,7 +84,7 @@ public class TavilyTool {
 
                     String summary = item.optString("content", "");
                     rawTotal += summary.length();
-                    int allow = Math.min(WebSearchTool.MAX_SUMMARY_CHARS, budget);
+                    int allow = Math.min(Limits.searchSummaryChars, budget);
                     if (allow <= 0) {
                         summary = "";
                     } else if (summary.length() > allow) {
@@ -105,7 +105,7 @@ public class TavilyTool {
             result.put("results", out);
             LogUtil.i(TAG, "search <- %d results, summary %d -> %d chars (per=%d, total=%d)",
                     out.length(), rawTotal, keptTotal,
-                    WebSearchTool.MAX_SUMMARY_CHARS, WebSearchTool.MAX_TOTAL_SUMMARY_CHARS);
+                    Limits.searchSummaryChars, Limits.searchTotalSummaryChars);
             return result.toString();
         } catch (Exception e) {
             LogUtil.e(TAG, "search failed: " + e.getMessage(), e);

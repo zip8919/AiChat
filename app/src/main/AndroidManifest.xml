@@ -83,5 +83,43 @@
             android:exported="false"
             android:configChanges="screenSize|orientation|keyboardHidden"/>
 
+        <activity
+            android:label="使用统计"
+            android:name="xyz.zip8919.app.aichat.StatsActivity"
+            android:exported="false"
+            android:configChanges="screenSize|orientation|keyboardHidden"/>
+
+        <activity
+            android:label="存储空间"
+            android:name="xyz.zip8919.app.aichat.StorageActivity"
+            android:exported="false"
+            android:configChanges="screenSize|orientation|keyboardHidden"/>
+
+        <activity
+            android:label="图片附件"
+            android:name="xyz.zip8919.app.aichat.StorageAttachmentsActivity"
+            android:exported="false"
+            android:configChanges="screenSize|orientation|keyboardHidden"/>
+
+        <activity
+            android:label="已保存文件"
+            android:name="xyz.zip8919.app.aichat.StorageFilesActivity"
+            android:exported="false"
+            android:configChanges="screenSize|orientation|keyboardHidden"/>
+
+        <!-- 相机输出：只暴露 cache/camera 下一个文件，靠 Intent 临时写授权，不对外开放 -->
+        <provider
+            android:name=".CameraOutputProvider"
+            android:authorities="${applicationId}.camera"
+            android:exported="false"
+            android:grantUriPermissions="true"/>
+
+        <!-- 文件外发：exports / attachments 两个目录的只读出口，用于第三方应用打开与分享 -->
+        <provider
+            android:name=".FilePathProvider"
+            android:authorities="${applicationId}.files"
+            android:exported="false"
+            android:grantUriPermissions="true"/>
+
     </application>
 </manifest>

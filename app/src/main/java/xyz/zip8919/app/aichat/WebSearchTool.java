@@ -32,11 +32,8 @@ public class WebSearchTool {
     private static final String SEARCH_PATH = "/v1/tools/search";
     private static final String FETCH_PATH = "/v1/tools/fetch";
     private static final int DEFAULT_COUNT = 5;
-    private static final int MAX_COUNT = 10;
-    /** 单条搜索摘要的上限（字符）：摘要会一次性进入上下文，不裁剪太费 token。 */
-    static final int MAX_SUMMARY_CHARS = 1200;
-    /** 一次搜索内所有条目摘要的合计上限（字符），超出部分只保留标题与链接。 */
-    static final int MAX_TOTAL_SUMMARY_CHARS = 6000;
+    // 搜索条数与摘要长度上限已搬进设置（见 Limits.searchMaxCount /
+    // searchSummaryChars / searchTotalSummaryChars），默认值仍是 10 / 1200 / 6000
     /**
      * 仅作为网络读取的 OOM / 内存保护上限（1MB），不是业务截断：
      * web_fetch 的正文仍完整传给模型、完整保存、完整展示。
@@ -83,9 +80,9 @@ public class WebSearchTool {
             searchProps.put("query", query);
             JSONObject count = new JSONObject();
             count.put("type", "integer");
-            count.put("description", "返回结果条数，1-10，默认 5");
+            count.put("description", "返回结果条数，1-" + Limits.searchMaxCount + "，默认 5");
             count.put("minimum", 1);
-            count.put("maximum", MAX_COUNT);
+            count.put("maximum", Limits.searchMaxCount);
             searchProps.put("count", count);
             searchParams.put("properties", searchProps);
             searchParams.put("required", new JSONArray().put("query"));
@@ -273,7 +270,7 @@ public class WebSearchTool {
                 if (query.length() > 128) query = query.substring(0, 128);
                 int count = args == null ? DEFAULT_COUNT : args.optInt("count", DEFAULT_COUNT);
                 if (count < 1) count = 1;
-                if (count > MAX_COUNT) count = MAX_COUNT;
+                if (count > Limits.searchMaxCount) count = Limits.searchMaxCount;
                 if (useTavily) {
                     if (!TavilyTool.hasApiKey(tavilyKey)) {
                         return error("未配置 Tavily API Key，请到设置页填写后重试。");
@@ -347,7 +344,7 @@ public class WebSearchTool {
         int keptTotal = 0;
         // 单次搜索的摘要总预算：几条结果叠加后仍可能撑爆上下文，
         // 所以在「单条上限」之外再加一层总量控制，超出的条目只保留标题与链接。
-        int budget = MAX_TOTAL_SUMMARY_CHARS;
+        int budget = Limits.searchTotalSummaryChars;
         if (results != null) {
             for (int i = 0; i < results.length(); i++) {
                 JSONObject item = results.optJSONObject(i);
@@ -358,7 +355,7 @@ public class WebSearchTool {
                 String summary = item.optString("summary", "");
                 if (summary.length() == 0) summary = item.optString("snippet", "");
                 rawTotal += summary.length();
-                int allow = Math.min(MAX_SUMMARY_CHARS, budget);
+                int allow = Math.min(Limits.searchSummaryChars, budget);
                 if (allow <= 0) {
                     summary = "";
                 } else if (summary.length() > allow) {
@@ -381,7 +378,7 @@ public class WebSearchTool {
         result.put("query", query);
         result.put("results", out);
         LogUtil.i(TAG, "search <- %d results, summary %d -> %d chars (per=%d, total=%d)",
-                out.length(), rawTotal, keptTotal, MAX_SUMMARY_CHARS, MAX_TOTAL_SUMMARY_CHARS);
+                out.length(), rawTotal, keptTotal, Limits.searchSummaryChars, Limits.searchTotalSummaryChars);
         return result.toString();
     }
 
@@ -464,8 +461,16 @@ public class WebSearchTool {
                 if (args.has("count")) display.put("count", args.optInt("count", 0));
             }
 
-            JSONObject result = toolResult == null || toolResult.trim().length() == 0
-                    ? null : new JSONObject(toolResult);
+            JSONObject result = null;
+            String rawResult = "";
+            if (toolResult != null && toolResult.trim().length() > 0) {
+                try {
+                    result = new JSONObject(toolResult.trim());
+                } catch (Exception ignored) {
+                    // HTML / 纯文本输出不是 JSON：整段当结果正文展示，别让卡片直接消失
+                    rawResult = toolResult.trim();
+                }
+            }
             if (result != null && result.has("error") && !result.isNull("error")) {
                 display.put("error", sanitizeMarker(result.optString("error", ""), 400));
             } else if (TOOL_FETCH.equals(toolName)) {
@@ -523,7 +528,38 @@ public class WebSearchTool {
                         }
                     }
                     display.put("results", rows);
+                    if (rows.length() == 0) {
+                        // HTML 执行 / HTTP 请求这类工具没有检索结果，把原始输出带进卡片，
+                        // 否则渲染层会退化成「搜索（0 条）」。
+                        String fallback = result.optString("content", "");
+                        if (fallback.length() == 0) fallback = result.optString("text", "");
+                        if (fallback.length() == 0) fallback = result.optString("output", "");
+                        if (fallback.length() == 0) fallback = result.optString("html", "");
+                        if (fallback.length() == 0) fallback = result.toString();
+                        // 调用结果是 JSON 时缩进美化（.tool-fetch-content 是 pre-wrap，
+                        // 换行能保留）。被截断的响应体或超长展示截断都会让 JSON 不完整：
+                        // prettyJson 返回 null 就退回原文并标注「可能不完整」，既不
+                        // 假装是完整结果，也不因解析失败让整张卡片消失。
+                        String pretty = HttpRequestTool.prettyJson(fallback);
+                        if (pretty != null) fallback = pretty;
+                        // 只有 http 工具同步放宽展示上限，其他工具维持原来的 4000，
+                        // 避免这次改动扩散到无关工具的结果展示。
+                        int max = HttpRequestTool.TOOL_HTTP.equals(toolName) ? 32000 : 4000;
+                        boolean cut = fallback.length() > max;
+                        if (cut) fallback = fallback.substring(0, max);
+                        StringBuilder note = new StringBuilder();
+                        if (result.optBoolean("truncated", false)) {
+                            note.append("\n（HTTP 响应已按 32 KB 截断，body 可能不是完整 JSON）");
+                        }
+                        if (cut) {
+                            note.append("\n（结果过长，展示已截断，JSON 可能不完整）");
+                        }
+                        display.put("content", sanitizeMarker(fallback + note.toString()));
+                    }
                 }
+            }
+            if (result == null && rawResult.length() > 0) {
+                display.put("content", sanitizeMarker(rawResult, 4000));
             }
 
             return TRACE_START + display.toString() + TRACE_END;

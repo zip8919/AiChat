@@ -10,7 +10,11 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.res.Configuration;
 import android.database.Cursor;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.drawable.BitmapDrawable;
 import android.net.Uri;
+import android.util.Base64;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
@@ -45,6 +49,7 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.json.JSONArray;
@@ -52,6 +57,8 @@ import org.json.JSONObject;
 
 public class MainActivity extends Activity {
     private static final String TAG = "MainActivity";
+    /** 拍照目标文件跨 Activity 重建的保存键。 */
+    private static final String STATE_CAMERA_OUTPUT = "camera_output_path";
 
     /**
      * Height of the viewer overlay toolbar (viewer_top_left / viewer_close are
@@ -79,16 +86,7 @@ public class MainActivity extends Activity {
     private static final int MENU_ATTACH_CAMERA = 4;
     /** 单文件上限 10 MB：超过直接报错，不截断——半截代码更难排查。 */
     private static final int MAX_IMPORT_BYTES = 10 * 1024 * 1024;
-    /** 单条消息最多挂几个附件。 */
-    private static final int MAX_ATTACHMENTS = 5;
-    /**
-     * 所有附件合计字符上限（Java String 是 UTF-16，1 字符 ≈ 2 字节堆）。
-     *
-     * <p>20M 字符 = 40 MB 的 char[]，再加上解码时的 byte[] 与拼装请求体的副本，
-     * 峰值接近 70 MB——这已经是 API 18 老设备（堆上限常见 128 MB）能承受的边界。
-     * 上限不是为了限制用法，是为了别让用户在点发送的那一刻看到 OOM。
-     */
-    private static final int MAX_ATTACHMENT_TOTAL = 20 * 1000 * 1000;
+    // 单次附件数与合计字符上限已搬进设置，见 Limits.maxAttachments / Limits.attachTotalChars
 
     /**
      * 待发送附件（仅输入框这一侧；已发送的附件在 {@link Message#attachments}）。
@@ -113,6 +111,15 @@ public class MainActivity extends Activity {
     private ImageButton sendButton;
     private ImageButton plusButton;
     private ImageButton expandButton;
+    /** 清空输入（输入框文字 + 待发附件），单击弹确认框。 */
+    private TextView clearInputButton;
+    /**
+     * 输入框上方那条动作栏（清空 / 全屏）。
+     * 整条只在「有文字或有附件」时出现：空输入时它完全让位，输入框拿回全部宽度。
+     */
+    private View inputActionBar;
+    /** 回到底部气泡当前是否可见。JS 每秒能调几十次，靠它去重。 */
+    private volatile boolean scrollBubbleVisible;
     /** 附件条的滚动外壳（GONE 时整条隐藏）与内部容器。 */
     private View attachmentScroll;
     private LinearLayout attachmentBar;
@@ -178,10 +185,21 @@ public class MainActivity extends Activity {
 
     private String currentModel;
     private String systemPrompt;
+    /** 输入框上方的会话用量状态栏，见 {@link #updateUsageBar()}。 */
+    private TextView usageBar;
     /** 上次手动选择的模型，Activity 重建后用它恢复，而不是回落到默认模型。 */
     private static final String KEY_SELECTED_MODEL = "selected_model";
 
     @Override
+    protected void onSaveInstanceState(Bundle outState) {
+        super.onSaveInstanceState(outState);
+        // 相机是内存密集操作，宿主 Activity 常被系统回收。不把目标文件路径存下来，
+        // 拍完回来 cameraOutputFile 就是 null，表现为「点了确认什么都没发生」。
+        if (cameraOutputFile != null) {
+            outState.putString(STATE_CAMERA_OUTPUT, cameraOutputFile.getAbsolutePath());
+        }
+    }
+
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         LogUtil.ENABLED = SettingsActivity.isLogEnabled(this);
@@ -189,7 +207,16 @@ public class MainActivity extends Activity {
                 savedInstanceState, LogUtil.thread());
         setContentView(R.layout.activity_main);
 
+        if (savedInstanceState != null) {
+            String pendingShot = savedInstanceState.getString(STATE_CAMERA_OUTPUT);
+            if (pendingShot != null && pendingShot.length() > 0) {
+                cameraOutputFile = new File(pendingShot);
+            }
+        }
+
         this.prefs = getSharedPreferences(PREFS_NAME, 0);
+        // 先刷一遍运行期上限：附件、工具、搜索都要读它，晚于任何一次附加就白改了
+        Limits.reload(getApplicationContext());
         this.storageManager = StorageManager.getInstance(this);
         this.configManager = ConfigManager.getInstance();
         this.conversationManager = ConversationManager.getInstance();
@@ -206,6 +233,20 @@ public class MainActivity extends Activity {
         }
 
         configManager.load();
+        // 附件目录搬过一次家（内部私有 → 数据目录）。迁移放后台，绝不阻塞首屏；
+        // 没搬完也能用：读取时按文件名兜底解析（AttachmentFiles.resolve）
+        new Thread(new Runnable() {
+            public void run() {
+                try {
+                    AttachmentFiles.migrateLegacy();
+                } catch (Throwable t) {
+                    LogUtil.w(TAG, "attachment migration failed: %s", t.getMessage());
+                }
+            }
+        }, "aichat-att-migrate").start();
+        // 统计必须在 StorageManager 初始化之后：它要从 basePath 读 stats.json，
+        // 早于存储初始化会读到空、随后把磁盘上的累计数据覆盖掉
+        UsageStats.init(getApplicationContext());
         LogUtil.i(TAG, "config loaded: providers=%d, models=%d, defaultModel=%s, thinking=%s/%s",
                 configManager.getProviders().size(), configManager.getModels().size(),
                 configManager.getDefaultModel(), configManager.isThinkingEnabled(),
@@ -329,6 +370,7 @@ public class MainActivity extends Activity {
         bindTopBar();
         bindSendButton();
         bindScrollButton();
+        bindClearButton();
         bindThinkingSpinner();
         refreshModelSpinner();
     }
@@ -338,10 +380,13 @@ public class MainActivity extends Activity {
         sendButton = (ImageButton) findViewById(R.id.send_button);
         plusButton = (ImageButton) findViewById(R.id.plus_button);
         expandButton = (ImageButton) findViewById(R.id.expand_button);
+        clearInputButton = (TextView) findViewById(R.id.clear_input_button);
+        inputActionBar = findViewById(R.id.input_action_bar);
         attachmentScroll = findViewById(R.id.attachment_scroll);
         attachmentBar = (LinearLayout) findViewById(R.id.attachment_bar);
         modelSpinner = (Spinner) findViewById(R.id.model_spinner);
         thinkingSpinner = (Spinner) findViewById(R.id.thinking_spinner);
+        usageBar = (TextView) findViewById(R.id.usage_bar);
     }
 
     private void bindWebView() {
@@ -359,6 +404,14 @@ public class MainActivity extends Activity {
             public boolean shouldOverrideUrlLoading(WebView view, String url) {
                 // 链接一律不跳转：聊天页里的外链由消息卡片自己处理
                 return true;
+            }
+
+            @Override
+            public void onPageFinished(WebView view, String url) {
+                // 整页重建后强制重绘一次。硬件加速下合成层偶发不主动刷新，DOM 里
+                // 内容齐全却没画出来，直到用户点开菜单/弹对话框触发窗口重绘才可见。
+                // invalidate 是最轻的兜底，不改 DOM、不引入闪烁。
+                view.invalidate();
             }
         });
     }
@@ -525,8 +578,18 @@ public class MainActivity extends Activity {
                 stopping ? R.string.stop_generating : R.string.send));
         // 空闲且既没输入也没附件时禁用，避免「点了没反应」的困惑
         sendButton.setEnabled(stopping || canSend());
+        // 动作栏整条显隐：空输入时彻底隐藏，输入框拿回全部宽度——这也是把清空/全屏
+        // 从输入行里挪出来的原因。两个子按钮再各自控制，避免「有附件没文字」时
+        // 摆着一个点了没意义的全屏键。
+        boolean hasAnything = hasText || hasAttachment;
+        if (inputActionBar != null) {
+            inputActionBar.setVisibility(hasAnything ? View.VISIBLE : View.GONE);
+        }
         if (expandButton != null) {
             expandButton.setVisibility(hasText ? View.VISIBLE : View.GONE);
+        }
+        if (clearInputButton != null) {
+            clearInputButton.setVisibility(hasAnything ? View.VISIBLE : View.GONE);
         }
     }
 
@@ -605,8 +668,13 @@ public class MainActivity extends Activity {
      *
      * <p>用 {@code ACTION_IMAGE_CAPTURE} + {@code EXTRA_OUTPUT} 存原图，而不是读
      * {@code data} 里那张缩略图：某些 ROM 在 data 里回的是 160×120 的预览图，
-     * 拍完一看全是马赛克。API 18 没有 FileProvider（项目不带 support 库），
-     * 只能给 {@code file://}；targetSdk 18 不会因此抛 FileUriExposedException。
+     * 拍完一看全是马赛克。
+     *
+     * <p><b>输出必须走 {@code content://}（{@link CameraOutputProvider}）</b>：
+     * 相机是另一个 uid，{@code file://} 指向 app 私有 cache 目录它根本没有写权限，
+     * 文件永远不会出现，每次都会掉回 data 里的预览图——这才是「拍照总是模糊」的
+     * 根因，不是某个 ROM 的偶发行为。项目不带 support 库，所以自己实现了一个只
+     * 暴露单个输出文件的极小 Provider，而不是引入 androidx 的 FileProvider。
      */
     private void takePhoto() {
         Intent intent = new Intent(android.provider.MediaStore.ACTION_IMAGE_CAPTURE);
@@ -619,12 +687,46 @@ public class MainActivity extends Activity {
             if (!dir.exists() && !dir.mkdirs()) throw new Exception("无法创建缓存目录");
             sweepOldCameraFiles(dir);
             cameraOutputFile = new File(dir, "shot-" + System.currentTimeMillis() + ".jpg");
-            intent.putExtra(android.provider.MediaStore.EXTRA_OUTPUT,
-                    Uri.fromFile(cameraOutputFile));
+            Uri outUri = CameraOutputProvider.uriFor(cameraOutputFile.getName());
+            intent.putExtra(android.provider.MediaStore.EXTRA_OUTPUT, outUri);
+            intent.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+            // 部分相机只从 ClipData 取临时授权，不认 EXTRA_OUTPUT 上的 flag
+            intent.setClipData(ClipData.newRawUri("", outUri));
             startActivityForResult(intent, REQUEST_TAKE_PHOTO);
         } catch (Exception e) {
             LogUtil.w(TAG, "takePhoto failed: %s", e.getMessage());
             Toast.makeText(this, "启动相机失败", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    /** 少数相机忽略 EXTRA_OUTPUT，只在 data 里回一张缩略图；有总比没有强。 */
+    private Bitmap extractInlinePhoto(Intent data) {
+        if (data == null || data.getExtras() == null) return null;
+        try {
+            Object o = data.getExtras().get("data");
+            return o instanceof Bitmap ? (Bitmap) o : null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** 把 data 里的缩略图落到私有缓存，后续仍走同一条裁剪链路。 */
+    private File saveInlinePhoto(Bitmap bmp) {
+        FileOutputStream fos = null;
+        try {
+            File dir = new File(getCacheDir(), "camera");
+            if (!dir.exists() && !dir.mkdirs()) return null;
+            File out = new File(dir, "shot-" + System.currentTimeMillis() + ".jpg");
+            fos = new FileOutputStream(out);
+            bmp.compress(Bitmap.CompressFormat.JPEG, 92, fos);
+            fos.flush();
+            cameraOutputFile = out;
+            return out.length() > 0 ? out : null;
+        } catch (Exception e) {
+            LogUtil.w(TAG, "saveInlinePhoto failed: %s", e.getMessage());
+            return null;
+        } finally {
+            if (fos != null) { try { fos.close(); } catch (Exception ignored) { } }
         }
     }
 
@@ -657,7 +759,7 @@ public class MainActivity extends Activity {
                         throw new Exception("这不是图片文件");
                     }
                     staged = AttachmentFiles.stageToCache(MainActivity.this, picked,
-                            AttachmentFiles.MAX_IMAGE_BYTES);
+                            AttachmentFiles.maxImageBytes());
                 } catch (Exception e) {
                     err = e.getMessage();
                 } catch (OutOfMemoryError e) {
@@ -732,7 +834,7 @@ public class MainActivity extends Activity {
                 String err = null;
                 try {
                     file = AttachmentFiles.importUrl(MainActivity.this, url,
-                            AttachmentFiles.MAX_IMAGE_BYTES);
+                            AttachmentFiles.maxImageBytes());
                 } catch (Exception e) {
                     err = e.getMessage();
                 } catch (OutOfMemoryError e) {
@@ -749,7 +851,12 @@ public class MainActivity extends Activity {
                                     Toast.LENGTH_LONG).show();
                             return;
                         }
-                        addAttachment(loaded);
+                        // 链接下载的图片同样进裁剪页，与拍照/相册统一一条路
+                        if (loaded.isImage() && loaded.path.length() > 0) {
+                            startCrop(loaded.path, loaded.name);
+                        } else {
+                            addAttachment(loaded);
+                        }
                     }
                 });
             }
@@ -828,7 +935,7 @@ public class MainActivity extends Activity {
                         throw new Exception("这不是图片文件");
                     }
                     file = AttachmentFiles.importImage(MainActivity.this, uri, name,
-                            AttachmentFiles.MAX_IMAGE_BYTES);
+                            AttachmentFiles.maxImageBytes());
                 } catch (Exception e) {
                     err = e.getMessage();
                 } catch (OutOfMemoryError e) {
@@ -882,17 +989,19 @@ public class MainActivity extends Activity {
     }
 
     private void addAttachment(AttachmentText.File f) {
-        if (pendingAttachments.size() >= MAX_ATTACHMENTS) {
-            Toast.makeText(this, "最多附加 " + MAX_ATTACHMENTS + " 个文件", Toast.LENGTH_SHORT).show();
+        // 上限来自设置（Limits），不再写死：不同机型内存差一个数量级
+        if (pendingAttachments.size() >= Limits.maxAttachments) {
+            Toast.makeText(this, "最多附加 " + Limits.maxAttachments + " 个文件",
+                    Toast.LENGTH_SHORT).show();
             return;
         }
         int total = f.chars();
         for (int i = 0; i < pendingAttachments.size(); i++) {
             total += pendingAttachments.get(i).chars();
         }
-        if (total > MAX_ATTACHMENT_TOTAL) {
+        if (total > Limits.attachTotalChars) {
             Toast.makeText(this,
-                    "附件合计超过 " + (MAX_ATTACHMENT_TOTAL / 1000000) + "M 字符，老设备内存扛不住",
+                    "附件合计超过 " + (Limits.attachTotalChars / 10000) + " 万字符，老设备内存扛不住",
                     Toast.LENGTH_LONG).show();
             return;
         }
@@ -938,6 +1047,18 @@ public class MainActivity extends Activity {
             chip.setSingleLine(false);
             chip.setMaxLines(2);
             chip.setContentDescription("移除附件 " + a.name);
+            // 图片附件在输入框上方直接给缩略图：thumb 是导入时生成的 data URI，
+            // 解码失败就退回原来的纯文字卡片，绝不让整条附件挂掉。
+            if (a.isImage() && a.thumb.length() > 0) {
+                Bitmap thumbBmp = decodeThumb(a.thumb);
+                if (thumbBmp != null) {
+                    BitmapDrawable d = new BitmapDrawable(getResources(), thumbBmp);
+                    int side = dp(36);
+                    d.setBounds(0, 0, side, side);
+                    chip.setCompoundDrawables(d, null, null, null);
+                    chip.setCompoundDrawablePadding(dp(6));
+                }
+            }
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
             lp.rightMargin = gap;
@@ -952,6 +1073,21 @@ public class MainActivity extends Activity {
                 }
             });
             attachmentBar.addView(chip);
+        }
+    }
+
+    /** 附件条缩略图：base64 data URI → Bitmap；失败返回 null，文字卡片照常显示。 */
+    private Bitmap decodeThumb(String dataUri) {
+        try {
+            int comma = dataUri.indexOf(',');
+            if (comma < 0) return null;
+            byte[] bytes = Base64.decode(dataUri.substring(comma + 1), Base64.DEFAULT);
+            return BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+        } catch (Exception e) {
+            LogUtil.w(TAG, "decodeThumb failed: %s", e.getMessage());
+            return null;
+        } catch (OutOfMemoryError e) {
+            return null;
         }
     }
 
@@ -1006,37 +1142,49 @@ public class MainActivity extends Activity {
         }
     }
 
-    /** 回到底部：点击滚到底，长按 600ms 清空输入框。 */
+    /**
+     * 回到底部：单击滚到底。
+     *
+     * <p>原来这里挂着「点击滚到底 / 长按 600ms 清空输入框」，两个毫不相关的
+     * 功能挤在同一个 36dp 的圆里，长按还是一次性不可撤销的破坏性操作。
+     * 清空已经挪到输入栏的独立按钮上（带确认框），这里只做一件事。
+     */
     private void bindScrollButton() {
-        final Button scrollBtn = (Button) findViewById(R.id.scroll_to_bottom_button);
-        scrollBtn.setOnTouchListener(new View.OnTouchListener() {
-            private Runnable longPressRunnable;
-            private boolean longPressed = false;
+        findViewById(R.id.scroll_to_bottom_button).setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                LogUtil.d(TAG, "click: scroll_to_bottom");
+                conversationWebView.loadUrl("javascript:smartScrollToBottom(true)");
+            }
+        });
+    }
 
-            @Override
-            public boolean onTouch(View v, MotionEvent event) {
-                switch (event.getAction()) {
-                    case MotionEvent.ACTION_DOWN:
-                        longPressed = false;
-                        longPressRunnable = new Runnable() {
-                            public void run() {
-                                longPressed = true;
+    /**
+     * 清空输入：文字和待发附件一起清，先弹确认框。
+     *
+     * <p>不做「点了就清」：输入框里可能是刚粘过来的几千字报错，清空是不可撤销的，
+     * 误触一次就要重新找素材。确认框里明确写清会连附件一起清掉。
+     */
+    private void bindClearButton() {
+        if (clearInputButton == null) return;
+        clearInputButton.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                final boolean hasAttachment = !pendingAttachments.isEmpty();
+                LogUtil.d(TAG, "click: clear_input, attachment=%s", hasAttachment);
+                new AlertDialog.Builder(MainActivity.this)
+                        .setTitle("清空输入")
+                        .setMessage(hasAttachment
+                                ? "将清空输入框中的文字，并移除 " + pendingAttachments.size()
+                                        + " 个待发送附件。清空后无法撤销。"
+                                : "将清空输入框中的文字。清空后无法撤销。")
+                        .setPositiveButton("清空", new DialogInterface.OnClickListener() {
+                            public void onClick(DialogInterface d, int w) {
                                 inputEditText.setText("");
+                                clearAttachments();
+                                refreshSendButton();
                             }
-                        };
-                        handler.postDelayed(longPressRunnable, 600);
-                        return false;
-                    case MotionEvent.ACTION_UP:
-                        handler.removeCallbacks(longPressRunnable);
-                        if (!longPressed) {
-                            conversationWebView.loadUrl("javascript:smartScrollToBottom(true)");
-                        }
-                        return false;
-                    case MotionEvent.ACTION_CANCEL:
-                        handler.removeCallbacks(longPressRunnable);
-                        return false;
-                }
-                return false;
+                        })
+                        .setNegativeButton("取消", null)
+                        .show();
             }
         });
     }
@@ -1162,6 +1310,32 @@ public class MainActivity extends Activity {
                 systemPrompt == null ? 0 : systemPrompt.length(), LogUtil.preview(systemPrompt, 120));
     }
 
+    /**
+     * 会话时间注入的后缀。第一次请求时记下时间并落盘，之后原样复用。
+     *
+     * <p>这就是「中途改系统提示词，时间不跟着变」的关键：每次请求都会重新读设置里的
+     * 提示词，但时间是会话自己的字段，不参与重新计算。
+     */
+    private String conversationTimeSuffix() {
+        Conversation conv = conversationManager.getCurrentConversation();
+        if (conv == null) return "";
+        boolean hasHistory = conv.messages != null && conv.messages.size() > 1;
+        boolean hadStamp = conv.firstRequestStamp != null
+                && conv.firstRequestStamp.length() > 0;
+        // 刚追加的用户消息让 size 至少为 1，所以「已有历史」要 > 1：
+        // 只有这一条说明是新会话，时间应该就是现在
+        String stamp = ConvTime.ensure(conv, hasHistory);
+        // 只有第一次写入时才落盘：每次请求都存一遍会把 updatedAt 一直往后推，
+        // 历史列表的排序会变成「谁刚发过消息谁靠前」以外的噪声
+        if (!hadStamp) {
+            conversationManager.saveCurrentConversation();
+            // 会话数按「第一次真正使用」计，且只算真正的新会话：
+            // 升级后继续用老会话不能算成「今天新建了一个会话」
+            if (!hasHistory) UsageStats.get().onConversationCreated();
+        }
+        return ConvTime.promptSuffix(stamp);
+    }
+
     private void initConversation() {
         Conversation conv = conversationManager.getCurrentConversation();
         messages = conv.messages;
@@ -1257,6 +1431,7 @@ public class MainActivity extends Activity {
                             // finalizeLast 被代数守卫跳过时占位 div 的 data-idx 仍为 -1，
                             // removeRangeFrom(idx>=0) 删不掉它，这里补删未定稿的占位 div
                             removeUnfinalizedAiDiv();
+                            updateUsageBar();
                             // 一个字都没生成：重试入口挂到用户消息上，否则没有任何可点的东西
                             int userIdx = lastUserIndexBefore(messages.size());
                             if (userIdx >= 0) {
@@ -1278,8 +1453,46 @@ public class MainActivity extends Activity {
                             // 否则用户只能重新打字，已生成的内容无法续上
                             lastMsg.sendFailed = true;
                             lastMsg.errorDetail = "本次回复已被手动中断。";
+                            // 打上中断标记：渲染层据此不再对残缺回答估算 token。
+                            // 只靠「totalTokens==0」判断不够——端点没给 usage 的
+                            // 正常回复也是 0，那样会把好数据也一起屏蔽掉。
+                            lastMsg.interrupted = true;
                             LogUtil.d(TAG, "interrupt: marking AI msg as interrupted, len=%d", content.length());
+
+                            // 中断的用量也进统计，但标记为估算：输入侧那几万 token 是真的
+                            // 消耗掉了（尤其带附件的一轮），统计里一条都不记，用户会以为
+                            // 「打断了就不花钱」。输出侧按当前已生成的字数估。
+                            String src = lastMsg.apiText != null && lastMsg.apiText.length() > 0
+                                    ? lastMsg.apiText : lastMsg.content;
+                            int estCt = MessageHtmlRenderer.estimateTokens(src);
+                            // 输入侧必须算上历史上下文：这个请求是带着前文发出去的，
+                            // 只报「这次生成了多少」等于把最贵的那部分藏起来。
+                            // 已完成轮次（工具轮）的真实用量在 promptTokens 里，直接累加：
+                            // 每一轮都按当时的全部上下文计费，相加就是真实口径。
+                            int estPt = estimatePromptBefore(lastIdx);
+                            if (estCt > 0 || estPt > 0) {
+                                lastMsg.promptTokens += estPt;
+                                lastMsg.completionTokens += estCt;
+                                lastMsg.totalTokens = lastMsg.promptTokens + lastMsg.completionTokens;
+                                lastMsg.tokensEstimated = true;
+                                if (lastMsg.rounds == null) {
+                                    lastMsg.rounds = new ArrayList<Message.RoundUsage>();
+                                }
+                                lastMsg.rounds.add(new Message.RoundUsage(estPt, estCt, 0,
+                                        Math.max(0, System.currentTimeMillis() - lastMsg.timestamp),
+                                        true));
+                                lastMsg.requestCount = Math.max(1, lastMsg.requestCount + 1);
+                                UsageStats.get().onUsage(currentModel, currentProviderName(),
+                                        estPt, estCt, 0,
+                                        Math.max(0, System.currentTimeMillis() - lastMsg.timestamp),
+                                        true);
+                            }
                             updateAiContent(lastMsg.content);
+                            // meta 里的 token 行要立刻重画：打断前那一版是按流式内容算的，
+                            // 现在正文末尾多了「(已打断)」，且估算口径要带上 ~ 和中断标记
+                            webViewEvalJs("updateLastMeta('"
+                                    + jsEscape(MessageHtmlRenderer.renderMeta(lastMsg)) + "')");
+                            updateUsageBar();
                             attachInterruptRetry(lastIdx);
                             conversationManager.saveCurrentConversation();
                         }
@@ -1289,6 +1502,56 @@ public class MainActivity extends Activity {
                 }
             }
         });
+    }
+
+    /**
+     * 当前选中服务商的显示名，只给统计用。
+     *
+     * <p>拿不到就返回空串（统计里归到「未知」），不抛异常：统计是旁路，
+     * 没理由因为下拉框还没初始化就把一次中断处理整个打断。
+     */
+    private String currentProviderName() {
+        try {
+            int pos = modelSpinner == null ? -1 : modelSpinner.getSelectedItemPosition();
+            if (pos < 0 || availableModels == null || pos >= availableModels.size()) return "";
+            ProviderInfo p = configManager.getProvider(availableModels.get(pos).provider);
+            return p == null || p.name == null ? "" : p.name;
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    /**
+     * 估算「这条 AI 消息之前」的输入侧用量：系统提示词 + 全部历史 + 附件正文 + 工具历史。
+     *
+     * <p>只给打断场景兜底用。真实 usage 拿不到时，输入侧也得有个数——带附件的一轮
+     * 常常几万 token，漏掉它会让「这次大概花了多少」低估一个数量级。
+     *
+     * <p>口径刻意与 {@code ChatTransport.buildRequestBody} 对齐：历史优先用
+     * {@code apiText}（真正发出去的那份），没有才回退 content；工具历史也逐字计入，
+     * 它确实占上下文。每条加 8 token 是角色标记与分隔符的粗略补偿。
+     */
+    private int estimatePromptBefore(int aiIndex) {
+        int total = 0;
+        if (systemPrompt != null && systemPrompt.length() > 0) {
+            total += MessageHtmlRenderer.estimateTokens(systemPrompt);
+        }
+        int end = Math.min(aiIndex, messages.size());
+        for (int i = 0; i < end; i++) {
+            Message m = messages.get(i);
+            if (m == null) continue;
+            if (m.isUser()) {
+                total += AttachmentText.tokensOf(m);
+            } else {
+                String s = m.apiText != null && m.apiText.length() > 0 ? m.apiText : m.content;
+                total += MessageHtmlRenderer.estimateTokens(s);
+                if (m.toolHistory != null && m.toolHistory.length() > 0) {
+                    total += MessageHtmlRenderer.estimateTokens(m.toolHistory);
+                }
+            }
+            total += 8;
+        }
+        return total;
     }
 
     /**
@@ -1322,37 +1585,74 @@ public class MainActivity extends Activity {
         startActivity(new Intent(this, ToolsActivity.class));
     }
 
+    /**
+     * 存储页的「查看」用它切会话：带 {@code FLAG_ACTIVITY_REORDER_TO_FRONT}，
+     * 不会新开一个主界面实例，返回键落回原来的管理页。
+     */
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        String conversationId = intent == null ? null : intent.getStringExtra("conversation_id");
+        LogUtil.d(TAG, "onNewIntent: conversation_id=%s", conversationId);
+        if (conversationId != null) {
+            switchToConversation(conversationId);
+        }
+        // 首启引导还没确认时不能直接发：否则从别的应用「发送到 AiChat」，
+        // 消息会在引导弹窗背后被发出去。等用户点「同意」时再统一处理 getIntent()。
+        if (!prefs.getBoolean(KEY_FIRST_LAUNCH_DONE, false)) {
+            LogUtil.d(TAG, "onNewIntent deferred: first launch not confirmed");
+            return;
+        }
+        handlePromptIntent(intent);
+    }
+
+    /**
+     * 切换到指定会话。来自会话管理页（startActivityForResult）与存储页（onNewIntent）共用。
+     *
+     * <p>已经是当前会话就直接返回：重复走一遍会中断正在进行的请求、
+     * 丢掉排队消息，用户只是点了「查看」，不该付出这个代价。
+     */
+    private void switchToConversation(final String conversationId) {
+        Conversation cur = conversationManager.getCurrentConversation();
+        if (cur != null && conversationId.equals(cur.id)) {
+            LogUtil.i(TAG, "switchToConversation: already current %s", conversationId);
+            return;
+        }
+        LogUtil.i(TAG, "switching to conversation: %s", conversationId);
+        // 排队消息属于旧会话：在 interruptRequest 派发的 drain 之前丢弃，避免发进新会话
+        if (queue != null) queue.clearAll();
+        clearAttachments();
+        if (isRequestInProgress.get()) interruptRequest();
+        dropTrailingEmptyAssistant();
+        conversationManager.saveCurrentConversation();
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                conversationManager.switchConversation(conversationId);
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        Conversation conv = conversationManager.getCurrentConversation();
+                        messages = conv.messages;
+                        LogUtil.i(TAG, "switched: id=%s title=%s messages=%d",
+                                conv.id, conv.title, messages.size());
+                        refreshWebView();
+                        Toast.makeText(MainActivity.this, "已切换到: " + conv.title,
+                                Toast.LENGTH_SHORT).show();
+                    }
+                });
+            }
+        }, "aichat-switch-conversation").start();
+    }
+
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         LogUtil.d(TAG, "onActivityResult: requestCode=%d resultCode=%d data=%s", requestCode, resultCode, data);
         if (requestCode == REQUEST_CONVERSATION_MANAGER && resultCode == RESULT_OK) {
             final String conversationId = data == null ? null : data.getStringExtra("conversation_id");
             if (conversationId != null) {
-                LogUtil.i(TAG, "switching to conversation: %s", conversationId);
-                // 排队消息属于旧会话：在 interruptRequest 派发的 drain 之前丢弃，避免发进新会话
-                if (queue != null) queue.clearAll();
-                clearAttachments();
-                if (isRequestInProgress.get()) interruptRequest();
-                dropTrailingEmptyAssistant();
-                conversationManager.saveCurrentConversation();
-                new Thread(new Runnable() {
-                    @Override
-                    public void run() {
-                        conversationManager.switchConversation(conversationId);
-                        runOnUiThread(new Runnable() {
-                            @Override
-                            public void run() {
-                                Conversation conv = conversationManager.getCurrentConversation();
-                                messages = conv.messages;
-                                LogUtil.i(TAG, "switched: id=%s title=%s messages=%d",
-                                        conv.id, conv.title, messages.size());
-                                refreshWebView();
-                                Toast.makeText(MainActivity.this, "已切换到: " + conv.title,
-                                        Toast.LENGTH_SHORT).show();
-                            }
-                        });
-                    }
-                }, "aichat-switch-conversation").start();
+                switchToConversation(conversationId);
             } else {
                 LogUtil.w(TAG, "REQUEST_CONVERSATION_MANAGER returned null conversation_id");
             }
@@ -1397,12 +1697,29 @@ public class MainActivity extends Activity {
                 LogUtil.d(TAG, "pick image cancelled or empty");
             }
         } else if (requestCode == REQUEST_TAKE_PHOTO) {
-            if (resultCode == RESULT_OK && cameraOutputFile != null
-                    && cameraOutputFile.length() > 0) {
-                LogUtil.i(TAG, "photo captured: %d bytes", cameraOutputFile.length());
-                startCrop(cameraOutputFile.getAbsolutePath(), "photo.jpg");
+            // 以「文件真的写出来了」为准，不再死卡 resultCode：不少 ROM 带 EXTRA_OUTPUT
+            // 时返回非 RESULT_OK，甚至只在 data 里回一张缩略图。静默失败是这里最糟的表现。
+            File shot = cameraOutputFile;
+            if (shot != null && shot.exists() && shot.length() > 0) {
+                LogUtil.i(TAG, "photo captured: %d bytes (resultCode=%d)",
+                        shot.length(), resultCode);
+                startCrop(shot.getAbsolutePath(), "photo.jpg");
             } else {
-                LogUtil.d(TAG, "take photo cancelled or empty");
+                Bitmap inline = extractInlinePhoto(data);
+                if (inline != null) {
+                    File saved = saveInlinePhoto(inline);
+                    if (saved != null) {
+                        LogUtil.i(TAG, "photo captured from inline thumbnail: %d bytes",
+                                saved.length());
+                        startCrop(saved.getAbsolutePath(), "photo.jpg");
+                    } else {
+                        Toast.makeText(this, "保存照片失败，请重试", Toast.LENGTH_SHORT).show();
+                    }
+                } else {
+                    LogUtil.w(TAG, "take photo produced no file (resultCode=%d)", resultCode);
+                    Toast.makeText(this, "拍照未完成或相机未返回图片，请重试",
+                            Toast.LENGTH_SHORT).show();
+                }
             }
         } else if (requestCode == REQUEST_CROP) {
             String out = data == null ? null : data.getStringExtra(CropActivity.EXTRA_OUT_PATH);
@@ -1425,19 +1742,6 @@ public class MainActivity extends Activity {
         } else {
             LogUtil.d(TAG, "onActivityResult unhandled: requestCode=%d resultCode=%d", requestCode, resultCode);
         }
-    }
-
-    @Override
-    protected void onNewIntent(Intent intent) {
-        super.onNewIntent(intent);
-        setIntent(intent);
-        // 首启引导还没确认时不能直接发：否则从别的应用「发送到 AiChat」，
-        // 消息会在引导弹窗背后被发出去。等用户点「同意」时再统一处理 getIntent()。
-        if (!prefs.getBoolean(KEY_FIRST_LAUNCH_DONE, false)) {
-            LogUtil.d(TAG, "onNewIntent deferred: first launch not confirmed");
-            return;
-        }
-        handlePromptIntent(intent);
     }
 
     private void handlePromptIntent(Intent intent) {
@@ -1526,6 +1830,9 @@ public class MainActivity extends Activity {
                 SettingsActivity.isHttpAllowPrivateHost(this));
         loadSystemPrompt();
         refreshModelSpinner();
+        // 弹对话框/切后台回来时，硬件加速合成层偶发不主动重绘，表现为
+        // 「消息要交互一下才看得见」。回到前台主动 invalidate 一次。
+        if (conversationWebView != null) conversationWebView.invalidate();
         if (expectingQuickScanResult) {
             expectingQuickScanResult = false;
             LogUtil.d(TAG, "onResume: quick-scan result expected -> loadQuickScanResult");
@@ -1665,11 +1972,19 @@ public class MainActivity extends Activity {
             return;
         }
 
+        // 记快照：从这一刻起这条消息的附件按此刻的字符预算发出去了。
+        // 必须在渲染附件卡片之前——卡片上的「已截断 M / N」直接读这个快照，
+        // 之后再改设置也不会回头改写它；只有用户重发/重试这条消息才会重新记。
+        AttachmentText.recordSent(files);
+
         Message userMsg = new Message(Message.ROLE_USER, input);
         // 附件正文随消息走，不再另存一份 apiText：一份正文两个副本，
         // 迟早有一处忘了同步（1.8.1 的「AI 收不到文件」就是这么来的）
         if (files != null) userMsg.attachments.addAll(files);
         messages.add(userMsg);
+        // 统计「轮次」：一条用户消息 = 一轮对话（含它触发的工具轮次）。
+        // 重新生成/续跑不新增用户消息，所以不会重复计数。
+        UsageStats.get().onRound();
         conversationManager.getCurrentConversation().touch();
         LogUtil.d(TAG, "user message appended, total messages=%d", messages.size());
 
@@ -1739,7 +2054,8 @@ public class MainActivity extends Activity {
         final boolean searchReady = webSearchEnabled
                 && (useTavily ? TavilyTool.hasApiKey(tavilyKey) : searchProvider != null);
         final String effectiveSystemPrompt =
-                WebSearchTool.appendToSystemPrompt(systemPrompt, webSearchEnabled);
+                WebSearchTool.appendToSystemPrompt(systemPrompt, webSearchEnabled)
+                        + conversationTimeSuffix();
         final boolean streamEnabled = SettingsActivity.isStreamEnabled(this);
         // 模型是否支持图片输入：只有用户勾过才发 image_url 块，否则图片只写一行说明
         final ModelInfo visionModel = configManager.getModel(currentModel);
@@ -1857,13 +2173,37 @@ public class MainActivity extends Activity {
             LogUtil.d(TAG, "trace trimmed: render base reset");
         }
 
-        public void onRetryWaiting(int attempt, int maxAttempts, long waitMs,
+        public void onRetryWaiting(int attempt, int maxAttempts, long waitMs, String reason,
                 int generation, int aiIndex) {
-            webViewEvalJs("showRetryCard(" + attempt + "," + maxAttempts + "," + waitMs + ")");
+            webViewEvalJs("showRetryCard(" + attempt + "," + maxAttempts + "," + waitMs
+                    + ",'" + jsEscape(reason) + "')");
         }
 
         public void onRetryWaitEnd() {
             webViewEvalJs("hideRetryCard()");
+        }
+
+        public void onRoundUsage(final int aiIndex, final int prompt, final int completion,
+                final int cached, final long ms) {
+            runOnUiThread(new Runnable() {
+                public void run() {
+                    if (aiIndex < 0 || aiIndex >= messages.size()) return;
+                    Message m = messages.get(aiIndex);
+                    if (m == null || !m.isAssistant()) return;
+                    m.rounds.add(new Message.RoundUsage(prompt, completion, cached, ms, false));
+                    m.promptTokens += prompt;
+                    m.completionTokens += completion;
+                    m.cachedTokens += cached;
+                    m.totalTokens = m.promptTokens + m.completionTokens;
+                    m.requestCount++;
+                    // 流式过程中就把底部数字刷出来：用户不用等整条回复结束才看到用量。
+                    // 只在它还是最后一条时刷，避免续跑旧消息时把别人的 meta 改掉。
+                    if (aiIndex == messages.size() - 1) {
+                        webViewEvalJs("updateLastMeta('"
+                                + jsEscape(MessageHtmlRenderer.renderMeta(m)) + "')");
+                    }
+                }
+            });
         }
 
         public void onUsageUnsupported() {
@@ -1996,6 +2336,12 @@ public class MainActivity extends Activity {
                                 done.promptTokens = settled.promptTokens;
                                 done.completionTokens = settled.completionTokens;
                                 done.totalTokens = settled.totalTokens;
+                                // 命中数来自 usage 里的 prompt cache 字段：
+                                // 只有真拿到值才写，估算分支不能再拿它编数
+                                done.cachedTokens = settled.cachedTokens;
+                                // 工具轮次会发多次请求：round 是 0 起的轮次下标，
+                                // 加一才是这次回复真正发出去的请求数
+                                done.requestCount = settled.round + 1;
                                 // 端点没给 usage（不支持 stream_options / 关了流式）：
                                 // 用正文估一个，并标记为估算。空着不显示，用户会以为
                                 // 「这个端点根本不返回 token」，实际是没开统计。
@@ -2028,6 +2374,7 @@ public class MainActivity extends Activity {
                             webViewEvalJs("updateLastMeta('"
                                     + jsEscape(MessageHtmlRenderer.renderMeta(am)) + "')");
                             webViewEvalJs("finalizeLast(" + finalIdx + ")");
+                            updateUsageBar();
                             conversationManager.saveCurrentConversation();
                         }
                     });
@@ -2192,6 +2539,52 @@ public class MainActivity extends Activity {
 
     // ========== WebView helpers ==========
 
+    /**
+     * 会话用量状态栏：把本会话所有 AI 消息的用量累加一次。
+     *
+     * <p>只累加端点真的报过的数（含标了 {@code ~} 的估算值），不在这里二次估算：
+     * 这一行的用途是对账，编出来的数字没有对账价值。命中率分母固定用 promptTokens——
+     * 一次请求里只有输入侧能被缓存。
+     */
+    private void updateUsageBar() {
+        if (usageBar == null) return;
+        long prompt = 0, completion = 0, cached = 0, total = 0, genMs = 0;
+        int n = messages == null ? 0 : messages.size();
+        for (int i = 0; i < n; i++) {
+            Message m = messages.get(i);
+            if (m == null || !m.isAssistant()) continue;
+            if (m.promptTokens > 0) prompt += m.promptTokens;
+            if (m.completionTokens > 0) completion += m.completionTokens;
+            if (m.cachedTokens > 0) cached += m.cachedTokens;
+            if (m.totalTokens > 0) total += m.totalTokens;
+            // 打断的消息没有 finishedAt，不参与速度统计，否则会把速度拉低
+            if (m.finishedAt > m.timestamp && !m.interrupted) {
+                genMs += m.finishedAt - m.timestamp;
+            }
+        }
+        if (total <= 0 && prompt + completion > 0) total = prompt + completion;
+        if (total <= 0) {
+            usageBar.setVisibility(View.GONE);
+            return;
+        }
+        StringBuilder sb = new StringBuilder("本会话 ");
+        sb.append(MessageHtmlRenderer.formatTokens(
+                (int) Math.min(total, Integer.MAX_VALUE))).append(" tokens");
+        if (cached > 0) {
+            sb.append(" · 命中 ").append(MessageHtmlRenderer.formatTokens(
+                    (int) Math.min(cached, Integer.MAX_VALUE)));
+            if (prompt > 0) {
+                sb.append("（").append(Math.round(cached * 100f / prompt)).append("%）");
+            }
+        }
+        if (completion > 0 && genMs >= 1000) {
+            sb.append(" · ").append(String.format(Locale.US, "%.1f tok/s",
+                    completion * 1000.0 / genMs));
+        }
+        usageBar.setText(sb.toString());
+        usageBar.setVisibility(View.VISIBLE);
+    }
+
     private void refreshWebView() {
         LogUtil.d(TAG, "refreshWebView: messages=%d", messages == null ? -1 : messages.size());
         final long t0 = System.currentTimeMillis();
@@ -2221,6 +2614,7 @@ public class MainActivity extends Activity {
                         // 「已推送基准」必须作废，否则下一次 trace 渲染会误走增量
                         lastStreamTrace = "";
                         conversationWebView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null);
+                        updateUsageBar();
                         LogUtil.d(TAG, "webview reloaded: showing %d of %d messages (from=%d)",
                                 snapshot.size() - from, snapshot.size(), from);
                     }
@@ -2372,6 +2766,23 @@ public class MainActivity extends Activity {
         public void retryNow() {
             LogUtil.i(TAG, "JsBridge.retryNow: skip 429 wait");
             retryNowRequested.set(true);
+        }
+
+        /**
+         * 回到底部气泡的显隐。页面每滚一下都会调，所以这里必须去重：
+         * Chromium 30 的 scroll 事件在惯性滑动时能到每秒几十次，
+         * 每次都 setVisibility 会让主线程忙于重排。
+         */
+        @JavascriptInterface
+        public void setScrollBubble(final boolean show) {
+            if (show == scrollBubbleVisible) return;
+            scrollBubbleVisible = show;
+            handler.post(new Runnable() {
+                public void run() {
+                    View b = findViewById(R.id.scroll_to_bottom_button);
+                    if (b != null) b.setVisibility(show ? View.VISIBLE : View.GONE);
+                }
+            });
         }
 
         @JavascriptInterface
@@ -3261,7 +3672,8 @@ public class MainActivity extends Activity {
         }
         try {
             boolean webSearchEnabled = SettingsActivity.isWebSearchEnabled(this);
-            String sysPrompt = WebSearchTool.appendToSystemPrompt(systemPrompt, webSearchEnabled);
+            String sysPrompt = WebSearchTool.appendToSystemPrompt(systemPrompt, webSearchEnabled)
+                    + conversationTimeSuffix();
             List<Message> prefix = new ArrayList<Message>(messages.subList(0, pos));
             JSONArray conversation = ChatHistory.build(prefix, null, sysPrompt);
 
@@ -3345,6 +3757,10 @@ public class MainActivity extends Activity {
         // 附件要跟着重发：只复制正文的话，用户点一次「重试」，文件就从这条消息里消失了，
         // 模型下一轮也就读不到文件——这正是「附件改一下就没了」的同源问题
         if (src.attachments != null) um.attachments.addAll(src.attachments);
+        // 重试是这个功能的例外：它按此刻的配置重新发，所以快照要重记一次，
+        // 卡片随之显示新的截断量。除此之外任何路径都不许改快照。
+        // 必须在 renderMessageDiv 之前——卡片渲染直接读快照。
+        AttachmentText.recordSent(um.attachments);
         // 新建的消息 sendFailed/errorDetail 均为默认值，失败标记自然被清除
         messages.add(um);
         conversationManager.getCurrentConversation().touch();
@@ -3516,6 +3932,20 @@ public class MainActivity extends Activity {
                     copy.completionTokens = src.completionTokens;
                     copy.totalTokens = src.totalTokens;
                     copy.tokensEstimated = src.tokensEstimated;
+                    // 命中与中断标记也要带走：分支里少这两项，命中率会凭空掉、
+                    // 中断过的回答又会重新被估算出一个 token 数
+                    copy.cachedTokens = src.cachedTokens;
+                    copy.interrupted = src.interrupted;
+                    copy.requestCount = src.requestCount;
+                    // 逐轮明细是值对象，直接复制列表（不是引用），
+                    // 否则分支里再续跑一轮会改到原会话的记录
+                    if (src.rounds != null && !src.rounds.isEmpty()) {
+                        for (Message.RoundUsage r : src.rounds) {
+                            if (r == null) continue;
+                            copy.rounds.add(new Message.RoundUsage(
+                                    r.prompt, r.completion, r.cached, r.ms, r.estimated));
+                        }
+                    }
                     // 纯文本/工具历史也要一起带走，否则分支里的 AI 回复又退回「只有正文」
                     copy.apiText = src.apiText;
                     copy.toolHistory = src.toolHistory;

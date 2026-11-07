@@ -41,7 +41,28 @@ public class ConversationManagerActivity extends Activity {
     private TextView selectionCount;
     private Button selectModeButton;
     private Button selectionCancelButton;
+    private TextView sortToggle;
     private boolean selectionMode = false;
+
+    /**
+     * 是否从存储管理进入。
+     *
+     * <p>此时点击会话不再「切换过去并关页」——那样会直接回到存储页，看起来像点了没反应，
+     * 而且主界面也不在跳转链路上。改为弹出该会话的体积详情，与「看谁占空间」的语境一致。
+     */
+    private boolean fromStorage = false;
+
+    /** 从「最占空间」跳进来时要定位的会话 id。 */
+    private String highlightId;
+
+    /**
+     * 是否按体积排序。
+     *
+     * <p>只影响本页展示：排序作用在副本上，不改 ConversationManager 内部列表的顺序
+     * （那个顺序被主界面的会话切换依赖）。所以排序后删除要靠 {@link #loadConversations()}
+     * 重载，而不能靠「监听列表变短」判断删除成功。
+     */
+    private boolean sortBySize = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -49,6 +70,11 @@ public class ConversationManagerActivity extends Activity {
         setContentView(R.layout.activity_conversation_manager);
 
         this.uiState = getSharedPreferences(PREFS_NAME, 0);
+        this.fromStorage = getIntent() != null
+                && getIntent().getBooleanExtra(StorageActivity.EXTRA_FROM_STORAGE, false);
+        this.highlightId = getIntent() == null ? null
+                : getIntent().getStringExtra(StorageActivity.EXTRA_HIGHLIGHT_ID);
+        if (highlightId != null) LogUtil.i(TAG, "highlight conversation: %s", highlightId);
         this.conversationManager = ConversationManager.getInstance();
         // 此刻「当前会话」必已由主界面建立，缓存引用即可安全同步标题；
         // 之后即使在本页删掉当前会话，也不会再触发 getCurrentConversation() 的惰性创建
@@ -58,6 +84,7 @@ public class ConversationManagerActivity extends Activity {
         this.selectionCount = (TextView) findViewById(R.id.selection_count);
         this.selectModeButton = (Button) findViewById(R.id.select_mode_button);
         this.selectionCancelButton = (Button) findViewById(R.id.selection_cancel_button);
+        this.sortToggle = (TextView) findViewById(R.id.sort_toggle);
 
         initButtons();
         loadConversations();
@@ -131,6 +158,17 @@ public class ConversationManagerActivity extends Activity {
             }
         });
 
+        // 按钮文案是「下一步切到哪种」，不是「当前是什么」：
+        // 显示「按体积」时点下去就变成按体积排，不用让人猜现在的顺序。
+        sortToggle.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                sortBySize = !sortBySize;
+                sortToggle.setText(sortBySize ? "按时间" : "按体积");
+                LogUtil.d(TAG, "click: sortBySize=%s", sortBySize);
+                applySort();
+            }
+        });
+
         findViewById(R.id.selection_all_button).setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 LogUtil.d(TAG, "click: select all");
@@ -168,6 +206,10 @@ public class ConversationManagerActivity extends Activity {
                 }
                 Conversation conv = conversations.get(pos);
                 LogUtil.i(TAG, "item click: pos=%d id=%s title=%s", pos, conv.id, conv.title);
+                if (fromStorage) {
+                    showStorageDetail(conv);
+                    return;
+                }
                 // 返回本页时恢复滚动位置；冷启动/新建会话不恢复
                 restoreScrollNextTime = true;
                 Intent result = new Intent();
@@ -208,9 +250,48 @@ public class ConversationManagerActivity extends Activity {
         selectionActions.setVisibility(selectionMode ? View.VISIBLE : View.GONE);
         selectModeButton.setVisibility(selectionMode ? View.GONE : View.VISIBLE);
         selectionCancelButton.setVisibility(selectionMode ? View.VISIBLE : View.GONE);
+        if (sortToggle != null) {
+            sortToggle.setVisibility(selectionMode ? View.GONE : View.VISIBLE);
+        }
         selectionCount.setText(selectionMode
                 ? ("已选 " + (adapter == null ? 0 : adapter.getSelectedCount()) + " / " + conversations.size())
-                : "点击多选可批量删除");
+                : (fromStorage ? "点击查看占用详情，长按更多操作" : "点击多选可批量删除"));
+    }
+
+    /** 按当前模式排序。作用在副本上，不动 ConversationManager 内部列表。 */
+    private void applySort() {
+        if (conversations == null) return;
+        List<Conversation> sorted = new ArrayList<Conversation>(conversations);
+        if (sortBySize) {
+            java.util.Collections.sort(sorted, new java.util.Comparator<Conversation>() {
+                public int compare(Conversation a, Conversation b) {
+                    if (b.fileBytes > a.fileBytes) return 1;
+                    if (b.fileBytes < a.fileBytes) return -1;
+                    return 0;
+                }
+            });
+        } else {
+            java.util.Collections.sort(sorted, new java.util.Comparator<Conversation>() {
+                public int compare(Conversation a, Conversation b) {
+                    if (b.updatedAt > a.updatedAt) return 1;
+                    if (b.updatedAt < a.updatedAt) return -1;
+                    return 0;
+                }
+            });
+        }
+        conversations = sorted;
+        if (adapter != null) {
+            adapter.setConversations(conversations);
+        }
+    }
+
+    /** 按 id 找列表下标。排序后位置会变，不能用「最占空间」列表里的顺序去猜。 */
+    private int indexOfConversation(String id) {
+        if (id == null || conversations == null) return -1;
+        for (int i = 0; i < conversations.size(); i++) {
+            if (id.equals(conversations.get(i).id)) return i;
+        }
+        return -1;
     }
 
     private void confirmDeleteSelected() {
@@ -234,20 +315,19 @@ public class ConversationManagerActivity extends Activity {
 
     private void deleteSelected(List<String> ids) {
         LogUtil.i(TAG, "deleteSelected: %d ids=%s", ids.size(), ids.toString());
-        // conversationManager.deleteConversation 会就地移除它持有的同一个 List 实例（即本页的
-        // conversations），所以必须在删除前计数，不能删完再扫（那样恒为 0）
         int removed = 0;
         for (int i = 0; i < ids.size(); i++) {
-            int sizeBefore = conversations.size();
             conversationManager.deleteConversation(ids.get(i));
-            if (conversations.size() < sizeBefore) {
-                removed++;
-            }
+            removed++;
         }
-        adapter.notifyDataSetChanged();
+        // 会话文件变了，存储管理页的缓存立刻作废，否则返回后还显示旧的「已用」
+        StorageActivity.invalidateCache();
         exitSelectionMode();
-        LogUtil.i(TAG, "deleteSelected done: removed=%d remaining=%d", removed, conversations.size());
         Toast.makeText(this, "已删除 " + removed + " 个对话", Toast.LENGTH_SHORT).show();
+        // 排序后 conversations 是副本，不能再靠「列表变短」判断删除是否成功；
+        // 直接按磁盘重载，顺便把体积重新算准
+        loadConversations();
+        LogUtil.i(TAG, "deleteSelected done: removed=%d", removed);
     }
 
     private void loadConversations() {
@@ -267,18 +347,74 @@ public class ConversationManagerActivity extends Activity {
                         } else {
                             adapter.setConversations(conversations);
                         }
+                        // 重载会把列表恢复成「按时间」，用户选的按体积排序要重新应用
+                        applySort();
                         updateSelectionBar();
+                        if (highlightId != null) {
+                            // 从「最占空间」点进来：定位并高亮那一行。找不到（已删）就正常回到顶部
+                            adapter.setHighlightId(highlightId);
+                            int idx = indexOfConversation(highlightId);
+                            if (idx >= 0) listView.setSelection(idx);
+                        }
                         int savedPos = restoreScrollNextTime ? uiState.getInt(KEY_SCROLL_POS, 0) : 0;
                         restoreScrollNextTime = false;
-                        if (savedPos > 0 && savedPos < conversations.size()) {
-                            listView.setSelection(savedPos);
-                        } else {
-                            listView.setSelection(0);
+                        if (highlightId == null) {
+                            if (savedPos > 0 && savedPos < conversations.size()) {
+                                listView.setSelection(savedPos);
+                            } else {
+                                listView.setSelection(0);
+                            }
                         }
                     }
                 });
             }
         }).start();
+    }
+
+    /**
+     * 从存储管理进入时的点击反馈：体积详情 + 查看 + 删除。
+     *
+     * <p>不在这里切换会话——本页由存储页启动，切过去再 finish 会直接弹回存储页，
+     * 用户看到的是「点了一下，什么也没发生」。要真看内容就走「查看」，
+     * 直接回到主界面并把会话切过去，返回键回到本页。
+     */
+    private void showStorageDetail(final Conversation conv) {
+        int count = conv.messages == null ? 0 : conv.messages.size();
+        String msg = "消息 " + count + " 条\n"
+                + "占用 " + StorageReport.size(conv.fileBytes) + "\n"
+                + "最后更新 " + android.text.format.DateFormat.format("yyyy-MM-dd HH:mm",
+                        conv.updatedAt) + "\n\n"
+                + "删除后该会话的图片若不再被别的会话使用，会在图片附件里变成「无引用」。";
+        new AlertDialog.Builder(this)
+                .setTitle(ConversationManager.normalizeTitle(conv.title))
+                .setMessage(msg)
+                .setPositiveButton("查看", new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface d, int w) {
+                        openConversation(conv);
+                    }
+                })
+                .setNeutralButton("删除", new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface d, int w) {
+                        showDeleteDialog(conv);
+                    }
+                })
+                .setNegativeButton("关闭", null)
+                .show();
+    }
+
+    /**
+     * 回到主界面并切到这条会话。
+     *
+     * <p>用 REORDER_TO_FRONT 而不是新开一个实例：主界面持有 WebView、请求状态与消息列表，
+     * 开第二个实例等于让两个界面同时监听同一份数据。它被提到栈顶后，
+     * 返回键自然落回本页，符合「看完回来继续清」的操作流。
+     */
+    private void openConversation(Conversation conv) {
+        LogUtil.i(TAG, "openConversation from storage: id=%s", conv.id);
+        Intent it = new Intent(this, MainActivity.class);
+        it.putExtra("conversation_id", conv.id);
+        it.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
+        startActivity(it);
     }
 
     private void showActionDialog(final Conversation conv) {
@@ -349,6 +485,7 @@ public class ConversationManagerActivity extends Activity {
                         conversationManager.deleteConversation(conv.id);
                         conversations.remove(conv);
                         adapter.notifyDataSetChanged();
+                        StorageActivity.invalidateCache();
                         LogUtil.d(TAG, "delete done: remaining=%d", conversations.size());
                         Toast.makeText(ConversationManagerActivity.this, "已删除", Toast.LENGTH_SHORT).show();
                     }
@@ -371,6 +508,7 @@ public class ConversationManagerActivity extends Activity {
         }
         conversations.clear();
         adapter.notifyDataSetChanged();
+        StorageActivity.invalidateCache();
         LogUtil.i(TAG, "clearAllHistory done: %d remaining", conversations.size());
         Toast.makeText(this, "已清空所有历史对话", Toast.LENGTH_SHORT).show();
     }

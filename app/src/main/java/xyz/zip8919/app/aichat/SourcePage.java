@@ -32,6 +32,16 @@ final class SourcePage {
      * @param toolbarInset 顶部工具栏占位像素
      */
     static String build(String lang, String code, String rotateCss, int toolbarInset) {
+        return build(lang, code, rotateCss, toolbarInset, "#FFFFFF");
+    }
+
+    /**
+     * @param bgColor 页面背景（{@code #RRGGBB}）。字体色一律固定，不随背景反色——
+     *                用户明确要求「背景变颜色，但是字体颜色不变」。
+     */
+    static String build(String lang, String code, String rotateCss, int toolbarInset,
+            String bgColor) {
+        String bg = bgColor == null ? "#FFFFFF" : bgColor;
         String safe = code == null ? "" : code;
         boolean truncated = safe.length() > MAX_DISPLAY_CHARS;
         String shown = truncated ? safe.substring(0, MAX_DISPLAY_CHARS) : safe;
@@ -45,7 +55,7 @@ final class SourcePage {
           .append("<meta name=\"viewport\" content=\"width=device-width,initial-scale=1.0,user-scalable=yes\">")
           .append("<style>")
           .append("*{margin:0;padding:0;}")
-          .append("html,body{width:100%;min-height:100%;background:#FFFFFF;")
+          .append("html,body{width:100%;min-height:100%;background:").append(bg).append(";")
           .append("-webkit-transform-origin:0 0;transform-origin:0 0;}")
           .append("body{padding:").append(toolbarInset).append("px 10px 30px 10px;")
           .append("-webkit-box-sizing:border-box;box-sizing:border-box;}")
@@ -67,6 +77,7 @@ final class SourcePage {
           .append("if(f===0){vZoom=1;}else{vZoom=Math.min(5,Math.max(0.1,vZoom*f));}")
           .append("var t='scale('+vZoom+')';")
           .append("document.body.style.webkitTransform=t;document.body.style.transform=t;}")
+          .append(ViewerBg.SET_BG_JS)
           .append("</script></head><body><div class=\"doc-wrap\">");
         if (truncated) {
             sb.append("<div class=\"banner\">文件较大，仅显示前 ")

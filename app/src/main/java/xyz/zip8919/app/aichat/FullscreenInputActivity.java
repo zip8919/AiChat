@@ -1,6 +1,8 @@
 package xyz.zip8919.app.aichat;
 
 import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.os.Bundle;
 import android.text.Editable;
@@ -25,6 +27,7 @@ public class FullscreenInputActivity extends Activity {
 
     private EditText edit;
     private TextView counter;
+    private Button clear;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -33,6 +36,7 @@ public class FullscreenInputActivity extends Activity {
 
         edit = (EditText) findViewById(R.id.fullscreen_edit);
         counter = (TextView) findViewById(R.id.fullscreen_count);
+        clear = (Button) findViewById(R.id.fullscreen_clear);
         Button cancel = (Button) findViewById(R.id.fullscreen_cancel);
         Button done = (Button) findViewById(R.id.fullscreen_done);
 
@@ -57,6 +61,24 @@ public class FullscreenInputActivity extends Activity {
                 finish();
             }
         });
+        clear.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                final int len = edit.getText().length();
+                if (len == 0) return;
+                // 这里没有后悔药：主界面清空也先问一句，长文更是如此
+                new AlertDialog.Builder(FullscreenInputActivity.this)
+                        .setTitle("清空输入")
+                        .setMessage("将清空全部 " + len + " 字。清空后无法撤销。")
+                        .setPositiveButton("清空", new DialogInterface.OnClickListener() {
+                            public void onClick(DialogInterface d, int w) {
+                                edit.setText("");
+                                edit.requestFocus();
+                            }
+                        })
+                        .setNegativeButton("取消", null)
+                        .show();
+            }
+        });
         done.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 Intent out = new Intent();
@@ -74,6 +96,15 @@ public class FullscreenInputActivity extends Activity {
     }
 
     private void updateCounter(int len) {
-        if (counter != null) counter.setText(len + " 字");
+        if (counter != null) {
+            // 与消息底部同一套估算规则（中英分别计权、代理对算一个宽字符），
+            // 长文输入时先看到大概要花多少，不用发出去再看回执
+            int tokens = MessageHtmlRenderer.estimateTokens(edit.getText());
+            counter.setText(len + " 字 · ~"
+                    + MessageHtmlRenderer.formatTokens(tokens) + " tokens");
+        }
+        if (clear != null) {
+            clear.setVisibility(len > 0 ? View.VISIBLE : View.GONE);
+        }
     }
 }

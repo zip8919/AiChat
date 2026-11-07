@@ -158,6 +158,11 @@ final class ToolExecutor {
                 }
             }
 
+            // 统计工具调用：错误结果统一是 {"error":...}，据此判失败。
+            // 只看有没有抛异常会把「搜索密钥没配」这类软失败算成成功。
+            boolean ok = result != null && !result.trim().startsWith("{\"error\"");
+            UsageStats.get().onTool(name, ok);
+
             WebSearchTool.extractSources(result, sources);
             ToolCalls.appendResult(conversation, toolHistory, id, result);
             // 视觉注入只能在 tool 结果之后：顺序反了模型会先看到图、后看到「搜到了什么」，

@@ -26,6 +26,16 @@ final class MarkdownPage {
      * @param toolbarInset 顶部工具栏占位像素
      */
     static String build(String bodyHtml, int totalChars, String rotateCss, int toolbarInset) {
+        return build(bodyHtml, totalChars, rotateCss, toolbarInset, "#FFFFFF");
+    }
+
+    /**
+     * @param bgColor 页面背景（{@code #RRGGBB}）。表格单元格背景跟随该色，
+     *                字体颜色一律显式固定、不随背景反色。
+     */
+    static String build(String bodyHtml, int totalChars, String rotateCss, int toolbarInset,
+            String bgColor) {
+        String bg = bgColor == null ? "#FFFFFF" : bgColor;
         String body = bodyHtml == null ? "" : bodyHtml;
         boolean truncated = totalChars > MAX_CHARS;
 
@@ -34,7 +44,7 @@ final class MarkdownPage {
           .append("<meta name=\"viewport\" content=\"width=device-width,initial-scale=1.0,user-scalable=yes\">")
           .append("<style>")
           .append("*{margin:0;padding:0;}")
-          .append("html,body{width:100%;min-height:100%;background:#FFFFFF;")
+          .append("html,body{width:100%;min-height:100%;background:").append(bg).append(";")
           .append("-webkit-transform-origin:0 0;transform-origin:0 0;}")
           .append("body{padding:").append(toolbarInset).append("px 12px 32px 12px;")
           .append("font-size:15px;line-height:1.65;color:#24292e;word-wrap:break-word;")
@@ -55,8 +65,10 @@ final class MarkdownPage {
           .append("overflow-x:auto;margin:10px 0;}")
           .append("pre code{background:none;padding:0;font-size:12.5px;line-height:1.5;}")
           .append("table{border-collapse:collapse;margin:12px 0;max-width:100%;}")
-          .append("th,td{border:1px solid #dfe2e5;padding:6px 10px;font-size:13px;text-align:left;}")
-          .append("th{background:#f6f8fa;}")
+          // 字体色显式固定：背景切换只改单元格背景，不碰 color（用户要求「字体颜色不变」）。
+          // th 不再写死 #f6f8fa 灰底，否则切深色背景时表头留一块白斑。
+          .append("th,td{border:1px solid #dfe2e5;padding:6px 10px;font-size:13px;text-align:left;")
+          .append("color:#24292e;background:transparent;}")
           .append("img{max-width:100%;height:auto;}")
           .append("a{color:#0366d6;text-decoration:none;word-break:break-all;}")
           .append("hr{border:0;border-top:1px solid #eaecef;margin:16px 0;}")
@@ -75,6 +87,7 @@ final class MarkdownPage {
           .append("if(f===0){vZoom=1;}else{vZoom=Math.min(5,Math.max(0.1,vZoom*f));}")
           .append("var t='scale('+vZoom+')';")
           .append("document.body.style.webkitTransform=t;document.body.style.transform=t;}")
+          .append(ViewerBg.SET_BG_JS)
           .append("</script></head><body><div class=\"doc-wrap\">");
         if (truncated) {
             sb.append("<div class=\"banner\">文件较大，仅显示前 ")

@@ -1,0 +1,161 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:orientation="vertical"
+    android:background="@color/background"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:fillViewport="true">
+
+        <LinearLayout
+            android:orientation="vertical"
+            android:padding="12dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content">
+
+            <!-- 容量头：一根条同时表达总量与构成 -->
+            <LinearLayout
+                android:orientation="vertical"
+                android:background="@drawable/bg_card"
+                android:padding="16dp"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content">
+                <LinearLayout
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content">
+                    <TextView
+                        android:id="@+id/storage_used"
+                        android:textSize="20sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/text_primary"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="统计中…"/>
+                    <TextView
+                        android:id="@+id/storage_refresh"
+                        android:textSize="12sp"
+                        android:textColor="@color/primary"
+                        android:padding="6dp"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="刷新"/>
+                </LinearLayout>
+                <TextView
+                    android:id="@+id/storage_free"
+                    android:textSize="12sp"
+                    android:textColor="@color/text_secondary"
+                    android:layout_marginTop="2dp"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="正在统计各类数据的占用"/>
+                <xyz.zip8919.app.aichat.StorageBarView
+                    android:id="@+id/storage_bar"
+                    android:layout_marginTop="12dp"
+                    android:layout_width="match_parent"
+                    android:layout_height="8dp"/>
+                <LinearLayout
+                    android:id="@+id/storage_legend"
+                    android:orientation="horizontal"
+                    android:layout_marginTop="10dp"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"/>
+                <TextView
+                    android:id="@+id/storage_path"
+                    android:textSize="12sp"
+                    android:textColor="@color/text_secondary"
+                    android:paddingTop="10dp"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="存储位置"/>
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/storage_warn"
+                android:textSize="12sp"
+                android:textColor="@color/danger"
+                android:visibility="gone"
+                android:layout_marginTop="8dp"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"/>
+
+            <!-- 五张分类卡由代码填充：顺序与色条颜色必须和占用条一致 -->
+            <LinearLayout
+                android:id="@+id/storage_categories"
+                android:orientation="vertical"
+                android:layout_marginTop="10dp"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"/>
+
+            <!-- 安全清理：可释放量为 0 时整块隐藏 -->
+            <LinearLayout
+                android:id="@+id/storage_clean_card"
+                android:orientation="vertical"
+                android:background="@drawable/bg_card"
+                android:visibility="gone"
+                android:padding="16dp"
+                android:layout_marginTop="8dp"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content">
+                <TextView
+                    android:id="@+id/storage_clean_title"
+                    android:textSize="15sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/text_primary"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="可安全释放"/>
+                <TextView
+                    android:id="@+id/storage_clean_sub"
+                    android:textSize="12sp"
+                    android:textColor="@color/text_secondary"
+                    android:layout_marginTop="3dp"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"/>
+                <Button
+                    android:id="@+id/storage_clean_btn"
+                    android:textSize="13sp"
+                    android:textColor="@android:color/white"
+                    android:background="@color/primary"
+                    android:layout_marginTop="10dp"
+                    android:layout_width="match_parent"
+                    android:layout_height="40dp"
+                    android:text="立即清理"/>
+            </LinearLayout>
+
+            <TextView
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:textColor="@color/text_primary"
+                android:layout_marginTop="16dp"
+                android:layout_marginBottom="6dp"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="最占空间的 10 个文件"/>
+
+            <LinearLayout
+                android:id="@+id/storage_top"
+                android:orientation="vertical"
+                android:background="@drawable/bg_card"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"/>
+
+            <TextView
+                android:id="@+id/storage_top_empty"
+                android:textSize="12sp"
+                android:textColor="@color/text_secondary"
+                android:background="@drawable/bg_card"
+                android:padding="16dp"
+                android:visibility="gone"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="还没有任何数据"/>
+        </LinearLayout>
+    </ScrollView>
+</LinearLayout>

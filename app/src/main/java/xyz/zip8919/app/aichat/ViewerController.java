@@ -3,7 +3,6 @@ package xyz.zip8919.app.aichat;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.DialogInterface;
-import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
 import android.view.View;
 import android.view.ViewGroup;
@@ -53,19 +52,21 @@ final class ViewerController {
     private List<ImageInfo> imageList;
     private int imageIndex;
     private int imageRotation;
-    private int imageBg; // 0=白 1=灰 2=黑
+
+    // ---- 统一背景色（ARGB）----
+    // 四类查看器共用一份，由 ViewerBg 持久化。用户手动选过色后全局生效；
+    // 旋转 / 重新 load / 重开查看器都从这里读，不再回到按类型给的默认值。
+    private int bgColor = ViewerBg.DEFAULT;
 
     // ---- 表格查看器状态 ----
     private AlertDialog tableDialog;
     private WebView tableWebView;
     private int tableRotation;
-    private int tableBg;
 
     // ---- 代码预览状态 ----
     private AlertDialog codeDialog;
     private WebView codeWebView;
     private int codeRotation;
-    private int codeBg;
     private String codeLang;
     private String codeText;
 
@@ -126,9 +127,11 @@ final class ViewerController {
         imageList = images;
         imageIndex = index;
         imageRotation = 0;
-        // 默认背景：SVG 多为透明底深色线条，用白底；位图用黑底
+        // 默认背景：SVG 多为透明底深色线条，用白底；位图用黑底。用户手动选过色后
+        // （ViewerBg 持久化）一律用那个色，旋转/重载/重开都不再回退到这里的默认。
         ImageInfo first = images.get(index);
-        imageBg = ("svg".equals(first.type)) ? 0 : 2;
+        bgColor = ViewerBg.effective(activity,
+                "svg".equals(first.type) ? 0xFFFFFFFF : 0xFF000000);
 
         View view = activity.getLayoutInflater().inflate(R.layout.dialog_image_viewer, null);
         imageWebView = (WebView) view.findViewById(R.id.viewer_webview);
@@ -142,7 +145,7 @@ final class ViewerController {
         Button bgToggle = (Button) view.findViewById(R.id.viewer_bg_toggle);
         Button close = (Button) view.findViewById(R.id.viewer_close);
 
-        configureWebView(imageWebView, Color.BLACK);
+        configureWebView(imageWebView, bgColor);
 
         imagePrev.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
@@ -179,12 +182,10 @@ final class ViewerController {
             }
         });
         bgToggle.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) {
-                imageBg = (imageBg + 1) % 3;
-                if (imageWebView != null) {
-                    evalJs(imageWebView, "viewerSetBg('" + bgHex(imageBg) + "')");
-                }
-            }
+            public void onClick(View v) { openBgPicker(); }
+        });
+        bindExport(view, imageWebView, "image", new ViewerExport.DirectSource() {
+            public String get() { return currentBitmapSource(); }
         });
         close.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
@@ -216,7 +217,7 @@ final class ViewerController {
         imageDialog.getWindow().setLayout(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT);
-        imageDialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.BLACK));
+        imageDialog.getWindow().setBackgroundDrawable(new ColorDrawable(bgColor));
         imageDialog.show();
         loadAfterLayout(imageWebView, new Runnable() {
             public void run() { loadCurrentImage(); }
@@ -233,7 +234,7 @@ final class ViewerController {
         imagePrev.setEnabled(imageIndex > 0);
         imageNext.setEnabled(imageIndex < imageList.size() - 1);
 
-        String bgColor = bgHex(imageBg);
+        String bgColor = ViewerBg.hex(ViewerController.this.bgColor);
         String rotateCss = rotateTransform(imageRotation);
 
         String html;
@@ -252,7 +253,7 @@ final class ViewerController {
                     "<script>var vZoom=1;function viewerZoom(f){vZoom=Math.min(5,Math.max(0.1,vZoom*f));" +
                     "var t='scale('+vZoom+')';" +
                     "document.body.style.webkitTransform=t;document.body.style.transform=t;}" +
-                    "function viewerSetBg(c){document.body.style.backgroundColor=c;}</script>" +
+                    ViewerBg.SET_BG_JS + "</script>" +
                     "</head><body>" +
                     "<div class=\"svg-wrap\">" + svgHtml + "</div>" +
                     "</body></html>";
@@ -285,7 +286,7 @@ final class ViewerController {
                     "<script>var vZoom=1;function viewerZoom(f){vZoom=Math.min(5,Math.max(0.1,vZoom*f));" +
                     "var t='scale('+vZoom+')';" +
                     "document.body.style.webkitTransform=t;document.body.style.transform=t;}" +
-                    "function viewerSetBg(c){document.body.style.backgroundColor=c;document.documentElement.style.backgroundColor=c;}" +
+                    ViewerBg.SET_BG_JS +
                     "</script>" +
                     "</head><body>" +
                     "<div class=\"img-cell\"><img src=\"" + src + "\" alt=\"" + alt + "\"></div>" +
@@ -308,7 +309,7 @@ final class ViewerController {
         }
 
         tableRotation = 0;
-        tableBg = 0;
+        bgColor = ViewerBg.effective(activity, 0xFFFFFFFF);
 
         View view = activity.getLayoutInflater().inflate(R.layout.dialog_image_viewer, null);
         tableWebView = (WebView) view.findViewById(R.id.viewer_webview);
@@ -325,7 +326,7 @@ final class ViewerController {
         Button bgToggle = (Button) view.findViewById(R.id.viewer_bg_toggle);
         Button close = (Button) view.findViewById(R.id.viewer_close);
 
-        configureWebView(tableWebView, Color.WHITE);
+        configureWebView(tableWebView, bgColor);
 
         zoomOut.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) { evalJs(tableWebView, "viewerZoom(0.8)"); }
@@ -346,13 +347,9 @@ final class ViewerController {
             }
         });
         bgToggle.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) {
-                tableBg = (tableBg + 1) % 3;
-                if (tableWebView != null) {
-                    evalJs(tableWebView, "viewerSetBg('" + bgHex(tableBg) + "')");
-                }
-            }
+            public void onClick(View v) { openBgPicker(); }
         });
+        bindExport(view, tableWebView, "table", null);
         close.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 if (tableDialog != null) tableDialog.dismiss();
@@ -412,7 +409,7 @@ final class ViewerController {
                     "</script>";
         }
 
-        String bgColor = bgHex(tableBg);
+        String bgColor = ViewerBg.hex(ViewerController.this.bgColor);
         String html = "<!DOCTYPE html><html><head>" +
                 "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1.0,user-scalable=yes\">" +
                 "<style>" +
@@ -421,14 +418,17 @@ final class ViewerController {
                 "-webkit-transform-origin:0 0;transform-origin:0 0;}" +
                 ".table-wrap{display:inline-block;" + rotateCss + "}" +
                 "table{border-collapse:collapse;font-size:14px;}" +
-                "th,td{border:1px solid #ddd;padding:8px 12px;text-align:left;}" +
-                "th{background:#f0f0f0;font-weight:bold;white-space:nowrap;}" +
+                // 字体色显式固定、单元格背景透明跟随 body：切背景只变底色，字体颜色不变；
+                // th 不再写死 #f0f0f0，否则深色背景下表头留一块浅灰。
+                "th,td{border:1px solid #ddd;padding:8px 12px;text-align:left;" +
+                "color:#24292e;background:transparent;}" +
+                "th{font-weight:bold;white-space:nowrap;}" +
                 "td{white-space:nowrap;}" +
                 "</style>" +
                 "<script>var vZoom=1;function viewerZoom(f){vZoom=Math.min(5,Math.max(0.1,vZoom*f));" +
                 "var t='scale('+vZoom+')';" +
                 "document.body.style.webkitTransform=t;document.body.style.transform=t;}" +
-                "function viewerSetBg(c){document.body.style.backgroundColor=c;}</script>" +
+                ViewerBg.SET_BG_JS + "</script>" +
                 "</head><body>" +
                 "<div class=\"table-wrap\">" + tableHtml + "</div>" +
                 rotateJs +
@@ -450,7 +450,7 @@ final class ViewerController {
         }
 
         codeRotation = 0;
-        codeBg = 0;
+        bgColor = ViewerBg.effective(activity, 0xFFFFFFFF);
         codeLang = lang;
         codeText = code;
 
@@ -468,7 +468,7 @@ final class ViewerController {
         Button bgToggle = (Button) view.findViewById(R.id.viewer_bg_toggle);
         Button close = (Button) view.findViewById(R.id.viewer_close);
 
-        configureWebView(codeWebView, Color.WHITE);
+        configureWebView(codeWebView, bgColor);
 
         zoomOut.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) { evalJs(codeWebView, "viewerZoom(0.8)"); }
@@ -489,13 +489,9 @@ final class ViewerController {
             }
         });
         bgToggle.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) {
-                codeBg = (codeBg + 1) % 3;
-                if (codeWebView != null) {
-                    evalJs(codeWebView, "viewerSetBg('" + bgHex(codeBg) + "')");
-                }
-            }
+            public void onClick(View v) { openBgPicker(); }
         });
+        bindExport(view, codeWebView, "code", null);
         close.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 if (codeDialog != null) codeDialog.dismiss();
@@ -524,6 +520,12 @@ final class ViewerController {
         codeDialog.getWindow().setLayout(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT);
+        // AlertDialog 的窗口默认带 FLAG_ALT_FOCUSABLE_IM。系统判断「需不需要输入法」
+        // 时只看原生 EditText，看不到 WebView 里的 <input>，于是这个 flag 一直不被清掉，
+        // 页面里的输入框点上去永远不弹键盘、也收不到字符。
+        // 显式设置 softInputMode 会清掉该 flag，键盘才随焦点出现。
+        codeDialog.getWindow().setSoftInputMode(
+                android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
         codeDialog.show();
 
         loadAfterLayout(codeWebView, new Runnable() {
@@ -536,7 +538,7 @@ final class ViewerController {
 
         LogUtil.d(TAG, "loadCodePreview: lang=%s len=%d rot=%d",
                 codeLang, codeText.length(), codeRotation);
-        String bgColor = bgHex(codeBg);
+        String bgColor = ViewerBg.hex(ViewerController.this.bgColor);
 
         // 包裹层的真实盒子尺寸：旋转 90/270 时需要按交换后的轴给显式宽高
         int boxW = codeWebView.getWidth();
@@ -570,7 +572,7 @@ final class ViewerController {
                 "function viewerZoom(f){vZoom=Math.min(5,Math.max(0.1,vZoom*f));" +
                 "var t='scale('+vZoom+')';" +
                 "document.body.style.webkitTransform=t;document.body.style.transform=t;}" +
-                "function viewerSetBg(c){document.body.style.backgroundColor=c;}";
+                ViewerBg.SET_BG_JS;
 
         if ("svg".equals(lang)) {
             // 把 SVG 包进最小 HTML 页。
@@ -676,6 +678,7 @@ final class ViewerController {
         docLang = lang == null ? "" : lang;
         docCode = code;
         docRotation = 0;
+        bgColor = ViewerBg.effective(activity, 0xFFFFFFFF);
         // 默认看源码：用户点「查看文件」的意图多半是「这几行到底写了什么」，
         // 想看成品的再点一下右上角的预览。
         docSourceMode = true;
@@ -689,8 +692,14 @@ final class ViewerController {
         view.findViewById(R.id.viewer_prev).setVisibility(View.GONE);
         view.findViewById(R.id.viewer_next).setVisibility(View.GONE);
         view.findViewById(R.id.viewer_counter).setVisibility(View.GONE);
-        // 源码只有浅色一版，背景切换按钮会调出白底黑字的对比灾难，直接不显示
-        view.findViewById(R.id.viewer_bg_toggle).setVisibility(View.GONE);
+        // 附件预览器同样支持背景色修改（用户明确要求「包括文件预览器」）。
+        // 源码页/源码高亮的字色是固定的，深色背景下对比度会变差——这是用户要的
+        // 「字体颜色不变」的取舍，不做自动反色。
+        Button bgToggle = (Button) view.findViewById(R.id.viewer_bg_toggle);
+        bgToggle.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { openBgPicker(); }
+        });
+        bindExport(view, docWebView, "doc", null);
 
         title.setText(docName);
         title.setVisibility(View.VISIBLE);
@@ -728,7 +737,7 @@ final class ViewerController {
             });
         }
 
-        configureWebView(docWebView, Color.WHITE);
+        configureWebView(docWebView, bgColor);
 
         zoomOut.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) { evalJs(docWebView, "viewerZoom(0.8)"); }
@@ -778,6 +787,9 @@ final class ViewerController {
         docDialog.getWindow().setLayout(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT);
+        // 同 showCode：不设 softInputMode，HTML 附件里的输入框收不到键盘
+        docDialog.getWindow().setSoftInputMode(
+                android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
         docDialog.show();
 
         loadAfterLayout(docWebView, new Runnable() {
@@ -804,15 +816,16 @@ final class ViewerController {
             String trimmed = docCode.trim().toLowerCase();
             boolean isFullDoc = "html".equals(docLang)
                     && (trimmed.startsWith("<!doctype") || trimmed.startsWith("<html"));
-            html = buildCodePreviewHtml(docCode, docLang, "#FFFFFF", rotateCss, isFullDoc,
-                    sideways ? boxH : 0);
+            html = buildCodePreviewHtml(docCode, docLang, ViewerBg.hex(bgColor),
+                    rotateCss, isFullDoc, sideways ? boxH : 0);
         }
         docWebView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null);
     }
 
     /** 源码页由 {@link SourcePage} 生成（纯字符串逻辑，可单测）。 */
     private String buildSourceHtml(String lang, String code, String rotateCss) {
-        String html = SourcePage.build(lang, code, rotateCss, TOOLBAR_INSET_PX);
+        String html = SourcePage.build(lang, code, rotateCss, TOOLBAR_INSET_PX,
+                ViewerBg.hex(bgColor));
         LogUtil.d(TAG, "buildSourceHtml: lang=%s chars=%d -> %d", lang, code.length(), html.length());
         return html;
     }
@@ -829,7 +842,8 @@ final class ViewerController {
                 ? md.substring(0, MarkdownPage.MAX_CHARS) : md;
         long t0 = System.currentTimeMillis();
         String body = MarkdownPipeline.render(shown, activity);
-        String html = MarkdownPage.build(body, md.length(), rotateCss, TOOLBAR_INSET_PX);
+        String html = MarkdownPage.build(body, md.length(), rotateCss, TOOLBAR_INSET_PX,
+                ViewerBg.hex(bgColor));
         LogUtil.d(TAG, "buildMarkdownHtml: chars=%d -> %d in %dms",
                 shown.length(), html.length(), System.currentTimeMillis() - t0);
         return html;
@@ -871,12 +885,66 @@ final class ViewerController {
         });
     }
 
-    private static String bgHex(int state) {
-        switch (state) {
-            case 1: return "#888888";
-            case 2: return "#000000";
-            default: return "#FFFFFF";
-        }
+    /**
+     * 打开背景色选择。选定后立即：① 更新统一字段并持久化；② 同步所有已打开
+     * 预览 WebView 的控件底色与 DOM 背景。这样旋转按钮重新 load HTML、
+     * 屏幕旋转、重开查看器、进程重建都从 {@link ViewerBg} 读到同一个色，
+     * 不会再"改回默认"。
+     */
+    private void openBgPicker() {
+        ViewerBg.showPicker(activity, bgColor, new ViewerBg.Callback() {
+            public void onPicked(int argb) {
+                bgColor = argb;
+                ViewerBg.set(activity, argb);
+                String hex = ViewerBg.hex(argb);
+                applyBg(imageWebView, argb, hex);
+                applyBg(tableWebView, argb, hex);
+                applyBg(codeWebView, argb, hex);
+                applyBg(docWebView, argb, hex);
+                LogUtil.i(TAG, "viewer bg picked: %s", hex);
+            }
+        });
+    }
+
+    /** 控件底色 + DOM 背景一起改；DOM 用统一脚本，保证表格单元格也跟随、字体色不动。 */
+    private void applyBg(WebView wv, int argb, String hex) {
+        if (wv == null) return;
+        try { wv.setBackgroundColor(argb); } catch (Exception ignored) {}
+        evalJs(wv, "if(typeof viewerSetBg==='function')viewerSetBg('" + hex + "')");
+    }
+
+    /**
+     * 绑定「导出为 PNG/JPEG」按钮，四类查看器共用。
+     *
+     * @param direct 图片查看器传 {@link #currentBitmapSource}：当前页是本地可读源时
+     *               直接落原图（零背景、保原分辨率）；其余查看器传 null，走截图 + 裁背景。
+     */
+    private void bindExport(View view, final WebView wv, final String tag,
+                            final ViewerExport.DirectSource direct) {
+        Button b = (Button) view.findViewById(R.id.viewer_export);
+        if (b == null) return;
+        b.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                ViewerExport.choose(activity, wv, bgColor, tag, direct);
+            }
+        });
+    }
+
+    /**
+     * 当前页是否来自本地可读源（{@code data:} / {@code file:}）。
+     *
+     * <p>只在图片查看器、且当前页是位图时返回非 null：SVG 是标记片段没有可直出的
+     * 位图字节，{@code http(s)} 不在导出时二次下载（防盗链/超时/流量不可控），
+     * 两者都返回 null 走截图 + 裁背景。
+     */
+    private String currentBitmapSource() {
+        if (imageList == null || imageIndex < 0 || imageIndex >= imageList.size()) return null;
+        ImageInfo info = imageList.get(imageIndex);
+        if (!"raster".equals(info.type)) return null;
+        String s = info.src;
+        if (s == null) return null;
+        if (s.startsWith("data:image/") || s.startsWith("file://")) return s;
+        return null;
     }
 
     /**
@@ -948,6 +1016,13 @@ final class ViewerController {
 
     /** 屏幕旋转后 dialog 窗口尺寸需要重新铺满，否则会留下黑边。 */
     void onConfigurationChanged() {
+        // 部分 ROM 在配置变更时会重建 WebView 渲染层，DOM 内联背景可能丢失。
+        // 用持久化字段重新施加一次，保证「旋转后背景色不改回默认」。
+        String hex = ViewerBg.hex(bgColor);
+        applyBg(imageWebView, bgColor, hex);
+        applyBg(tableWebView, bgColor, hex);
+        applyBg(codeWebView, bgColor, hex);
+        applyBg(docWebView, bgColor, hex);
         if (imageDialog != null && imageDialog.isShowing()) {
             imageDialog.getWindow().setLayout(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);

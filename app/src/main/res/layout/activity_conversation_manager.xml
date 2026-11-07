@@ -60,6 +60,15 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"/>
+            <TextView
+                android:id="@+id/sort_toggle"
+                android:textSize="12sp"
+                android:textColor="@color/primary"
+                android:padding="6dp"
+                android:visibility="gone"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="按体积"/>
             <Button
                 android:id="@+id/select_mode_button"
                 android:textSize="12sp"

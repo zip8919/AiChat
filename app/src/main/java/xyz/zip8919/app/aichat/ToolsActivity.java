@@ -8,6 +8,7 @@ import android.content.Context;
 import android.content.DialogInterface;
 import android.graphics.Color;
 import android.os.Bundle;
+import android.util.Base64;
 import android.text.Editable;
 import android.text.InputType;
 import android.text.TextWatcher;
@@ -28,11 +29,15 @@ import android.widget.Toast;
 import android.webkit.WebView;
 
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * Long-press on 历史 opens this page: saved-code manager plus a JS runner.
@@ -47,6 +52,16 @@ public class ToolsActivity extends Activity {
     private String currentJsFileName = "";
     private boolean loadingFile = false;
 
+    /**
+     * 代码预览器。
+     *
+     * <p>此前预览是 {@code newCodePreviewIntent()}：目标写成 MainActivity +
+     * {@code CLEAR_TOP|SINGLE_TOP}，等于把本页从栈里清掉再回主界面弹预览。
+     * 用户看到的现象是「预览完按返回直接掉回聊天页」，正在清理的文件列表也没了。
+     * 改成在本页叠一个 dialog，关掉仍在原页面。
+     */
+    private ViewerController viewer;
+
     private boolean selectionMode = false;
     private final HashSet<String> checkedNames = new HashSet<String>();
     private LinearLayout selectionActions;
@@ -58,6 +73,7 @@ public class ToolsActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_tools);
+        viewer = new ViewerController(this);
 
         findViewById(R.id.tools_back_button).setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) { finish(); }
@@ -141,6 +157,16 @@ public class ToolsActivity extends Activity {
         refreshFiles();
     }
 
+    @Override
+    protected void onDestroy() {
+        // 预览 dialog 持有 WebView 与 Activity，不释放会随每次进出累积
+        if (viewer != null) {
+            viewer.destroy();
+            viewer = null;
+        }
+        super.onDestroy();
+    }
+
     private File exportsDir() {
         // 传入 Context：本页可能是进程重建后的栈顶，惰性初始化必须带上 appContext，
         // 否则 StorageManager 会以 null context 固化基础路径，且后续无法再被 MainActivity 纠正
@@ -178,10 +204,11 @@ public class ToolsActivity extends Activity {
 
         List<String> labels = new ArrayList<String>();
         for (File f : files) {
-            labels.add(f.getName() + "\n" + f.length() + " B");
+            labels.add(f.getName() + "\n" + f.length() + " B"
+                    + (isImageFile(f) ? "  [图片]" : ""));
         }
         if (labels.isEmpty() && !selectionMode) {
-            labels.add("（暂无已保存代码）");
+            labels.add("（暂无已保存文件）");
         }
         fileList.setChoiceMode(selectionMode
                 ? ListView.CHOICE_MODE_MULTIPLE : ListView.CHOICE_MODE_NONE);
@@ -305,6 +332,7 @@ public class ToolsActivity extends Activity {
         }
         LogUtil.i(TAG, "deleteSelectedFiles: %d/%d ok", ok, selected.size());
         Toast.makeText(this, "已删除 " + ok + " 个文件", Toast.LENGTH_SHORT).show();
+        StorageActivity.invalidateCache();
         selectionMode = false;
         refreshFiles();
     }
@@ -312,8 +340,31 @@ public class ToolsActivity extends Activity {
     // ---------- saved code ----------
 
     private void showFileMenu(final File f) {
+        // 图片文件不能走文本菜单：readFile 会把 PNG/JPEG 字节按 UTF-8 解成乱码，
+        // 编辑再保存更是直接把图片写坏。给图片单独一条「预览 / 重命名 / 删除」。
+        if (isImageFile(f)) {
+            final String[] imgItems = {"预览图片", "打开方式", "分享", "重命名", "删除"};
+            new AlertDialog.Builder(this)
+                    .setTitle(f.getName())
+                    .setItems(imgItems, new DialogInterface.OnClickListener() {
+                        public void onClick(DialogInterface d, int which) {
+                            switch (which) {
+                                case 0: FileActions.previewImage(ToolsActivity.this, f); break;
+                                case 1: FileActions.open(ToolsActivity.this, f); break;
+                                case 2: FileActions.share(ToolsActivity.this, f); break;
+                                case 3: renameFile(f); break;
+                                case 4: deleteFile(f); break;
+                                default: break;
+                            }
+                        }
+                    })
+                    .setNegativeButton("取消", null)
+                    .show();
+            return;
+        }
         final String[] items = {
-                "查看 / 复制内容", "重命名", "编辑", "预览 / 运行", "删除"
+                "查看 / 复制内容", "重命名", "编辑", "预览 / 运行",
+                "打开方式（第三方应用）", "分享", "删除"
         };
         new AlertDialog.Builder(this)
                 .setTitle(f.getName())
@@ -324,7 +375,9 @@ public class ToolsActivity extends Activity {
                             case 1: renameFile(f); break;
                             case 2: editFile(f); break;
                             case 3: previewFile(f); break;
-                            case 4: deleteFile(f); break;
+                            case 4: FileActions.open(ToolsActivity.this, f); break;
+                            case 5: FileActions.share(ToolsActivity.this, f); break;
+                            case 6: deleteFile(f); break;
                             default: break;
                         }
                     }
@@ -333,83 +386,41 @@ public class ToolsActivity extends Activity {
                 .show();
     }
 
+    /** 查看器导出的 PNG/JPEG，以及用户自己放进 exports 的位图。 */
+    static boolean isImageFile(File f) {
+        return FileActions.isImage(f.getName());
+    }
+
+    /**
+     * 用 base64 data URI 显示图片，不用 file:// —— 项目里 MathRenderer 也是这个做法，
+     * 避免 WebView 的 file 访问限制与路径转义问题。读文件放后台，避免大图卡主线程。
+     *
+     * <p>实现已抽到 {@link FileActions}：存储管理的两个列表也要同一套预览、
+     * 同一套「打开方式 / 分享」，复制三份必然漂移成三种行为。
+     */
+    private void previewImage(final File f) {
+        FileActions.previewImage(this, f);
+    }
+
     private String readFile(File f) {
         return StorageManager.getInstance(getApplicationContext()).readFile(f.getAbsolutePath());
     }
 
+    /** 三个文本入口的兜底：万一图片文件绕过菜单（如外部调用），不把字节当文本读。 */
+    private boolean guardImage(File f) {
+        if (!isImageFile(f)) return false;
+        Toast.makeText(this, "图片请用「预览图片」查看", Toast.LENGTH_SHORT).show();
+        previewImage(f);
+        return true;
+    }
+
     private void viewFile(final File f) {
-        // 读文件与整篇正则高亮都放到后台线程，避免点击「查看」时阻塞主线程
-        new Thread(new Runnable() {
-            public void run() {
-                final String content = readFile(f);
-                if (content == null) {
-                    runOnUiThread(new Runnable() {
-                        public void run() {
-                            Toast.makeText(ToolsActivity.this, "读取失败", Toast.LENGTH_SHORT).show();
-                        }
-                    });
-                    return;
-                }
-                final String lang = MainActivity.detectLang(content);
-                final String html = buildHighlightHtml(content, lang);
-                LogUtil.i(TAG, "viewFile: %s lang=%s len=%d", f.getName(), lang, content.length());
-                runOnUiThread(new Runnable() {
-                    public void run() {
-                        if (isFinishing()) {
-                            return;
-                        }
-                        showContentDialog(f, content, lang, html);
-                    }
-                });
-            }
-        }).start();
+        if (guardImage(f)) return;
+        // 读文件、整篇正则高亮都在 FileActions 的后台线程里做，不占主线程
+        FileActions.viewText(this, f);
     }
 
-    private void showContentDialog(File f, final String content, String lang, String html) {
-        final WebView wv = new WebView(this);
-        wv.getSettings().setJavaScriptEnabled(false);
-        wv.setBackgroundColor(Color.WHITE);
-        int viewH = (int) (getResources().getDisplayMetrics().density * 380);
-        wv.setLayoutParams(new ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, viewH));
-        wv.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null);
-        AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle(f.getName() + "  [" + lang + "]")
-                .setView(wv)
-                .setPositiveButton("复制全部", new DialogInterface.OnClickListener() {
-                    public void onClick(DialogInterface d, int w) {
-                        copyToClipboard(content);
-                    }
-                })
-                .setNegativeButton("关闭", null)
-                .create();
-        // 弹窗关闭即销毁 WebView，否则每次查看都泄漏一个 WebView 及渲染资源
-        dialog.setOnDismissListener(new DialogInterface.OnDismissListener() {
-            public void onDismiss(DialogInterface d) {
-                wv.destroy();
-            }
-        });
-        dialog.show();
-    }
 
-    private String buildHighlightHtml(String content, String lang) {
-        return "<!DOCTYPE html><html><head><meta charset=\"UTF-8\">"
-                + "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
-                + "<style>"
-                + "html,body{margin:0;padding:0;background:#fff;}"
-                + "pre{margin:8px;padding:8px;background:#F5F5F5;font-family:monospace;font-size:12px;"
-                + "white-space:pre-wrap;word-wrap:break-word;}"
-                + ".tk-kw{color:#d73a49;font-weight:bold;}"
-                + ".tk-str{color:#032f62;}"
-                + ".tk-cmt{color:#6a737d;font-style:italic;}"
-                + ".tk-num{color:#005cc5;}"
-                + ".tk-type{color:#6f42c1;}"
-                + ".tk-fn{color:#6f42c1;}"
-                + ".tk-op{color:#d73a49;}"
-                + "</style></head><body><pre>"
-                + CodeHighlighter.highlight(content, lang)
-                + "</pre></body></html>";
-    }
 
     private void renameFile(final File f) {
         final EditText input = new EditText(this);
@@ -458,69 +469,17 @@ public class ToolsActivity extends Activity {
     }
 
     private void editFile(final File f) {
-        // 读文件放到后台线程，避免点击「编辑」时阻塞主线程
-        new Thread(new Runnable() {
-            public void run() {
-                final String content = readFile(f);
-                runOnUiThread(new Runnable() {
-                    public void run() {
-                        if (content == null) {
-                            Toast.makeText(ToolsActivity.this, "读取失败", Toast.LENGTH_SHORT).show();
-                            return;
-                        }
-                        final EditText input = new EditText(ToolsActivity.this);
-                        input.setInputType(InputType.TYPE_CLASS_TEXT
-                                | InputType.TYPE_TEXT_FLAG_MULTI_LINE
-                                | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
-                        input.setText(content);
-                        input.setTextSize(12);
-                        new AlertDialog.Builder(ToolsActivity.this)
-                                .setTitle("编辑 " + f.getName())
-                .setView(input)
-                .setPositiveButton("保存", new DialogInterface.OnClickListener() {
-                    public void onClick(DialogInterface d, int w) {
-                        String ok = StorageManager.getInstance(getApplicationContext())
-                                .saveExport(f.getName(), input.getText().toString());
-                        LogUtil.i(TAG, "editFile: save %s ok=%s", f.getName(), (ok != null));
-                        if (ok == null) {
-                            Toast.makeText(ToolsActivity.this, "保存失败", Toast.LENGTH_SHORT).show();
-                        }
-                        refreshFiles();
-                    }
-                })
-                .setNegativeButton("取消", null)
-                .show();
-                    }
-                });
-            }
-        }, "aichat-editFile").start();
+        if (guardImage(f)) return;
+        // 读写全部交给 FileActions：与本页原先的实现等价，只是不再有两份
+        FileActions.editText(this, f, new Runnable() {
+            public void run() { refreshFiles(); }
+        });
     }
 
     private void previewFile(final File f) {
-        // 读文件放到后台线程，避免点击「预览」时阻塞主线程
-        new Thread(new Runnable() {
-            public void run() {
-                final String content = readFile(f);
-                runOnUiThread(new Runnable() {
-                    public void run() {
-                        if (isFinishing() || isDestroyed()) {
-                            return;
-                        }
-                        if (content == null) {
-                            Toast.makeText(ToolsActivity.this, "读取失败", Toast.LENGTH_SHORT).show();
-                            return;
-                        }
-                        String lang = MainActivity.detectLang(content);
-                        LogUtil.i(TAG, "previewFile: %s lang=%s", f.getName(), lang);
-                        if ("html".equals(lang) || "svg".equals(lang)) {
-                            startActivity(MainActivity.newCodePreviewIntent(ToolsActivity.this, lang, content));
-                        } else {
-                            startActivity(MainActivity.newJsRunnerIntent(ToolsActivity.this, content, lang));
-                        }
-                    }
-                });
-            }
-        }, "aichat-previewFile").start();
+        if (guardImage(f)) return;
+        // html / svg 在本页叠预览（不再 CLEAR_TOP 回主界面），其余进 JS 运行器
+        FileActions.previewCode(this, viewer, f);
     }
 
     private void deleteFile(final File f) {
@@ -533,6 +492,8 @@ public class ToolsActivity extends Activity {
                         if (!ok) {
                             Toast.makeText(ToolsActivity.this, "删除失败", Toast.LENGTH_SHORT).show();
                         }
+                        // 导出目录变了，存储管理页的缓存作废，否则返回后仍显示旧体积
+                        StorageActivity.invalidateCache();
                         refreshFiles();
                     }
                 })

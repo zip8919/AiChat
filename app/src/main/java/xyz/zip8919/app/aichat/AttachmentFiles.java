@@ -10,6 +10,7 @@ import android.util.Base64;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
@@ -37,7 +38,12 @@ final class AttachmentFiles {
     private static final String TAG = "AttachmentFiles";
 
     /** 单张图片上限 20 MB：再大就不是「贴张截图」而是相册原图，拷进来只会拖慢一切。 */
-    static final int MAX_IMAGE_BYTES = 20 * 1024 * 1024;
+    private static final int FALLBACK_IMAGE_BYTES = 20 * 1024 * 1024;
+
+    /** 单张图片字节上限：设置里可改，默认 20 MB。 */
+    static int maxImageBytes() {
+        return Limits.imageMaxBytes > 0 ? Limits.imageMaxBytes : FALLBACK_IMAGE_BYTES;
+    }
 
     /** 缩略图长边像素。卡片上只占 36dp，160px 在 3x 屏上也够清晰。 */
     private static final int THUMB_PX = 160;
@@ -53,7 +59,6 @@ final class AttachmentFiles {
     static final int API_BUDGET = 0;
 
     /** 单张网络图片的下载上限：和本地导入一致，防止一个链接把内存打爆。 */
-    static final int MAX_REMOTE_BYTES = MAX_IMAGE_BYTES;
 
     private AttachmentFiles() {
     }
@@ -81,7 +86,8 @@ final class AttachmentFiles {
      */
     static AttachmentText.File importStream(Context ctx, InputStream in, String displayName,
             int maxBytes) throws Exception {
-        File dir = new File(ctx.getFilesDir(), "attachments");
+        File dir = StorageManager.getInstance(ctx).getAttachmentsDir();
+        if (dir == null) dir = new File(ctx.getFilesDir(), "attachments");
         if (!dir.exists() && !dir.mkdirs()) throw new Exception("无法创建附件目录");
         sweepTempFiles(dir);
         File tmp = new File(dir, "tmp-" + System.currentTimeMillis() + ".bin");
@@ -145,6 +151,130 @@ final class AttachmentFiles {
                 displayName, total, w, h, thumb.length());
         return AttachmentText.File.image(displayName, target.getAbsolutePath(),
                 total, w, h, thumb);
+    }
+
+    // ---------------------------------------------------------------- 路径解析与迁移
+
+    /**
+     * 把「会话里记的路径」解析成「现在实际能打开的文件」。
+     *
+     * <p>必须做这一层，因为附件目录搬过一次家（内部私有 → 数据目录），
+     * 而老会话里存的是搬家前的绝对路径。三种情况按顺序试：
+     * <ol>
+     *   <li>原路径还在——没搬家，或迁移还没轮到它；</li>
+     *   <li>当前附件目录下同名文件——已搬家；</li>
+     *   <li>旧附件目录下同名文件——迁移失败/尚未执行时的兜底。</li>
+     * </ol>
+     * 迁移只搬文件、不改会话 JSON：改 JSON 要遍历重写所有会话，
+     * 一旦中途失败就是「路径改了、文件没搬」的裂图，比不迁更糟。
+     */
+    static String resolve(String path) {
+        if (path == null || path.length() == 0) return null;
+        File direct = new File(path);
+        if (direct.isFile() && direct.length() > 0) return path;
+
+        String name = StorageRefs.fileNameOf(path);
+        if (name.length() == 0) return null;
+        try {
+            StorageManager sm = StorageManager.getInstance();
+            File cur = sm.getAttachmentsDir();
+            if (cur != null) {
+                File f = new File(cur, name);
+                if (f.isFile() && f.length() > 0) return f.getAbsolutePath();
+            }
+            File legacy = sm.getLegacyAttachmentsDir();
+            if (legacy != null) {
+                File f = new File(legacy, name);
+                if (f.isFile() && f.length() > 0) return f.getAbsolutePath();
+            }
+        } catch (Throwable t) {
+            LogUtil.w(TAG, "resolve failed: %s : %s", path, t.getMessage());
+        }
+        return null;
+    }
+
+    /**
+     * 旧附件目录 → 数据目录的一次性迁移。后台线程执行，可重复调用。
+     *
+     * <p>只搬不删源文件的镜像没有意义（空间翻倍），所以每个文件搬成功后删源；
+     * 搬失败就留在原地，{@link #resolve} 仍能按文件名找到它。
+     * 同名文件已存在说明是同一张图（内容哈希命名），直接删源即可。
+     *
+     * @return 搬过的文件数
+     */
+    static int migrateLegacy() {
+        StorageManager sm;
+        try {
+            sm = StorageManager.getInstance();
+        } catch (Throwable t) {
+            return 0;
+        }
+        File target = sm.getAttachmentsDir();
+        File legacy = sm.getLegacyAttachmentsDir();
+        if (target == null || legacy == null || !legacy.isDirectory()) return 0;
+        try {
+            if (target.getCanonicalPath().equals(legacy.getCanonicalPath())) return 0;
+        } catch (Exception e) {
+            return 0;
+        }
+
+        File[] files = legacy.listFiles();
+        if (files == null) return 0;
+        int moved = 0;
+        long now = System.currentTimeMillis();
+        for (int i = 0; i < files.length; i++) {
+            File src = files[i];
+            if (!src.isFile()) continue;
+            String name = src.getName();
+            // 导入残留直接清，搬过去只是把垃圾换个地方堆
+            if (name.startsWith("tmp-")) {
+                if (now - src.lastModified() >= 24L * 60L * 60L * 1000L) src.delete();
+                continue;
+            }
+            File dst = new File(target, name);
+            if (dst.isFile() && dst.length() == src.length()) {
+                src.delete();
+                continue;
+            }
+            if (copyFile(src, dst)) {
+                src.delete();
+                moved++;
+            } else {
+                LogUtil.w(TAG, "migrate: copy failed %s", src.getAbsolutePath());
+            }
+        }
+        LogUtil.i(TAG, "migrateLegacy: moved=%d to %s", moved, target.getAbsolutePath());
+        return moved;
+    }
+
+    private static boolean copyFile(File src, File dst) {
+        InputStream in = null;
+        FileOutputStream out = null;
+        File tmp = new File(dst.getParentFile(), "tmp-" + System.currentTimeMillis() + ".bin");
+        try {
+            in = new FileInputStream(src);
+            out = new FileOutputStream(tmp);
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+            out.flush();
+            out.close();
+            out = null;
+            // 先写临时文件再改名：中途断电不会留下名字正确、内容半截的图
+            if (dst.exists()) {
+                tmp.delete();
+                return dst.length() == src.length();
+            }
+            return tmp.renameTo(dst);
+        } catch (Throwable t) {
+            LogUtil.w(TAG, "copyFile failed: %s -> %s : %s",
+                    src.getAbsolutePath(), dst.getAbsolutePath(), t.getMessage());
+            tmp.delete();
+            return false;
+        } finally {
+            try { if (in != null) in.close(); } catch (Exception ignored) { }
+            try { if (out != null) out.close(); } catch (Exception ignored) { }
+        }
     }
 
     /**
@@ -348,6 +478,8 @@ final class AttachmentFiles {
 
     /** 查看器用的大图：按 1600px 采样后转 data URI，返回 null 表示文件不可用。 */
     static String viewDataUri(String path) {
+        // 会话里存的是发送当时的绝对路径，附件目录搬过家，这里统一解析一次
+        path = resolve(path);
         if (path == null || path.length() == 0) return null;
         File f = new File(path);
         if (!f.isFile() || f.length() <= 0) return null;
@@ -357,14 +489,16 @@ final class AttachmentFiles {
             BitmapFactory.Options bounds = new BitmapFactory.Options();
             bounds.inJustDecodeBounds = true;
             BitmapFactory.decodeFile(path, bounds);
-            int w = bounds.outWidth > 0 ? bounds.outWidth : VIEW_PX;
-            int h = bounds.outHeight > 0 ? bounds.outHeight : VIEW_PX;
+            // 最大边来自设置：调大能把小字看清，代价是 base64 体积与上传时间
+            final int maxPx = Limits.visionMaxPx > 0 ? Limits.visionMaxPx : VIEW_PX;
+            int w = bounds.outWidth > 0 ? bounds.outWidth : maxPx;
+            int h = bounds.outHeight > 0 ? bounds.outHeight : maxPx;
 
             BitmapFactory.Options o = new BitmapFactory.Options();
-            o.inSampleSize = sampleSize(w, h, VIEW_PX);
+            o.inSampleSize = sampleSize(w, h, maxPx);
             bmp = BitmapFactory.decodeFile(path, o);
             if (bmp == null) return null;
-            Bitmap scaled = scaleTo(bmp, VIEW_PX);
+            Bitmap scaled = scaleTo(bmp, maxPx);
             boolean hasAlpha = scaled.hasAlpha();
             ByteArrayOutputStream bos = new ByteArrayOutputStream();
             // 带透明通道的（截图、图标）存 PNG：JPEG 会把透明压成黑底
@@ -428,6 +562,7 @@ final class AttachmentFiles {
 
     /** 本地文件 → data URI；任何一步失败返回 null（调用方退回纯文本）。 */
     static String encodeToDataUri(String path, int maxSide, int quality) {
+        path = resolve(path);
         if (path == null || path.length() == 0) return null;
         File f = new File(path);
         if (!f.isFile() || f.length() <= 0) return null;
@@ -507,9 +642,9 @@ final class AttachmentFiles {
                 long total = 0;
                 while ((n = in.read(buf)) > 0) {
                     total += n;
-                    if (total > MAX_REMOTE_BYTES) {
+                    if (total > maxImageBytes()) {
                         throw new Exception("图片超过 "
-                                + AttachmentText.formatBytes(MAX_REMOTE_BYTES));
+                                + AttachmentText.formatBytes(maxImageBytes()));
                     }
                     out.write(buf, 0, n);
                 }

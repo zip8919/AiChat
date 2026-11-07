@@ -55,6 +55,66 @@ public class Message {
     public int promptTokens;
     public int completionTokens;
     public int totalTokens;
+
+    /**
+     * 命中「前缀缓存」的 token 数。0 表示端点没上报或这次没命中。
+     *
+     * <p>两家口径不同，解析时都要认：DeepSeek 用顶层 {@code prompt_cache_hit_tokens}，
+     * OpenAI 用 {@code prompt_tokens_details.cached_tokens}。命中率 = 本值 / promptTokens。
+     */
+    public int cachedTokens;
+
+    /**
+     * 这条回复一共发了多少次请求。工具轮次会一轮多发，1 表示只发了一次。
+     *
+     * <p>用于消息底部那行汇总：「3 次请求 · 12.4k tokens · 命中 50%」。
+     * 只数模型请求轮次，不含 429 重试——重试属于同一次请求的失败重发，
+     * 算进来会让「一次请求」变成 4 次，用户对不上账。
+     */
+    public int requestCount;
+
+    /**
+     * 每一轮请求各自的用量。工具轮次会一轮一发，这里逐轮记录，
+     * 消息底部才能写出「第 1 轮输入 8.0k / 输出 120」这种能对上账单的明细。
+     *
+     * <p>只记端点真的返回了 usage 的轮次；被打断的最后一轮没有 usage，
+     * 由宿主在中断时补一条 {@code estimated=true} 的估算记录。
+     * 空列表表示这个端点不报用量（老会话也是空）。
+     */
+    public List<RoundUsage> rounds = new ArrayList<RoundUsage>();
+
+    /** 单轮请求的用量快照。 */
+    public static class RoundUsage {
+        /** 该轮请求的输入 token（含全部上下文）。 */
+        public int prompt;
+        /** 该轮生成的 token。 */
+        public int completion;
+        /** 该轮命中的前缀缓存 token。 */
+        public int cached;
+        /** 该轮端到端耗时（毫秒）。 */
+        public long ms;
+        /** 本地估算而非端点上报。 */
+        public boolean estimated;
+
+        public RoundUsage() {}
+
+        public RoundUsage(int prompt, int completion, int cached, long ms, boolean estimated) {
+            this.prompt = prompt;
+            this.completion = completion;
+            this.cached = cached;
+            this.ms = ms;
+            this.estimated = estimated;
+        }
+    }
+
+    /**
+     * 这条 AI 回复是被用户手动打断的（不是请求失败）。
+     *
+     * <p>打断时没有真实 usage，内容也不完整。渲染层据此<b>跳过本地估算</b>：
+     * 对半截回答报一个精确到个位的 token 数，比不显示更容易误导人对账。
+     */
+    public boolean interrupted;
+
     /**
      * 用量是本地估算的，不是端点返回的。
      *

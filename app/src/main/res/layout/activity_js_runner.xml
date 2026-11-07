@@ -48,6 +48,15 @@
             android:text="运行"
             android:textSize="12sp" />
 
+        <!-- 死循环停不下来，只能销毁 WebView 重来；按钮常驻但空闲时禁用 -->
+        <Button
+            android:id="@+id/js_abort_button"
+            android:layout_width="0dp"
+            android:layout_height="40dp"
+            android:layout_weight="1"
+            android:text="中止"
+            android:textSize="12sp" />
+
         <Button
             android:id="@+id/js_paste_button"
             android:layout_width="0dp"
@@ -109,12 +118,15 @@
         android:gravity="center_vertical"
         android:paddingLeft="4dp">
 
+        <!-- 运行状态就写在这一行：原先「输出」永远是两个字，
+             用户点完运行不知道到底跑了没有 -->
         <TextView
+            android:id="@+id/js_output_title"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:padding="4dp"
-            android:text="输出"
+            android:text="输出 · 未运行"
             android:textColor="#333333"
             android:textSize="12sp" />
 
@@ -158,8 +170,9 @@
         android:textColor="#333333"
         android:textSize="12sp" />
 
-    <WebView
-        android:id="@+id/js_webview"
+    <!-- WebView 由代码创建：中止运行时必须整个销毁重建，才能真的掐断死循环 -->
+    <FrameLayout
+        android:id="@+id/js_webview_host"
         android:layout_width="match_parent"
         android:layout_height="200dp"
         android:layout_weight="1" />

@@ -70,6 +70,15 @@
             android:textSize="12sp"/>
 
         <Button
+            android:id="@+id/crop_rotate"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="#00000000"
+            android:text="旋转 90°"
+            android:textColor="#FF64B5F6"
+            android:textSize="13sp"/>
+
+        <Button
             android:id="@+id/crop_original"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"

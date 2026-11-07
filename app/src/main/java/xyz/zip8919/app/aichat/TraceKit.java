@@ -19,8 +19,20 @@ final class TraceKit {
 
     private static final String TAG = "TraceKit";
 
-    /** 单条消息 trace 的上限（字符）。约 8~10 轮完整工具卡片。 */
-    static final int MAX_CHARS = 48000;
+    /**
+     * 兜底上限（字符），<b>不是</b>显示上限。
+     *
+     * <p>这里只防一种情况：某个工具返回了几百 MB 的正文，单条消息的 trace 大到
+     * 落盘和解析都会把机器拖死。5 MB ≈ 900 张工具卡片，正常对话永远碰不到。
+     *
+     * <p>日常「卡片太多」由渲染层折叠解决（只显示最近若干张，更早的折成一行可点开），
+     * 数据一条都不删。早先这里写的是 48000，约 8~10 轮卡片就开始真删数据——
+     * 用户看到的是「卡片自己消失了」，重开会话也回不来，那是错的取舍。
+     */
+    static final int MAX_CHARS = 5 * 1024 * 1024;
+
+    /** 裁剪后贴在头部的说明块，见 {@link #cap}。 */
+    static final String TRIM_TOOL = "trace_trimmed";
 
     private static final String THINKING_END = "[/thinking]";
 
@@ -29,6 +41,11 @@ final class TraceKit {
 
     /**
      * 超限时从头部裁掉若干个完整块。
+     *
+     * <p><b>裁掉不等于抹掉</b>：早先这里直接 {@code delete(0, cut)}，聊到中途、工具卡片
+     * 攒够 48000 字符后，用户看着屏幕上前几张卡片凭空消失——没有任何提示，
+     * 看起来就是「渲染坏了」。现在在剪切点插入一个说明块，明确告诉用户
+     * 「更早的工具记录因为太长已收起」，并且只插入一次（重复裁剪不叠加）。
      *
      * @return 是否真的裁剪过。裁剪后文本变短，调用方必须重置「已推送到 DOM 的
      *         base」标记，否则下一次渲染会把自己当成过期快照丢掉。
@@ -39,14 +56,32 @@ final class TraceKit {
 
     static boolean cap(StringBuilder sb, int max) {
         if (sb == null || max <= 0 || sb.length() <= max) return false;
-        int cut = safeCut(sb.toString(), sb.length() - max);
+        // 说明块本身要占长度，预算里先扣掉，否则裁完还是超
+        int noteLen = trimNote().length();
+        int cut = safeCut(sb.toString(), sb.length() - max + noteLen);
         if (cut <= 0) {
             // 没有可用的块边界：保持原样，绝不硬切
             return false;
         }
         sb.delete(0, cut);
-        LogUtil.i(TAG, "trace capped: cut=%d, remain=%d", cut, sb.length());
+        // 必须在剪切之后再判断：说明块就在头部，这一刀很可能把它一起切掉了。
+        // 先判断后剪切的写法只会在第一次裁剪时插入，第二次又变成静默消失。
+        boolean noted = sb.indexOf(TRIM_TOOL) >= 0;
+        if (!noted) sb.insert(0, trimNote());
+        LogUtil.i(TAG, "trace capped: cut=%d, remain=%d, noted=%s",
+                cut, sb.length(), !noted);
         return true;
+    }
+
+    /**
+     * 裁剪说明块。用 tool 卡片的既有语法而不是另造标记：
+     * 渲染层、纯文本剥离、落盘解析都已经认识 {@code [tool]...[/tool]}，
+     * 多一种标记就要在五处同步，迟早漏一处。
+     */
+    private static String trimNote() {
+        return WebSearchTool.TRACE_START
+                + "{\"tool\":\"" + TRIM_TOOL + "\",\"note\":\"更早的工具调用记录因内容过长已收起\"}"
+                + WebSearchTool.TRACE_END;
     }
 
     /**

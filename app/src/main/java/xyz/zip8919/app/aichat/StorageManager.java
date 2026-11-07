@@ -5,6 +5,7 @@ import android.os.Environment;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -152,6 +153,12 @@ public class StorageManager {
         File convDir = new File(this.conversationsPath);
         boolean ok = convDir.exists() || convDir.mkdirs();
         if (!ok) LogUtil.e(TAG, "createDirectories failed: cannot mkdir conversations %s", this.conversationsPath);
+        // 附件目录提前建好：导入图片时再建，失败原因会被当成「图片保存失败」，
+        // 这里建失败至少能在启动日志里留下真实原因
+        File attDir = new File(this.basePath, "attachments");
+        if (!attDir.exists() && !attDir.mkdirs()) {
+            LogUtil.w(TAG, "createDirectories: cannot mkdir attachments %s", attDir.getAbsolutePath());
+        }
         return ok;
     }
 
@@ -184,6 +191,31 @@ public class StorageManager {
         return content;
     }
 
+    // ---- usage stats ----
+
+    /**
+     * 使用统计文件。与 config、conversations 同目录，方便用户整目录备份/迁移。
+     *
+     * <p>单独一个文件而不是塞进 config：统计是高频写入的可再生数据，
+     * 混进 config 会让一次写统计失败连带用户 API Key 一起丢。
+     */
+    public String getStatsPath() {
+        return this.basePath + File.separator + "stats.json";
+    }
+
+    public String loadStats() {
+        String content = readFile(getStatsPath());
+        LogUtil.d(TAG, "loadStats: len=%d", content == null ? 0 : content.length());
+        return content;
+    }
+
+    public boolean saveStats(String content) {
+        boolean ok = writeFile(getStatsPath(), content);
+        LogUtil.d(TAG, "saveStats: %d chars ok=%s",
+                content == null ? 0 : content.length(), ok);
+        return ok;
+    }
+
     // ---- exports ----
 
     /**
@@ -210,6 +242,105 @@ public class StorageManager {
     public boolean exportExists(String fileName) {
         File dir = new File(this.basePath + File.separator + EXPORTS_DIR);
         return new File(dir, fileName).exists();
+    }
+
+    /**
+     * 二进制导出（查看器截图的 PNG / JPEG）。与 {@link #saveExport} 共用 exports 目录，
+     * 但走字节流而不是 FileWriter：Writer 会把图片字节按 UTF-8 编码写坏。
+     *
+     * <p>同样先写 {@code .tmp} 再改名，避免小工具在写到一半时把半截图片列出来。
+     *
+     * @return 绝对路径，失败返回 null。
+     */
+    public String saveExportBytes(String fileName, byte[] bytes) {
+        if (fileName == null || bytes == null) return null;
+        File dir = new File(this.basePath + File.separator + EXPORTS_DIR);
+        if (!dir.exists() && !dir.mkdirs()) {
+            LogUtil.e(TAG, "saveExportBytes failed: cannot mkdir %s", dir.getAbsolutePath());
+            return null;
+        }
+        File file = new File(dir, fileName);
+        File tmp = new File(dir, fileName + ".tmp");
+        FileOutputStream out = null;
+        boolean ok = false;
+        try {
+            out = new FileOutputStream(tmp);
+            out.write(bytes);
+            out.flush();
+            out.close();
+            out = null;
+            if (tmp.renameTo(file)) {
+                ok = true;
+            } else {
+                // 目标已存在时 rename 在部分 ROM 上失败；删掉旧的再试一次
+                if (file.exists() && file.delete() && tmp.renameTo(file)) {
+                    ok = true;
+                } else {
+                    LogUtil.e(TAG, "saveExportBytes rename failed: %s", file.getAbsolutePath());
+                }
+            }
+        } catch (IOException e) {
+            LogUtil.e(TAG, "saveExportBytes failed: %s", e.getMessage());
+        } finally {
+            if (out != null) {
+                try { out.close(); } catch (IOException ignored) {}
+            }
+            if (!ok && tmp.exists()) tmp.delete();
+        }
+        LogUtil.i(TAG, "saveExportBytes: %d bytes -> %s ok=%s", bytes.length, file.getAbsolutePath(), ok);
+        return ok ? file.getAbsolutePath() : null;
+    }
+
+    /** exports 目录的绝对路径；目录不存在时也返回路径本身，由调用方判断可写性。 */
+    public String getExportsDir() {
+        return this.basePath + File.separator + EXPORTS_DIR;
+    }
+
+    /**
+     * 把 exports 目录下的一个文件改名（同目录 {@code renameTo}，原子操作，不复制字节）。
+     *
+     * <p>不静默覆盖：目标已存在且不是同一个文件时直接失败，交由调用方提示用户。
+     * 仅大小写不同的改名（{@code a.png → A.png}）在大小写不敏感的文件系统上
+     * 会让 {@code exists()} 命中自己，这里用 canonical path 区分，允许这类改名。
+     *
+     * @return 改名后的绝对路径；文件不存在、目标重名、rename 失败都返回 null。
+     */
+    public String renameExport(String oldName, String newName) {
+        if (oldName == null || newName == null) return null;
+        String from = oldName.trim(), to = newName.trim();
+        if (from.length() == 0 || to.length() == 0) return null;
+        // 只允许在 exports 目录内改名，挡住 ../ 之类的路径穿越
+        if (to.contains("/") || to.contains("\\") || from.contains("/") || from.contains("\\")) {
+            LogUtil.w(TAG, "renameExport rejected path: %s -> %s", from, to);
+            return null;
+        }
+        if (from.equals(to)) return null;
+
+        File dir = new File(getExportsDir());
+        File src = new File(dir, from);
+        File dst = new File(dir, to);
+        if (!src.isFile()) {
+            LogUtil.w(TAG, "renameExport: source missing %s", src.getAbsolutePath());
+            return null;
+        }
+        try {
+            if (dst.exists() && !dst.getCanonicalPath().equals(src.getCanonicalPath())) {
+                LogUtil.w(TAG, "renameExport: target exists %s", dst.getAbsolutePath());
+                return null;
+            }
+        } catch (IOException e) {
+            LogUtil.w(TAG, "renameExport: canonical failed %s", e.getMessage());
+            return null;
+        }
+        boolean ok;
+        try {
+            ok = src.renameTo(dst);
+        } catch (Throwable e) {
+            LogUtil.w(TAG, "renameExport threw: %s", e.getMessage());
+            ok = false;
+        }
+        LogUtil.i(TAG, "renameExport: %s -> %s ok=%s", from, to, ok);
+        return ok ? dst.getAbsolutePath() : null;
     }
 
     // ---- conversations ----
@@ -344,6 +475,51 @@ public class StorageManager {
     }
 
     // ---- info ----
+
+    /**
+     * 图片附件目录：{@code basePath/attachments}，与会话、导出放在一起。
+     *
+     * <p>早先它在内部存储的 filesDir 下，理由是「外部存储可能不可用，图片必须随时可读」。
+     * 代价是用户把数据目录整包拷到新手机时会话过去了、图片全丢，而且不开 root
+     * 根本打不开那个目录。图片和会话是同一条消息的两半，拆开放没有任何好处，
+     * 所以本版搬回数据目录，旧文件由 {@link AttachmentFiles#migrateLegacy} 迁移。
+     *
+     * <p>外部存储真的不可用时仍然退回内部目录：宁可路径分叉，也不能让用户
+     * 发不出图、看不到历史图。
+     *
+     * @return null 表示 Context 尚未初始化（进程重建早期的极端路径）。
+     */
+    public File getAttachmentsDir() {
+        if (this.basePath != null) {
+            File dir = new File(this.basePath, "attachments");
+            if (dir.isDirectory() || dir.mkdirs()) return dir;
+            LogUtil.w(TAG, "getAttachmentsDir: cannot use %s, falling back to internal",
+                    dir.getAbsolutePath());
+        }
+        return getLegacyAttachmentsDir();
+    }
+
+    /**
+     * 旧版附件目录（内部私有）。只用于迁移与兜底读取，新代码不要再往这里写。
+     */
+    public File getLegacyAttachmentsDir() {
+        if (this.appContext == null) {
+            LogUtil.w(TAG, "getLegacyAttachmentsDir: appContext null");
+            return null;
+        }
+        return new File(this.appContext.getFilesDir(), "attachments");
+    }
+
+    /** 缓存目录（系统可能随时清理）。 */
+    public File getCacheDir() {
+        if (this.appContext == null) return null;
+        return this.appContext.getCacheDir();
+    }
+
+    /** 内部私有数据目录，用于在界面上说明「附件在哪」。 */
+    public String getInternalFilesPath() {
+        return this.appContext == null ? null : this.appContext.getFilesDir().getAbsolutePath();
+    }
 
     public String getBasePath() {
         return this.basePath;

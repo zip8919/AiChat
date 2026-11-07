@@ -40,14 +40,8 @@ final class ChatHistory {
     /** 序列化后的总长兜底，防止条目极多时把上下文撑爆。 */
     private static final int RESULT_MAX = 3000;
 
-    /**
-     * 单条消息最多带几张图。
-     *
-     * <p>视觉请求的体积是「张数 × base64 长度」：1024px 的 JPEG 约 120 KB，
-     * Base64 后 160 KB。三张就已经占掉 500 KB 请求体，再多在 2G/3G 上
-     * 光是上传就要十几秒，用户会以为卡死了。
-     */
-    static final int MAX_VISION_IMAGES = 3;
+    // 单条消息最多带几张图已搬进设置（Limits.visionMaxImages，默认 3）：
+    // 视觉请求体积 = 张数 × base64 长度，多一张在慢网上就是十几秒上传
 
     /** 把本地图片变成可放进 {@code image_url.url} 的 data URI；返回 null 表示取不到。 */
     interface ImageProvider {
@@ -164,7 +158,9 @@ final class ChatHistory {
             parts.put(text);
 
             int added = 0;
-            for (int i = 0; i < m.attachments.size() && added < MAX_VISION_IMAGES; i++) {
+            // 张数上限来自设置（默认 3）：多一张就是多 160 KB base64，慢网上直接卡住
+            final int maxVision = Limits.visionMaxImages;
+            for (int i = 0; i < m.attachments.size() && added < maxVision; i++) {
                 AttachmentText.File f = m.attachments.get(i);
                 if (f == null || !f.isImage()) continue;
                 String uri = images.dataUri(f);

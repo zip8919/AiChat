@@ -156,6 +156,8 @@ public class ConversationManager {
         c.systemPrompt = src.systemPrompt;
         c.titleGenerated = src.titleGenerated;
         c.titleRequested = src.titleRequested;
+        c.firstRequestAt = src.firstRequestAt;
+        c.firstRequestStamp = src.firstRequestStamp;
         c.messages = new ArrayList<Message>(src.messages);
         return c;
     }
@@ -188,6 +190,10 @@ public class ConversationManager {
 
     public void deleteConversation(String conversationId) {
         LogUtil.i(TAG, "deleteConversation: id=%s, before=%d", conversationId, this.conversations.size());
+        // 附件文件名必须在删文件之前取：删完就无从知道这条会话引用过哪些图。
+        // 只读一个会话文件，和下面 flushSaves 的落盘开销同量级，不会额外拖慢主线程。
+        java.util.Set<String> ownAttachments =
+                StorageCleaner.attachmentNames(storageManager, conversationId);
         // 先落盘队列里的写：否则删完文件后，队列里排着的保存会把它重新写回来
         flushSaves();
         // flush 可能超时（大会话序列化慢），残余任务靠这里兜底拦掉
@@ -204,7 +210,11 @@ public class ConversationManager {
             }
         }
         boolean ok = storageManager.deleteConversation(conversationId);
-        LogUtil.d(TAG, "deleteConversation: file deleted=%s, remaining=%d", ok, this.conversations.size());
+        // 回收只被这条会话引用的图片。异步执行、失败静默：
+        // 删会话本身已经成功，回收失败最多是留几张孤儿图，不影响用户操作
+        StorageCleaner.recycleAsync(storageManager, ownAttachments);
+        LogUtil.d(TAG, "deleteConversation: file deleted=%s, remaining=%d, attachments=%d",
+                ok, this.conversations.size(), ownAttachments.size());
     }
 
     public List<Conversation> loadConversations() {
@@ -219,7 +229,12 @@ public class ConversationManager {
                 String content = storageManager.loadConversation(conversationId);
                 if (content == null || content.length() == 0) continue;
                 try {
-                    loaded.add(fromJson(content));
+                    Conversation conv = fromJson(content);
+                    // 体积取磁盘实际字节，不按正文字符数估：JSON 转义、缩略图 Base64、
+                    // 中文 UTF-8 多字节都会让字符数与文件大小差出好几倍
+                    conv.fileBytes = new java.io.File(
+                            storageManager.getConversationsPath(), file).length();
+                    loaded.add(conv);
                 } catch (Exception e) {
                     LogUtil.e(TAG, "loadConversations: failed to parse '%s': %s", file, e.getMessage(), e);
                 }
@@ -328,6 +343,11 @@ public class ConversationManager {
             json.put("systemPrompt", conv.systemPrompt != null ? conv.systemPrompt : "");
             json.put("titleGenerated", conv.titleGenerated);
             json.put("titleRequested", conv.titleRequested);
+            // 首请求时间：只在有值时写，老会话不因为这个功能整体变大
+            if (conv.firstRequestAt > 0) json.put("firstRequestAt", conv.firstRequestAt);
+            if (conv.firstRequestStamp != null && conv.firstRequestStamp.length() > 0) {
+                json.put("firstRequestStamp", conv.firstRequestStamp);
+            }
 
             JSONArray msgs = new JSONArray();
             for (Message m : conv.messages) {
@@ -348,6 +368,26 @@ public class ConversationManager {
                     // 估算值会被当成端点返回的真实用量，用户对账时对不上。
                     if (m.tokensEstimated) mj.put("tokensEstimated", true);
                 }
+                // 只在有值时写：老会话不该因为加了这个功能就整体重写变大
+                if (m.cachedTokens > 0) mj.put("cachedTokens", m.cachedTokens);
+                if (m.requestCount > 1) mj.put("requestCount", m.requestCount);
+                // 逐轮用量：只在多轮时写。单轮时 prompt/completion 已经表达了同一件事，
+                // 存一份等于每条消息多几十字节，几百条会话也是白占。
+                if (m.rounds != null && m.rounds.size() > 1) {
+                    JSONArray ra = new JSONArray();
+                    for (Message.RoundUsage r : m.rounds) {
+                        if (r == null) continue;
+                        JSONObject ro = new JSONObject();
+                        ro.put("p", r.prompt);
+                        ro.put("c", r.completion);
+                        if (r.cached > 0) ro.put("h", r.cached);
+                        if (r.ms > 0) ro.put("ms", r.ms);
+                        if (r.estimated) ro.put("e", true);
+                        ra.put(ro);
+                    }
+                    if (ra.length() > 0) mj.put("rounds", ra);
+                }
+                if (m.interrupted) mj.put("interrupted", true);
                 if (m.apiText != null && m.apiText.length() > 0) {
                     mj.put("apiText", m.apiText);
                 }
@@ -370,6 +410,13 @@ public class ConversationManager {
                             if (f.thumb.length() > 0) fo.put("thumb", f.thumb);
                         } else {
                             fo.put("content", f.content);
+                        }
+                        // 发送时的截断快照，见 AttachmentText.File#sentChars。
+                        // 三态都要写：NOT_SENT 不写（省字节），全文写 -1，
+                        // 截断写实际字符数。全文也必须写——不写的话读回会被当成
+                        // 「没发过」，下一轮重拼上下文时又按当前预算重算，等于白存。
+                        if (f.sentChars != AttachmentText.File.NOT_SENT) {
+                            fo.put("sent", f.sentChars);
                         }
                         aa.put(fo);
                     }
@@ -429,6 +476,8 @@ public class ConversationManager {
             conv.systemPrompt = json.optString("systemPrompt", "");
             conv.titleGenerated = json.optBoolean("titleGenerated", false);
             conv.titleRequested = json.optBoolean("titleRequested", conv.titleGenerated);
+            conv.firstRequestAt = json.optLong("firstRequestAt", 0);
+            conv.firstRequestStamp = json.optString("firstRequestStamp", "");
 
             conv.messages.clear();
             JSONArray msgs = json.optJSONArray("messages");
@@ -448,6 +497,23 @@ public class ConversationManager {
                     m.completionTokens = mj.optInt("completionTokens", 0);
                     m.totalTokens = mj.optInt("totalTokens", 0);
                     m.tokensEstimated = mj.optBoolean("tokensEstimated", false);
+                    // 命中数与中断标记：只存不读等于重启后丢数据，
+                    // 命中率会突然从 50% 掉到 0%，中断消息又会重新出现估算值
+                    m.cachedTokens = mj.optInt("cachedTokens", 0);
+                    m.requestCount = mj.optInt("requestCount", 0);
+                    // 逐轮明细：老会话没有这个字段，读回空列表即可——
+                    // 缺明细只影响「每轮」那一行，主行的输入/输出仍然在。
+                    JSONArray rra = mj.optJSONArray("rounds");
+                    if (rra != null) {
+                        for (int j = 0; j < rra.length(); j++) {
+                            JSONObject ro = rra.optJSONObject(j);
+                            if (ro == null) continue;
+                            m.rounds.add(new Message.RoundUsage(
+                                    ro.optInt("p", 0), ro.optInt("c", 0), ro.optInt("h", 0),
+                                    ro.optLong("ms", 0), ro.optBoolean("e", false)));
+                        }
+                    }
+                    m.interrupted = mj.optBoolean("interrupted", false);
                     m.sendFailed = mj.optBoolean("sendFailed", false);
                     m.errorDetail = mj.optString("errorDetail", "");
                     m.apiText = mj.optString("apiText", "");
@@ -457,7 +523,7 @@ public class ConversationManager {
                         for (int j = 0; j < aa.length(); j++) {
                             JSONObject ao = aa.optJSONObject(j);
                             if (ao == null) continue;
-                            m.attachments.add(new AttachmentText.File(
+                            AttachmentText.File af = new AttachmentText.File(
                                     ao.optString("name", ""),
                                     ao.isNull("content") ? "" : ao.optString("content", ""),
                                     ao.optLong("bytes", 0),
@@ -465,7 +531,12 @@ public class ConversationManager {
                                     ao.optString("path", ""),
                                     ao.optInt("w", 0),
                                     ao.optInt("h", 0),
-                                    ao.optString("thumb", "")));
+                                    ao.optString("thumb", ""));
+                            // 老版本没存过这个字段，读回 NOT_SENT（= 当时的发送量未知）。
+                            // 这里刻意不按当前预算补算：补算出来的数字是今天的配置，
+                            // 不是当时的事实，显示它比不显示更误导。
+                            af.sentChars = ao.optInt("sent", AttachmentText.File.NOT_SENT);
+                            m.attachments.add(af);
                         }
                     }
                     // 1.8.2 及以前的用户消息把附件摊在正文里：读进来就地迁移成结构化字段，

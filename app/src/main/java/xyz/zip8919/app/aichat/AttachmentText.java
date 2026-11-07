@@ -52,6 +52,40 @@ final class AttachmentText {
         final String thumb;
 
         /**
+         * 从未记录过发送量。与 {@link #SENT_ALL} 必须区分开：
+         * 「没发过」要按当前预算规划，「全文发过」要永远按全文发送——
+         * 两者都写成 -1 的话，老会话每轮都会被当前预算重新截断一次。
+         */
+        static final int NOT_SENT = Integer.MIN_VALUE;
+
+        /** 全文发送。 */
+        static final int SENT_ALL = -1;
+
+        /**
+         * 最近一次发送时实际拼进请求体的字符数。
+         *
+         * <p>三态，缺一不可：
+         * <ul>
+         *   <li>{@link #NOT_SENT}：没发过，按当前预算规划；</li>
+         *   <li>{@link #SENT_ALL}：全文发过，永不截断；</li>
+         *   <li>{@code >=0}：只发了前这么多字符。</li>
+         * </ul>
+         *
+         * <p><b>必须落盘</b>。早先这是不落盘的运行期字段，渲染时按当前预算
+         * {@code planCut} 重算——后果是历史记录会随设置漂移：用户在 20 万预算下发了一条
+         * 50 万字的日志，卡片写着「仅发送前 200k」；等他后来把预算调到 100 万，
+         * 同一条历史消息的提示会自己消失，看起来像当时全文都发出去了，而模型当时
+         * 只看到前 20 万字。反向也成立：预算调小，一堆当时全文发送的历史消息会
+         * 突然全部显示「已截断」。
+         *
+         * <p>写入时机只有一处：{@link #recordSent}，在真正发请求之前。所以
+         * 重发/重试同一条消息时会被新预算的结果覆盖，这正是期望行为——那一次
+         * 确实按新配置发了。未被重发的历史消息永远保持当时的真实值，
+         * 而且这个值同时决定了它重拼进上下文时发多少（见 {@link #cutsOf}）。
+         */
+        int sentChars = NOT_SENT;
+
+        /**
          * token 估算缓存。-1 表示还没算过。
          *
          * <p>10 MB 的附件要遍历一千万个字符，而整页重渲染每轮都会问一次
@@ -146,12 +180,19 @@ final class AttachmentText {
         if (files == null || files.isEmpty()) return base;
         StringBuilder sb = new StringBuilder(base);
         if (sb.length() == 0) sb.append("请阅读以下附件。");
+        // 送模上限按「字符」算，0 表示不截断。只截拼进请求的这份文本，
+        // 磁盘与内存里的 AttachmentText.File.content 保持完整——用户把阈值调大后
+        // 重发同一条消息，还能拿到全文；改原文等于替用户销毁数据。
+        //
+        // 截断规划由 cutsOf 统一负责：界面上的「已截断 M / N」提示与这里实际发出去的
+        // 正文必须来自同一个结果。
+        int[] cuts = cutsOf(files);
         for (int i = 0; i < files.size(); i++) {
             File f = files.get(i);
             if (f.isImage()) {
                 // 图片正文不拼进文字：视觉模式下像素走 image_url 块，这里只留一行
                 // 「有这么一张图」；非视觉模式下明确告诉模型这一轮看不到图，
-                // 免得它对着文件名编内容。
+                // 免得它对着文件名编内容。图片走自己的字节上限，不占字符预算。
                 sb.append("\n\n[图片附件] ").append(f.name);
                 String meta = f.imageSize();
                 if (meta.length() > 0) sb.append("（").append(meta).append("）");
@@ -160,11 +201,136 @@ final class AttachmentText {
                         : "\n（本次为纯文本请求，未包含图像内容）");
                 continue;
             }
-            sb.append("\n\n<附件 name=\"").append(f.name).append("\">\n")
-                    .append(f.content)
-                    .append("\n</附件>");
+            String body = f.content == null ? "" : f.content;
+            int cut = cuts[i];
+            sb.append("\n\n<附件 name=\"").append(f.name).append("\">\n");
+            if (cut == 0) {
+                // 预算已经用光：仍要把附件标签写出来，否则模型不知道还有这个文件，
+                // 会回答「你只发了一个文件」
+                sb.append("<已截断：原文 ").append(body.length())
+                  .append(" 字符，本请求未发送正文>");
+            } else if (cut > 0) {
+                sb.append(body, 0, cut)
+                  .append("\n<已截断：原文 ").append(body.length())
+                  .append(" 字符，仅发送前 ").append(cut).append(" 字符>");
+            } else {
+                sb.append(body);
+            }
+            sb.append("\n</附件>");
         }
         return sb.toString();
+    }
+
+    /**
+     * 决定这批附件这次发多少：有快照就走快照，没快照才按当前预算规划。
+     *
+     * <p>为什么不能一律按当前预算：历史消息在每轮请求里都会被重拼一次
+     * （{@link ChatHistory} 拼上下文时逐个 user 消息调 {@link #apiTextOf}）。
+     * 如果每次都拿"今天的预算"重新截断，用户改一次设置，整段历史发给模型的正文
+     * 就跟着变——上一轮模型看到 20 万字，下一轮同一段变成 100 万字，
+     * 上下文前后不一致，回答会莫名其妙地"忘了前面说过什么"。
+     *
+     * <p>全部附件都有快照时才走快照：预算是按顺序分配的（前一个占满了，后一个就一点不剩），
+     * 混着用会把"剩余额度"算错。新消息在发送前由 {@link #recordSent} 一次性写满全部快照，
+     * 所以正常路径永远是走快照的那一支；只有程序内部临时拼的请求（摘要、标题）才会
+     * 落到按当前预算规划。
+     */
+    private static int[] cutsOf(List<File> files) {
+        int n = files == null ? 0 : files.size();
+        boolean allSnapshotted = n > 0;
+        for (int i = 0; i < n; i++) {
+            File f = files.get(i);
+            if (f == null) continue;
+            if (!f.isImage() && f.sentChars == File.NOT_SENT) {
+                allSnapshotted = false;
+                break;
+            }
+        }
+        if (!allSnapshotted) return planCut(files, Limits.attachMaxChars);
+
+        int[] out = new int[n];
+        for (int i = 0; i < n; i++) {
+            File f = files.get(i);
+            out[i] = (f == null || f.isImage()) ? File.SENT_ALL : f.sentChars;
+        }
+        return out;
+    }
+
+    /**
+     * 按字符预算规划每个文本附件的实际发送长度。
+     *
+     * <p>返回值与 {@code files} 等长，语义务必分清：
+     * <ul>
+     *   <li>{@code -1}：全文发送（图片附件恒为 -1，它不占字符预算）；</li>
+     *   <li>{@code 0}：预算已耗尽，正文一个字都不发，只保留标签；</li>
+     *   <li>{@code >0}：只发前这么多字符。</li>
+     * </ul>
+     *
+     * <p>纯函数，<b>不写</b> {@link File#sentChars}：历史消息在每轮请求里都会被重拼一次
+     * （{@link ChatHistory} 拼上下文时走 {@link #apiTextOf}），若在这里顺手写快照，
+     * 用户一改预算，所有历史附件的「当时发了多少」都会被改写成今天的配置。
+     * 写快照只在真正发送的那一刻发生，见 {@link #recordSent}。
+     * 10 MB 的附件也只是遍历一遍长度，不做任何字符串拷贝。
+     */
+    static int[] planCut(List<File> files, int budget) {
+        int n = files == null ? 0 : files.size();
+        int[] out = new int[n];
+        int used = 0;
+        for (int i = 0; i < n; i++) {
+            File f = files.get(i);
+            if (budget <= 0 || f.isImage()) {
+                out[i] = -1;
+                continue;
+            }
+            int len = f.content.length();
+            int remain = budget - used;
+            if (remain <= 0) {
+                out[i] = 0;
+            } else if (len > remain) {
+                out[i] = safeCut(f.content, remain);
+                used += out[i];
+            } else {
+                out[i] = -1;
+                used += len;
+            }
+        }
+        return out;
+    }
+
+    /**
+     * 发送前记快照：按当前预算算一次，把每个附件实际发送的字符数写进
+     * {@link File#sentChars}，随后由 {@link ConversationManager} 落盘。
+     *
+     * <p>调用点必须在「确定要发这条请求」之后——入列、校验模型、拼上下文都要先过。
+     * 调用一次就意味着这条消息的附件确实按此刻的配置发出去了，之后无论预算怎么改，
+     * 卡片上的提示都停在这一次的真实值上，直到用户重发/重试它。
+     */
+    static int[] recordSent(List<File> files) {
+        if (files == null || files.isEmpty()) return new int[0];
+        int[] cuts = planCut(files, Limits.attachMaxChars);
+        for (int i = 0; i < files.size() && i < cuts.length; i++) {
+            File f = files.get(i);
+            if (f == null) continue;
+            f.sentChars = cuts[i] < 0 ? File.SENT_ALL : cuts[i];
+        }
+        return cuts;
+    }
+
+    /**
+     * 按 UTF-16 长度切字符串时不把代理对劈开。
+     *
+     * <p>表情符号占两个 char，切在中间会留下半个代理项，UTF-8 编码后变成
+     * {@code ?}——附件正文里凭空多一个乱码字符，模型读到的就是错的。
+     */
+    private static int safeCut(String s, int len) {
+        if (len <= 0) return 0;
+        if (len >= s.length()) return s.length();
+        char c = s.charAt(len);
+        if (Character.isLowSurrogate(c) && len > 0
+                && Character.isHighSurrogate(s.charAt(len - 1))) {
+            return len - 1;
+        }
+        return len;
     }
 
     /**

@@ -147,12 +147,36 @@ public class MessageHtmlRenderer {
               .append("<span class=\"attach-name\">").append(esc(f.name)).append("</span>")
               .append("<span class=\"attach-sub\">")
               .append(esc(AttachmentText.sizeAndTokens(f))).append("</span>")
+              .append(cutNote(f))
               .append("</span>")
               .append("<span class=\"attach-view\">查看 ›</span>")
               .append("</div>");
         }
         sb.append("</div>");
         return sb.toString();
+    }
+
+    /**
+     * 附件卡片第三行：那一次实际发了多少。
+     *
+     * <p>数据来自 {@link AttachmentText.File#sentChars}——发送前由
+     * {@link AttachmentText#recordSent} 写入并落盘。这里<b>绝不能</b>拿当前预算重算：
+     * 那样用户一改设置，历史消息的提示就会跟着变，把「当时只发了 20 万字」
+     * 悄悄改写成「全文发送」，反过来也会给当时全文发送的老消息凭空加上「已截断」。
+     *
+     * <p>{@code NOT_SENT}（没发过）和 {@code SENT_ALL}（全文发过）都返回空串：
+     * 没截断就不该多一行噪音，没记录过更不该编一个数字出来。
+     */
+    private static String cutNote(AttachmentText.File f) {
+        int cut = f.sentChars;
+        if (cut < 0) return "";
+        int total = f.chars();
+        if (cut == 0) {
+            return "<span class=\"attach-cut\">⚠ 超出字符预算，本次未发送正文（共 "
+                    + formatTokens(total) + " 字符）</span>";
+        }
+        return "<span class=\"attach-cut\">⚠ 已截断，仅发送前 " + formatTokens(cut)
+                + " / 共 " + formatTokens(total) + " 字符</span>";
     }
 
     /**
@@ -171,51 +195,118 @@ public class MessageHtmlRenderer {
             sb.append(formatClock(msg.timestamp));
         }
 
-        int tokens = msg.totalTokens;
+        int prompt = msg.promptTokens;
+        int completion = msg.completionTokens;
         boolean estimated = msg.tokensEstimated;
-        if (tokens <= 0 && msg.completionTokens > 0) {
-            tokens = msg.completionTokens;
-        }
-        if (tokens <= 0 && msg.timestamp > 0) {
-            // 用户消息从来没被端点统计过；AI 消息在端点不支持 usage 时也是 0。
-            // 两种都退到本地估算，否则这一行会整段消失，看起来像「没这个功能」。
-            // 没有时间戳的消息（更老的会话或畸形数据）不估算：连时间都没有的消息，
-            // 凭空补一个 token 数只会让整段历史看起来像被篡改过。
-            int est;
+        boolean interrupted = msg.isAssistant() && msg.interrupted;
+
+        // 兜底估算：端点不报 usage、老会话、以及用户消息（服务端从来没给它统计过）。
+        // 早先这里只估一个「总数」，用户看不出其中多少是上下文、多少是这次生成的，
+        // 对账时无从下手。现在两侧分开：用户消息只有输入侧，AI 消息按能拿到的估。
+        if (prompt <= 0 && completion <= 0 && msg.timestamp > 0) {
             if (msg.isUser()) {
                 // 用户消息的「真实开销」含附件正文，只算气泡里那几个字会低估上千倍。
                 // 分块累加而不是先拼成一个大字符串：10 MB 的附件再复制一份就是 20 MB。
-                est = AttachmentText.tokensOf(msg);
+                int est = AttachmentText.tokensOf(msg);
+                if (est > 0) {
+                    prompt = est;
+                    estimated = true;
+                }
             } else {
                 String src = msg.apiText != null && msg.apiText.length() > 0
                         ? msg.apiText : msg.content;
-                est = estimateTokens(src);
+                int est = estimateTokens(src);
+                if (est > 0) {
+                    completion = est;
+                    estimated = true;
+                }
             }
-            if (est > 0) {
-                tokens = est;
-                estimated = true;
-            }
-        }
-        if (tokens > 0) {
-            if (sb.length() > 0) sb.append(" · ");
-            if (estimated) sb.append('~');
-            sb.append(formatTokens(tokens)).append(" tokens");
         }
 
-        // 速度只在有完成时刻时给：打断/失败的消息没有参考价值。
-        // 估算的用量算出来的速度也是估算的，同样带 ~。
-        if (msg.isAssistant() && msg.completionTokens > 0 && msg.finishedAt > msg.timestamp) {
+        // 工具轮次：一条回复可能发了好几次请求（每次工具调用一轮）。
+        // 逐轮拆分（1) 8.0k→120 · 2) …）会拉成一长串，这里只留次数当背景；
+        // 明细仍存在 Message.rounds 里，统计页与调试侧照旧可用。
+        if (msg.requestCount > 1) {
+            if (sb.length() > 0) sb.append(" · ");
+            sb.append(msg.requestCount).append(" 次请求");
+        }
+
+        // 合计 = 这次回复各轮输入累加 + 各轮输出累加。
+        // 多轮时输入里同一份上下文被反复计费，输入和输出两个数分开看，
+        // 用户没法回答「AI 这一整条回复到底花了多少」——所以合计必须单列。
+        boolean hasTotal = msg.isAssistant() && prompt > 0 && completion > 0;
+
+        // 输入侧 = 这条回复所有请求真正发给模型的上下文累加，不是本次回答的字数。
+        // 缓存附在输入侧：它的分母就是 promptTokens，换个位置就不成立。
+        // 有了合计的外层括号，缓存就不再自己套括号，否则两个右括号糊在一起：
+        // 「共 32.4k（输入 30.1k（缓存 21.0k · 70%） · 输出 2.3k）」
+        StringBuilder io = new StringBuilder();
+        if (prompt > 0) {
+            io.append("输入 ");
+            if (estimated) io.append('~');
+            io.append(formatTokens(prompt));
+            if (msg.cachedTokens > 0) {
+                int pct = Math.round(msg.cachedTokens * 100f / prompt);
+                if (hasTotal) {
+                    io.append(" · 缓存 ").append(formatTokens(msg.cachedTokens))
+                      .append('/').append(pct).append('%');
+                } else {
+                    io.append("（缓存 ").append(formatTokens(msg.cachedTokens))
+                      .append(" · ").append(pct).append("%）");
+                }
+            }
+        }
+        if (completion > 0) {
+            if (io.length() > 0) io.append(" · ");
+            io.append("输出 ");
+            if (estimated) io.append('~');
+            io.append(formatTokens(completion));
+        }
+
+        // 合计摆最前，括号里再拆输入/输出。单轮也摆：用户要的就是「一次问答总共多少」，
+        // 只在多轮才给总数，会让人以为单轮的输入输出就是全部开销（其实是相加）。
+        if (io.length() > 0) {
+            if (sb.length() > 0) sb.append(" · ");
+            if (hasTotal) {
+                sb.append("共 ");
+                if (estimated) sb.append('~');
+                sb.append(formatTokens(prompt + completion));
+                sb.append("（").append(io).append("）");
+            } else {
+                sb.append(io);
+            }
+        }
+
+        // 速度只看生成侧，并且用端到端耗时（含工具轮）。打断/失败没有参考价值。
+        if (msg.isAssistant() && !interrupted
+                && completion > 0 && msg.finishedAt > msg.timestamp) {
             long elapsed = msg.finishedAt - msg.timestamp;
             if (elapsed >= 1000) {
-                double speed = msg.completionTokens * 1000.0 / elapsed;
+                double speed = completion * 1000.0 / elapsed;
                 if (sb.length() > 0) sb.append(" · ");
                 if (estimated) sb.append('~');
                 sb.append(String.format(Locale.US, "%.1f tok/s", speed));
             }
         }
 
-        if (sb.length() == 0) return "";
-        return "<div class=\"msg-meta\">" + esc(sb.toString()) + "</div>";
+        // 中断标记放最后：前面那串数字是「已经产生的用量」，这五个字说明
+        // 「它为什么只有这么点」。没有标记的话，用户会拿它跟正常回复对比，
+        // 以为模型变慢了或者统计漏记了。
+        if (interrupted) {
+            if (sb.length() > 0) sb.append(" · ");
+            sb.append("已中断");
+        }
+
+        // 逐轮明细（1) 8.0k→120 · 2) …）已经去掉：一条回复里工具调用了五六次，
+        // 那行会拉成一长串，用户真正要的只是「这次一共花了多少」。
+        // 轮次数保留在主行的「N 轮」里，明细数据仍在 Message.rounds 中，
+        // 需要时可由别处消费（统计页聚合走的是事件流，不依赖这里渲染）。
+
+        StringBuilder out = new StringBuilder();
+        if (sb.length() > 0) {
+            out.append("<div class=\"msg-meta\">").append(esc(sb.toString())).append("</div>");
+        }
+        return out.toString();
     }
 
     /** 当天只显示时分，跨天补上日期，避免昨天的消息看起来像刚刚发的。 */
@@ -420,9 +511,27 @@ public class MessageHtmlRenderer {
                 if (te == -1) {
                     // Streaming: thinking not yet closed
                     LogUtil.v(TAG, "thinking block UNCLOSED at %d, tail=%d chars", ts, text.length() - ts - 10);
-                    html.append("<div class=\"thinking-block\">")
-                        .append(esc(text.substring(ts + 10)))
-                        .append("</div>");
+                    // 工具轮次中途会留下一段尚未闭合的 [thinking]，旧代码直接输出
+                    // 不带 toggle 的裸块，于是「多一份无法折叠的思考内容」。
+                    // 这里复用闭合分支的同一套折叠结构，流式阶段也能展开/收起。
+                    String thinking = text.substring(ts + 10);
+                    int thinkTok = estimateTokens(thinking);
+                    // 流式每个分片都会整段重建 HTML，思考块的展开状态必须靠一个
+                    // 稳定 key 跨重建恢复。取「开头 64 字」做指纹：流式内容只在
+                    // 末尾增长，前缀不变；同一段思考在「未闭合 → 闭合」两种形态
+                    // 下也拿到同一个 key，展开状态不会跳变。
+                    // data-think-live=1 表示这段思考还在输出（未收到 [/thinking]）。
+                    // JS 侧只对「仍在 tail 里」的 live 块自动展开；等闭合标记到达、
+                    // 或本轮被 commit 进 base 后，同一块自动折叠。历史消息整页重建
+                    // 时块直接落在 .content 里、不在 tail 内，一律折叠，不会误展开。
+                    html.append("<div class=\"thinking-wrap\" data-think-key=\"")
+                        .append(thinkingKey(thinking)).append("\" data-think-live=\"1\">")
+                        .append("<div class=\"thinking-toggle\" data-tok=\"").append(thinkTok)
+                        .append("\" onclick=\"toggleThinking(this)\">── 展开思考（")
+                        .append(formatTokens(thinkTok)).append(" tokens）──</div>")
+                        .append("<div class=\"thinking-block\" style=\"display:none\">")
+                        .append(MarkdownPipeline.render(thinking, ctx))
+                        .append("</div></div>");
                     break;
                 }
                 String thinking = text.substring(ts + 10, te);
@@ -432,7 +541,9 @@ public class MessageHtmlRenderer {
                 // 数值按源码估算（中文 0.6 / 英文 0.3 每字符），并写进 data-tok，
                 // 折叠时由 JS 直接读回，避免展开/收起后数字跳变。
                 int thinkTok = estimateTokens(thinking);
-                html.append("<div class=\"thinking-wrap\">")
+                // 已闭合（思考结束）：live=0，JS 会自动折叠，除非用户手动展开过。
+                html.append("<div class=\"thinking-wrap\" data-think-key=\"")
+                    .append(thinkingKey(thinking)).append("\" data-think-live=\"0\">")
                     .append("<div class=\"thinking-toggle\" data-tok=\"").append(thinkTok)
                     .append("\" onclick=\"toggleThinking(this)\">── 展开思考（")
                     .append(formatTokens(thinkTok)).append(" tokens）──</div>")
@@ -456,6 +567,18 @@ public class MessageHtmlRenderer {
         }
         LogUtil.v(TAG, "contentWithBlocks: %d blocks rendered", blocks);
         return html.toString();
+    }
+
+    /**
+     * 思考块的稳定标识。用「前 64 个字符」的哈希而不是全文哈希：
+     * 流式输出时文本在末尾增长，全文哈希每个分片都变，展开状态就永远对不上；
+     * 前缀哈希在整个输出过程中保持不变，闭合后也一致。
+     * 不同轮次的思考内容不同，前缀足以区分（极端同前缀的情况只是两块共用
+     * 一个展开状态，不会丢内容）。
+     */
+    private static String thinkingKey(String thinking) {
+        String head = thinking.length() > 64 ? thinking.substring(0, 64) : thinking;
+        return Integer.toHexString(head.hashCode());
     }
 
     /**
@@ -593,8 +716,12 @@ public class MessageHtmlRenderer {
         try {
             json = new JSONObject(payload);
         } catch (Exception e) {
+            // 不能返回空串：那等于这张卡片凭空消失，用户会以为「刚才明明有一张卡」。
+            // 也不回显 payload——里面是工具结果原文，可能几百 KB，也可能带密钥。
             LogUtil.w(TAG, "renderToolBlock: bad JSON len=%d", payload == null ? 0 : payload.length());
-            return "";
+            return "<div class=\"tool-card\"><div class=\"tool-card-head\">工具结果</div>"
+                    + "<div class=\"tool-error\">结果格式异常，无法显示（"
+                    + (payload == null ? 0 : payload.length()) + " 字符）</div></div>";
         }
         String tool = json.optString("tool", "");
         String error = json.optString("error", "");
@@ -605,6 +732,13 @@ public class MessageHtmlRenderer {
         StringBuilder out = new StringBuilder();
         out.append("<div class=\"tool-card\" data-tool-key=\"")
            .append(Integer.toHexString(payload.hashCode())).append("\">");
+        // trace 超长被裁剪时留下的说明，见 TraceKit.cap
+        if (TraceKit.TRIM_TOOL.equals(tool)) {
+            out.append("<div class=\"tool-card-head tool-trim\">")
+               .append(esc(json.optString("note", "更早的工具记录已收起")))
+               .append("</div></div>");
+            return out.toString();
+        }
         if (error.length() > 0) {
             boolean isLimit = "limit".equals(tool);
             out.append("<div class=\"tool-card-head\">")
@@ -689,12 +823,25 @@ public class MessageHtmlRenderer {
         int count = json.optInt("count", 0);
         JSONArray results = json.optJSONArray("results");
         int n = results == null ? 0 : results.length();
-        out.append(collapsibleHead("搜索"
-           + (query.length() > 0 ? "：" + esc(query) : "")
-           + "（" + (count > 0 ? count : n) + " 条）"));
+        // 非搜索类工具（HTML 执行、HTTP 请求等）没有 results，旧代码一律套「搜索（0 条）」，
+        // 用户看到的就是一张莫名其妙的空搜索卡片。这里按工具类型分派。
+        // tool 已在方法开头解析，此处直接复用
+        boolean isSearch = tool.length() == 0 || WebSearchTool.TOOL_SEARCH.equals(tool);
+        String content = json.optString("content", "");
+        String head = isSearch
+                ? "搜索" + (query.length() > 0 ? "：" + esc(query) : "")
+                        + "（" + (count > 0 ? count : n) + " 条）"
+                : "工具结果：" + esc(tool.length() > 0 ? tool : "未知工具")
+                        + (query.length() > 0 ? " · " + esc(query) : "");
+        out.append(collapsibleHead(head));
         out.append("<div class=\"tool-body\">");
-        if (n == 0) {
-            out.append("<div class=\"tool-empty\">没有找到结果</div>");
+        if (!isSearch && n == 0 && content.length() > 0) {
+            // HTML / 代码执行类工具的结果正文直接展示，不再伪装成搜索结果
+            out.append("<div class=\"tool-fetch-content\">").append(esc(content))
+               .append("</div>");
+        } else if (n == 0) {
+            out.append("<div class=\"tool-empty\">")
+               .append(isSearch ? "没有找到结果" : "（无输出）").append("</div>");
         } else {
             for (int i = 0; i < n; i++) {
                 JSONObject item = results.optJSONObject(i);

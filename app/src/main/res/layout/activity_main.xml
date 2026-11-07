@@ -108,33 +108,40 @@
             android:layout_marginLeft="8dp"/>
     </LinearLayout>
 
-    <!-- Message display (WebView for rich HTML rendering) -->
-    <WebView
-        android:id="@+id/message_webview"
+    <!-- Message display (WebView for rich HTML rendering) + 悬浮的回到底部气泡。
+         气泡必须叠在 WebView 之上而不是另占一行：独立一行的话，即使已经滚在最底部，
+         也永远有一条 36dp 的空带把输入栏往下推，看起来像布局错位。
+         FrameLayout 只包这两层，其余布局不动。 -->
+    <FrameLayout
+        android:id="@+id/scroll_to_bottom_bar"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1"/>
+        android:layout_weight="1">
 
-    <!-- Scroll-to-bottom button bar -->
-    <LinearLayout
-        android:id="@+id/scroll_to_bottom_bar"
-        android:gravity="center"
-        android:orientation="horizontal"
-        android:background="@color/background"
-        android:padding="4dp"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content">
-        <Button
+        <WebView
+            android:id="@+id/message_webview"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"/>
+
+        <!-- 圆形小气泡：半透明底 + 白色箭头，压在正文上也能看清。
+             原来这里是一条横贯全屏、写着「↓ 回到底部（长按清空输入框）」的长条，
+             文案里还藏着一个只有长按才能发现的功能。 -->
+        <TextView
             android:id="@+id/scroll_to_bottom_button"
-            android:textSize="12sp"
-            android:textColor="@color/primary"
-            android:background="@android:color/transparent"
-            android:padding="4dp"
-            android:minHeight="0dp"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="↓ 回到底部（长按清空输入框）"/>
-    </LinearLayout>
+            android:textSize="15sp"
+            android:textStyle="bold"
+            android:textColor="#FFFFFF"
+            android:background="@drawable/bg_scroll_bubble"
+            android:gravity="center"
+            android:includeFontPadding="false"
+            android:layout_gravity="end|bottom"
+            android:layout_marginRight="14dp"
+            android:layout_marginBottom="10dp"
+            android:visibility="gone"
+            android:layout_width="38dp"
+            android:layout_height="38dp"
+            android:text="↓"/>
+    </FrameLayout>
 
     <!-- Queued messages bar (only visible while messages are waiting) -->
     <LinearLayout
@@ -187,56 +194,106 @@
             android:layout_height="wrap_content"/>
     </HorizontalScrollView>
 
+    <!-- 会话用量状态栏：常驻在输入框上方，显示本会话累计 token / 命中 / 速度。
+         没有数据时 GONE——空会话挂一条「0 tokens」只是白占一行高度。 -->
+    <TextView
+        android:id="@+id/usage_bar"
+        android:textSize="11sp"
+        android:textColor="#777777"
+        android:paddingLeft="14dp"
+        android:paddingRight="14dp"
+        android:paddingTop="3dp"
+        android:paddingBottom="3dp"
+        android:maxLines="1"
+        android:ellipsize="end"
+        android:background="@color/background"
+        android:visibility="gone"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"/>
+
     <!-- Bottom input bar
-         右侧是竖排：上面全屏展开、下面发送。全屏用 GONE 而不是 INVISIBLE：
-         它常驻会白占 30dp，窄屏上输入栏一直比改动前高 30dp。
-         不会导致发送键跳动——外层 gravity=bottom、发送键是列内最后一个子元素，
-         列变高只往上长，发送键底边和输入框底边都不动。
-         加号放在发送左边，只负责附件菜单。 -->
+         上下两层：
+         ① 动作栏（清空 / 全屏）——整条只在「有文字或有附件」时出现，空输入时彻底让位，
+            输入框拿回全部宽度；
+         ② 输入行（输入框 + 加号 + 发送）。
+         早先把清空/全屏塞进输入行右侧，为了让它们不随输入框长高而漂移，只能给一个
+         62dp 的固定占位，代价是输入框永久变窄。拆成独立一行后两个问题一起解决：
+         这一行有固定高度、自己占自己的竖直空间，输入框多高都动不到它。 -->
     <LinearLayout
-        android:gravity="bottom"
-        android:orientation="horizontal"
+        android:orientation="vertical"
         android:background="@color/white"
-        android:padding="8dp"
         android:layout_width="match_parent"
         android:layout_height="wrap_content">
-        <EditText
-            android:id="@+id/input_edit_text"
-            android:background="@drawable/edit_text_background"
-            android:padding="12dp"
-            android:minHeight="44dp"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:hint="@string/input_hint"
-            android:maxLines="4"
-            android:layout_weight="1"
-            android:inputType="textMultiLine"/>
-        <ImageButton
-            android:id="@+id/plus_button"
-            android:background="?android:attr/selectableItemBackground"
-            android:padding="10dp"
-            android:layout_width="44dp"
-            android:layout_height="44dp"
-            android:layout_marginLeft="4dp"
-            android:scaleType="fitCenter"
-            android:src="@drawable/ic_plus"
-            android:contentDescription="@string/attach"/>
+
         <LinearLayout
-            android:orientation="vertical"
-            android:gravity="center_horizontal"
-            android:layout_width="44dp"
-            android:layout_height="wrap_content">
+            android:id="@+id/input_action_bar"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:background="@color/white"
+            android:paddingLeft="8dp"
+            android:paddingRight="8dp"
+            android:visibility="gone"
+            android:layout_width="match_parent"
+            android:layout_height="34dp">
+            <!-- 清空：原来是「长按回到底部」的隐藏功能，没人会发现；现在是一个看得见的
+                 按钮，点一下弹确认框再清。宽 44dp 保证指头够得着，视觉上仍是轻量的小叉。 -->
+            <TextView
+                android:id="@+id/clear_input_button"
+                android:textSize="20sp"
+                android:textColor="#90a4ae"
+                android:gravity="center"
+                android:includeFontPadding="false"
+                android:background="?android:attr/selectableItemBackground"
+                android:layout_width="44dp"
+                android:layout_height="34dp"
+                android:contentDescription="清空输入"
+                android:text="×"/>
+            <View
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="1"/>
+            <!-- 全屏：只有输入框里真有文字才显示——空输入进全屏没有意义。
+                 右对齐，显隐不会推挤左边的清空键。 -->
             <ImageButton
                 android:id="@+id/expand_button"
                 android:background="?android:attr/selectableItemBackground"
                 android:padding="4dp"
                 android:layout_width="30dp"
                 android:layout_height="30dp"
-                android:layout_gravity="end"
                 android:scaleType="fitCenter"
                 android:src="@drawable/ic_expand"
                 android:visibility="gone"
                 android:contentDescription="@string/fullscreen_input"/>
+        </LinearLayout>
+
+        <LinearLayout
+            android:gravity="bottom"
+            android:orientation="horizontal"
+            android:background="@color/white"
+            android:padding="8dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content">
+            <EditText
+                android:id="@+id/input_edit_text"
+                android:background="@drawable/edit_text_background"
+                android:padding="12dp"
+                android:minHeight="44dp"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:hint="@string/input_hint"
+                android:maxLines="4"
+                android:layout_weight="1"
+                android:inputType="textMultiLine"/>
+            <ImageButton
+                android:id="@+id/plus_button"
+                android:background="?android:attr/selectableItemBackground"
+                android:padding="10dp"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:layout_marginLeft="4dp"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_plus"
+                android:contentDescription="@string/attach"/>
             <ImageButton
                 android:id="@+id/send_button"
                 android:background="@drawable/bg_send_button"

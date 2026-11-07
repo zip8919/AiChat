@@ -1,0 +1,526 @@
+package xyz.zip8919.app.aichat;
+
+import android.content.Context;
+import android.os.Handler;
+import android.os.Looper;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+/**
+ * 本地使用统计。
+ *
+ * <p><b>为什么是事件流而不是按天聚合</b>：上一版把「请求数」和「用量」分别累加到
+ * 两个地方（{@code Day.reqs} 与 {@code Day.models[name].reqs}），任何一条路径漏加，
+ * 页面上就会出现「总览有 30 次请求，按模型全是 0 次」——数字自相矛盾，
+ * 用户立刻不信这个页面。现在只有一种写法：<b>发生一件事，追加一条事件</b>，
+ * 总览和明细都由同一条事件聚合出来，结构上不可能不一致。
+ *
+ * <p>附带好处是任意区间：按天聚合只能查今日/本周/本月，查「10 月 3 日到 10 月 9 日」
+ * 就得预存无数种组合。事件流过滤一遍即可。
+ *
+ * <p>只存本机、本版之后的数据：历史会话没有 prompt cache 字段，回填出来的命中率
+ * 一定是错的，宁可从零开始也不给一个看起来精确的假数。旧版 stats.json（v1）
+ * 直接丢弃不清空文件——里面按模型的数字本身就是错的，迁移错误比没有更糟。
+ */
+final class UsageStats {
+
+    private static final String TAG = "UsageStats";
+    private static final Object LOCK = new Object();
+    private static UsageStats instance;
+    private static Context appContext;
+
+    /** 事件上限。一条回复约 2~10 条事件，两万条够用几个月；超了从头部丢最旧的。 */
+    private static final int MAX_EVENTS = 20000;
+
+    private static final String EV_REQ = "req";
+    private static final String EV_USAGE = "usage";
+    private static final String EV_CONV = "conv";
+    private static final String EV_ROUND = "round";
+    private static final String EV_TOOL = "tool";
+    private static final String EV_RETRY = "retry";
+
+    private final List<Ev> events = new ArrayList<Ev>();
+    private final Handler ui = new Handler(Looper.getMainLooper());
+    private final ExecutorService io = Executors.newSingleThreadExecutor();
+    private final Runnable flushTask = new Runnable() {
+        public void run() {
+            flush();
+        }
+    };
+    private boolean dirty;
+
+    static void init(Context ctx) {
+        if (ctx == null) return;
+        synchronized (LOCK) {
+            appContext = ctx.getApplicationContext();
+            if (instance == null) {
+                instance = new UsageStats();
+                instance.load();
+            }
+        }
+    }
+
+    /** 未初始化时返回一个空壳，调用方不用到处判 null（统计丢了不该影响主流程）。 */
+    static UsageStats get() {
+        synchronized (LOCK) {
+            if (instance == null) instance = new UsageStats();
+            return instance;
+        }
+    }
+
+    // ---------------------------------------------------------------- 数据模型
+
+    /** 一条事件。字段全平铺，避免嵌套对象在 JSON 里翻倍膨胀。 */
+    static final class Ev {
+        long ts;
+        String kind;
+        /** 模型名；只有 req / usage 事件有值。 */
+        String model;
+        /** 服务商名；只有 req / usage 事件有值。 */
+        String provider;
+        /** 工具名；只有 tool 事件有值。 */
+        String name;
+        int pt;
+        int ct;
+        int cached;
+        long genMs;
+        /** 用量是本地估算（端点没给 usage，例如用户中途打断）。 */
+        boolean est;
+        /** 工具调用是否成功；其他事件恒为 true。 */
+        boolean ok = true;
+    }
+
+    static final class Bucket {
+        int reqs;
+        long pt;
+        long ct;
+        long cached;
+        long genMs;
+        /** 其中属于本地估算的部分，页面单独标注，不混进「账单口径」。 */
+        long estPt;
+        long estCt;
+
+        void addRequest() {
+            reqs++;
+        }
+
+        void addUsage(int p, int c, int hit, long ms, boolean est) {
+            pt += Math.max(0, p);
+            ct += Math.max(0, c);
+            cached += Math.max(0, hit);
+            genMs += Math.max(0, ms);
+            if (est) {
+                estPt += Math.max(0, p);
+                estCt += Math.max(0, c);
+            }
+        }
+
+        void addTo(Bucket out) {
+            out.reqs += reqs;
+            out.pt += pt;
+            out.ct += ct;
+            out.cached += cached;
+            out.genMs += genMs;
+            out.estPt += estPt;
+            out.estCt += estCt;
+        }
+
+        int cacheRate() {
+            return pt <= 0 ? -1 : (int) Math.round(cached * 100.0 / pt);
+        }
+    }
+
+    static final class ToolCount {
+        int calls;
+        int fail;
+
+        void addTo(ToolCount out) {
+            out.calls += calls;
+            out.fail += fail;
+        }
+    }
+
+    // ---------------------------------------------------------------- 写入
+
+    void onConversationCreated() {
+        append(EV_CONV, null, null, null, 0, 0, 0, 0, false, true);
+    }
+
+    void onRound() {
+        append(EV_ROUND, null, null, null, 0, 0, 0, 0, false, true);
+    }
+
+    /** 一次 HTTP 请求（含工具轮、含 429 重试）。重试另有计数，便于区分请求多的原因。 */
+    void onRequest(String model, String provider) {
+        append(EV_REQ, model, provider, null, 0, 0, 0, 0, false, true);
+    }
+
+    void onRetry() {
+        append(EV_RETRY, null, null, null, 0, 0, 0, 0, false, true);
+    }
+
+    void onTool(String name, boolean ok) {
+        if (name == null || name.length() == 0) return;
+        append(EV_TOOL, null, null, name, 0, 0, 0, 0, false, ok);
+    }
+
+    /**
+     * 一轮请求的用量。
+     *
+     * <p>只记端点真报过的部分，外加明确标记为估算的部分（{@code est}）：
+     * 估算值进不进统计本身是次要的，<b>必须标出来</b>才是关键——
+     * 混在一起不标，用户拿统计页对账单，差额永远找不到出处。
+     */
+    void onUsage(String model, String provider, int prompt, int completion,
+                 int cached, long genMs, boolean est) {
+        if (prompt <= 0 && completion <= 0) return;
+        append(EV_USAGE, model, provider, null, prompt, completion, cached, genMs, est, true);
+    }
+
+    private void append(String kind, String model, String provider, String name,
+                        int pt, int ct, int cached, long genMs, boolean est, boolean ok) {
+        Ev e = new Ev();
+        e.ts = System.currentTimeMillis();
+        e.kind = kind;
+        e.model = model == null ? "" : model;
+        e.provider = provider == null ? "" : provider;
+        e.name = name == null ? "" : name;
+        e.pt = Math.max(0, pt);
+        e.ct = Math.max(0, ct);
+        e.cached = Math.max(0, cached);
+        e.genMs = Math.max(0, genMs);
+        e.est = est;
+        e.ok = ok;
+        synchronized (this) {
+            events.add(e);
+            // 超上限时丢最旧的一批（一次丢 10%，避免每条都做一次 System.arraycopy）
+            int over = events.size() - MAX_EVENTS;
+            if (over > 0) {
+                events.subList(0, Math.max(over, MAX_EVENTS / 10)).clear();
+            }
+            dirty = true;
+        }
+        schedule();
+    }
+
+    // ---------------------------------------------------------------- 聚合
+
+    static final int PERIOD_DAY = 0;
+    static final int PERIOD_WEEK = 1;
+    static final int PERIOD_MONTH = 2;
+
+    static final class Summary {
+        long fromTs;
+        long toTs;
+        int convs;
+        int rounds;
+        int reqs;
+        int retries;
+        long pt;
+        long ct;
+        long cached;
+        long genMs;
+        long estPt;
+        long estCt;
+        int toolCalls;
+        int toolFail;
+        final Map<String, ToolCount> tools = new LinkedHashMap<String, ToolCount>();
+        final Map<String, Bucket> models = new LinkedHashMap<String, Bucket>();
+        final Map<String, Bucket> providers = new LinkedHashMap<String, Bucket>();
+
+        int cacheRate() {
+            return pt <= 0 ? -1 : (int) Math.round(cached * 100.0 / pt);
+        }
+
+        double speed() {
+            return genMs <= 0 ? 0 : ct * 1000.0 / genMs;
+        }
+
+        boolean hasEstimated() {
+            return estPt > 0 || estCt > 0;
+        }
+    }
+
+    /** 今日 / 本周 / 本月（自然周，周一为第一天）。 */
+    Summary summarize(int period) {
+        long now = System.currentTimeMillis();
+        long from;
+        java.util.Calendar c = java.util.Calendar.getInstance();
+        c.setTimeInMillis(now);
+        if (period == PERIOD_DAY) {
+            c.set(java.util.Calendar.HOUR_OF_DAY, 0);
+            c.set(java.util.Calendar.MINUTE, 0);
+            c.set(java.util.Calendar.SECOND, 0);
+            c.set(java.util.Calendar.MILLISECOND, 0);
+            from = c.getTimeInMillis();
+        } else if (period == PERIOD_WEEK) {
+            // 自然周从周一算：周日属于上一周，不是下一周的开头
+            int dow = c.get(java.util.Calendar.DAY_OF_WEEK);
+            int back = (dow == java.util.Calendar.SUNDAY) ? 6 : dow - java.util.Calendar.MONDAY;
+            c.add(java.util.Calendar.DAY_OF_MONTH, -back);
+            c.set(java.util.Calendar.HOUR_OF_DAY, 0);
+            c.set(java.util.Calendar.MINUTE, 0);
+            c.set(java.util.Calendar.SECOND, 0);
+            c.set(java.util.Calendar.MILLISECOND, 0);
+            from = c.getTimeInMillis();
+        } else {
+            c.set(java.util.Calendar.DAY_OF_MONTH, 1);
+            c.set(java.util.Calendar.HOUR_OF_DAY, 0);
+            c.set(java.util.Calendar.MINUTE, 0);
+            c.set(java.util.Calendar.SECOND, 0);
+            c.set(java.util.Calendar.MILLISECOND, 0);
+            from = c.getTimeInMillis();
+        }
+        return summarize(from, now);
+    }
+
+    /**
+     * 任意区间聚合，闭区间 {@code [fromTs, toTs]}。
+     *
+     * <p>按事件时间过滤，不按「天」对齐：用户选 3 日 10:00 到 3 日 12:00，
+     * 就该只统计这两小时，不能把 3 日全天算进去。
+     */
+    Summary summarize(long fromTs, long toTs) {
+        Summary s = new Summary();
+        s.fromTs = fromTs;
+        s.toTs = toTs;
+        synchronized (this) {
+            for (int i = 0; i < events.size(); i++) {
+                Ev e = events.get(i);
+                if (e.ts < fromTs || e.ts > toTs) continue;
+                if (EV_REQ.equals(e.kind)) {
+                    s.reqs++;
+                    bucket(s.models, e.model).addRequest();
+                    bucket(s.providers, e.provider).addRequest();
+                } else if (EV_USAGE.equals(e.kind)) {
+                    s.pt += e.pt;
+                    s.ct += e.ct;
+                    s.cached += e.cached;
+                    s.genMs += e.genMs;
+                    if (e.est) {
+                        s.estPt += e.pt;
+                        s.estCt += e.ct;
+                    }
+                    bucket(s.models, e.model).addUsage(e.pt, e.ct, e.cached, e.genMs, e.est);
+                    bucket(s.providers, e.provider).addUsage(e.pt, e.ct, e.cached, e.genMs, e.est);
+                } else if (EV_CONV.equals(e.kind)) {
+                    s.convs++;
+                } else if (EV_ROUND.equals(e.kind)) {
+                    s.rounds++;
+                } else if (EV_RETRY.equals(e.kind)) {
+                    s.retries++;
+                } else if (EV_TOOL.equals(e.kind)) {
+                    s.toolCalls++;
+                    if (!e.ok) s.toolFail++;
+                    ToolCount t = s.tools.get(e.name);
+                    if (t == null) {
+                        t = new ToolCount();
+                        s.tools.put(e.name, t);
+                    }
+                    t.calls++;
+                    if (!e.ok) t.fail++;
+                }
+            }
+        }
+        return s;
+    }
+
+    private static Bucket bucket(Map<String, Bucket> map, String key) {
+        String k = (key == null || key.length() == 0) ? "未知" : key;
+        Bucket b = map.get(k);
+        if (b == null) {
+            b = new Bucket();
+            map.put(k, b);
+        }
+        return b;
+    }
+
+    /** 按请求数从多到少，页面上一眼看到主力模型。 */
+    static List<Map.Entry<String, Bucket>> sorted(Map<String, Bucket> map) {
+        List<Map.Entry<String, Bucket>> list =
+                new ArrayList<Map.Entry<String, Bucket>>(map.entrySet());
+        Collections.sort(list, new Comparator<Map.Entry<String, Bucket>>() {
+            public int compare(Map.Entry<String, Bucket> a, Map.Entry<String, Bucket> b) {
+                return b.getValue().reqs - a.getValue().reqs;
+            }
+        });
+        return list;
+    }
+
+    /** 数据的最早时间；没有数据返回 -1（页面用它做「自定义区间」的默认起点）。 */
+    long earliestTs() {
+        synchronized (this) {
+            return events.isEmpty() ? -1 : events.get(0).ts;
+        }
+    }
+
+    int eventCount() {
+        synchronized (this) {
+            return events.size();
+        }
+    }
+
+    void clear() {
+        synchronized (this) {
+            events.clear();
+            dirty = true;
+        }
+        flush();
+    }
+
+    // ---------------------------------------------------------------- 落盘
+
+    private void schedule() {
+        synchronized (this) {
+            dirty = true;
+        }
+        ui.removeCallbacks(flushTask);
+        ui.postDelayed(flushTask, 800);
+    }
+
+    private void flush() {
+        final String json;
+        synchronized (this) {
+            if (!dirty) return;
+            dirty = false;
+            json = toJson();
+        }
+        io.execute(new Runnable() {
+            public void run() {
+                try {
+                    StorageManager sm = StorageManager.getInstance();
+                    if (sm == null) return;
+                    sm.saveStats(json);
+                } catch (Exception e) {
+                    LogUtil.w(TAG, "flush failed: %s", e.getMessage());
+                }
+            }
+        });
+    }
+
+    /**
+     * 事件用紧凑数组存：一条 11 个字段，写成对象会多出 11 个键名，
+     * 20000 条差出好几 MB，而这份文件是每次回复都要重写的。
+     * 下标顺序见 {@link #KIND_CODES} 与 {@link #readEvent}。
+     */
+    private static final String[] KIND_CODES =
+            {EV_REQ, EV_USAGE, EV_CONV, EV_ROUND, EV_TOOL, EV_RETRY};
+
+    private void load() {
+        try {
+            String raw = StorageManager.getInstance().loadStats();
+            if (raw == null || raw.length() == 0) return;
+            JSONObject root = new JSONObject(raw);
+            if (root.optInt("v", 0) != 2) {
+                // v1 是按天聚合的旧结构，且按模型/按服务商的数字本身就是错的
+                LogUtil.i(TAG, "load: drop v%d stats", root.optInt("v", 0));
+                return;
+            }
+            JSONArray arr = root.optJSONArray("evs");
+            if (arr == null) return;
+            synchronized (this) {
+                for (int i = 0; i < arr.length(); i++) {
+                    Ev e = readEvent(arr.optJSONArray(i));
+                    if (e != null) events.add(e);
+                }
+            }
+            LogUtil.i(TAG, "load: %d event(s)", events.size());
+        } catch (Exception e) {
+            // 统计文件损坏不是致命问题：丢弃重来，不要让主流程起不来
+            LogUtil.w(TAG, "load failed, reset: %s", e.getMessage());
+            synchronized (this) {
+                events.clear();
+            }
+        }
+    }
+
+    private static Ev readEvent(JSONArray a) {
+        if (a == null || a.length() < 10) return null;
+        Ev e = new Ev();
+        e.ts = a.optLong(0);
+        int code = a.optInt(1, -1);
+        if (code < 0 || code >= KIND_CODES.length) return null;
+        e.kind = KIND_CODES[code];
+        e.model = a.optString(2, "");
+        e.provider = a.optString(3, "");
+        e.name = a.optString(4, "");
+        e.pt = a.optInt(5, 0);
+        e.ct = a.optInt(6, 0);
+        e.cached = a.optInt(7, 0);
+        e.genMs = a.optLong(8, 0);
+        e.est = a.optInt(9, 0) == 1;
+        e.ok = a.optInt(10, 1) == 1;
+        return e;
+    }
+
+    private String toJson() {
+        try {
+            JSONObject root = new JSONObject();
+            root.put("v", 2);
+            JSONArray arr = new JSONArray();
+            synchronized (this) {
+                for (int i = 0; i < events.size(); i++) {
+                    Ev e = events.get(i);
+                    JSONArray a = new JSONArray();
+                    a.put(e.ts);
+                    a.put(kindCode(e.kind));
+                    a.put(e.model);
+                    a.put(e.provider);
+                    a.put(e.name);
+                    a.put(e.pt);
+                    a.put(e.ct);
+                    a.put(e.cached);
+                    a.put(e.genMs);
+                    a.put(e.est ? 1 : 0);
+                    a.put(e.ok ? 1 : 0);
+                    arr.put(a);
+                }
+            }
+            root.put("evs", arr);
+            return root.toString();
+        } catch (Exception e) {
+            LogUtil.w(TAG, "toJson failed: %s", e.getMessage());
+            return "{}";
+        }
+    }
+
+    private static int kindCode(String kind) {
+        for (int i = 0; i < KIND_CODES.length; i++) {
+            if (KIND_CODES[i].equals(kind)) return i;
+        }
+        return 0;
+    }
+
+    // ---------------------------------------------------------------- 日期键
+
+    /** 本地时区的 yyyy-MM-dd。不能用 UTC：东八区凌晨 0-8 点会被算到前一天。 */
+    static String dayKey(long ts) {
+        return new java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+                .format(new java.util.Date(ts));
+    }
+
+    /** 某天 00:00:00.000 的时间戳，自定义区间取边界用。 */
+    static long dayStart(long ts) {
+        java.util.Calendar c = java.util.Calendar.getInstance();
+        c.setTimeInMillis(ts);
+        c.set(java.util.Calendar.HOUR_OF_DAY, 0);
+        c.set(java.util.Calendar.MINUTE, 0);
+        c.set(java.util.Calendar.SECOND, 0);
+        c.set(java.util.Calendar.MILLISECOND, 0);
+        return c.getTimeInMillis();
+    }
+
+    /** 某天 23:59:59.999 的时间戳。 */
+    static long dayEnd(long ts) {
+        return dayStart(ts) + 24L * 60 * 60 * 1000 - 1;
+    }
+}

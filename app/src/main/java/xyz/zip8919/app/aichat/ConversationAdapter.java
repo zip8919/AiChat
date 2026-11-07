@@ -27,6 +27,14 @@ public class ConversationAdapter extends BaseAdapter {
     private Map<String, String> timeCache = new HashMap<String, String>();
     private boolean selectionMode = false;
     private Set<String> selectedIds = new HashSet<String>();
+    /** 从「最占空间」跳进来时定位的会话；只影响底色，不影响选中。 */
+    private String highlightId;
+
+    public void setHighlightId(String id) {
+        LogUtil.d(TAG, "setHighlightId: %s", id);
+        this.highlightId = id;
+        notifyDataSetChanged();
+    }
 
     public ConversationAdapter(Context context, List<Conversation> conversations) {
         this.context = context;
@@ -164,7 +172,15 @@ public class ConversationAdapter extends BaseAdapter {
             }
             timeCache.put(timeKey, timeText);
         }
-        holder.timeView.setText(timeText);
+        // 副行 = 时间 · 条数 · 体积。体积是用户决定「删哪个」的唯一依据，
+        // 只给时间的话，列表只能按「看起来新不新」猜占用。
+        StringBuilder sub = new StringBuilder(timeText);
+        int msgCount = conv.messages == null ? 0 : conv.messages.size();
+        sub.append(" · ").append(msgCount).append(" 条");
+        if (conv.fileBytes > 0) {
+            sub.append(" · ").append(StorageReport.size(conv.fileBytes));
+        }
+        holder.timeView.setText(sub.toString());
         if (selectionMode) {
             boolean checked = selectedIds.contains(conv.id);
             holder.checkView.setVisibility(View.VISIBLE);
@@ -173,7 +189,9 @@ public class ConversationAdapter extends BaseAdapter {
         } else {
             holder.checkView.setVisibility(View.GONE);
             holder.checkView.setChecked(false);
-            convertView.setBackgroundColor(0xFFFFFFFF);
+            // 高亮只表达「你刚点的是这一条」，不能和选中态混淆，所以优先级放在选中之后
+            convertView.setBackgroundColor(conv.id.equals(highlightId)
+                    ? 0xFFE3F2FD : 0xFFFFFFFF);
         }
         return convertView;
     }

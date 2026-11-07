@@ -61,11 +61,22 @@ final class ChatStreamRunner {
          *
          * <p>不用 {@link #showStatus} 表达：状态行是纯文本，塞不进按钮，
          * 而用户最需要的恰恰是「别让我干等 30 秒」。
+         * reason 是从 429 响应体解析出的服务端具体原因，常驻显示在卡片上。
          */
-        void onRetryWaiting(int attempt, int maxAttempts, long waitMs, int generation, int aiIndex);
+        void onRetryWaiting(int attempt, int maxAttempts, long waitMs, String reason,
+                int generation, int aiIndex);
 
         /** 等待结束（已重发或已中止）：收起卡片。 */
         void onRetryWaitEnd();
+
+        /**
+         * 单轮请求结算，只在端点真的返回了 usage 时回调。
+         *
+         * <p>宿主拿它做两件事：把该轮用量加进消息（流式中就能看到数字在涨）、
+         * 记一条逐轮明细。和 {@code UsageStats} 是两条独立链路——统计要的是全局
+         * 时间序列，这里要的是「这条消息的哪一轮花了多少」。
+         */
+        void onRoundUsage(int aiIndex, int prompt, int completion, int cached, long ms);
     }
 
     /** 会话侧能力：请求代数、连接句柄、收尾。 */
@@ -106,11 +117,14 @@ final class ChatStreamRunner {
         final int promptTokens;
         final int completionTokens;
         final int totalTokens;
+        /** 命中前缀缓存的 token 数，口径见 {@link Message#cachedTokens}。 */
+        final int cachedTokens;
         final long finishedAt;
 
         Settled(boolean failed, int aiIndex, int generation, int round, int httpCode,
                 String errorDetail, String trace, String toolHistory, String apiText, String content,
-                int promptTokens, int completionTokens, int totalTokens, long finishedAt) {
+                int promptTokens, int completionTokens, int totalTokens, int cachedTokens,
+                long finishedAt) {
             this.failed = failed;
             this.aiIndex = aiIndex;
             this.generation = generation;
@@ -124,6 +138,7 @@ final class ChatStreamRunner {
             this.promptTokens = promptTokens;
             this.completionTokens = completionTokens;
             this.totalTokens = totalTokens;
+            this.cachedTokens = cachedTokens;
             this.finishedAt = finishedAt;
         }
     }
@@ -186,6 +201,8 @@ final class ChatStreamRunner {
             boolean fallbackTried = false;
             boolean includeUsage = job.includeUsage;
             boolean usageDowngraded = false;
+            // 最近一次 429 的响应体。重试耗尽那一轮可能已读不到 body，用它兜底进错误卡片。
+            String last429Body = "";
             /**
              * 429 重试计数：按「单个 HTTP 请求」独立，不能跨轮次累计。
              *
@@ -230,6 +247,10 @@ final class ChatStreamRunner {
                 JSONObject body = ChatTransport.buildRequestBody(job.modelName, job.provider,
                         job.thinkingLevel, conversation, job.streamEnabled,
                         toolsEnabled ? toolDefs : null, includeUsage);
+                // 统计口径：一次 open 就是一次 HTTP 请求（含工具轮、含重试）。
+                // 重试另有 retries 计数，方便区分「请求多」是工具轮还是 429。
+                UsageStats.get().onRequest(job.modelName, job.providerName);
+                final long roundStartMs = System.currentTimeMillis();
                 conn = ChatTransport.open(job.provider);
                 session.setConnection(conn);
                 writeBody(conn, body.toString());
@@ -242,13 +263,23 @@ final class ChatStreamRunner {
                     // 429 最优先处理：此时 body 还没读，直接关掉重连最干净
                     if (code == 429 && job.retryPolicy.enabled
                             && retryCount < job.retryPolicy.maxAttempts) {
+                        // 429 的具体原因（配额 / 频率 / TPM 限制）写在响应体里，旧代码直接
+                        // 关连接重连，用户只看到「等待重试」，永远不知道服务端说了什么。
+                        String body429 = ChatTransport.readErrorBody(conn);
+                        if (body429 != null && body429.trim().length() > 0) last429Body = body429;
+                        String reason429 = ErrorReport.providerMessage(last429Body);
+                        if (reason429.length() > 160) reason429 = reason429.substring(0, 160) + "…";
                         int retryAfter = ChatTransport.retryAfterSeconds(conn);
                         long waitMs = job.retryPolicy.delayFor(retryCount, retryAfter);
                         retryCount++;
-                        LogUtil.w(TAG, "HTTP 429, retry %d/%d in %d ms (retryAfter=%d)",
-                                retryCount, job.retryPolicy.maxAttempts, waitMs, retryAfter);
+                        UsageStats.get().onRetry();
+                        LogUtil.w(TAG, "HTTP 429, retry %d/%d in %d ms (retryAfter=%d) reason=%s",
+                                retryCount, job.retryPolicy.maxAttempts, waitMs, retryAfter,
+                                LogUtil.preview(reason429, 200));
+                        // 原因常驻在重试卡片上，不用 Toast：一闪而过看不清，
+                        // 而退避可能长达几十秒，用户需要能反复看清「到底为什么」。
                         ui.onRetryWaiting(retryCount, job.retryPolicy.maxAttempts, waitMs,
-                                job.generation, job.aiIndex);
+                                reason429, job.generation, job.aiIndex);
                         ChatTransport.close(conn);
                         conn = null;
                         session.setConnection(null);
@@ -292,20 +323,41 @@ final class ChatStreamRunner {
 
                     st.failed = true;
                     st.httpCode = code;
+                    String bodyForReport = (errBody != null && errBody.trim().length() > 0)
+                            ? errBody : last429Body;
                     st.errorDetail = ErrorReport.build(job.providerName, job.modelName,
-                            job.chatEndpoint, round, code, errBody, null);
+                            job.chatEndpoint, round, code, bodyForReport, null);
                     if (retryCount > 0) {
                         st.errorDetail += "\n\n已自动重试 " + retryCount + " 次仍失败";
                     }
                     LogUtil.e(TAG, "request failed (round %d): %s", round, st.errorDetail);
-                    ui.toast("请求失败: HTTP " + code);
+                    String failReason = ErrorReport.providerMessage(bodyForReport);
+                    if (failReason.length() > 80) failReason = failReason.substring(0, 80) + "…";
+                    ui.toast("请求失败: HTTP " + code
+                            + (failReason.length() > 0 ? " · " + failReason : ""));
                     return;
                 }
 
                 renderer.beginRound();
                 SseRound.Result rr = readRound(conn, st, renderer);
                 st.chunks = rr.chunks;
+                // 统计要的是「本轮这一发」的用量，而 st 里是跨轮累计值。
+                // 不做差直接记，一条带 3 次工具轮的回复会把总量算成 1+2+3=6 倍。
+                final int ptBefore = st.promptTokens;
+                final int ctBefore = st.completionTokens;
+                final int hitBefore = st.cachedTokens;
                 st.addUsage(rr.usage);
+                final int dPt = st.promptTokens - ptBefore;
+                final int dCt = st.completionTokens - ctBefore;
+                final int dHit = st.cachedTokens - hitBefore;
+                final long roundMs = System.currentTimeMillis() - roundStartMs;
+                UsageStats.get().onUsage(job.modelName, job.providerName,
+                        dPt, dCt, dHit, roundMs, false);
+                // 逐轮明细：光看累计值对不上账单（3 轮工具调用的回复，用户不知道
+                // 多出来的 token 花在哪一轮）。有真实 usage 才记，估算的轮次由宿主补。
+                if (dPt > 0 || dCt > 0) {
+                    ui.onRoundUsage(job.aiIndex, dPt, dCt, dHit, roundMs);
+                }
                 if (rr.error != null) {
                     // 用户打断时 abort 会让读循环立刻退出，chunks 可能为 0，
                     // 这里会误报「服务端没有返回任何内容」。打断不是失败，静默返回。
@@ -332,6 +384,19 @@ final class ChatStreamRunner {
                     // 本轮思考/半截回答保留在界面上，不要被下一轮覆盖
                     st.trace.append(rr.display);
                     if (TraceKit.cap(st.trace)) ui.onTraceTrimmed();
+                    // 插入工具卡片前必须先把本轮 tail 并进 base。
+                    // StreamRenderer.commitTail 的契约明写「本轮结束（或要插入工具
+                    // 卡片）」，但这里原先只在下一轮 round>0 的开头调用，漏了这一次。
+                    // 漏掉的后果是同一轮内容出现三份：
+                    //   1) tail 里流式渲染的 display 还挂着；
+                    //   2) 下面 ToolExecutor 的 onTraceAppended 触发
+                    //      renderTraceAsync，它的 lastStreamTrace 仍是旧值，于是把
+                    //      rr.display 当成「新增增量」streamAppendBase 追加进 base
+                    //      —— 思考块和正文一起重复；
+                    //   3) 下一轮 commitTail 再把 tail 那份搬进 base。
+                    // 先 commit 一次：tail 归位、lastStreamTrace 推进到含 display，
+                    // 后续 renderTraceAsync 的 part 就只剩工具卡片，各一份且不乱序。
+                    renderer.commitTail(st.trace.toString());
                     // 注意：不把 rr.content 累进 apiText——工具轮次的正文已经作为
                     // assistant(tool_calls).content 存在于 toolHistory 里，再拼一次会让模型看到重复内容
                     ToolCalls.appendAssistant(conversation, st.toolHistory,
@@ -376,9 +441,9 @@ final class ChatStreamRunner {
             }
         } finally {
             st.finishedAt = System.currentTimeMillis();
-            LogUtil.i(TAG, "<<< request end: elapsed=%d ms, chunks=%d, failed=%s, tokens=%d/%d",
+            LogUtil.i(TAG, "<<< request end: elapsed=%d ms, chunks=%d, failed=%s, tokens=%d/%d cached=%d",
                     st.finishedAt - startMs, st.chunks, st.failed,
-                    st.promptTokens, st.completionTokens);
+                    st.promptTokens, st.completionTokens, st.cachedTokens);
             if (conn != null) {
                 try { conn.disconnect(); } catch (Exception ignored) { }
             }
@@ -520,6 +585,8 @@ final class ChatStreamRunner {
         int promptTokens;
         int completionTokens;
         int totalTokens;
+        /** 命中前缀缓存的 token 数；两家厂商字段名不同，见 {@link #cacheHitOf}。 */
+        int cachedTokens;
         /** 收尾时刻，用于算端到端生成速度。 */
         long finishedAt;
 
@@ -535,6 +602,27 @@ final class ChatStreamRunner {
             promptTokens += p;
             completionTokens += c;
             totalTokens += t;
+            cachedTokens += cacheHitOf(u);
+        }
+
+        /**
+         * 解析「命中缓存的输入 token」。
+         *
+         * <p>DeepSeek 放在顶层 {@code prompt_cache_hit_tokens}；OpenAI 系放在
+         * {@code prompt_tokens_details.cached_tokens}。两边都认，取第一个大于 0 的。
+         * 都不认识就返回 0——宁可这条不显示，也不要拿 prompt_tokens 冒充命中量。
+         */
+        private static int cacheHitOf(JSONObject u) {
+            int hit = u.optInt("prompt_cache_hit_tokens", 0);
+            if (hit > 0) return hit;
+            // 部分网关把 DeepSeek 的字段也塞进 details 里，一并认
+            JSONObject d = u.optJSONObject("prompt_tokens_details");
+            if (d != null) {
+                hit = d.optInt("cached_tokens", 0);
+                if (hit > 0) return hit;
+                hit = d.optInt("cache_hit_tokens", 0);
+            }
+            return Math.max(0, hit);
         }
 
         State(StreamJob job) {
@@ -561,7 +649,7 @@ final class ChatStreamRunner {
         Settled toSettled(StreamJob job) {
             return new Settled(failed, job.aiIndex, job.generation, round, httpCode,
                     errorDetail, trace.toString(), toolHistory.toString(), apiText, content,
-                    promptTokens, completionTokens, totalTokens, finishedAt);
+                    promptTokens, completionTokens, totalTokens, cachedTokens, finishedAt);
         }
     }
 

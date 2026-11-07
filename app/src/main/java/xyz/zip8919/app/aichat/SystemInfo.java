@@ -113,8 +113,15 @@ final class SystemInfo {
     /**
      * 把提示词模板里的占位符换成真实值。
      *
-     * <p>支持的占位符：{@code {android}} {@code {api}} {@code {webview}}
-     * {@code {model}} {@code {app_version}} {@code {ua}}。
+     * <p>支持的占位符：
+     * <ul>
+     *   <li>系统：{@code {android}} {@code {api}} {@code {webview}} {@code {ua}}</li>
+     *   <li>设备：{@code {model}}（机型）{@code {brand}}（厂商）{@code {cpu_abi}}</li>
+     *   <li>屏幕：{@code {screen}}（宽x高）{@code {density}}（dpi）</li>
+     *   <li>时间：{@code {date}} {@code {time}} {@code {datetime}} {@code {weekday}} {@code {timezone}}</li>
+     *   <li>应用：{@code {app_version}} {@code {app_package}} {@code {free_storage}}</li>
+     *   <li>语言：{@code {locale}}</li>
+     * </ul>
      * 未知占位符原样保留——用户粘贴别的模板时不该被悄悄吃掉内容。
      */
     static String fillPlaceholders(String template, Context ctx) {
@@ -136,6 +143,115 @@ final class SystemInfo {
         if (out.indexOf("{ua}") >= 0) {
             out = out.replace("{ua}", webviewUserAgent(ctx));
         }
+
+        // ---- 时间类：每次渲染取实时值 ----
+        // 注意：{date} 每天变一次，会让 system 前缀每天断一次 prompt cache。
+        // 需要「会话固定的时间」请用会话注入那一句，不要拿这里替代。
+        if (out.indexOf("{date}") >= 0 || out.indexOf("{time}") >= 0
+                || out.indexOf("{datetime}") >= 0 || out.indexOf("{weekday}") >= 0
+                || out.indexOf("{timezone}") >= 0) {
+            long now = System.currentTimeMillis();
+            if (out.indexOf("{date}") >= 0) out = out.replace("{date}", formatDate(now));
+            if (out.indexOf("{time}") >= 0) out = out.replace("{time}", formatTime(now));
+            if (out.indexOf("{datetime}") >= 0) out = out.replace("{datetime}", formatDateTime(now));
+            if (out.indexOf("{weekday}") >= 0) out = out.replace("{weekday}", weekday(now));
+            if (out.indexOf("{timezone}") >= 0) out = out.replace("{timezone}", timezone(now));
+        }
+
+        // ---- 屏幕 / 系统类 ----
+        if (out.indexOf("{screen}") >= 0 || out.indexOf("{density}") >= 0) {
+            if (ctx != null) {
+                android.util.DisplayMetrics dm = ctx.getResources().getDisplayMetrics();
+                if (out.indexOf("{screen}") >= 0) {
+                    out = out.replace("{screen}", dm.widthPixels + "x" + dm.heightPixels);
+                }
+                if (out.indexOf("{density}") >= 0) {
+                    out = out.replace("{density}", String.valueOf(dm.densityDpi));
+                }
+            } else {
+                // 没有 Context 就退成「未知」，而不是把 {screen} 原样留在提示词里
+                if (out.indexOf("{screen}") >= 0) out = out.replace("{screen}", "未知");
+                if (out.indexOf("{density}") >= 0) out = out.replace("{density}", "未知");
+            }
+        }
+        out = out.replace("{brand}", isBlank(Build.MANUFACTURER) ? "未知" : Build.MANUFACTURER.trim());
+        if (out.indexOf("{cpu_abi}") >= 0) out = out.replace("{cpu_abi}", cpuAbi());
+        if (out.indexOf("{locale}") >= 0) {
+            out = out.replace("{locale}", java.util.Locale.getDefault().toString());
+        }
+
+        // ---- 应用类 ----
+        if (out.indexOf("{app_package}") >= 0) {
+            out = out.replace("{app_package}", ctx == null ? "未知" : ctx.getPackageName());
+        }
+        if (out.indexOf("{free_storage}") >= 0) {
+            out = out.replace("{free_storage}", freeStorage(ctx));
+        }
         return out;
+    }
+
+    private static String formatDate(long ts) {
+        return new java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+                .format(new java.util.Date(ts));
+    }
+
+    private static String formatTime(long ts) {
+        return new java.text.SimpleDateFormat("HH:mm", java.util.Locale.US)
+                .format(new java.util.Date(ts));
+    }
+
+    private static String formatDateTime(long ts) {
+        return new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.US)
+                .format(new java.util.Date(ts));
+    }
+
+    /** 固定输出「星期X」，不跟随系统语言——英文系统上 EEEE 会变成 Friday。 */
+    private static String weekday(long ts) {
+        String[] names = {"日", "一", "二", "三", "四", "五", "六"};
+        java.util.Calendar c = java.util.Calendar.getInstance();
+        c.setTimeInMillis(ts);
+        int i = c.get(java.util.Calendar.DAY_OF_WEEK) - java.util.Calendar.SUNDAY;
+        if (i < 0 || i > 6) i = 0;
+        return "星期" + names[i];
+    }
+
+    /** 例如 {@code GMT+8} / {@code GMT+5:30}。 */
+    private static String timezone(long ts) {
+        java.util.Calendar c = java.util.Calendar.getInstance();
+        int offsetMin = c.getTimeZone().getOffset(ts) / 60000;
+        String sign = offsetMin >= 0 ? "+" : "-";
+        int abs = Math.abs(offsetMin);
+        if (abs % 60 == 0) return "GMT" + sign + (abs / 60);
+        return String.format(java.util.Locale.US, "GMT%s%d:%02d", sign, abs / 60, abs % 60);
+    }
+
+    private static String cpuAbi() {
+        try {
+            if (Build.VERSION.SDK_INT >= 21 && Build.SUPPORTED_ABIS != null
+                    && Build.SUPPORTED_ABIS.length > 0) {
+                return Build.SUPPORTED_ABIS[0];
+            }
+            return isBlank(Build.CPU_ABI) ? "未知" : Build.CPU_ABI;
+        } catch (Throwable t) {
+            return "未知";
+        }
+    }
+
+    /** 应用私有目录所在分区的剩余空间，例如 {@code 3.2 GB}。 */
+    private static String freeStorage(Context ctx) {
+        if (ctx == null) return "未知";
+        try {
+            java.io.File dir = ctx.getFilesDir();
+            if (dir == null) return "未知";
+            long free = dir.getUsableSpace();
+            if (free <= 0) return "未知";
+            if (free >= 1024L * 1024L * 1024L) {
+                return String.format(java.util.Locale.US, "%.1f GB",
+                        free / (1024.0 * 1024.0 * 1024.0));
+            }
+            return String.format(java.util.Locale.US, "%.0f MB", free / (1024.0 * 1024.0));
+        } catch (Throwable t) {
+            return "未知";
+        }
     }
 }

@@ -72,6 +72,29 @@ public class SettingsActivity extends Activity {
     private static final int MAX_RETRY_429_MAX_WAIT_S = 120;
     /** 代码执行器（JS 运行器）的环境提示词，支持 {android}/{api}/{webview} 等占位符。 */
     private static final String KEY_JS_ENV_PROMPT = "js_env_prompt";
+    // ---- 上限与配额（由 Limits 统一读取，键名对外可见）----
+    /** 附件正文送模上限，单位字符；0 表示不截断。 */
+    static final String KEY_ATTACH_MAX_CHARS = "attach_max_chars";
+    /** 附件合计上限，单位「万字符」——直接填 20000000 太长，输入框放不下。 */
+    static final String KEY_ATTACH_TOTAL_CHARS = "attach_total_wan_chars";
+    static final String KEY_MAX_ATTACHMENTS = "max_attachments";
+    static final String KEY_IMAGE_MAX_MB = "image_max_mb";
+    static final String KEY_TOOL_MAX_KB = "tool_max_kb";
+    static final String KEY_HTTP_TIMEOUT_S = "http_timeout_s";
+    static final String KEY_SEARCH_COUNT = "search_max_count";
+    static final String KEY_SEARCH_SUMMARY_CHARS = "search_summary_chars";
+    static final String KEY_VISION_MAX_PX = "vision_max_px";
+    static final String KEY_VISION_MAX_IMAGES = "vision_max_images";
+    private static final int DEFAULT_ATTACH_MAX_CHARS = 262144;
+    private static final int DEFAULT_ATTACH_TOTAL_WAN = 2000;
+    private static final int DEFAULT_MAX_ATTACHMENTS = 5;
+    private static final int DEFAULT_IMAGE_MAX_MB = 20;
+    private static final int DEFAULT_TOOL_MAX_KB = 32;
+    private static final int DEFAULT_HTTP_TIMEOUT_S = 30;
+    private static final int DEFAULT_SEARCH_COUNT = 10;
+    private static final int DEFAULT_SEARCH_SUMMARY = 1200;
+    private static final int DEFAULT_VISION_MAX_PX = 1600;
+    private static final int DEFAULT_VISION_MAX_IMAGES = 3;
     private static final String DEFAULT_TITLE_MODEL = "Qwen/Qwen3.5-397B-A17B";
     private static final String DEFAULT_TITLE_PROMPT = "你是一个标题生成助手。根据用户消息生成3-15字标题。只输出标题本身，禁止输出任何其他文字、解释、标点或换行。";
     /**
@@ -98,8 +121,15 @@ public class SettingsActivity extends Activity {
     private boolean bindingSwitches;
     private Switch retry429Switch, retry429BackoffSwitch;
     private EditText retry429MaxEdit, retry429BaseEdit, retry429MaxWaitEdit;
+    private EditText attachMaxCharsEdit, attachTotalEdit, maxAttachmentsEdit, imageMaxMbEdit;
+    private EditText toolMaxKbEdit, httpTimeoutEdit, searchCountEdit, searchSummaryEdit;
+    private EditText visionMaxPxEdit, visionMaxImagesEdit;
     private Spinner titleModelSpinner, presetSpinner, searchBackendSpinner;
     private Button saveButton, cancelButton, balanceButton, manageModelsButton;
+    /** 设置页顶部的存储入口：右侧显示「已用 X」。 */
+    private android.widget.TextView storageEntrySize;
+    /** 后台扫描进行中，避免反复进出设置页叠起多个线程。 */
+    private boolean storageScanning;
     private Button managePresetsButton, savePresetButton;
     private AlertDialog manageDialog;
     private List<String[]> presetList; // [name, prompt]
@@ -135,6 +165,16 @@ public class SettingsActivity extends Activity {
         retry429MaxEdit = (EditText) findViewById(R.id.retry_429_max_edit);
         retry429BaseEdit = (EditText) findViewById(R.id.retry_429_base_edit);
         retry429MaxWaitEdit = (EditText) findViewById(R.id.retry_429_max_wait_edit);
+        attachMaxCharsEdit = (EditText) findViewById(R.id.attach_max_chars_edit);
+        attachTotalEdit = (EditText) findViewById(R.id.attach_total_edit);
+        maxAttachmentsEdit = (EditText) findViewById(R.id.max_attachments_edit);
+        imageMaxMbEdit = (EditText) findViewById(R.id.image_max_mb_edit);
+        toolMaxKbEdit = (EditText) findViewById(R.id.tool_max_kb_edit);
+        httpTimeoutEdit = (EditText) findViewById(R.id.http_timeout_edit);
+        searchCountEdit = (EditText) findViewById(R.id.search_count_edit);
+        searchSummaryEdit = (EditText) findViewById(R.id.search_summary_edit);
+        visionMaxPxEdit = (EditText) findViewById(R.id.vision_max_px_edit);
+        visionMaxImagesEdit = (EditText) findViewById(R.id.vision_max_images_edit);
         webSearchMaxCallsEdit = (EditText) findViewById(R.id.web_search_max_calls_edit);
         jsEnvPromptEdit = (EditText) findViewById(R.id.js_env_prompt_edit);
         logSwitch = (Switch) findViewById(R.id.log_switch);
@@ -152,6 +192,12 @@ public class SettingsActivity extends Activity {
         cancelButton = (Button) findViewById(R.id.cancel_button);
         balanceButton = (Button) findViewById(R.id.balance_button);
         manageModelsButton = (Button) findViewById(R.id.manage_models_button);
+        storageEntrySize = (android.widget.TextView) findViewById(R.id.storage_entry_size);
+        findViewById(R.id.storage_entry).setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                startActivity(new Intent(SettingsActivity.this, StorageActivity.class));
+            }
+        });
         ((Button) findViewById(R.id.about_button)).setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 startActivity(new Intent(SettingsActivity.this, AboutActivity.class));
@@ -174,6 +220,12 @@ public class SettingsActivity extends Activity {
             public void onClick(View v) {
                 LogUtil.d(TAG, "click: manage models -> ModelConfigActivity");
                 startActivity(new Intent(SettingsActivity.this, ModelConfigActivity.class));
+            }
+        });
+        findViewById(R.id.usage_stats_button).setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                LogUtil.d(TAG, "click: usage stats -> StatsActivity");
+                startActivity(new Intent(SettingsActivity.this, StatsActivity.class));
             }
         });
         managePresetsButton.setOnClickListener(new View.OnClickListener() {
@@ -269,6 +321,28 @@ public class SettingsActivity extends Activity {
                 SEARCH_BACKEND_DEEPSEEK.equals(getSearchBackend(this)) ? 1 : 0);
         tavilyKeyEdit.setText(getTavilyKey(this));
         webSearchMaxCallsEdit.setText(String.valueOf(getWebSearchMaxCallsPerRound(this)));
+        // 上限与配额：全部按「实际生效值」回显，而不是回显用户上次输入的原文。
+        // 上次可能填了越界值被夹住，回显原文会让人以为那个值已经生效。
+        attachMaxCharsEdit.setText(String.valueOf(prefs.getInt(
+                KEY_ATTACH_MAX_CHARS, DEFAULT_ATTACH_MAX_CHARS)));
+        attachTotalEdit.setText(String.valueOf(prefs.getInt(
+                KEY_ATTACH_TOTAL_CHARS, DEFAULT_ATTACH_TOTAL_WAN)));
+        maxAttachmentsEdit.setText(String.valueOf(prefs.getInt(
+                KEY_MAX_ATTACHMENTS, DEFAULT_MAX_ATTACHMENTS)));
+        imageMaxMbEdit.setText(String.valueOf(prefs.getInt(
+                KEY_IMAGE_MAX_MB, DEFAULT_IMAGE_MAX_MB)));
+        toolMaxKbEdit.setText(String.valueOf(prefs.getInt(
+                KEY_TOOL_MAX_KB, DEFAULT_TOOL_MAX_KB)));
+        httpTimeoutEdit.setText(String.valueOf(prefs.getInt(
+                KEY_HTTP_TIMEOUT_S, DEFAULT_HTTP_TIMEOUT_S)));
+        searchCountEdit.setText(String.valueOf(prefs.getInt(
+                KEY_SEARCH_COUNT, DEFAULT_SEARCH_COUNT)));
+        searchSummaryEdit.setText(String.valueOf(prefs.getInt(
+                KEY_SEARCH_SUMMARY_CHARS, DEFAULT_SEARCH_SUMMARY)));
+        visionMaxPxEdit.setText(String.valueOf(prefs.getInt(
+                KEY_VISION_MAX_PX, DEFAULT_VISION_MAX_PX)));
+        visionMaxImagesEdit.setText(String.valueOf(prefs.getInt(
+                KEY_VISION_MAX_IMAGES, DEFAULT_VISION_MAX_IMAGES)));
         jsEnvPromptEdit.setText(prefs.getString(KEY_JS_ENV_PROMPT, DEFAULT_JS_ENV_PROMPT));
         logSwitch.setChecked(prefs.getBoolean(KEY_LOG_ENABLED, true));
         realtimeRenderSwitch.setChecked(prefs.getBoolean(KEY_REALTIME_RENDER, false));
@@ -322,7 +396,37 @@ public class SettingsActivity extends Activity {
         LogUtil.w(TAG, "refreshTitleModelSpinner: saved model '%s' not found", saved);
     }
 
+    /**
+     * 保存入口：先检查系统提示词有没有改，改了就先把代价讲清楚再落盘。
+     *
+     * <p>系统提示词拼在每次请求的最前面，服务端的前缀缓存按「从头开始相同的部分」
+     * 计算命中。改一个字，从那个字开始往后的全部内容都要重算——不是「多花一点」，
+     * 而是整段上下文按未命中计费。用户有权知道这件事再决定，而不是月底看账单。
+     */
     private void saveSettings() {
+        String current = systemPromptEdit.getText().toString().trim();
+        String saved = prefs.getString(KEY_SYSTEM_PROMPT, "");
+        if (current.equals(saved == null ? "" : saved.trim())) {
+            doSaveSettings();
+            return;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("系统提示词已修改")
+                .setMessage("系统提示词位于每次请求的最前面。改动会让服务端的前缀缓存"
+                        + "从改动位置起失效——下一次请求的整段上下文按未命中计费，"
+                        + "之后随着对话继续才会逐步恢复。\n\n"
+                        + "如果只是想让模型知道当前时间，优先用最后一条消息里的时间提示，"
+                        + "而不是把时间写进系统提示词。")
+                .setPositiveButton("保存并接受", new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface d, int w) {
+                        doSaveSettings();
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void doSaveSettings() {
         String prompt = systemPromptEdit.getText().toString().trim();
         boolean autoTitle = autoTitleSwitch.isChecked();
         boolean logEnabled = logSwitch.isChecked();
@@ -378,6 +482,60 @@ public class SettingsActivity extends Activity {
         editor.putInt(KEY_WEB_SEARCH_MAX_CALLS, maxCalls);
         webSearchMaxCallsEdit.setText(String.valueOf(maxCalls));
 
+        // ---- 上限与配额：全部夹到合法区间并回写输入框 ----
+        // 回写是必须的：用户填了 999999 的上限，保存后输入框仍显示 999999，
+        // 但实际生效的是 4096，下次进来看到两个不同的数只会以为配置丢了。
+        int attachMax = clampInt(attachMaxCharsEdit.getText().toString(),
+                DEFAULT_ATTACH_MAX_CHARS, 0, 100000000);
+        if (attachMax != 0 && attachMax < 1024) attachMax = 1024;
+        editor.putInt(KEY_ATTACH_MAX_CHARS, attachMax);
+        attachMaxCharsEdit.setText(String.valueOf(attachMax));
+
+        int attachTotal = clampInt(attachTotalEdit.getText().toString(),
+                DEFAULT_ATTACH_TOTAL_WAN, 100, 100000);
+        editor.putInt(KEY_ATTACH_TOTAL_CHARS, attachTotal);
+        attachTotalEdit.setText(String.valueOf(attachTotal));
+
+        int maxFiles = clampInt(maxAttachmentsEdit.getText().toString(),
+                DEFAULT_MAX_ATTACHMENTS, 1, 20);
+        editor.putInt(KEY_MAX_ATTACHMENTS, maxFiles);
+        maxAttachmentsEdit.setText(String.valueOf(maxFiles));
+
+        int imageMb = clampInt(imageMaxMbEdit.getText().toString(),
+                DEFAULT_IMAGE_MAX_MB, 1, 100);
+        editor.putInt(KEY_IMAGE_MAX_MB, imageMb);
+        imageMaxMbEdit.setText(String.valueOf(imageMb));
+
+        int toolKb = clampInt(toolMaxKbEdit.getText().toString(),
+                DEFAULT_TOOL_MAX_KB, 4, 1024);
+        editor.putInt(KEY_TOOL_MAX_KB, toolKb);
+        toolMaxKbEdit.setText(String.valueOf(toolKb));
+
+        int httpTimeout = clampInt(httpTimeoutEdit.getText().toString(),
+                DEFAULT_HTTP_TIMEOUT_S, 5, 120);
+        editor.putInt(KEY_HTTP_TIMEOUT_S, httpTimeout);
+        httpTimeoutEdit.setText(String.valueOf(httpTimeout));
+
+        int searchCount = clampInt(searchCountEdit.getText().toString(),
+                DEFAULT_SEARCH_COUNT, 1, 20);
+        editor.putInt(KEY_SEARCH_COUNT, searchCount);
+        searchCountEdit.setText(String.valueOf(searchCount));
+
+        int searchSummary = clampInt(searchSummaryEdit.getText().toString(),
+                DEFAULT_SEARCH_SUMMARY, 200, 8000);
+        editor.putInt(KEY_SEARCH_SUMMARY_CHARS, searchSummary);
+        searchSummaryEdit.setText(String.valueOf(searchSummary));
+
+        int visionPx = clampInt(visionMaxPxEdit.getText().toString(),
+                DEFAULT_VISION_MAX_PX, 512, 4096);
+        editor.putInt(KEY_VISION_MAX_PX, visionPx);
+        visionMaxPxEdit.setText(String.valueOf(visionPx));
+
+        int visionImages = clampInt(visionMaxImagesEdit.getText().toString(),
+                DEFAULT_VISION_MAX_IMAGES, 1, 10);
+        editor.putInt(KEY_VISION_MAX_IMAGES, visionImages);
+        visionMaxImagesEdit.setText(String.valueOf(visionImages));
+
         int pos = titleModelSpinner.getSelectedItemPosition();
         if (pos >= 0) {
             ConfigManager cm = ConfigManager.getInstance();
@@ -396,6 +554,9 @@ public class SettingsActivity extends Activity {
             }
         }
         editor.apply();
+        // 立刻刷新运行期上限：用户保存后直接返回聊天，下一条消息就该按新值执行，
+        // 不该等到进程重启才生效
+        Limits.reload(getApplicationContext());
         LogUtil.ENABLED = logEnabled;
         LogUtil.i(TAG, "saveSettings: prefs committed, logging %s", logEnabled ? "enabled" : "DISABLED");
 
@@ -474,6 +635,39 @@ public class SettingsActivity extends Activity {
         super.onResume();
         LogUtil.d(TAG, "onResume");
         refreshTitleModelSpinner();
+        refreshStorageEntry();
+    }
+
+    /**
+     * 刷新存储入口右侧的「已用 X」。
+     *
+     * <p>有缓存直接用——这个数字只是为了让人知道「大概多少」，为了它每次进设置都扫一遍
+     * 几十 MB 的目录不值得。没有缓存时后台扫一次，扫完再填，绝不在主线程碰磁盘。
+     */
+    private void refreshStorageEntry() {
+        if (storageEntrySize == null) return;
+        StorageReport cached = StorageActivity.cachedReport();
+        if (cached != null) {
+            storageEntrySize.setText("已用 " + StorageReport.size(cached.usedBytes()));
+            return;
+        }
+        // 反复进出设置页时避免叠起多个扫描线程
+        if (storageScanning) return;
+        storageScanning = true;
+        storageEntrySize.setText("");
+        new Thread(new Runnable() {
+            public void run() {
+                final StorageReport r = StorageScanner.scan(getApplicationContext());
+                final String text = "已用 " + StorageReport.size(r.usedBytes());
+                runOnUiThread(new Runnable() {
+                    public void run() {
+                        storageScanning = false;
+                        if (isFinishing() || storageEntrySize == null) return;
+                        storageEntrySize.setText(text);
+                    }
+                });
+            }
+        }, "settings-storage").start();
     }
 
     /**

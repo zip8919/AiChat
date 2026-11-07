@@ -17,8 +17,45 @@
         android:textColor="@color/text_primary"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginBottom="16dp"
+        android:layout_marginBottom="10dp"
         android:text="设置"/>
+
+    <!-- 存储空间入口：放在最上面而不是页尾。用户找它通常是在手机提示空间不足时，
+         不该让他先滚过十几个开关。右侧数字进页面时刷新一次。 -->
+    <LinearLayout
+        android:id="@+id/storage_entry"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:background="@drawable/bg_card"
+        android:paddingLeft="14dp"
+        android:paddingRight="14dp"
+        android:paddingTop="12dp"
+        android:paddingBottom="12dp"
+        android:layout_marginBottom="16dp"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
+        <TextView
+            android:textSize="15sp"
+            android:textColor="@color/text_primary"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="存储空间"/>
+        <TextView
+            android:id="@+id/storage_entry_size"
+            android:textSize="12sp"
+            android:textColor="@color/text_secondary"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text=""/>
+        <TextView
+            android:textSize="18sp"
+            android:textColor="#b0bec5"
+            android:layout_marginLeft="6dp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="›"/>
+    </LinearLayout>
 
     <!-- System prompt -->
     <TextView
@@ -44,10 +81,18 @@
     <TextView
         android:textSize="11sp"
         android:textColor="@color/text_secondary"
+        android:textIsSelectable="true"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="6dp"
+        android:text="可用占位符（发送时替换成当前设备的真实值）\n设备：{android} 系统版本 · {api} API 级别 · {webview} WebView 版本 · {model} 机型 · {brand} 厂商 · {cpu_abi} CPU 架构 · {app_version} 应用版本 · {app_package} 包名 · {locale} 语言 · {ua} UA 字符串\n屏幕：{screen} 分辨率 · {density} 屏幕密度\n时间：{date} 日期 · {time} 时间 · {datetime} 日期+时间 · {weekday} 星期 · {timezone} 时区\n存储：{free_storage} 可用空间"/>
+    <TextView
+        android:textSize="11sp"
+        android:textColor="#e65100"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginBottom="16dp"
-        android:text="可用占位符：{android} 系统版本 · {api} API 级别 · {webview} WebView 版本 · {model} 机型 · {app_version} 应用版本 · {ua} UA 字符串。发送时自动替换成当前设备的真实值。"/>
+        android:text="⚠ 时间类占位符会让缓存失效：{date} 每天变一次、{time} 每秒都在变。系统提示词位于请求最前面，里面带时间等于每次请求都换一个开头，服务端的前缀缓存全部重算。需要当前时间请用消息里自动附带的时间提示，不要写进这里。"/>
 
     <!-- Preset selector -->
     <LinearLayout
@@ -426,6 +471,265 @@
             android:layout_height="wrap_content"/>
     </LinearLayout>
 
+    <!-- 上限与配额：原来全是写死在代码里的常量，换设备/换模型都得改源码 -->
+    <TextView
+        android:textSize="14sp"
+        android:textStyle="bold"
+        android:textColor="@color/text_primary"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:layout_marginBottom="4dp"
+        android:text="上限与配额"/>
+    <TextView
+        android:textSize="11sp"
+        android:textColor="@color/text_secondary"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="8dp"
+        android:text="改小可以省钱省内存，改大容易撞端点限制。附件正文上限填 0 表示不截断。"/>
+
+    <LinearLayout
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="6dp">
+        <TextView
+            android:textSize="13sp"
+            android:textColor="@color/text_primary"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="附件正文送模上限（字符，0=不截断）"/>
+        <EditText
+            android:id="@+id/attach_max_chars_edit"
+            android:background="@drawable/edit_text_background"
+            android:gravity="center"
+            android:inputType="number"
+            android:maxLength="8"
+            android:padding="6dp"
+            android:layout_width="96dp"
+            android:layout_height="wrap_content"
+            android:hint="262144"/>
+    </LinearLayout>
+    <LinearLayout
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="6dp">
+        <TextView
+            android:textSize="13sp"
+            android:textColor="@color/text_primary"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="附件合计上限（万字符，100-100000）"/>
+        <EditText
+            android:id="@+id/attach_total_edit"
+            android:background="@drawable/edit_text_background"
+            android:gravity="center"
+            android:inputType="number"
+            android:maxLength="6"
+            android:padding="6dp"
+            android:layout_width="96dp"
+            android:layout_height="wrap_content"
+            android:hint="2000"/>
+    </LinearLayout>
+    <LinearLayout
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="6dp">
+        <TextView
+            android:textSize="13sp"
+            android:textColor="@color/text_primary"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="单次附件数（1-20）"/>
+        <EditText
+            android:id="@+id/max_attachments_edit"
+            android:background="@drawable/edit_text_background"
+            android:gravity="center"
+            android:inputType="number"
+            android:maxLength="2"
+            android:padding="6dp"
+            android:layout_width="64dp"
+            android:layout_height="wrap_content"
+            android:hint="5"/>
+    </LinearLayout>
+    <LinearLayout
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="6dp">
+        <TextView
+            android:textSize="13sp"
+            android:textColor="@color/text_primary"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="图片单张上限（MB，1-100）"/>
+        <EditText
+            android:id="@+id/image_max_mb_edit"
+            android:background="@drawable/edit_text_background"
+            android:gravity="center"
+            android:inputType="number"
+            android:maxLength="3"
+            android:padding="6dp"
+            android:layout_width="64dp"
+            android:layout_height="wrap_content"
+            android:hint="20"/>
+    </LinearLayout>
+    <LinearLayout
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="6dp">
+        <TextView
+            android:textSize="13sp"
+            android:textColor="@color/text_primary"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="工具结果截断（KB，4-1024）"/>
+        <EditText
+            android:id="@+id/tool_max_kb_edit"
+            android:background="@drawable/edit_text_background"
+            android:gravity="center"
+            android:inputType="number"
+            android:maxLength="4"
+            android:padding="6dp"
+            android:layout_width="64dp"
+            android:layout_height="wrap_content"
+            android:hint="32"/>
+    </LinearLayout>
+    <LinearLayout
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="6dp">
+        <TextView
+            android:textSize="13sp"
+            android:textColor="@color/text_primary"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="HTTP 工具超时（秒，5-120）"/>
+        <EditText
+            android:id="@+id/http_timeout_edit"
+            android:background="@drawable/edit_text_background"
+            android:gravity="center"
+            android:inputType="number"
+            android:maxLength="3"
+            android:padding="6dp"
+            android:layout_width="64dp"
+            android:layout_height="wrap_content"
+            android:hint="30"/>
+    </LinearLayout>
+    <LinearLayout
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="6dp">
+        <TextView
+            android:textSize="13sp"
+            android:textColor="@color/text_primary"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="单次搜索条数（1-20）"/>
+        <EditText
+            android:id="@+id/search_count_edit"
+            android:background="@drawable/edit_text_background"
+            android:gravity="center"
+            android:inputType="number"
+            android:maxLength="2"
+            android:padding="6dp"
+            android:layout_width="64dp"
+            android:layout_height="wrap_content"
+            android:hint="10"/>
+    </LinearLayout>
+    <LinearLayout
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="6dp">
+        <TextView
+            android:textSize="13sp"
+            android:textColor="@color/text_primary"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="单条搜索摘要长度（字符，200-8000）"/>
+        <EditText
+            android:id="@+id/search_summary_edit"
+            android:background="@drawable/edit_text_background"
+            android:gravity="center"
+            android:inputType="number"
+            android:maxLength="4"
+            android:padding="6dp"
+            android:layout_width="64dp"
+            android:layout_height="wrap_content"
+            android:hint="1200"/>
+    </LinearLayout>
+    <LinearLayout
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="6dp">
+        <TextView
+            android:textSize="13sp"
+            android:textColor="@color/text_primary"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="图片送模最大边（px，512-4096）"/>
+        <EditText
+            android:id="@+id/vision_max_px_edit"
+            android:background="@drawable/edit_text_background"
+            android:gravity="center"
+            android:inputType="number"
+            android:maxLength="4"
+            android:padding="6dp"
+            android:layout_width="64dp"
+            android:layout_height="wrap_content"
+            android:hint="1600"/>
+    </LinearLayout>
+    <LinearLayout
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="12dp">
+        <TextView
+            android:textSize="13sp"
+            android:textColor="@color/text_primary"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="单轮视觉图片张数（1-10）"/>
+        <EditText
+            android:id="@+id/vision_max_images_edit"
+            android:background="@drawable/edit_text_background"
+            android:gravity="center"
+            android:inputType="number"
+            android:maxLength="2"
+            android:padding="6dp"
+            android:layout_width="64dp"
+            android:layout_height="wrap_content"
+            android:hint="3"/>
+    </LinearLayout>
+
     <!-- 代码执行器环境提示词：原来写死在 ToolsActivity，换设备就报错 -->
     <TextView
         android:textSize="14sp"
@@ -599,6 +903,15 @@
         android:layout_height="wrap_content"
         android:layout_marginBottom="16dp"
         android:text="管理模型 →"/>
+
+    <!-- Usage statistics -->
+    <Button
+        android:textSize="14sp"
+        android:id="@+id/usage_stats_button"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="16dp"
+        android:text="使用统计 →"/>
 
     <!-- Balance query button -->
     <Button
