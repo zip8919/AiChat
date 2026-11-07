@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 模型选择器「展开项」：两行，48dp 触控高度。
+     展开时宽度不再受顶栏限制（弹窗可接近整屏），但同名模型仍要靠第二行区分，
+     所以与收起态保持同一结构，只把字号加大一号。 -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:minHeight="48dp"
+    android:orientation="vertical"
+    android:gravity="center_vertical"
+    android:paddingLeft="12dp"
+    android:paddingRight="12dp"
+    android:paddingTop="6dp"
+    android:paddingBottom="6dp">
+
+    <TextView
+        android:id="@+id/model_item_text"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:singleLine="true"
+        android:maxLines="1"
+        android:textSize="15sp"
+        android:textColor="#333333"
+        android:ellipsize="middle" />
+
+    <TextView
+        android:id="@+id/model_item_provider"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="1dp"
+        android:singleLine="true"
+        android:maxLines="1"
+        android:textSize="11sp"
+        android:textColor="#888888"
+        android:ellipsize="end" />
+</LinearLayout>

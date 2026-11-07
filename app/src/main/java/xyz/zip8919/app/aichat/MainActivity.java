@@ -1257,7 +1257,8 @@ public class MainActivity extends Activity {
         for (ModelInfo m : availableModels) {
             names.add(m.name + " (" + m.provider + ")");
         }
-        // 收起态只显示模型名（带字号降级），展开态才拼服务商 —— 258dp 上拼服务商必溢出
+        // 每一项两行：第一行模型名（16/14/12sp 降级 + 中间省略），第二行服务商（固定 10sp）。
+        // 服务商必须常显：deepseek-flash 在 DeepSeek 与商汤各有一份，只显示名字分不清。
         ModelSpinnerAdapter adapter = new ModelSpinnerAdapter(this, availableModels);
         modelSpinner.setAdapter(adapter);
         LogUtil.d(TAG, "model spinner items=%d: %s", names.size(), names);
