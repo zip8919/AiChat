@@ -387,6 +387,26 @@ public class MainActivity extends Activity {
         modelSpinner = (Spinner) findViewById(R.id.model_spinner);
         thinkingSpinner = (Spinner) findViewById(R.id.thinking_spinner);
         usageBar = (TextView) findViewById(R.id.usage_bar);
+        applyOrientationLayout(getResources().getConfiguration().orientation
+                == Configuration.ORIENTATION_LANDSCAPE);
+    }
+
+    /**
+     * 横屏时收起「模型行」和「思考行」。
+     *
+     * <p>这台设备物理上是横屏笔，竖屏靠 {@code ↻} 转过来；用户点名要保留 {@code ↻}，
+     * 所以方向不能锁死在 Manifest 上。横过来的时候高度只剩 258dp，两行各 48dp 就是 37% 的可用高，
+     * 藏掉它们、把模型名留在标题栏，比压小字号划算。
+     */
+    private void applyOrientationLayout(boolean landscape) {
+        View modelRow = findViewById(R.id.model_row);
+        View thinkingRow = findViewById(R.id.thinking_row);
+        if (modelRow != null) {
+            modelRow.setVisibility(landscape ? View.GONE : View.VISIBLE);
+        }
+        if (thinkingRow != null) {
+            thinkingRow.setVisibility(landscape ? View.GONE : View.VISIBLE);
+        }
     }
 
     private void bindWebView() {
@@ -1237,9 +1257,8 @@ public class MainActivity extends Activity {
         for (ModelInfo m : availableModels) {
             names.add(m.name + " (" + m.provider + ")");
         }
-        ArrayAdapter<String> adapter = new ArrayAdapter<String>(this,
-                android.R.layout.simple_spinner_item, names);
-        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        // 收起态只显示模型名（带字号降级），展开态才拼服务商 —— 258dp 上拼服务商必溢出
+        ModelSpinnerAdapter adapter = new ModelSpinnerAdapter(this, availableModels);
         modelSpinner.setAdapter(adapter);
         LogUtil.d(TAG, "model spinner items=%d: %s", names.size(), names);
 
@@ -1861,6 +1880,7 @@ public class MainActivity extends Activity {
         super.onConfigurationChanged(newConfig);
         LogUtil.d(TAG, "onConfigurationChanged: orient=%s",
                 newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE ? "landscape" : "portrait");
+        applyOrientationLayout(newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE);
         if (viewer != null) viewer.onConfigurationChanged();
     }
 

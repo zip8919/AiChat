@@ -1,141 +1,23 @@
-<?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:orientation="vertical"
-    android:background="@color/background"
-    android:layout_width="match_parent"
-    android:layout_height="match_parent">
-
-    <LinearLayout
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:background="@color/primary"
-        android:padding="16dp"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content">
-        <TextView
-            android:textSize="20sp"
-            android:textStyle="bold"
-            android:textColor="@android:color/white"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:text="对话历史"
-            android:layout_weight="1"/>
-        <Button
-            android:textSize="12sp"
-            android:textColor="@color/primary"
-            android:id="@+id/new_conversation_button"
-            android:background="@android:color/white"
-            android:padding="8dp"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginRight="4dp"
-            android:text="@string/new_conversation"/>
-        <Button
-            android:textSize="12sp"
-            android:textColor="@color/primary"
-            android:id="@+id/clear_history_button"
-            android:background="@android:color/white"
-            android:padding="8dp"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="清空历史"/>
+<?xml version='1.0' encoding='utf-8'?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:orientation="vertical" android:background="@color/background" android:layout_width="match_parent" android:layout_height="match_parent">
+    <LinearLayout android:gravity="center_vertical" android:orientation="horizontal" android:background="@color/primary" android:padding="8dp" android:layout_width="match_parent" android:layout_height="wrap_content">
+        <TextView android:textSize="20sp" android:textStyle="bold" android:textColor="@android:color/white" android:layout_width="0dp" android:layout_height="wrap_content" android:text="历史" android:layout_weight="1" />
+        <Button android:id="@+id/tools_entry_button" android:layout_width="wrap_content" android:layout_height="wrap_content" android:padding="8dp" android:textSize="12sp" android:textColor="@color/primary" android:background="@android:color/white" android:layout_marginRight="4dp" android:text="工具" />
+        <Button android:textSize="12sp" android:textColor="@color/primary" android:id="@+id/new_conversation_button" android:background="@android:color/white" android:padding="8dp" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginRight="4dp" android:text="新建" />
+        <Button android:textSize="12sp" android:textColor="@color/primary" android:id="@+id/clear_history_button" android:background="@android:color/white" android:padding="8dp" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="清空" />
     </LinearLayout>
-
-    <LinearLayout
-        android:id="@+id/selection_bar"
-        android:orientation="vertical"
-        android:background="#FFF8E1"
-        android:padding="4dp"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content">
-        <LinearLayout
-            android:gravity="center_vertical"
-            android:orientation="horizontal"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content">
-            <TextView
-                android:id="@+id/selection_count"
-                android:textSize="12sp"
-                android:textColor="#8D6E00"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"/>
-            <TextView
-                android:id="@+id/sort_toggle"
-                android:textSize="12sp"
-                android:textColor="@color/primary"
-                android:padding="6dp"
-                android:visibility="gone"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="按体积"/>
-            <Button
-                android:id="@+id/select_mode_button"
-                android:textSize="12sp"
-                android:textColor="@color/primary"
-                android:background="@android:color/white"
-                android:padding="6dp"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="多选"/>
-            <Button
-                android:id="@+id/selection_cancel_button"
-                android:textSize="12sp"
-                android:textColor="@color/primary"
-                android:background="@android:color/white"
-                android:padding="6dp"
-                android:visibility="gone"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="取消"/>
+    <LinearLayout android:id="@+id/selection_bar" android:orientation="vertical" android:background="#FFF8E1" android:padding="4dp" android:layout_width="match_parent" android:layout_height="wrap_content">
+        <LinearLayout android:gravity="center_vertical" android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content">
+            <TextView android:id="@+id/selection_count" android:textSize="12sp" android:textColor="#8D6E00" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" />
+            <TextView android:id="@+id/sort_toggle" android:textSize="12sp" android:textColor="@color/primary" android:padding="6dp" android:visibility="gone" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="按体积" />
+            <Button android:id="@+id/select_mode_button" android:textSize="12sp" android:textColor="@color/primary" android:background="@android:color/white" android:padding="6dp" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="多选" />
+            <Button android:id="@+id/selection_cancel_button" android:textSize="12sp" android:textColor="@color/primary" android:background="@android:color/white" android:padding="6dp" android:visibility="gone" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="取消" />
         </LinearLayout>
-        <LinearLayout
-            android:id="@+id/selection_actions"
-            android:orientation="horizontal"
-            android:visibility="gone"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content">
-            <Button
-                android:id="@+id/selection_all_button"
-                android:textSize="12sp"
-                android:textColor="@color/primary"
-                android:background="@android:color/white"
-                android:padding="6dp"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="全选"/>
-            <Button
-                android:id="@+id/selection_invert_button"
-                android:textSize="12sp"
-                android:textColor="@color/primary"
-                android:background="@android:color/white"
-                android:padding="6dp"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="反选"/>
-            <Button
-                android:id="@+id/selection_delete_button"
-                android:textSize="12sp"
-                android:textColor="@color/primary"
-                android:background="@android:color/white"
-                android:padding="6dp"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="删除选中"/>
+        <LinearLayout android:id="@+id/selection_actions" android:orientation="horizontal" android:visibility="gone" android:layout_width="match_parent" android:layout_height="wrap_content">
+            <Button android:id="@+id/selection_all_button" android:textSize="12sp" android:textColor="@color/primary" android:background="@android:color/white" android:padding="6dp" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="全选" />
+            <Button android:id="@+id/selection_invert_button" android:textSize="12sp" android:textColor="@color/primary" android:background="@android:color/white" android:padding="6dp" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="反选" />
+            <Button android:id="@+id/selection_delete_button" android:textSize="12sp" android:textColor="@color/primary" android:background="@android:color/white" android:padding="6dp" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="删除选中" />
         </LinearLayout>
     </LinearLayout>
-
-    <ListView
-        android:id="@+id/conversation_list"
-        android:padding="8dp"
-        android:longClickable="true"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:divider="@color/gray"
-        android:dividerHeight="1dp"
-        android:choiceMode="singleChoice"/>
+    <ListView android:id="@+id/conversation_list" android:padding="8dp" android:longClickable="true" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:divider="@color/gray" android:dividerHeight="1dp" android:choiceMode="singleChoice" />
 </LinearLayout>

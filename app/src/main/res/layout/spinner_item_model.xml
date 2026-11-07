@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 顶栏模型名：单行、不换行、超宽先降字号再中间省略（见界面方案 §7.5）。
+     中间省略保头尾：前面是厂商/系列，后面是版本号，尾部省略会把 0731 / 1120 抹成同一个名字。 -->
+<TextView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/model_item_text"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:paddingLeft="8dp"
+    android:paddingRight="8dp"
+    android:paddingTop="4dp"
+    android:paddingBottom="4dp"
+    android:singleLine="true"
+    android:maxLines="1"
+    android:textSize="16sp"
+    android:textColor="#333333"
+    android:ellipsize="end" />

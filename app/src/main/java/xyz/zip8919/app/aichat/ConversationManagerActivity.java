@@ -21,6 +21,8 @@ public class ConversationManagerActivity extends Activity {
     private static final String TAG = "ConvMgrActivity";
     private static final String PREFS_NAME = "aichat_ui_state";
     private static final String KEY_SCROLL_POS = "history_scroll_pos";
+    /** 「工具」入口的一次性引导：只提示一次，之后再进来就不打扰。 */
+    private static final String KEY_TOOLS_HINT_SHOWN = "tools_entry_hint_shown";
 
     /**
      * 只有「从本页点进某个会话、再返回」才恢复上次的滚动位置。
@@ -100,6 +102,19 @@ public class ConversationManagerActivity extends Activity {
     }
 
     private void initButtons() {
+        // 「工具」入口只放在本页右上角（聊天页顶栏 3 个按钮已占 176dp，再加会挤出屏）。
+        // 长按聊天页「历史」的旧路径保留，两条路都通。
+        findViewById(R.id.tools_entry_button).setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                LogUtil.d(TAG, "click: tools");
+                startActivity(new Intent(ConversationManagerActivity.this, ToolsActivity.class));
+            }
+        });
+        if (!uiState.getBoolean(KEY_TOOLS_HINT_SHOWN, false)) {
+            uiState.edit().putBoolean(KEY_TOOLS_HINT_SHOWN, true).apply();
+            Toast.makeText(this, "常用代码与 JS 运行器在「工具」里", Toast.LENGTH_LONG).show();
+        }
+
         findViewById(R.id.new_conversation_button).setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 LogUtil.d(TAG, "click: new conversation");

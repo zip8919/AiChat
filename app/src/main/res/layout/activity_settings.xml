@@ -1,958 +1,208 @@
-<?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:fillViewport="true">
-
-<LinearLayout
-    android:orientation="vertical"
-    android:background="@color/background"
-    android:padding="16dp"
-    android:layout_width="match_parent"
-    android:layout_height="wrap_content">
-
-    <TextView
-        android:textSize="20sp"
-        android:textStyle="bold"
-        android:textColor="@color/text_primary"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="10dp"
-        android:text="设置"/>
-
-    <!-- 存储空间入口：放在最上面而不是页尾。用户找它通常是在手机提示空间不足时，
-         不该让他先滚过十几个开关。右侧数字进页面时刷新一次。 -->
-    <LinearLayout
-        android:id="@+id/storage_entry"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:background="@drawable/bg_card"
-        android:paddingLeft="14dp"
-        android:paddingRight="14dp"
-        android:paddingTop="12dp"
-        android:paddingBottom="12dp"
-        android:layout_marginBottom="16dp"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content">
-        <TextView
-            android:textSize="15sp"
-            android:textColor="@color/text_primary"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="存储空间"/>
-        <TextView
-            android:id="@+id/storage_entry_size"
-            android:textSize="12sp"
-            android:textColor="@color/text_secondary"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text=""/>
-        <TextView
-            android:textSize="18sp"
-            android:textColor="#b0bec5"
-            android:layout_marginLeft="6dp"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="›"/>
+<?xml version='1.0' encoding='utf-8'?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="match_parent" android:fillViewport="true">
+    <LinearLayout android:orientation="vertical" android:background="@color/background" android:padding="16dp" android:layout_width="match_parent" android:layout_height="wrap_content">
+        <TextView android:textSize="20sp" android:textStyle="bold" android:textColor="@color/text_primary" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="10dp" android:text="设置" />
+        <LinearLayout android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="18dp">
+            <LinearLayout android:id="@+id/group_header_A" android:orientation="horizontal" android:gravity="center_vertical" android:background="@drawable/bg_card" android:paddingLeft="14dp" android:paddingRight="14dp" android:paddingTop="12dp" android:paddingBottom="12dp" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="48dp">
+                <TextView android:id="@+id/group_title_A" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:textSize="15sp" android:textStyle="bold" android:textColor="@color/text_primary" android:text="常用" />
+                <TextView android:id="@+id/group_count_A" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="12sp" android:textColor="@color/text_secondary" android:text="4 项" />
+                <TextView android:id="@+id/group_arrow_A" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginLeft="8dp" android:textSize="13sp" android:textColor="@color/text_secondary" android:text="▾" />
+            </LinearLayout>
+        </LinearLayout>
+        <LinearLayout android:id="@+id/group_body_A" android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content">
+            <LinearLayout android:gravity="center_vertical" android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="12dp" android:minHeight="48dp">
+                <TextView android:textSize="14sp" android:textStyle="bold" android:textColor="@color/text_primary" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="自动生成对话标题" />
+                <Switch android:id="@+id/auto_title_switch" android:layout_width="wrap_content" android:layout_height="wrap_content" />
+            </LinearLayout>
+            <LinearLayout android:gravity="center_vertical" android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="4dp" android:minHeight="48dp">
+                <TextView android:textSize="14sp" android:textStyle="bold" android:textColor="@color/text_primary" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="联网搜索" />
+                <Switch android:id="@+id/web_search_switch" android:layout_width="wrap_content" android:layout_height="wrap_content" />
+            </LinearLayout>
+            <TextView android:textSize="12sp" android:textColor="@color/text_secondary" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="12dp" android:text="让 AI 能搜索并抓取网页  ⓘ" android:id="@+id/desc_web_search" android:tag="允许 AI 调用搜索/抓取工具，使用 DeepSeek Search API（需配置 DeepSeek API Key）" android:clickable="true" android:background="?android:attr/selectableItemBackground" android:paddingTop="4dp" android:paddingBottom="4dp" />
+            <LinearLayout android:gravity="center_vertical" android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="12dp" android:minHeight="48dp">
+                <TextView android:textSize="14sp" android:textStyle="bold" android:textColor="@color/text_primary" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="实时渲染" />
+                <Switch android:id="@+id/realtime_render_switch" android:layout_width="wrap_content" android:layout_height="wrap_content" />
+            </LinearLayout>
+            <LinearLayout android:gravity="center_vertical" android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="12dp" android:minHeight="48dp">
+                <TextView android:textSize="14sp" android:textStyle="bold" android:textColor="@color/text_primary" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="流式输出" />
+                <Switch android:id="@+id/stream_switch" android:layout_width="wrap_content" android:layout_height="wrap_content" />
+            </LinearLayout>
+        </LinearLayout>
+        <LinearLayout android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="18dp">
+            <LinearLayout android:id="@+id/group_header_B" android:orientation="horizontal" android:gravity="center_vertical" android:background="@drawable/bg_card" android:paddingLeft="14dp" android:paddingRight="14dp" android:paddingTop="12dp" android:paddingBottom="12dp" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="48dp">
+                <TextView android:id="@+id/group_title_B" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:textSize="15sp" android:textStyle="bold" android:textColor="@color/text_primary" android:text="模型与提示词" />
+                <TextView android:id="@+id/group_count_B" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="12sp" android:textColor="@color/text_secondary" android:text="5 项" />
+                <TextView android:id="@+id/group_arrow_B" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginLeft="8dp" android:textSize="13sp" android:textColor="@color/text_secondary" android:text="▸" />
+            </LinearLayout>
+        </LinearLayout>
+        <LinearLayout android:id="@+id/group_body_B" android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:visibility="gone" android:minHeight="48dp" android:gravity="center_vertical">
+            <TextView android:textSize="14sp" android:textStyle="bold" android:textColor="@color/text_primary" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="4dp" android:text="@string/system_prompt" />
+            <EditText android:gravity="top" android:id="@+id/system_prompt_edit" android:background="@drawable/edit_text_background" android:padding="12dp" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="16dp" android:hint="例如：你是一个专业的编程助手..." android:maxLines="6" android:minLines="3" android:inputType="textMultiLine" />
+            <TextView android:textSize="12sp" android:textColor="@color/text_secondary" android:textIsSelectable="true" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="6dp" android:text="可用占位符（发送时替换成当前设备的真实值）\n设备：{android} 系统版本 · {api} API 级别 · {webview} WebView 版本 · {model} 机型 · {brand} 厂商 · {cpu_abi} CPU 架构 · {app_version} 应用版本 · {app_package} 包名 · {locale} 语言 · {ua} UA 字符串\n屏幕：{screen} 分辨率 · {density} 屏幕密度\n时间：{date} 日期 · {time} 时间 · {datetime} 日期+时间 · {weekday} 星期 · {timezone} 时区\n存储：{free_storage} 可用空间" />
+            <TextView android:textSize="12sp" android:textColor="#e65100" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="16dp" android:text="⚠ 时间类占位符会让缓存失效：{date} 每天变一次、{time} 每秒都在变。系统提示词位于请求最前面，里面带时间等于每次请求都换一个开头，服务端的前缀缓存全部重算。需要当前时间请用消息里自动附带的时间提示，不要写进这里。" />
+            <LinearLayout android:gravity="center_vertical" android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="8dp">
+                <TextView android:textSize="12sp" android:textColor="@color/text_primary" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="预设:" />
+                <Spinner android:id="@+id/preset_spinner" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginLeft="4dp" />
+                <Button android:textSize="11sp" android:id="@+id/manage_presets_button" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginLeft="4dp" android:padding="4dp" android:minWidth="0dp" android:text="管理" />
+                <Button android:textSize="11sp" android:id="@+id/save_preset_button" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginLeft="2dp" android:padding="4dp" android:minWidth="0dp" android:text="保存当前" />
+            </LinearLayout>
+            <TextView android:textSize="14sp" android:textStyle="bold" android:textColor="@color/text_primary" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="4dp" android:text="标题生成提示词" />
+            <EditText android:gravity="top" android:id="@+id/title_prompt_edit" android:background="@drawable/edit_text_background" android:padding="12dp" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="6dp" android:hint="根据用户消息生成3-15字标题。只输出标题本身。" android:maxLines="3" android:minLines="2" android:inputType="textMultiLine" />
+            <TextView android:textSize="12sp" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="16dp" android:textColor="@color/text_secondary" android:text="同样支持占位符：{android} {api} {webview} {model} {app_version} {ua}，生成标题时替换成当前设备的真实值。" />
+            <LinearLayout android:gravity="center_vertical" android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="16dp">
+                <TextView android:textSize="14sp" android:textStyle="bold" android:textColor="@color/text_primary" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="标题生成模型" />
+                <Spinner android:id="@+id/title_model_spinner" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginLeft="8dp" />
+            </LinearLayout>
+            <Button android:textSize="14sp" android:id="@+id/manage_models_button" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="16dp" android:text="管理模型 →" />
+            <TextView android:textSize="14sp" android:textStyle="bold" android:textColor="@color/text_primary" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="6dp" android:text="代码执行提示词" />
+            <EditText android:id="@+id/js_env_prompt_edit" android:background="@drawable/edit_text_background" android:gravity="top|start" android:inputType="textMultiLine" android:minLines="4" android:maxLines="10" android:padding="8dp" android:textSize="13sp" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="4dp" />
+            <TextView android:textSize="12sp" android:textColor="@color/text_secondary" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="12dp" android:text="小工具页的「复制环境提示词」「发送给 AI」会用它。可用占位符：{android} {api} {webview} {model} {app_version} {ua}" />
+        </LinearLayout>
+        <LinearLayout android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="18dp">
+            <LinearLayout android:id="@+id/group_header_C" android:orientation="horizontal" android:gravity="center_vertical" android:background="@drawable/bg_card" android:paddingLeft="14dp" android:paddingRight="14dp" android:paddingTop="12dp" android:paddingBottom="12dp" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="48dp">
+                <TextView android:id="@+id/group_title_C" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:textSize="15sp" android:textStyle="bold" android:textColor="@color/text_primary" android:text="联网与工具" />
+                <TextView android:id="@+id/group_count_C" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="12sp" android:textColor="@color/text_secondary" android:text="6 项" />
+                <TextView android:id="@+id/group_arrow_C" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginLeft="8dp" android:textSize="13sp" android:textColor="@color/text_secondary" android:text="▸" />
+            </LinearLayout>
+        </LinearLayout>
+        <LinearLayout android:id="@+id/group_body_C" android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:visibility="gone" android:minHeight="48dp" android:gravity="center_vertical">
+            <LinearLayout android:gravity="center_vertical" android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="2dp">
+                <TextView android:textSize="14sp" android:textStyle="bold" android:textColor="@color/text_primary" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="搜索服务" />
+                <Spinner android:id="@+id/search_backend_spinner" android:layout_width="140dp" android:layout_height="wrap_content" />
+            </LinearLayout>
+            <TextView android:textSize="12sp" android:textColor="@color/text_secondary" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="8dp" android:text="Tavily 免费；DeepSeek 按次计费  ⓘ" android:id="@+id/desc_search_backend" android:tag="Tavily：经自建网关调用，默认选项；DeepSeek：使用 DeepSeek 提供商的 API Key，按次计费。" android:clickable="true" android:background="?android:attr/selectableItemBackground" android:paddingTop="4dp" android:paddingBottom="4dp" />
+            <TextView android:textSize="13sp" android:textColor="@color/text_primary" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="4dp" android:text="Tavily API Key" />
+            <EditText android:id="@+id/tavily_key_edit" android:background="@drawable/edit_text_background" android:padding="10dp" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="2dp" android:hint="tvly-..." android:inputType="textVisiblePassword" android:maxLines="1" />
+            <TextView android:textSize="12sp" android:textColor="@color/text_secondary" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="12dp" android:text="只存本机，不进安装包  ⓘ" android:id="@+id/desc_tavily" android:tag="仅保存在本机，不会写入源码或打进安装包；换设备、清除数据后需重新填写。" android:clickable="true" android:background="?android:attr/selectableItemBackground" android:paddingTop="4dp" android:paddingBottom="4dp" />
+            <LinearLayout android:gravity="center_vertical" android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="4dp" android:minHeight="48dp">
+                <TextView android:textSize="14sp" android:textStyle="bold" android:textColor="@color/text_primary" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="每轮工具调用上限" />
+                <EditText android:id="@+id/web_search_max_calls_edit" android:background="@drawable/edit_text_background" android:gravity="center" android:inputType="number" android:maxLength="2" android:padding="6dp" android:layout_width="64dp" android:layout_height="wrap_content" android:hint="15" />
+            </LinearLayout>
+            <TextView android:textSize="12sp" android:textColor="@color/text_secondary" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="12dp" android:text="单轮最多实际执行几次搜索  ⓘ" android:id="@+id/desc_tool_calls" android:tag="限制单轮 AI 回复中执行的搜索/抓取请求数（1-50，默认 15）；工具轮次不设上限。" android:clickable="true" android:background="?android:attr/selectableItemBackground" android:paddingTop="4dp" android:paddingBottom="4dp" />
+            <LinearLayout android:gravity="center_vertical" android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="4dp" android:minHeight="48dp">
+                <TextView android:textSize="14sp" android:textStyle="bold" android:textColor="@color/text_primary" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="允许 AI 发起网络请求" />
+                <Switch android:id="@+id/http_tool_switch" android:layout_width="wrap_content" android:layout_height="wrap_content" />
+            </LinearLayout>
+            <TextView android:textSize="12sp" android:textColor="@color/text_secondary" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="12dp" android:text="让模型直接请求公网 URL  ⓘ" android:id="@+id/desc_http_tool" android:tag="开启后模型可直接请求公网 URL 调用 API（默认禁止访问本机与内网，响应截断 8 KB）。默认关闭。" android:clickable="true" android:background="?android:attr/selectableItemBackground" android:paddingTop="4dp" android:paddingBottom="4dp" />
+            <LinearLayout android:gravity="center_vertical" android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="4dp" android:minHeight="48dp">
+                <TextView android:textSize="14sp" android:textColor="@color/text_primary" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="允许访问内网地址" />
+                <Switch android:id="@+id/http_allow_private_switch" android:layout_width="wrap_content" android:layout_height="wrap_content" />
+            </LinearLayout>
+            <TextView android:textSize="12sp" android:textColor="#c62828" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="12dp" android:text="模型可访问路由器、NAS 等内网设备  ⓘ" android:id="@+id/desc_http_private" android:tag="风险：模型可访问 192.168.x.x、127.0.0.1、169.254.169.254 等地址，可能读到路由器管理页、NAS 文件或云主机凭证，且结果会随对话发给模型服务商。仅在需要调用局域网 API 时开启。" android:clickable="true" android:background="?android:attr/selectableItemBackground" android:paddingTop="4dp" android:paddingBottom="4dp" />
+            <LinearLayout android:gravity="center_vertical" android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="4dp" android:minHeight="48dp">
+                <TextView android:textSize="14sp" android:textColor="@color/text_primary" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="信任所有 HTTPS 证书" />
+                <Switch android:id="@+id/trust_all_certs_switch" android:layout_width="wrap_content" android:layout_height="wrap_content" />
+            </LinearLayout>
+            <TextView android:textSize="12sp" android:textColor="#c62828" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="12dp" android:text="会关闭证书校验，流量可被中途解密  ⓘ" android:id="@+id/desc_certs" android:tag="风险：关闭证书与主机名校验后，中间人可解密全部流量（含 API Key）。仅用于自签证书的内网服务，用完请关掉。" android:clickable="true" android:background="?android:attr/selectableItemBackground" android:paddingTop="4dp" android:paddingBottom="4dp" />
+        </LinearLayout>
+        <LinearLayout android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="18dp">
+            <LinearLayout android:id="@+id/group_header_D" android:orientation="horizontal" android:gravity="center_vertical" android:background="@drawable/bg_card" android:paddingLeft="14dp" android:paddingRight="14dp" android:paddingTop="12dp" android:paddingBottom="12dp" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="48dp">
+                <TextView android:id="@+id/group_title_D" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:textSize="15sp" android:textStyle="bold" android:textColor="@color/text_primary" android:text="上限与配额" />
+                <TextView android:id="@+id/group_count_D" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="12sp" android:textColor="@color/text_secondary" android:text="10 项" />
+                <TextView android:id="@+id/group_arrow_D" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginLeft="8dp" android:textSize="13sp" android:textColor="@color/text_secondary" android:text="▸" />
+            </LinearLayout>
+        </LinearLayout>
+        <LinearLayout android:id="@+id/group_body_D" android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:visibility="gone">
+            <TextView android:textSize="12sp" android:textColor="@color/text_secondary" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="8dp" android:text="改小省钱，改大容易撞端点限制  ⓘ" android:id="@+id/desc_quota" android:tag="改小可以省钱省内存，改大容易撞端点限制。附件正文上限填 0 表示不截断。" android:clickable="true" android:background="?android:attr/selectableItemBackground" android:paddingTop="4dp" android:paddingBottom="4dp" />
+            <LinearLayout android:gravity="center_vertical" android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="6dp" android:minHeight="48dp">
+                <TextView android:textSize="13sp" android:textColor="@color/text_primary" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="附件正文送模上限（字符，0=不截断）" />
+                <EditText android:id="@+id/attach_max_chars_edit" android:background="@drawable/edit_text_background" android:gravity="center" android:inputType="number" android:maxLength="8" android:padding="6dp" android:layout_width="96dp" android:layout_height="wrap_content" android:hint="262144" />
+            </LinearLayout>
+            <LinearLayout android:gravity="center_vertical" android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="6dp" android:minHeight="48dp">
+                <TextView android:textSize="13sp" android:textColor="@color/text_primary" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="附件合计上限（万字符，100-100000）" />
+                <EditText android:id="@+id/attach_total_edit" android:background="@drawable/edit_text_background" android:gravity="center" android:inputType="number" android:maxLength="6" android:padding="6dp" android:layout_width="96dp" android:layout_height="wrap_content" android:hint="2000" />
+            </LinearLayout>
+            <LinearLayout android:gravity="center_vertical" android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="6dp" android:minHeight="48dp">
+                <TextView android:textSize="13sp" android:textColor="@color/text_primary" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="单次附件数（1-20）" />
+                <EditText android:id="@+id/max_attachments_edit" android:background="@drawable/edit_text_background" android:gravity="center" android:inputType="number" android:maxLength="2" android:padding="6dp" android:layout_width="64dp" android:layout_height="wrap_content" android:hint="5" />
+            </LinearLayout>
+            <LinearLayout android:gravity="center_vertical" android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="6dp" android:minHeight="48dp">
+                <TextView android:textSize="13sp" android:textColor="@color/text_primary" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="图片单张上限（MB，1-100）" />
+                <EditText android:id="@+id/image_max_mb_edit" android:background="@drawable/edit_text_background" android:gravity="center" android:inputType="number" android:maxLength="3" android:padding="6dp" android:layout_width="64dp" android:layout_height="wrap_content" android:hint="20" />
+            </LinearLayout>
+            <LinearLayout android:gravity="center_vertical" android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="6dp" android:minHeight="48dp">
+                <TextView android:textSize="13sp" android:textColor="@color/text_primary" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="工具结果截断（KB，4-1024）" />
+                <EditText android:id="@+id/tool_max_kb_edit" android:background="@drawable/edit_text_background" android:gravity="center" android:inputType="number" android:maxLength="4" android:padding="6dp" android:layout_width="64dp" android:layout_height="wrap_content" android:hint="32" />
+            </LinearLayout>
+            <LinearLayout android:gravity="center_vertical" android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="6dp" android:minHeight="48dp">
+                <TextView android:textSize="13sp" android:textColor="@color/text_primary" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="HTTP 工具超时（秒，5-120）" />
+                <EditText android:id="@+id/http_timeout_edit" android:background="@drawable/edit_text_background" android:gravity="center" android:inputType="number" android:maxLength="3" android:padding="6dp" android:layout_width="64dp" android:layout_height="wrap_content" android:hint="30" />
+            </LinearLayout>
+            <LinearLayout android:gravity="center_vertical" android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="6dp" android:minHeight="48dp">
+                <TextView android:textSize="13sp" android:textColor="@color/text_primary" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="单次搜索条数（1-20）" />
+                <EditText android:id="@+id/search_count_edit" android:background="@drawable/edit_text_background" android:gravity="center" android:inputType="number" android:maxLength="2" android:padding="6dp" android:layout_width="64dp" android:layout_height="wrap_content" android:hint="10" />
+            </LinearLayout>
+            <LinearLayout android:gravity="center_vertical" android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="6dp" android:minHeight="48dp">
+                <TextView android:textSize="13sp" android:textColor="@color/text_primary" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="单条搜索摘要长度（字符，200-8000）" />
+                <EditText android:id="@+id/search_summary_edit" android:background="@drawable/edit_text_background" android:gravity="center" android:inputType="number" android:maxLength="4" android:padding="6dp" android:layout_width="64dp" android:layout_height="wrap_content" android:hint="1200" />
+            </LinearLayout>
+            <LinearLayout android:gravity="center_vertical" android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="6dp" android:minHeight="48dp">
+                <TextView android:textSize="13sp" android:textColor="@color/text_primary" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="图片送模最大边（px，512-4096）" />
+                <EditText android:id="@+id/vision_max_px_edit" android:background="@drawable/edit_text_background" android:gravity="center" android:inputType="number" android:maxLength="4" android:padding="6dp" android:layout_width="64dp" android:layout_height="wrap_content" android:hint="1600" />
+            </LinearLayout>
+            <LinearLayout android:gravity="center_vertical" android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="12dp" android:minHeight="48dp">
+                <TextView android:textSize="13sp" android:textColor="@color/text_primary" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="单轮视觉图片张数（1-10）" />
+                <EditText android:id="@+id/vision_max_images_edit" android:background="@drawable/edit_text_background" android:gravity="center" android:inputType="number" android:maxLength="2" android:padding="6dp" android:layout_width="64dp" android:layout_height="wrap_content" android:hint="3" />
+            </LinearLayout>
+        </LinearLayout>
+        <LinearLayout android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="18dp">
+            <LinearLayout android:id="@+id/group_header_E" android:orientation="horizontal" android:gravity="center_vertical" android:background="@drawable/bg_card" android:paddingLeft="14dp" android:paddingRight="14dp" android:paddingTop="12dp" android:paddingBottom="12dp" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="48dp">
+                <TextView android:id="@+id/group_title_E" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:textSize="15sp" android:textStyle="bold" android:textColor="@color/text_primary" android:text="调试与性能" />
+                <TextView android:id="@+id/group_count_E" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="12sp" android:textColor="@color/text_secondary" android:text="7 项" />
+                <TextView android:id="@+id/group_arrow_E" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginLeft="8dp" android:textSize="13sp" android:textColor="@color/text_secondary" android:text="▸" />
+            </LinearLayout>
+        </LinearLayout>
+        <LinearLayout android:id="@+id/group_body_E" android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:visibility="gone">
+            <LinearLayout android:gravity="center_vertical" android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="12dp" android:minHeight="48dp">
+                <TextView android:textSize="14sp" android:textStyle="bold" android:textColor="@color/text_primary" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="启用调试日志" />
+                <Switch android:id="@+id/log_switch" android:layout_width="wrap_content" android:layout_height="wrap_content" />
+            </LinearLayout>
+            <LinearLayout android:gravity="center_vertical" android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="12dp" android:minHeight="48dp">
+                <TextView android:textSize="14sp" android:textStyle="bold" android:textColor="@color/text_primary" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="@string/quick_scan_mode" />
+                <Switch android:id="@+id/quick_scan_switch" android:layout_width="wrap_content" android:layout_height="wrap_content" />
+            </LinearLayout>
+            <LinearLayout android:gravity="center_vertical" android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="4dp" android:minHeight="48dp">
+                <TextView android:textSize="14sp" android:textStyle="bold" android:textColor="@color/text_primary" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="429 自动重试" />
+                <Switch android:id="@+id/retry_429_switch" android:layout_width="wrap_content" android:layout_height="wrap_content" />
+            </LinearLayout>
+            <TextView android:textSize="12sp" android:textColor="@color/text_secondary" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="8dp" android:text="被限流时自动等待并重试  ⓘ" android:id="@+id/desc_retry429" android:tag="仅对「请求过于频繁」(HTTP 429) 生效；服务端返回 Retry-After 时以它为准。" android:clickable="true" android:background="?android:attr/selectableItemBackground" android:paddingTop="4dp" android:paddingBottom="4dp" />
+            <LinearLayout android:gravity="center_vertical" android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="6dp" android:minHeight="48dp">
+                <TextView android:textSize="13sp" android:textColor="@color/text_primary" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="最多重试次数（1-20）" />
+                <EditText android:id="@+id/retry_429_max_edit" android:background="@drawable/edit_text_background" android:gravity="center" android:inputType="number" android:maxLength="2" android:padding="6dp" android:layout_width="64dp" android:layout_height="wrap_content" android:hint="3" />
+            </LinearLayout>
+            <LinearLayout android:gravity="center_vertical" android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="6dp" android:minHeight="48dp">
+                <TextView android:textSize="13sp" android:textColor="@color/text_primary" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="首次等待（秒，1-30）" />
+                <EditText android:id="@+id/retry_429_base_edit" android:background="@drawable/edit_text_background" android:gravity="center" android:inputType="number" android:maxLength="2" android:padding="6dp" android:layout_width="64dp" android:layout_height="wrap_content" android:hint="2" />
+            </LinearLayout>
+            <LinearLayout android:gravity="center_vertical" android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="6dp" android:minHeight="48dp">
+                <TextView android:textSize="13sp" android:textColor="@color/text_primary" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="单次最长等待（秒，1-120）" />
+                <EditText android:id="@+id/retry_429_max_wait_edit" android:background="@drawable/edit_text_background" android:gravity="center" android:inputType="number" android:maxLength="3" android:padding="6dp" android:layout_width="64dp" android:layout_height="wrap_content" android:hint="30" />
+            </LinearLayout>
+            <LinearLayout android:gravity="center_vertical" android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="12dp" android:minHeight="48dp">
+                <TextView android:textSize="13sp" android:textColor="@color/text_primary" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="指数退避（2s → 4s → 8s）" />
+                <Switch android:id="@+id/retry_429_backoff_switch" android:layout_width="wrap_content" android:layout_height="wrap_content" />
+            </LinearLayout>
+        </LinearLayout>
+        <LinearLayout android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="18dp">
+            <LinearLayout android:id="@+id/group_header_F" android:orientation="horizontal" android:gravity="center_vertical" android:background="@drawable/bg_card" android:paddingLeft="14dp" android:paddingRight="14dp" android:paddingTop="12dp" android:paddingBottom="12dp" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="48dp">
+                <TextView android:id="@+id/group_title_F" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:textSize="15sp" android:textStyle="bold" android:textColor="@color/text_primary" android:text="数据与关于" />
+                <TextView android:id="@+id/group_count_F" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="12sp" android:textColor="@color/text_secondary" android:text="4 项" />
+                <TextView android:id="@+id/group_arrow_F" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginLeft="8dp" android:textSize="13sp" android:textColor="@color/text_secondary" android:text="▾" />
+            </LinearLayout>
+        </LinearLayout>
+        <LinearLayout android:id="@+id/group_body_F" android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content">
+            <LinearLayout android:id="@+id/storage_entry" android:orientation="horizontal" android:gravity="center_vertical" android:background="@drawable/bg_card" android:paddingLeft="14dp" android:paddingRight="14dp" android:paddingTop="12dp" android:paddingBottom="12dp" android:layout_marginBottom="16dp" android:layout_width="match_parent" android:layout_height="wrap_content">
+                <TextView android:textSize="15sp" android:textColor="@color/text_primary" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="存储空间" />
+                <TextView android:id="@+id/storage_entry_size" android:textSize="12sp" android:textColor="@color/text_secondary" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="" />
+                <TextView android:textSize="18sp" android:textColor="#b0bec5" android:layout_marginLeft="6dp" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="›" />
+            </LinearLayout>
+            <Button android:textSize="14sp" android:id="@+id/usage_stats_button" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="16dp" android:text="使用统计 →" />
+            <Button android:textSize="14sp" android:id="@+id/balance_button" android:background="@color/primary" android:textColor="@android:color/white" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="24dp" android:text="查询 DeepSeek 余额" />
+            <Button android:textSize="14sp" android:id="@+id/about_button" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="24dp" android:text="关于" />
+        </LinearLayout>
+        <LinearLayout android:gravity="end" android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content">
+            <Button android:id="@+id/cancel_button" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginRight="8dp" android:text="@string/cancel" />
+            <Button android:textColor="@android:color/white" android:id="@+id/save_button" android:background="@color/primary" android:layout_width="wrap_content" android:layout_height="wrap_content" android:minWidth="100dp" android:text="@string/save" />
+        </LinearLayout>
     </LinearLayout>
-
-    <!-- System prompt -->
-    <TextView
-        android:textSize="14sp"
-        android:textStyle="bold"
-        android:textColor="@color/text_primary"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="4dp"
-        android:text="@string/system_prompt"/>
-    <EditText
-        android:gravity="top"
-        android:id="@+id/system_prompt_edit"
-        android:background="@drawable/edit_text_background"
-        android:padding="12dp"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="16dp"
-        android:hint="例如：你是一个专业的编程助手..."
-        android:maxLines="6"
-        android:minLines="3"
-        android:inputType="textMultiLine"/>
-    <TextView
-        android:textSize="11sp"
-        android:textColor="@color/text_secondary"
-        android:textIsSelectable="true"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="6dp"
-        android:text="可用占位符（发送时替换成当前设备的真实值）\n设备：{android} 系统版本 · {api} API 级别 · {webview} WebView 版本 · {model} 机型 · {brand} 厂商 · {cpu_abi} CPU 架构 · {app_version} 应用版本 · {app_package} 包名 · {locale} 语言 · {ua} UA 字符串\n屏幕：{screen} 分辨率 · {density} 屏幕密度\n时间：{date} 日期 · {time} 时间 · {datetime} 日期+时间 · {weekday} 星期 · {timezone} 时区\n存储：{free_storage} 可用空间"/>
-    <TextView
-        android:textSize="11sp"
-        android:textColor="#e65100"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="16dp"
-        android:text="⚠ 时间类占位符会让缓存失效：{date} 每天变一次、{time} 每秒都在变。系统提示词位于请求最前面，里面带时间等于每次请求都换一个开头，服务端的前缀缓存全部重算。需要当前时间请用消息里自动附带的时间提示，不要写进这里。"/>
-
-    <!-- Preset selector -->
-    <LinearLayout
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="8dp">
-        <TextView
-            android:textSize="12sp"
-            android:textColor="@color/text_primary"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="预设:"/>
-        <Spinner
-            android:id="@+id/preset_spinner"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:layout_marginLeft="4dp"/>
-        <Button
-            android:textSize="11sp"
-            android:id="@+id/manage_presets_button"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginLeft="4dp"
-            android:padding="4dp"
-            android:minWidth="0dp"
-            android:text="管理"/>
-        <Button
-            android:textSize="11sp"
-            android:id="@+id/save_preset_button"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginLeft="2dp"
-            android:padding="4dp"
-            android:minWidth="0dp"
-            android:text="保存当前"/>
-    </LinearLayout>
-
-    <!-- Auto title switch -->
-    <LinearLayout
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="12dp">
-        <TextView
-            android:textSize="14sp"
-            android:textStyle="bold"
-            android:textColor="@color/text_primary"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="自动生成对话标题"/>
-        <Switch
-            android:id="@+id/auto_title_switch"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"/>
-    </LinearLayout>
-
-    <!-- Web search switch -->
-    <LinearLayout
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="4dp">
-        <TextView
-            android:textSize="14sp"
-            android:textStyle="bold"
-            android:textColor="@color/text_primary"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="联网搜索"/>
-        <Switch
-            android:id="@+id/web_search_switch"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"/>
-    </LinearLayout>
-    <TextView
-        android:textSize="11sp"
-        android:textColor="@color/text_secondary"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="12dp"
-        android:text="允许 AI 调用搜索/抓取工具，使用 DeepSeek Search API（需配置 DeepSeek API Key）"/>
-
-    <!-- 搜索服务（后端） -->
-    <LinearLayout
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="2dp">
-        <TextView
-            android:textSize="14sp"
-            android:textStyle="bold"
-            android:textColor="@color/text_primary"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="搜索服务"/>
-        <Spinner
-            android:id="@+id/search_backend_spinner"
-            android:layout_width="140dp"
-            android:layout_height="wrap_content"/>
-    </LinearLayout>
-    <TextView
-        android:textSize="11sp"
-        android:textColor="@color/text_secondary"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="8dp"
-        android:text="Tavily：经自建网关调用，默认选项；DeepSeek：使用 DeepSeek 提供商的 API Key，按次计费。"/>
-
-    <!-- Tavily 密钥（仅本机保存） -->
-    <TextView
-        android:textSize="13sp"
-        android:textColor="@color/text_primary"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="4dp"
-        android:text="Tavily API Key"/>
-    <EditText
-        android:id="@+id/tavily_key_edit"
-        android:background="@drawable/edit_text_background"
-        android:padding="10dp"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="2dp"
-        android:hint="tvly-..."
-        android:inputType="textVisiblePassword"
-        android:maxLines="1"/>
-    <TextView
-        android:textSize="11sp"
-        android:textColor="@color/text_secondary"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="12dp"
-        android:text="仅保存在本机，不会写入源码或打进安装包；换设备、清除数据后需重新填写。"/>
-
-    <!-- 每轮工具调用上限 -->
-    <LinearLayout
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="4dp">
-        <TextView
-            android:textSize="14sp"
-            android:textStyle="bold"
-            android:textColor="@color/text_primary"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="每轮工具调用上限"/>
-        <EditText
-            android:id="@+id/web_search_max_calls_edit"
-            android:background="@drawable/edit_text_background"
-            android:gravity="center"
-            android:inputType="number"
-            android:maxLength="2"
-            android:padding="6dp"
-            android:layout_width="64dp"
-            android:layout_height="wrap_content"
-            android:hint="15"/>
-    </LinearLayout>
-    <TextView
-        android:textSize="11sp"
-        android:textColor="@color/text_secondary"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="12dp"
-        android:text="限制单轮 AI 回复中执行的搜索/抓取请求数（1-50，默认 15）；工具轮次不设上限。"/>
-
-    <!-- 本机 HTTP 工具：默认关闭，开启等于把网络出口交给模型 -->
-    <LinearLayout
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="4dp">
-        <TextView
-            android:textSize="14sp"
-            android:textStyle="bold"
-            android:textColor="@color/text_primary"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="允许 AI 发起网络请求"/>
-        <Switch
-            android:id="@+id/http_tool_switch"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"/>
-    </LinearLayout>
-    <TextView
-        android:textSize="11sp"
-        android:textColor="@color/text_secondary"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="12dp"
-        android:text="开启后模型可直接请求公网 URL 调用 API（默认禁止访问本机与内网，响应截断 8 KB）。默认关闭。"/>
-
-    <!-- 内网访问：默认关闭，与上面的工具开关是两层 -->
-    <LinearLayout
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="4dp">
-        <TextView
-            android:textSize="14sp"
-            android:textColor="@color/text_primary"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="允许访问内网地址"/>
-        <Switch
-            android:id="@+id/http_allow_private_switch"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"/>
-    </LinearLayout>
-    <TextView
-        android:textSize="11sp"
-        android:textColor="#c62828"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="12dp"
-        android:text="风险：模型可访问 192.168.x.x、127.0.0.1、169.254.169.254 等地址，可能读到路由器管理页、NAS 文件或云主机凭证，且结果会随对话发给模型服务商。仅在需要调用局域网 API 时开启。"/>
-
-    <!-- TLS 证书校验：默认严格 -->
-    <LinearLayout
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="4dp">
-        <TextView
-            android:textSize="14sp"
-            android:textColor="@color/text_primary"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="信任所有 HTTPS 证书"/>
-        <Switch
-            android:id="@+id/trust_all_certs_switch"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"/>
-    </LinearLayout>
-    <TextView
-        android:textSize="11sp"
-        android:textColor="#c62828"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="12dp"
-        android:text="风险：关闭证书与主机名校验后，中间人可解密全部流量（含 API Key）。仅用于自签证书的内网服务，用完请关掉。"/>
-
-    <!-- 429 限流重试 -->
-    <LinearLayout
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="4dp">
-        <TextView
-            android:textSize="14sp"
-            android:textStyle="bold"
-            android:textColor="@color/text_primary"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="429 自动重试"/>
-        <Switch
-            android:id="@+id/retry_429_switch"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"/>
-    </LinearLayout>
-    <TextView
-        android:textSize="11sp"
-        android:textColor="@color/text_secondary"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="8dp"
-        android:text="仅对「请求过于频繁」(HTTP 429) 生效；服务端返回 Retry-After 时以它为准。"/>
-
-    <LinearLayout
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="6dp">
-        <TextView
-            android:textSize="13sp"
-            android:textColor="@color/text_primary"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="最多重试次数（1-20）"/>
-        <EditText
-            android:id="@+id/retry_429_max_edit"
-            android:background="@drawable/edit_text_background"
-            android:gravity="center"
-            android:inputType="number"
-            android:maxLength="2"
-            android:padding="6dp"
-            android:layout_width="64dp"
-            android:layout_height="wrap_content"
-            android:hint="3"/>
-    </LinearLayout>
-    <LinearLayout
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="6dp">
-        <TextView
-            android:textSize="13sp"
-            android:textColor="@color/text_primary"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="首次等待（秒，1-30）"/>
-        <EditText
-            android:id="@+id/retry_429_base_edit"
-            android:background="@drawable/edit_text_background"
-            android:gravity="center"
-            android:inputType="number"
-            android:maxLength="2"
-            android:padding="6dp"
-            android:layout_width="64dp"
-            android:layout_height="wrap_content"
-            android:hint="2"/>
-    </LinearLayout>
-    <LinearLayout
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="6dp">
-        <TextView
-            android:textSize="13sp"
-            android:textColor="@color/text_primary"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="单次最长等待（秒，1-120）"/>
-        <EditText
-            android:id="@+id/retry_429_max_wait_edit"
-            android:background="@drawable/edit_text_background"
-            android:gravity="center"
-            android:inputType="number"
-            android:maxLength="3"
-            android:padding="6dp"
-            android:layout_width="64dp"
-            android:layout_height="wrap_content"
-            android:hint="30"/>
-    </LinearLayout>
-    <LinearLayout
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="12dp">
-        <TextView
-            android:textSize="13sp"
-            android:textColor="@color/text_primary"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="指数退避（2s → 4s → 8s）"/>
-        <Switch
-            android:id="@+id/retry_429_backoff_switch"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"/>
-    </LinearLayout>
-
-    <!-- 上限与配额：原来全是写死在代码里的常量，换设备/换模型都得改源码 -->
-    <TextView
-        android:textSize="14sp"
-        android:textStyle="bold"
-        android:textColor="@color/text_primary"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="4dp"
-        android:layout_marginBottom="4dp"
-        android:text="上限与配额"/>
-    <TextView
-        android:textSize="11sp"
-        android:textColor="@color/text_secondary"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="8dp"
-        android:text="改小可以省钱省内存，改大容易撞端点限制。附件正文上限填 0 表示不截断。"/>
-
-    <LinearLayout
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="6dp">
-        <TextView
-            android:textSize="13sp"
-            android:textColor="@color/text_primary"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="附件正文送模上限（字符，0=不截断）"/>
-        <EditText
-            android:id="@+id/attach_max_chars_edit"
-            android:background="@drawable/edit_text_background"
-            android:gravity="center"
-            android:inputType="number"
-            android:maxLength="8"
-            android:padding="6dp"
-            android:layout_width="96dp"
-            android:layout_height="wrap_content"
-            android:hint="262144"/>
-    </LinearLayout>
-    <LinearLayout
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="6dp">
-        <TextView
-            android:textSize="13sp"
-            android:textColor="@color/text_primary"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="附件合计上限（万字符，100-100000）"/>
-        <EditText
-            android:id="@+id/attach_total_edit"
-            android:background="@drawable/edit_text_background"
-            android:gravity="center"
-            android:inputType="number"
-            android:maxLength="6"
-            android:padding="6dp"
-            android:layout_width="96dp"
-            android:layout_height="wrap_content"
-            android:hint="2000"/>
-    </LinearLayout>
-    <LinearLayout
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="6dp">
-        <TextView
-            android:textSize="13sp"
-            android:textColor="@color/text_primary"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="单次附件数（1-20）"/>
-        <EditText
-            android:id="@+id/max_attachments_edit"
-            android:background="@drawable/edit_text_background"
-            android:gravity="center"
-            android:inputType="number"
-            android:maxLength="2"
-            android:padding="6dp"
-            android:layout_width="64dp"
-            android:layout_height="wrap_content"
-            android:hint="5"/>
-    </LinearLayout>
-    <LinearLayout
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="6dp">
-        <TextView
-            android:textSize="13sp"
-            android:textColor="@color/text_primary"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="图片单张上限（MB，1-100）"/>
-        <EditText
-            android:id="@+id/image_max_mb_edit"
-            android:background="@drawable/edit_text_background"
-            android:gravity="center"
-            android:inputType="number"
-            android:maxLength="3"
-            android:padding="6dp"
-            android:layout_width="64dp"
-            android:layout_height="wrap_content"
-            android:hint="20"/>
-    </LinearLayout>
-    <LinearLayout
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="6dp">
-        <TextView
-            android:textSize="13sp"
-            android:textColor="@color/text_primary"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="工具结果截断（KB，4-1024）"/>
-        <EditText
-            android:id="@+id/tool_max_kb_edit"
-            android:background="@drawable/edit_text_background"
-            android:gravity="center"
-            android:inputType="number"
-            android:maxLength="4"
-            android:padding="6dp"
-            android:layout_width="64dp"
-            android:layout_height="wrap_content"
-            android:hint="32"/>
-    </LinearLayout>
-    <LinearLayout
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="6dp">
-        <TextView
-            android:textSize="13sp"
-            android:textColor="@color/text_primary"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="HTTP 工具超时（秒，5-120）"/>
-        <EditText
-            android:id="@+id/http_timeout_edit"
-            android:background="@drawable/edit_text_background"
-            android:gravity="center"
-            android:inputType="number"
-            android:maxLength="3"
-            android:padding="6dp"
-            android:layout_width="64dp"
-            android:layout_height="wrap_content"
-            android:hint="30"/>
-    </LinearLayout>
-    <LinearLayout
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="6dp">
-        <TextView
-            android:textSize="13sp"
-            android:textColor="@color/text_primary"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="单次搜索条数（1-20）"/>
-        <EditText
-            android:id="@+id/search_count_edit"
-            android:background="@drawable/edit_text_background"
-            android:gravity="center"
-            android:inputType="number"
-            android:maxLength="2"
-            android:padding="6dp"
-            android:layout_width="64dp"
-            android:layout_height="wrap_content"
-            android:hint="10"/>
-    </LinearLayout>
-    <LinearLayout
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="6dp">
-        <TextView
-            android:textSize="13sp"
-            android:textColor="@color/text_primary"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="单条搜索摘要长度（字符，200-8000）"/>
-        <EditText
-            android:id="@+id/search_summary_edit"
-            android:background="@drawable/edit_text_background"
-            android:gravity="center"
-            android:inputType="number"
-            android:maxLength="4"
-            android:padding="6dp"
-            android:layout_width="64dp"
-            android:layout_height="wrap_content"
-            android:hint="1200"/>
-    </LinearLayout>
-    <LinearLayout
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="6dp">
-        <TextView
-            android:textSize="13sp"
-            android:textColor="@color/text_primary"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="图片送模最大边（px，512-4096）"/>
-        <EditText
-            android:id="@+id/vision_max_px_edit"
-            android:background="@drawable/edit_text_background"
-            android:gravity="center"
-            android:inputType="number"
-            android:maxLength="4"
-            android:padding="6dp"
-            android:layout_width="64dp"
-            android:layout_height="wrap_content"
-            android:hint="1600"/>
-    </LinearLayout>
-    <LinearLayout
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="12dp">
-        <TextView
-            android:textSize="13sp"
-            android:textColor="@color/text_primary"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="单轮视觉图片张数（1-10）"/>
-        <EditText
-            android:id="@+id/vision_max_images_edit"
-            android:background="@drawable/edit_text_background"
-            android:gravity="center"
-            android:inputType="number"
-            android:maxLength="2"
-            android:padding="6dp"
-            android:layout_width="64dp"
-            android:layout_height="wrap_content"
-            android:hint="3"/>
-    </LinearLayout>
-
-    <!-- 代码执行器环境提示词：原来写死在 ToolsActivity，换设备就报错 -->
-    <TextView
-        android:textSize="14sp"
-        android:textStyle="bold"
-        android:textColor="@color/text_primary"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="6dp"
-        android:text="代码执行提示词"/>
-    <EditText
-        android:id="@+id/js_env_prompt_edit"
-        android:background="@drawable/edit_text_background"
-        android:gravity="top|start"
-        android:inputType="textMultiLine"
-        android:minLines="4"
-        android:maxLines="10"
-        android:padding="8dp"
-        android:textSize="13sp"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="4dp"/>
-    <TextView
-        android:textSize="11sp"
-        android:textColor="@color/text_secondary"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="12dp"
-        android:text="小工具页的「复制环境提示词」「发送给 AI」会用它。可用占位符：{android} {api} {webview} {model} {app_version} {ua}"/>
-
-    <!-- Quick scan switch -->
-    <LinearLayout
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="12dp">
-        <TextView
-            android:textSize="14sp"
-            android:textStyle="bold"
-            android:textColor="@color/text_primary"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="@string/quick_scan_mode"/>
-        <Switch
-            android:id="@+id/quick_scan_switch"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"/>
-    </LinearLayout>
-
-    <!-- Log switch -->
-    <LinearLayout
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="12dp">
-        <TextView
-            android:textSize="14sp"
-            android:textStyle="bold"
-            android:textColor="@color/text_primary"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="启用调试日志"/>
-        <Switch
-            android:id="@+id/log_switch"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"/>
-    </LinearLayout>
-
-    <!-- Realtime render switch -->
-    <LinearLayout
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="12dp">
-        <TextView
-            android:textSize="14sp"
-            android:textStyle="bold"
-            android:textColor="@color/text_primary"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="实时渲染"/>
-        <Switch
-            android:id="@+id/realtime_render_switch"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"/>
-    </LinearLayout>
-
-    <!-- Streaming switch -->
-    <LinearLayout
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="12dp">
-        <TextView
-            android:textSize="14sp"
-            android:textStyle="bold"
-            android:textColor="@color/text_primary"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="流式输出"/>
-        <Switch
-            android:id="@+id/stream_switch"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"/>
-    </LinearLayout>
-
-    <!-- Title prompt -->
-    <TextView
-        android:textSize="14sp"
-        android:textStyle="bold"
-        android:textColor="@color/text_primary"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="4dp"
-        android:text="标题生成提示词"/>
-    <EditText
-        android:gravity="top"
-        android:id="@+id/title_prompt_edit"
-        android:background="@drawable/edit_text_background"
-        android:padding="12dp"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="6dp"
-        android:hint="根据用户消息生成3-15字标题。只输出标题本身。"
-        android:maxLines="3"
-        android:minLines="2"
-        android:inputType="textMultiLine"/>
-
-    <TextView
-        android:textSize="11sp"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="16dp"
-        android:textColor="@color/text_secondary"
-        android:text="同样支持占位符：{android} {api} {webview} {model} {app_version} {ua}，生成标题时替换成当前设备的真实值。"/>
-
-    <!-- Title model -->
-    <LinearLayout
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="16dp">
-        <TextView
-            android:textSize="14sp"
-            android:textStyle="bold"
-            android:textColor="@color/text_primary"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="标题生成模型"/>
-        <Spinner
-            android:id="@+id/title_model_spinner"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:layout_marginLeft="8dp"/>
-    </LinearLayout>
-
-    <!-- Manage models -->
-    <Button
-        android:textSize="14sp"
-        android:id="@+id/manage_models_button"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="16dp"
-        android:text="管理模型 →"/>
-
-    <!-- Usage statistics -->
-    <Button
-        android:textSize="14sp"
-        android:id="@+id/usage_stats_button"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="16dp"
-        android:text="使用统计 →"/>
-
-    <!-- Balance query button -->
-    <Button
-        android:textSize="14sp"
-        android:id="@+id/balance_button"
-        android:background="@color/primary"
-        android:textColor="@android:color/white"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="24dp"
-        android:text="查询 DeepSeek 余额"/>
-
-    <!-- About -->
-    <Button
-        android:textSize="14sp"
-        android:id="@+id/about_button"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="24dp"
-        android:text="关于"/>
-
-    <!-- Save / Cancel -->
-    <LinearLayout
-        android:gravity="end"
-        android:orientation="horizontal"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content">
-        <Button
-            android:id="@+id/cancel_button"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginRight="8dp"
-            android:text="@string/cancel"/>
-        <Button
-            android:textColor="@android:color/white"
-            android:id="@+id/save_button"
-            android:background="@color/primary"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:minWidth="100dp"
-            android:text="@string/save"/>
-    </LinearLayout>
-</LinearLayout>
 </ScrollView>

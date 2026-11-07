@@ -145,6 +145,8 @@ public class SettingsActivity extends Activity {
         this.prefs = getSharedPreferences(PREFS_NAME, 0);
         LogUtil.i(TAG, "========== onCreate ========== (%s)", LogUtil.thread());
         initViews();
+        initGroups();
+        initDescDetails();
         loadSettings();
         LogUtil.i(TAG, "onCreate done: systemPrompt=%d chars, autoTitle=%s, titleModel=%s",
                 systemPromptEdit.getText().length(), autoTitleSwitch.isChecked(),
@@ -299,6 +301,80 @@ public class SettingsActivity extends Activity {
                     }
                 })
                 .show();
+    }
+
+    /**
+     * 六个分组的折叠状态。
+     * <p>默认只展开 A（常用）与 F（数据与关于）：首屏 = 4 行常用 + 6 个组标题 + 4 行导航，
+     * 258×960dp 上一屏能看全，折叠组只留「组标题 + 项数」。
+     * 状态写进 prefs，下次进来还是用户上次的样子。
+     */
+    private static final String KEY_GROUP_COLLAPSED = "ui_group_collapsed_";
+    private static final String[] GROUP_KEYS = {"A", "B", "C", "D", "E", "F"};
+    private static final boolean[] GROUP_DEFAULT_OPEN = {true, false, false, false, false, true};
+    private static final int[] GROUP_HEADER_IDS = {
+            R.id.group_header_A, R.id.group_header_B, R.id.group_header_C,
+            R.id.group_header_D, R.id.group_header_E, R.id.group_header_F};
+    private static final int[] GROUP_BODY_IDS = {
+            R.id.group_body_A, R.id.group_body_B, R.id.group_body_C,
+            R.id.group_body_D, R.id.group_body_E, R.id.group_body_F};
+    private static final int[] GROUP_ARROW_IDS = {
+            R.id.group_arrow_A, R.id.group_arrow_B, R.id.group_arrow_C,
+            R.id.group_arrow_D, R.id.group_arrow_E, R.id.group_arrow_F};
+
+    private void initGroups() {
+        for (int i = 0; i < GROUP_KEYS.length; i++) {
+            final String groupKey = GROUP_KEYS[i];
+            final View body = findViewById(GROUP_BODY_IDS[i]);
+            final android.widget.TextView arrow =
+                    (android.widget.TextView) findViewById(GROUP_ARROW_IDS[i]);
+            boolean open = !prefs.getBoolean(KEY_GROUP_COLLAPSED + groupKey,
+                    !GROUP_DEFAULT_OPEN[i]);
+            applyGroupState(body, arrow, open);
+            View header = findViewById(GROUP_HEADER_IDS[i]);
+            header.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    boolean nowOpen = body.getVisibility() != View.VISIBLE;
+                    applyGroupState(body, arrow, nowOpen);
+                    prefs.edit().putBoolean(KEY_GROUP_COLLAPSED + groupKey, !nowOpen).apply();
+                    LogUtil.d(TAG, "group %s -> %s", groupKey, nowOpen ? "open" : "closed");
+                }
+            });
+        }
+    }
+
+    private static void applyGroupState(View body, android.widget.TextView arrow, boolean open) {
+        body.setVisibility(open ? View.VISIBLE : View.GONE);
+        arrow.setText(open ? "▾" : "▸");
+    }
+
+    /**
+     * 说明文字：主页面只留一句 ≤24 字的摘要，全文放在 {@code android:tag} 里。
+     * <p>258dp 宽下 12sp 一行 12 字、两行是上限；把 90 字的风险说明直接铺在开关下面，
+     * 会把 6 组折叠省下来的高度又吃掉。点摘要看全文，是这次改动里观感提升最直接的一条。
+     */
+    private static final int[] DESC_IDS = {
+            R.id.desc_web_search, R.id.desc_search_backend, R.id.desc_tavily,
+            R.id.desc_tool_calls, R.id.desc_http_tool, R.id.desc_http_private,
+            R.id.desc_certs, R.id.desc_retry429, R.id.desc_quota};
+
+    private void initDescDetails() {
+        for (int i = 0; i < DESC_IDS.length; i++) {
+            android.widget.TextView tv = (android.widget.TextView) findViewById(DESC_IDS[i]);
+            if (tv == null) continue;
+            tv.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    Object detail = v.getTag();
+                    if (detail == null) return;
+                    new AlertDialog.Builder(SettingsActivity.this)
+                            .setTitle("说明")
+                            .setMessage(detail.toString())
+                            .setPositiveButton("知道了", null)
+                            .show();
+                }
+            });
+        }
     }
 
     private void loadSettings() {

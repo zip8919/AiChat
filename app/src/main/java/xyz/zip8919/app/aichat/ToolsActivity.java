@@ -68,6 +68,15 @@ public class ToolsActivity extends Activity {
     private TextView selectionCount;
     private Button selectButton;
     private Button selectionCancelButton;
+    /** 分段容器：代码库 / 运行器，同一时刻只显示一个。 */
+    private LinearLayout libraryPanel;
+    private LinearLayout runnerPanel;
+    private LinearLayout selectionFooter;
+    private LinearLayout libraryHead;
+    private Button tabLibrary;
+    private Button tabRunner;
+    private View emptyView;
+    private boolean runnerTab;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -112,6 +121,47 @@ public class ToolsActivity extends Activity {
         selectionCount = (TextView) findViewById(R.id.tools_selection_count);
         selectButton = (Button) findViewById(R.id.tools_select_button);
         selectionCancelButton = (Button) findViewById(R.id.tools_selection_cancel_button);
+        selectionFooter = (LinearLayout) findViewById(R.id.tools_selection_footer);
+        libraryHead = (LinearLayout) findViewById(R.id.tools_library_head);
+        emptyView = findViewById(R.id.tools_empty);
+        libraryPanel = (LinearLayout) findViewById(R.id.tools_panel_library);
+        runnerPanel = (LinearLayout) findViewById(R.id.tools_panel_runner);
+        tabLibrary = (Button) findViewById(R.id.tools_tab_library);
+        tabRunner = (Button) findViewById(R.id.tools_tab_runner);
+        tabLibrary.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { showTab(false); }
+        });
+        tabRunner.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { showTab(true); }
+        });
+        findViewById(R.id.tools_select_entry).setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { enterSelectionMode(); }
+        });
+        findViewById(R.id.tools_tpl_hello).setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                loadTemplate("console.log('Hello from AiChat');");
+            }
+        });
+        findViewById(R.id.tools_tpl_dom).setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                loadTemplate("var d = document.createElement('div');\n"
+                        + "d.textContent = 'DOM 就绪：' + document.title;\n"
+                        + "document.body.appendChild(d);\n"
+                        + "console.log('已插入一个 div');");
+            }
+        });
+        findViewById(R.id.tools_tpl_timer).setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                loadTemplate("var n = 0;\n"
+                        + "var t = setInterval(function () {\n"
+                        + "  console.log('tick ' + (++n));\n"
+                        + "  if (n >= 5) clearInterval(t);\n"
+                        + "}, 300);");
+            }
+        });
+        findViewById(R.id.tools_env_entry).setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { showEnvSheet(); }
+        });
         selectButton.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) { enterSelectionMode(); }
         });
@@ -140,21 +190,62 @@ public class ToolsActivity extends Activity {
         findViewById(R.id.tools_js_paste_button).setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) { pasteIntoInput(); }
         });
-        findViewById(R.id.tools_env_copy_button).setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) { copyEnvPrompt(); }
-        });
-        findViewById(R.id.tools_env_insert_button).setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) { sendEnvPrompt(false); }
-        });
-        findViewById(R.id.tools_env_send_button).setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) { sendEnvPrompt(true); }
-        });
+        // 环境提示词的三个动作在 tools_env_entry 的弹层里，不再是一排并列按钮
     }
 
     @Override
     protected void onResume() {
         super.onResume();
         refreshFiles();
+    }
+
+    /** 分段切换：代码库 ↔ 运行器。段控件固定，不随内容滚走。 */
+    private void showTab(boolean runner) {
+        runnerTab = runner;
+        libraryPanel.setVisibility(runner ? View.GONE : View.VISIBLE);
+        runnerPanel.setVisibility(runner ? View.VISIBLE : View.GONE);
+        tabLibrary.setBackgroundColor(runner ? 0xFFFFFFFF : 0xFF2196F3);
+        tabLibrary.setTextColor(runner ? 0xFF333333 : 0xFFFFFFFF);
+        tabRunner.setBackgroundColor(runner ? 0xFF2196F3 : 0xFFFFFFFF);
+        tabRunner.setTextColor(runner ? 0xFFFFFFFF : 0xFF333333);
+        if (runner) {
+            selectionFooter.setVisibility(View.GONE);
+        } else {
+            updateSelectionBar();
+        }
+    }
+
+    /** 空态模板：点一下切到运行器并把代码填好，省掉「先建文件再打开」的两步。 */
+    private void loadTemplate(String code) {
+        loadingFile = true;
+        jsInput.setText(code);
+        loadingFile = false;
+        currentJsFileName = "";
+        showTab(true);
+        jsInput.setSelection(code.length());
+        LogUtil.i(TAG, "loadTemplate: len=%d", code.length());
+    }
+
+    private void showEnvSheet() {
+        final String[] items = {
+                "复制提示词 — 贴到别的 AI 里",
+                "插入到输入框 — 先改再用",
+                "直接发送给 AI — 回聊天页发出"};
+        new AlertDialog.Builder(this)
+                .setTitle("给 AI 的环境说明")
+                .setItems(items, new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface d, int which) {
+                        if (which == 0) {
+                            copyEnvPrompt();
+                        } else if (which == 1) {
+                            sendEnvPrompt(false);
+                        } else {
+                            sendEnvPrompt(true);
+                        }
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
     }
 
     @Override
@@ -207,9 +298,10 @@ public class ToolsActivity extends Activity {
             labels.add(f.getName() + "\n" + f.length() + " B"
                     + (isImageFile(f) ? "  [图片]" : ""));
         }
-        if (labels.isEmpty() && !selectionMode) {
-            labels.add("（暂无已保存文件）");
-        }
+        // 空态不再用一行「（暂无已保存文件）」占位，改为说明 + 3 个模板（见 layout 的 tools_empty）
+        boolean empty = labels.isEmpty();
+        fileList.setVisibility(empty && !selectionMode ? View.GONE : View.VISIBLE);
+        emptyView.setVisibility(empty && !selectionMode ? View.VISIBLE : View.GONE);
         fileList.setChoiceMode(selectionMode
                 ? ListView.CHOICE_MODE_MULTIPLE : ListView.CHOICE_MODE_NONE);
         int itemLayout = selectionMode
@@ -232,6 +324,11 @@ public class ToolsActivity extends Activity {
     public void onBackPressed() {
         if (selectionMode) {
             exitSelectionMode();
+            return;
+        }
+        // 分段里的返回先回「代码库」，再按一次才退出页面 —— 与用户对分段的心智一致
+        if (runnerTab) {
+            showTab(false);
             return;
         }
         super.onBackPressed();
@@ -271,13 +368,15 @@ public class ToolsActivity extends Activity {
         if (selectionActions == null) {
             return;
         }
+        // 多选态：顶部条换状态栏、列表头（含「多选」入口）让位、底部出现固定删除栏
+        findViewById(R.id.tools_selection_bar).setVisibility(selectionMode ? View.VISIBLE : View.GONE);
+        libraryHead.setVisibility(selectionMode ? View.GONE : View.VISIBLE);
+        selectionFooter.setVisibility(selectionMode ? View.VISIBLE : View.GONE);
         selectionActions.setVisibility(selectionMode ? View.VISIBLE : View.GONE);
-        selectButton.setVisibility(selectionMode ? View.GONE : View.VISIBLE);
+        selectButton.setVisibility(View.GONE);
         selectionCancelButton.setVisibility(selectionMode ? View.VISIBLE : View.GONE);
         if (selectionMode) {
             selectionCount.setText("已选 " + selectedFileCount() + " / " + files.size());
-        } else {
-            selectionCount.setText("点击多选可批量删除");
         }
     }
 

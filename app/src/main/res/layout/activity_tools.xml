@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- 小工具页：顶部固定分段（代码库 / 运行器），内容在段下方各自滚动。
+     外层不能套整页 ScrollView，否则段控件会被一起滚走（见界面方案 §6.1）。 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:orientation="vertical"
     android:layout_width="match_parent"
@@ -31,203 +33,317 @@
             android:textStyle="bold" />
     </LinearLayout>
 
-    <ScrollView
+    <!-- 分段控件：44dp，两个等宽，选中态反白 -->
+    <LinearLayout
+        android:orientation="horizontal"
+        android:layout_width="match_parent"
+        android:layout_height="44dp"
+        android:background="#F5F5F5"
+        android:padding="4dp">
+
+        <Button
+            android:id="@+id/tools_tab_library"
+            android:layout_width="0dp"
+            android:layout_height="36dp"
+            android:layout_weight="1"
+            android:text="代码库"
+            android:textSize="13sp"
+            android:textColor="#FFFFFF"
+            android:background="#2196F3" />
+
+        <Button
+            android:id="@+id/tools_tab_runner"
+            android:layout_width="0dp"
+            android:layout_height="36dp"
+            android:layout_weight="1"
+            android:layout_marginLeft="4dp"
+            android:text="运行器"
+            android:textSize="13sp"
+            android:textColor="#333333"
+            android:background="#FFFFFF" />
+    </LinearLayout>
+
+    <!-- 代码库段 -->
+    <LinearLayout
+        android:id="@+id/tools_panel_library"
+        android:orientation="vertical"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1"
-        android:fillViewport="true">
+        android:layout_weight="1">
 
+        <!-- 多选状态栏：只留计数 + 全选 + 反选，删除挪到底部固定栏 -->
         <LinearLayout
+            android:id="@+id/tools_selection_bar"
             android:orientation="vertical"
+            android:background="#FFF8E1"
+            android:paddingLeft="8dp"
+            android:paddingRight="8dp"
+            android:paddingTop="4dp"
+            android:paddingBottom="4dp"
+            android:visibility="gone"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:padding="6dp">
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="已保存代码"
-                android:textSize="14sp"
-                android:textStyle="bold"
-                android:paddingBottom="4dp" />
-
-            <ListView
-                android:id="@+id/tools_file_list"
-                android:layout_width="match_parent"
-                android:layout_height="140dp"
-                android:background="#F5F5F5" />
-
+            android:layout_height="wrap_content">
             <LinearLayout
-                android:id="@+id/tools_selection_bar"
-                android:orientation="vertical"
-                android:background="#FFF8E1"
-                android:padding="4dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content">
-                <LinearLayout
-                    android:gravity="center_vertical"
-                    android:orientation="horizontal"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content">
-                    <TextView
-                        android:id="@+id/tools_selection_count"
-                        android:textSize="12sp"
-                        android:textColor="#8D6E00"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"/>
-                    <Button
-                        android:id="@+id/tools_select_button"
-                        android:textSize="12sp"
-                        android:textColor="@color/primary"
-                        android:background="@android:color/white"
-                        android:padding="6dp"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="多选"/>
-                    <Button
-                        android:id="@+id/tools_selection_cancel_button"
-                        android:textSize="12sp"
-                        android:textColor="@color/primary"
-                        android:background="@android:color/white"
-                        android:padding="6dp"
-                        android:visibility="gone"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="取消"/>
-                </LinearLayout>
-                <LinearLayout
-                    android:id="@+id/tools_selection_actions"
-                    android:orientation="horizontal"
+                <TextView
+                    android:id="@+id/tools_selection_count"
+                    android:textSize="12sp"
+                    android:textColor="#8D6E00"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"/>
+                <Button
+                    android:id="@+id/tools_select_button"
+                    android:textSize="12sp"
+                    android:textColor="@color/primary"
+                    android:background="@android:color/white"
+                    android:paddingLeft="8dp"
+                    android:paddingRight="8dp"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:text="多选"/>
+                <Button
+                    android:id="@+id/tools_selection_cancel_button"
+                    android:textSize="12sp"
+                    android:textColor="@color/primary"
+                    android:background="@android:color/white"
+                    android:paddingLeft="8dp"
+                    android:paddingRight="8dp"
                     android:visibility="gone"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content">
-                    <Button
-                        android:id="@+id/tools_selection_all_button"
-                        android:textSize="12sp"
-                        android:textColor="@color/primary"
-                        android:background="@android:color/white"
-                        android:padding="6dp"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:text="全选"/>
-                    <Button
-                        android:id="@+id/tools_selection_invert_button"
-                        android:textSize="12sp"
-                        android:textColor="@color/primary"
-                        android:background="@android:color/white"
-                        android:padding="6dp"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:text="反选"/>
-                    <Button
-                        android:id="@+id/tools_selection_delete_button"
-                        android:textSize="12sp"
-                        android:textColor="@color/primary"
-                        android:background="@android:color/white"
-                        android:padding="6dp"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:text="删除选中"/>
-                </LinearLayout>
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:text="取消"/>
             </LinearLayout>
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="JS 运行器"
-                android:textSize="14sp"
-                android:textStyle="bold"
-                android:paddingTop="10dp"
-                android:paddingBottom="4dp" />
-
             <LinearLayout
+                android:id="@+id/tools_selection_actions"
                 android:orientation="horizontal"
+                android:visibility="gone"
+                android:layout_marginTop="4dp"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content">
-
                 <Button
-                    android:id="@+id/tools_js_from_file_button"
+                    android:id="@+id/tools_selection_all_button"
+                    android:textSize="12sp"
+                    android:textColor="@color/primary"
+                    android:background="@android:color/white"
                     android:layout_width="0dp"
                     android:layout_height="36dp"
                     android:layout_weight="1"
-                    android:text="选择文件"
-                    android:textSize="11sp" />
-
+                    android:text="全选"/>
                 <Button
-                    android:id="@+id/tools_js_paste_button"
+                    android:id="@+id/tools_selection_invert_button"
+                    android:textSize="12sp"
+                    android:textColor="@color/primary"
+                    android:background="@android:color/white"
                     android:layout_width="0dp"
                     android:layout_height="36dp"
                     android:layout_weight="1"
-                    android:text="粘贴"
-                    android:textSize="11sp" />
-
-                <Button
-                    android:id="@+id/tools_js_clear_button"
-                    android:layout_width="0dp"
-                    android:layout_height="36dp"
-                    android:layout_weight="1"
-                    android:text="清空"
-                    android:textSize="11sp" />
-            </LinearLayout>
-
-            <EditText
-                android:id="@+id/tools_js_input"
-                android:layout_width="match_parent"
-                android:layout_height="160dp"
-                android:gravity="top|start"
-                android:textSize="11sp"
-                android:background="#FAFAFA"
-                android:hint="在此输入或粘贴 JS 代码" />
-
-            <Button
-                android:id="@+id/tools_js_run_button"
-                android:layout_width="match_parent"
-                android:layout_height="40dp"
-                android:text="运行"
-                android:textSize="13sp" />
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="APP 代码环境提示词"
-                android:textSize="14sp"
-                android:textStyle="bold"
-                android:paddingTop="10dp"
-                android:paddingBottom="4dp" />
-
-            <LinearLayout
-                android:orientation="horizontal"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content">
-
-                <Button
-                    android:id="@+id/tools_env_copy_button"
-                    android:layout_width="0dp"
-                    android:layout_height="40dp"
-                    android:layout_weight="1"
-                    android:text="复制"
-                    android:textSize="11sp" />
-
-                <Button
-                    android:id="@+id/tools_env_insert_button"
-                    android:layout_width="0dp"
-                    android:layout_height="40dp"
-                    android:layout_weight="1"
-                    android:text="插入输入框"
-                    android:textSize="11sp" />
-
-                <Button
-                    android:id="@+id/tools_env_send_button"
-                    android:layout_width="0dp"
-                    android:layout_height="40dp"
-                    android:layout_weight="1"
-                    android:text="直接发送"
-                    android:textSize="11sp" />
+                    android:layout_marginLeft="4dp"
+                    android:text="反选"/>
             </LinearLayout>
         </LinearLayout>
-    </ScrollView>
+
+        <!-- 列表右上角是多选入口：非多选态显示 -->
+        <LinearLayout
+            android:id="@+id/tools_library_head"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_width="match_parent"
+            android:layout_height="44dp"
+            android:paddingLeft="10dp"
+            android:paddingRight="6dp">
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="已保存代码"
+                android:textSize="14sp"
+                android:textStyle="bold"/>
+            <Button
+                android:id="@+id/tools_select_entry"
+                android:layout_width="wrap_content"
+                android:layout_height="36dp"
+                android:paddingLeft="10dp"
+                android:paddingRight="10dp"
+                android:text="多选"
+                android:textSize="12sp"/>
+        </LinearLayout>
+
+        <ListView
+            android:id="@+id/tools_file_list"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:background="#FFFFFF" />
+
+        <!-- 空态：说明 + 3 个模板，点一下直接进运行器 -->
+        <LinearLayout
+            android:id="@+id/tools_empty"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:visibility="gone"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:padding="12dp">
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:text="还没有保存的代码"
+                android:textSize="13sp"
+                android:textColor="@color/text_secondary"/>
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:layout_marginTop="2dp"
+                android:layout_marginBottom="8dp"
+                android:text="选一个模板试试，或回聊天页让 AI 写一段"
+                android:textSize="12sp"
+                android:textColor="@color/text_secondary"/>
+            <Button
+                android:id="@+id/tools_tpl_hello"
+                android:layout_width="match_parent"
+                android:layout_height="40dp"
+                android:text="Hello World"
+                android:textSize="12sp"/>
+            <Button
+                android:id="@+id/tools_tpl_dom"
+                android:layout_width="match_parent"
+                android:layout_height="40dp"
+                android:layout_marginTop="4dp"
+                android:text="DOM 操作"
+                android:textSize="12sp"/>
+            <Button
+                android:id="@+id/tools_tpl_timer"
+                android:layout_width="match_parent"
+                android:layout_height="40dp"
+                android:layout_marginTop="4dp"
+                android:text="定时器示例"
+                android:textSize="12sp"/>
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- 运行器段 -->
+    <LinearLayout
+        android:id="@+id/tools_panel_runner"
+        android:orientation="vertical"
+        android:visibility="gone"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+        <ScrollView
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:fillViewport="true">
+
+            <LinearLayout
+                android:orientation="vertical"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:padding="8dp">
+
+                <LinearLayout
+                    android:orientation="horizontal"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content">
+
+                    <Button
+                        android:id="@+id/tools_js_from_file_button"
+                        android:layout_width="0dp"
+                        android:layout_height="40dp"
+                        android:layout_weight="1"
+                        android:text="选择文件"
+                        android:textSize="11sp" />
+
+                    <Button
+                        android:id="@+id/tools_js_paste_button"
+                        android:layout_width="0dp"
+                        android:layout_height="40dp"
+                        android:layout_weight="1"
+                        android:layout_marginLeft="4dp"
+                        android:text="粘贴"
+                        android:textSize="11sp" />
+
+                    <Button
+                        android:id="@+id/tools_js_clear_button"
+                        android:layout_width="0dp"
+                        android:layout_height="40dp"
+                        android:layout_weight="1"
+                        android:layout_marginLeft="4dp"
+                        android:text="清空"
+                        android:textSize="11sp" />
+                </LinearLayout>
+
+                <EditText
+                    android:id="@+id/tools_js_input"
+                    android:layout_width="match_parent"
+                    android:layout_height="150dp"
+                    android:layout_marginTop="6dp"
+                    android:gravity="top|start"
+                    android:textSize="11sp"
+                    android:background="#FAFAFA"
+                    android:hint="在此输入或粘贴 JS 代码" />
+
+                <Button
+                    android:id="@+id/tools_js_run_button"
+                    android:layout_width="match_parent"
+                    android:layout_height="44dp"
+                    android:layout_marginTop="6dp"
+                    android:text="运行"
+                    android:textSize="13sp" />
+
+                <!-- 环境提示词：三个动作收进底部弹层，这里只留一行入口 -->
+                <LinearLayout
+                    android:id="@+id/tools_env_entry"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:background="@drawable/bg_card"
+                    android:paddingLeft="12dp"
+                    android:paddingRight="12dp"
+                    android:layout_marginTop="10dp"
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp">
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="给 AI 的环境说明"
+                        android:textSize="14sp"
+                        android:textColor="@color/text_primary"/>
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="›"
+                        android:textSize="18sp"
+                        android:textColor="#b0bec5"/>
+                </LinearLayout>
+            </LinearLayout>
+        </ScrollView>
+    </LinearLayout>
+
+    <!-- 底部固定删除栏：多选态才出现，红色文字 + 二次确认 -->
+    <LinearLayout
+        android:id="@+id/tools_selection_footer"
+        android:orientation="horizontal"
+        android:background="#FFFFFF"
+        android:padding="6dp"
+        android:visibility="gone"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
+        <Button
+            android:id="@+id/tools_selection_delete_button"
+            android:textSize="13sp"
+            android:textColor="#D32F2F"
+            android:background="@android:color/white"
+            android:layout_width="match_parent"
+            android:layout_height="44dp"
+            android:text="删除选中"/>
+    </LinearLayout>
 </LinearLayout>
