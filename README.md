@@ -1,6 +1,6 @@
 # AiChat
 
-Android 词典笔 AI 对话应用（版本 1.13.2，minSdk 18 / targetSdk 18，真机 Android 4.4.2 / API 19）。基于 WebView + HTML/CSS 渲染 Markdown/LaTeX，通过任意 OpenAI 兼容端点调用大模型，内置 DeepSeek（不含 API Key）与商汤日日新 默认配置，默认模型 `deepseek-v4-flash`（商汤日日新）。
+Android 词典笔 AI 对话应用（版本 1.14.0，minSdk 18 / targetSdk 18，真机 Android 4.4.2 / API 19）。基于 WebView + HTML/CSS 渲染 Markdown/LaTeX，通过任意 OpenAI 兼容端点调用大模型，内置 DeepSeek（不含 API Key）与商汤日日新 默认配置，默认模型 `deepseek-v4-flash`（商汤日日新）。
 
 > 改代码前先看 [ARCHITECTURE.md](ARCHITECTURE.md)：请求链路图、类职责边界、并发约定、「想改 X 去哪」对照表。
 
@@ -33,7 +33,8 @@ Android 词典笔 AI 对话应用（版本 1.13.2，minSdk 18 / targetSdk 18，�
 - **小工具**（长按"历史"按钮进入）— 已保存代码列表（查看/复制/重命名/编辑/预览运行/多选批量删除）；JS 运行器：在 WebView（Chromium 30）中运行 JS/HTML/SVG，输出可复制，支持粘贴、载入已保存文件、保存到 exports；APP 代码环境提示词（复制/插入输入框/直接发送）
 - **代码执行器提示词可配** — 设置页可自定义环境提示词，支持占位符 `{android}` `{api}` `{webview}` `{model}` `{app_version}` `{ua}`，发送时按当前设备实际值填充；未知占位符原样保留。系统提示词与标题生成提示词使用同一套占位符规则。WebView 版本从 `WebSettings.getDefaultUserAgent()` 的 `Chrome/xx` 段提取（`WebViewFactory` 是隐藏 API，不可反射）
 - **设置** — 联网搜索、流式输出、实时渲染、调试日志、快速搜题开关；`http_request` 工具开关；429 重试策略；代码执行器提示词；模型/提供商管理；查询 DeepSeek 余额（显示总余额/充值/赠送）；存储空间管理与用量统计入口；关于页入口
-- **关于与使用说明** — 关于页显示应用名、版本号（`versionName (versionCode)`）、**使用说明（与首启弹窗同一份文案）**、检查更新、反馈建议、开源许可（commonmark-java / jlatexmath-android / Conscrypt）；检查更新与反馈当前为「功能待开发」占位。首次启动弹出使用说明与免责声明，必须点「同意并继续」才可用；确认前不会发送任何由外部 Intent 带入的消息
+- **关于与使用说明** — 关于页显示应用名、版本号（`versionName (versionCode)`）、**使用说明（与首启弹窗同一份文案）**、检查更新、反馈建议、开源许可（commonmark-java / jlatexmath-android / Conscrypt）；反馈建议仍为占位。首次启动弹出使用说明与免责声明，必须点「同意并继续」才可用；确认前不会发送任何由外部 Intent 带入的消息
+- **版本更新**（关于页「检查更新」进入）— 直连 `api.github.com` 查最新 Release，按 `tag_name` 逐段比较数字判断新旧，展示更新说明；按 `Build.CPU_ABI` 自动挑对应架构的 APK（挑不到退 universal），也可手动切换。下载前内置 7 个加速镜像逐项测速并自动选最快，**测速是 HTTP 首字节探测（`Range: bytes=0-1023` 的 TTFB + 实读 1KB）而非 ICMP ping**——Android 上 ICMP 普遍被丢，测了也不代表下载快。镜像模板支持 `{url}` 占位符（省略则作前缀），可自定义添加、长按删除、选中项本地记忆。API 查询不走镜像（镜像只代理 `github.com/.../releases/download/`）；下载走已有的 `TlsCompat`（Conscrypt）兼容层，8KB 流式写盘、先 `.tmp` 再改名、按 API 给的 size 校验防截断，下载前清理旧 APK 避免占满可用存储；完成后经 `FilePathProvider` 的 `content://` 调起系统安装器。签名一致，覆盖安装不丢数据
 - **扫描识别** — 横屏扫描界面，调用词典笔系统 OCR 识别文字，支持加载摘抄记录、编辑、复制、插入
 - **快速搜题模式** — 开启后按扫描键直接跳转系统扫描应用，返回自动填入输入框
 - **屏幕旋转** — 右上角 ↻ 按钮切换横屏/竖屏
@@ -127,10 +128,10 @@ Tavily 的密钥在应用内「设置 → Tavily API Key」填写，仅保存在
 
 ```
 ├── app/
-│   ├── build.gradle                # versionName 1.13.2 / versionCode 60 / compileSdk 34
+│   ├── build.gradle                # versionName 1.14.0 / versionCode 61 / compileSdk 34
 │   ├── keystore/mc.jks             # 签名密钥库
 │   └── src/main/
-│       ├── AndroidManifest.xml     # 包名 xyz.zip8919.app.aichat，10 个 Activity
+│       ├── AndroidManifest.xml     # 包名 xyz.zip8919.app.aichat，15 个 Activity
 │       ├── java/xyz/zip8919/app/aichat/
 │       │   ├── MainActivity.java            # 主界面：视图装配、事件分发、会话状态
 │       │   │
@@ -166,6 +167,8 @@ Tavily 的密钥在应用内「设置 → Tavily API Key」填写，仅保存在
 │       │   ├── ViewerController.java        # 图片 / 表格 / HTML·SVG 全屏预览；附件查看（源码 / md 预览 / 运行）
 │       │   ├── FullscreenInputActivity.java # 全屏输入页（取消丢弃 / 完成回填）
 │       │   ├── AboutActivity.java           # 关于页：版本、检查更新、反馈、开源许可
+│       │   ├── UpdateActivity.java          # 版本更新页：Release 查询、镜像测速、下载安装
+│       │   ├── UpdateManager.java           # GitHub API / HTTP 首字节测速 / 流式下载 / 镜像配置
 │       │   ├── MessageQueue.java            # 排队发送：上移、下移、插队
 │       │   ├── AttachmentText.java          # 附件：给模型的正文、卡片摘要、老会话迁移
 │       │   ├── AttachmentFiles.java         # 图片附件：拷贝进私有目录、URL/拍照导入、裁剪产物落盘、缩略图、data URI

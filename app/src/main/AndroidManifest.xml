@@ -85,6 +85,12 @@
             android:configChanges="screenSize|orientation|keyboardHidden"/>
 
         <activity
+            android:label="版本更新"
+            android:name="xyz.zip8919.app.aichat.UpdateActivity"
+            android:exported="false"
+            android:configChanges="screenSize|orientation|keyboardHidden"/>
+
+        <activity
             android:label="使用统计"
             android:name="xyz.zip8919.app.aichat.StatsActivity"
             android:exported="false"

@@ -3,6 +3,7 @@ package xyz.zip8919.app.aichat;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.DialogInterface;
+import android.content.Intent;
 import android.content.pm.PackageInfo;
 import android.os.Bundle;
 import android.view.View;
@@ -11,8 +12,8 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 /**
- * 关于页。当前只做「信息展示」：版本号、开源许可。
- * 「检查更新」「反馈建议」按需求先放占位入口，不接后端。
+ * 关于页。版本号、开源许可、使用说明，以及「检查更新」入口（跳 {@link UpdateActivity}）。
+ * 「反馈建议」仍是占位入口，不接后端。
  */
 public class AboutActivity extends Activity {
 
@@ -38,7 +39,7 @@ public class AboutActivity extends Activity {
         });
         checkUpdate.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
-                Toast.makeText(AboutActivity.this, "检查更新功能待开发", Toast.LENGTH_SHORT).show();
+                startActivity(new Intent(AboutActivity.this, UpdateActivity.class));
             }
         });
         feedback.setOnClickListener(new View.OnClickListener() {
