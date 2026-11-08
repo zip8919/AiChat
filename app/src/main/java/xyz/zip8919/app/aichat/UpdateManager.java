@@ -39,8 +39,10 @@ import javax.net.ssl.HttpsURLConnection;
  *     并实际读 1KB，既验证可用性又贴近真实下载链路。</li>
  * </ol>
  *
- * <p>网络全部跑在单线程 Executor 上：老设备 Cortex-A7 + 66MB 内存，并发 7 个 TLS
- * 连接没有收益反而容易 OOM。回调统一 post 回主线程。
+ * <p>网络分两个单线程 Executor：版本查询与下载共用一个（本就先后发生），测速单独
+ * 一个。测速是 7 个镜像串行探测的长任务，若与下载共用线程，点「下载」会一直排队
+ * 到测速跑完才真正开始。拆开后最多同时 2 个 TLS 连接，老设备 Cortex-A7 + 66MB
+ * 内存仍可控（真正要避免的是 7 个并发握手）。回调统一 post 回主线程。
  */
 public final class UpdateManager {
 
@@ -75,9 +77,14 @@ public final class UpdateManager {
     };
 
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
+    /** 版本查询 + 下载：两者先后发生，共用一个线程即可。 */
     private static final ExecutorService POOL = Executors.newSingleThreadExecutor();
-    private static volatile HttpURLConnection active;
+    /** 测速专用：自动测速是长任务，不能占住下载线程导致点「下载」排队。 */
+    private static final ExecutorService PROBE_POOL = Executors.newSingleThreadExecutor();
+    private static volatile HttpURLConnection active;       // 查询/下载连接，cancel() 用
+    private static volatile HttpURLConnection probeActive;  // 测速连接，cancelProbe() 用
     private static volatile boolean cancelled;
+    private static volatile boolean probeCancelled;
 
     private UpdateManager() {}
 
@@ -238,7 +245,7 @@ public final class UpdateManager {
                 String err = null;
                 HttpURLConnection c = null;
                 try {
-                    c = open(API_LATEST);
+                    c = open(API_LATEST, false);
                     c.setRequestProperty("Accept", "application/vnd.github+json");
                     c.setConnectTimeout(8000);
                     c.setReadTimeout(15000);
@@ -347,13 +354,14 @@ public final class UpdateManager {
 
     // ==================== 镜像测速 ====================
 
-    /** 串行逐项测，回调逐项刷新 UI。取消后剩余项直接跳过。 */
+    /** 串行逐项测，回调逐项刷新 UI。cancelProbe() 后剩余项直接跳过。 */
     public static void probeAll(final List<Mirror> mirrors, final String assetUrl,
                                 final Callback cb) {
-        POOL.execute(new Runnable() {
+        probeCancelled = false;
+        PROBE_POOL.execute(new Runnable() {
             public void run() {
                 for (int i = 0; i < mirrors.size(); i++) {
-                    if (cancelled) break;
+                    if (probeCancelled) break;
                     final int idx = i;
                     final int ms = probe(applyMirror(mirrors.get(i), assetUrl));
                     mirrors.get(i).latency = ms;
@@ -375,7 +383,7 @@ public final class UpdateManager {
     private static int probe(String url) {
         HttpURLConnection c = null;
         try {
-            c = open(url);
+            c = open(url, true);
             c.setRequestMethod("GET");
             c.setRequestProperty("Range", "bytes=0-1023");
             c.setConnectTimeout(4000);
@@ -426,7 +434,7 @@ public final class UpdateManager {
                         throw new Exception("无法创建下载目录");
                     }
                     if (tmp.exists() && !tmp.delete()) throw new Exception("无法清理临时文件");
-                    c = open(url);
+                    c = open(url, false);
                     c.setConnectTimeout(8000);
                     c.setReadTimeout(20000);
                     int code = c.getResponseCode();
@@ -517,7 +525,21 @@ public final class UpdateManager {
         }
     }
 
-    private static HttpURLConnection open(String url) throws Exception {
+    /**
+     * 让在跑的测速尽快退出：点「下载」/切换安装包/页面销毁时调用。
+     * 不复用 cancelled，因为 startDownload() 会 resetCancel()，会把测速的取消
+     * 标志一并清掉；两者也各有独立的活动连接要断开。
+     */
+    public static void cancelProbe() {
+        probeCancelled = true;
+        HttpURLConnection c = probeActive;
+        if (c != null) {
+            try { c.disconnect(); } catch (Throwable t) {}
+        }
+    }
+
+    /** isProbe=true 登记到测速槽位：cancel()/cancelProbe() 各断各的连接，不串扰。 */
+    private static HttpURLConnection open(String url, boolean isProbe) throws Exception {
         HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
         if (c instanceof HttpsURLConnection) {
             // API 18/19 平台 TLS 栈缺 TLS1.2 与 GCM 套件，复用项目已有的 Conscrypt 兼容层
@@ -525,7 +547,7 @@ public final class UpdateManager {
         }
         c.setRequestProperty("User-Agent", UA); // GitHub API 不带 UA 会 403
         c.setInstanceFollowRedirects(true);
-        active = c;
+        if (isProbe) probeActive = c; else active = c;
         return c;
     }
 
@@ -534,6 +556,7 @@ public final class UpdateManager {
             try { c.disconnect(); } catch (Throwable t) {}
         }
         if (c == active) active = null;
+        if (c == probeActive) probeActive = null;
     }
 
     private static String readAll(InputStream in, int limit) throws Exception {

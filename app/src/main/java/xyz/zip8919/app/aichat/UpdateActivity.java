@@ -307,7 +307,6 @@ public class UpdateActivity extends Activity implements UpdateManager.Callback {
         for (int i = 0; i < mirrors.size(); i++) refreshRow(i);
         btnProbe.setEnabled(false);
         progressText.setText("正在逐项测速…（HTTP 首字节）");
-        UpdateManager.resetCancel();
         UpdateManager.probeAll(mirrors, asset.url, this);
     }
 
@@ -346,6 +345,10 @@ public class UpdateActivity extends Activity implements UpdateManager.Callback {
         String url = UpdateManager.applyMirror(m, asset.url);
 
         downloading = true;
+        // 测速与下载已分属不同线程，点下载即开始。把在跑的测速作废：
+        // 不再占连接，也不会在结束后自动改选镜像、覆盖本次下载正在用的那个。
+        probeStale = true;
+        UpdateManager.cancelProbe();
         btnAction.setText("取消下载");
         btnRefresh.setEnabled(false);
         btnProbe.setEnabled(false);
@@ -522,6 +525,7 @@ public class UpdateActivity extends Activity implements UpdateManager.Callback {
                 .setItems(names, new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         probeStale = true;
+                        UpdateManager.cancelProbe();
                         UpdateManager.cancel();
                         btnProbe.setEnabled(true);
                         asset = list.get(w);
@@ -570,6 +574,7 @@ public class UpdateActivity extends Activity implements UpdateManager.Callback {
         destroyed = true;
         // 不 resetCancel：排队中的任务应看到 cancelled=true 直接退出，避免页面销毁后继续联网
         UpdateManager.cancel();
+        UpdateManager.cancelProbe();
         super.onDestroy();
     }
 }
