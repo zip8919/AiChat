@@ -39,7 +39,7 @@ import java.util.Locale;
  * 镜像只有 7~9 项且不会无限增长，用动态 LinearLayout 行而非 ListView——
  * 省掉一层 Adapter，也避免选中/测速刷新时整表重建导致的滚动跳动。
  */
-public class UpdateActivity extends Activity implements UpdateManager.Callback {
+public class UpdateActivity extends ThemedActivity implements UpdateManager.Callback {
 
     private static final String TAG = "UpdateActivity";
 
@@ -145,7 +145,7 @@ public class UpdateActivity extends Activity implements UpdateManager.Callback {
                 TextView sub = new TextView(this);
                 sub.setText(m.template);
                 sub.setTextSize(10);
-                sub.setTextColor(getResources().getColor(R.color.text_secondary));
+                sub.setTextColor(ThemeTokens.get(this, ThemeTokens.AC_TEXT_SECONDARY));
                 sub.setSingleLine(true);
                 sub.setEllipsize(TextUtils.TruncateAt.MIDDLE);
                 col.addView(sub);
@@ -182,9 +182,19 @@ public class UpdateActivity extends Activity implements UpdateManager.Callback {
         if (i < 0 || i >= mirrors.size() || i >= marks.size()) return;
         UpdateManager.Mirror m = mirrors.get(i);
         boolean sel = (i == selectedIndex);
-        int primary = getResources().getColor(R.color.primary);
-        int textPrimary = getResources().getColor(R.color.text_primary);
-        int secondary = getResources().getColor(R.color.text_secondary);
+        // 原来取的是资源色 R.color.text_primary(#333)，深色底上等于黑字黑底，
+        // 正是「镜像源字体看不清」的原因。改为按当前外观取值。
+        AppearanceManager am = AppearanceManager.getInstance(this);
+        boolean cDef = am.isColorDefault();
+        boolean cDark = am.isDark();
+        int primary = cDef ? getResources().getColor(R.color.primary)
+                : am.getEffectiveColor(ThemeTokens.AC_PRIMARY, cDark);
+        int textPrimary = cDef ? getResources().getColor(R.color.text_primary)
+                : am.getEffectiveColor(ThemeTokens.AC_TEXT, cDark);
+        int secondary = cDef ? getResources().getColor(R.color.text_secondary)
+                : am.getEffectiveColor(ThemeTokens.AC_TEXT_SECONDARY, cDark);
+        int danger = cDef ? getResources().getColor(R.color.danger)
+                : am.getEffectiveColor(ThemeTokens.AC_DANGER, cDark);
 
         marks.get(i).setText(sel ? "●" : "○");
         marks.get(i).setTextColor(sel ? primary : secondary);
@@ -194,7 +204,7 @@ public class UpdateActivity extends Activity implements UpdateManager.Callback {
         int l = m.latency;
         latencyViews.get(i).setText(latencyText(l));
         latencyViews.get(i).setTextColor(
-                l == UpdateManager.FAILED ? getResources().getColor(R.color.danger)
+                l == UpdateManager.FAILED ? danger
                         : (l >= 0 ? primary : secondary));
     }
 
@@ -232,7 +242,12 @@ public class UpdateActivity extends Activity implements UpdateManager.Callback {
             public void onClick(View v) {
                 boolean show = customBox.getVisibility() != View.VISIBLE;
                 customBox.setVisibility(show ? View.VISIBLE : View.GONE);
-                if (show) customInput.requestFocus();
+                if (show) {
+                    // 这个输入区是内联的，不是弹框；里面 input 的背景写死 @color/white，
+                    // 深色下会突兀地白一块，这里补一次着色。
+                    ThemeRecolor.applyTo(customBox);
+                    customInput.requestFocus();
+                }
             }
         });
         btnCustomOk.setOnClickListener(new View.OnClickListener() {
@@ -485,7 +500,7 @@ public class UpdateActivity extends Activity implements UpdateManager.Callback {
     }
 
     private void confirmRemove(final UpdateManager.Mirror m) {
-        new AlertDialog.Builder(this)
+        AcDialog.builder(this)
                 .setTitle("删除自定义镜像")
                 .setMessage(m.name + "\n" + m.template)
                 .setPositiveButton("删除", new DialogInterface.OnClickListener() {
@@ -506,7 +521,7 @@ public class UpdateActivity extends Activity implements UpdateManager.Callback {
         if (release == null) return;
         String body = release.body;
         if (body.length() > 4000) body = body.substring(0, 4000) + "\n…（完整说明见 GitHub）";
-        new AlertDialog.Builder(this)
+        AcDialog.builder(this)
                 .setTitle(release.name.length() > 0 ? release.name : release.tag)
                 .setMessage(body)
                 .setPositiveButton("关闭", null)
@@ -520,7 +535,7 @@ public class UpdateActivity extends Activity implements UpdateManager.Callback {
         for (int i = 0; i < list.size(); i++) {
             names[i] = shortName(list.get(i).name) + "  " + formatSize(list.get(i).size);
         }
-        new AlertDialog.Builder(this)
+        AcDialog.builder(this)
                 .setTitle("选择安装包")
                 .setItems(names, new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {

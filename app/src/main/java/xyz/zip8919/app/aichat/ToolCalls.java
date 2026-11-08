@@ -152,6 +152,22 @@ final class ToolCalls {
     }
 
     /**
+     * 用户中止本轮时，给未执行的调用补的 tool 结果。
+     *
+     * <p>必须有：assistant 消息里的 tool_calls 已经发出去了，少一条 tool 回复，
+     * 下一次请求就是 400（insufficient tool messages following tool_calls message）。
+     */
+    static String abortNotice() {
+        try {
+            JSONObject json = new JSONObject();
+            json.put("error", "本轮已被用户中止，该调用未执行");
+            return json.toString();
+        } catch (Exception e) {
+            return "{\"error\":\"本轮已中止\"}";
+        }
+    }
+
+    /**
      * 超限未执行时追加到 trace 的卡片。只写 conversation 不写 trace 的话，
      * 界面上完全看不出「还有个调用没跑」，用户会以为模型自己漏了一步。
      */

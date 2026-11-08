@@ -196,7 +196,7 @@ final class MessageQueue {
             if (s.length() > 30) s = s.substring(0, 30) + "…";
             items[i] = (i + 1) + ". " + s;
         }
-        managerDialog = new AlertDialog.Builder(activity)
+        managerDialog = AcDialog.builder(activity)
                 .setTitle("排队中的消息")
                 .setItems(items, new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int which) {
@@ -250,7 +250,7 @@ final class MessageQueue {
             return;
         }
         final String[] actions = {"上移", "下移", "插队发送（打断当前回复）", "删除"};
-        actionsDialog = new AlertDialog.Builder(activity)
+        actionsDialog = AcDialog.builder(activity)
                 .setTitle("第 " + (index + 1) + " 条")
                 .setItems(actions, new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int which) {

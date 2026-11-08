@@ -26,7 +26,7 @@ import java.io.FileOutputStream;
  *
  * <p>这里自己画选框、自己裁像素：行为确定，输出尺寸可预期，也不用申请任何权限。
  */
-public class CropActivity extends Activity {
+public class CropActivity extends ThemedActivity {
 
     static final String EXTRA_SRC_PATH = "src_path";
     static final String EXTRA_OUT_PATH = "out_path";

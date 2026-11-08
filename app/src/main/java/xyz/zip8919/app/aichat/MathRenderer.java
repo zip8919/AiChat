@@ -374,7 +374,18 @@ final class MathRenderer {
         return out.toString();
     }
     private static String renderLatexImg(String formula, boolean block, float density) {
-        String key = formula + (block ? "b" : "i");
+        // 公式字色跟随主题：早期固定白底黑字，深色模式下就是一块刺眼的白色方块。
+        // 现在背景透明、字色取 ac_text。key 必须带上字色 —— 否则浅色下渲染的缓存
+        // 会在切深色后被复用，公式永远不换色。
+        int fgColor = 0xFF000000;
+        try {
+            AppearanceManager am = AppearanceManager.getInstance();
+            if (am != null && !am.isAppearanceDefault()) {
+                fgColor = am.getEffectiveColor(ThemeTokens.AC_TEXT, am.isDark());
+            }
+        } catch (Throwable ignored) {
+        }
+        String key = formula + (block ? "b" : "i") + ":" + Integer.toHexString(fgColor);
         String cached = latexCache.get(key);
         if (cached != null) {
             LogUtil.v(TAG, "latex CACHE hit: block=%s %s", block, LogUtil.preview(formula, 80));
@@ -388,7 +399,7 @@ final class MathRenderer {
 
         try {
             JLatexMathDrawable d = JLatexMathDrawable.builder(formula)
-                    .textSize(textSize).background(0xFFFFFFFF).build();
+                    .textSize(textSize).background(0x00000000).color(fgColor).build();
             int w = d.getIntrinsicWidth();
             int h = d.getIntrinsicHeight();
 
@@ -396,14 +407,14 @@ final class MathRenderer {
                 int maxW = (int)(400 * density);
                 if (w > maxW) { float s = (float) maxW / w;
                     d = JLatexMathDrawable.builder(formula).textSize(textSize * s)
-                            .background(0xFFFFFFFF).build();
+                            .background(0x00000000).color(fgColor).build();
                     w = maxW; h = (int)(h * s);
                 }
 
                 d.setBounds(0, 0, w, h);
                 Bitmap bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
                 Canvas c = new Canvas(bmp);
-                c.drawColor(Color.WHITE);
+                // 不再 drawColor(WHITE)：画布本身是透明的，铺白就是深色模式的病根
                 d.draw(c);
 
                 // Render to base64 data URI — no file:// access needed

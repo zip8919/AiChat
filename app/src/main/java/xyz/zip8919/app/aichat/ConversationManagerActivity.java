@@ -17,7 +17,7 @@ import android.widget.Toast;
 import java.util.ArrayList;
 import java.util.List;
 
-public class ConversationManagerActivity extends Activity {
+public class ConversationManagerActivity extends ThemedActivity {
     private static final String TAG = "ConvMgrActivity";
     private static final String PREFS_NAME = "aichat_ui_state";
     private static final String KEY_SCROLL_POS = "history_scroll_pos";
@@ -142,7 +142,7 @@ public class ConversationManagerActivity extends Activity {
                     return;
                 }
                 LogUtil.d(TAG, "click: clear history, %d conversations -> confirm dialog", conversations.size());
-                new AlertDialog.Builder(ConversationManagerActivity.this)
+                AcDialog.builder(ConversationManagerActivity.this)
                         .setTitle("清空历史")
                         .setMessage("确定要清空所有历史对话吗？\n\n此操作不可恢复！")
                         .setPositiveButton("清空", new DialogInterface.OnClickListener() {
@@ -316,7 +316,7 @@ public class ConversationManagerActivity extends Activity {
             Toast.makeText(this, "请先选择要删除的对话", Toast.LENGTH_SHORT).show();
             return;
         }
-        new AlertDialog.Builder(this)
+        AcDialog.builder(this)
                 .setTitle("删除对话")
                 .setMessage("确定要删除选中的 " + ids.size() + " 个对话吗？\n\n此操作不可恢复！")
                 .setPositiveButton("删除", new DialogInterface.OnClickListener() {
@@ -402,7 +402,7 @@ public class ConversationManagerActivity extends Activity {
                 + "最后更新 " + android.text.format.DateFormat.format("yyyy-MM-dd HH:mm",
                         conv.updatedAt) + "\n\n"
                 + "删除后该会话的图片若不再被别的会话使用，会在图片附件里变成「无引用」。";
-        new AlertDialog.Builder(this)
+        AcDialog.builder(this)
                 .setTitle(ConversationManager.normalizeTitle(conv.title))
                 .setMessage(msg)
                 .setPositiveButton("查看", new DialogInterface.OnClickListener() {
@@ -436,7 +436,7 @@ public class ConversationManagerActivity extends Activity {
 
     private void showActionDialog(final Conversation conv) {
         String[] items = {"重命名", "删除"};
-        new AlertDialog.Builder(this)
+        AcDialog.builder(this)
                 .setTitle("对话操作: " + conv.title)
                 .setItems(items, new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface dialog, int which) {
@@ -458,7 +458,7 @@ public class ConversationManagerActivity extends Activity {
         input.setText(conv.title);
         input.setSelectAllOnFocus(true);
 
-        new AlertDialog.Builder(this)
+        AcDialog.builder(this)
                 .setTitle("重命名对话")
                 .setView(input)
                 .setPositiveButton("确定", new DialogInterface.OnClickListener() {
@@ -493,7 +493,7 @@ public class ConversationManagerActivity extends Activity {
     }
 
     private void showDeleteDialog(final Conversation conv) {
-        new AlertDialog.Builder(this)
+        AcDialog.builder(this)
                 .setTitle("删除对话")
                 .setMessage("确定要删除\"" + conv.title + "\"吗？")
                 .setPositiveButton("删除", new DialogInterface.OnClickListener() {

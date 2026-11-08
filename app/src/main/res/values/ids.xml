@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      外观 token 标记专用 key：ThemeApplier 用 view.setTag(R.id.ac_token_tag, "ac_primary")
+      给需要跟随主题色的 View 打标记。
+      必须走「带 key 的 tag」而不是 android:tag —— activity_settings.xml 里
+      android:tag 已被大量用于存放 ⓘ 长说明文字，无 key 的 tag 会冲突。
+    -->
+    <item name="ac_token_tag" type="id"/>
+    <!-- TextView 原始 textSize(px)：字号缩放反复 apply 时按基准值算，避免累积放大 -->
+    <item name="ac_base_text_size" type="id"/>
+    <!-- TextView 原始 Typeface：字体回退 system 时用于恢复 -->
+    <item name="ac_base_typeface" type="id"/>
+    <!-- 数值区（固定 56dp）完全跳过字号缩放，否则 250% 档数字撑破固定宽度 -->
+    <item name="ac_no_scale" type="id"/>
+    <!-- 页标题：放大封顶 20sp，避免 48dp 行高被撑成不可控 -->
+    <item name="ac_title_text" type="id"/>
+    <!-- 手动标记「按钮类文字」：按倍率做 12/11/10sp 降级，不随倍率放大 -->
+    <item name="ac_button_text" type="id"/>
+    <!-- View 原始外观快照（背景 Drawable / 原始色 / 文字色），供深色与主题回退时还原 -->
+    <item name="ac_base_style" type="id"/>
+    <!-- 纯展示色块（色板、取色预览）：禁止参与运行时重着色，否则取色结果会被改掉 -->
+    <item name="ac_no_recolor" type="id"/>
+</resources>

@@ -37,7 +37,7 @@ import java.util.regex.Matcher;
  * 于是 {@code setTimeout(…, 5000)} 会显示「已执行，无 console 输出（33 ms）」——
  * 程序其实还在跑，界面已经宣布结束了。
  */
-public class JsRunnerActivity extends Activity {
+public class JsRunnerActivity extends ThemedActivity {
 
     private static final String TAG = "JsRunnerActivity";
 

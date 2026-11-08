@@ -42,7 +42,7 @@ import java.util.Locale;
 /**
  * Long-press on 历史 opens this page: saved-code manager plus a JS runner.
  */
-public class ToolsActivity extends Activity {
+public class ToolsActivity extends ThemedActivity {
 
     private static final String TAG = "ToolsActivity";
 
@@ -128,6 +128,11 @@ public class ToolsActivity extends Activity {
         runnerPanel = (LinearLayout) findViewById(R.id.tools_panel_runner);
         tabLibrary = (Button) findViewById(R.id.tools_tab_library);
         tabRunner = (Button) findViewById(R.id.tools_tab_runner);
+        // 这两个分段按钮的颜色由 showTab() 按「选中态」动态决定，同一 View 会在
+        // primary / surface 之间来回切，按捕获色反查会固定成一种颜色把选中态抹掉。
+        // 整块豁免重着色，改由 showTab() 自己读当前生效色（顺便避开 250% 档撑破 40dp）。
+        tabLibrary.setTag(R.id.ac_no_recolor, Boolean.TRUE);
+        tabRunner.setTag(R.id.ac_no_recolor, Boolean.TRUE);
         tabLibrary.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) { showTab(false); }
         });
@@ -204,10 +209,13 @@ public class ToolsActivity extends Activity {
         runnerTab = runner;
         libraryPanel.setVisibility(runner ? View.GONE : View.VISIBLE);
         runnerPanel.setVisibility(runner ? View.VISIBLE : View.GONE);
-        tabLibrary.setBackgroundColor(runner ? 0xFFFFFFFF : 0xFF2196F3);
-        tabLibrary.setTextColor(runner ? 0xFF333333 : 0xFFFFFFFF);
-        tabRunner.setBackgroundColor(runner ? 0xFF2196F3 : 0xFFFFFFFF);
-        tabRunner.setTextColor(runner ? 0xFFFFFFFF : 0xFF333333);
+        int primary = ThemeTokens.get(this, ThemeTokens.AC_PRIMARY);
+        int surface = AppearanceManager.getInstance(this).getEffectiveColor(ThemeTokens.AC_SURFACE);
+        int text = AppearanceManager.getInstance(this).getEffectiveColor(ThemeTokens.AC_TEXT);
+        tabLibrary.setBackgroundColor(runner ? surface : primary);
+        tabLibrary.setTextColor(runner ? text : 0xFFFFFFFF);
+        tabRunner.setBackgroundColor(runner ? primary : surface);
+        tabRunner.setTextColor(runner ? 0xFFFFFFFF : text);
         if (runner) {
             selectionFooter.setVisibility(View.GONE);
         } else {
@@ -231,7 +239,7 @@ public class ToolsActivity extends Activity {
                 "复制提示词 — 贴到别的 AI 里",
                 "插入到输入框 — 先改再用",
                 "直接发送给 AI — 回聊天页发出"};
-        new AlertDialog.Builder(this)
+        AcDialog.builder(this)
                 .setTitle("给 AI 的环境说明")
                 .setItems(items, new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int which) {
@@ -410,7 +418,7 @@ public class ToolsActivity extends Activity {
             Toast.makeText(this, "请先选择要删除的代码", Toast.LENGTH_SHORT).show();
             return;
         }
-        new AlertDialog.Builder(this)
+        AcDialog.builder(this)
                 .setTitle("删除代码")
                 .setMessage("确定要删除选中的 " + selected.size() + " 个文件吗？\n\n此操作不可恢复！")
                 .setPositiveButton("删除", new DialogInterface.OnClickListener() {
@@ -443,7 +451,7 @@ public class ToolsActivity extends Activity {
         // 编辑再保存更是直接把图片写坏。给图片单独一条「预览 / 重命名 / 删除」。
         if (isImageFile(f)) {
             final String[] imgItems = {"预览图片", "打开方式", "分享", "重命名", "删除"};
-            new AlertDialog.Builder(this)
+            AcDialog.builder(this)
                     .setTitle(f.getName())
                     .setItems(imgItems, new DialogInterface.OnClickListener() {
                         public void onClick(DialogInterface d, int which) {
@@ -465,7 +473,7 @@ public class ToolsActivity extends Activity {
                 "查看 / 复制内容", "重命名", "编辑", "预览 / 运行",
                 "打开方式（第三方应用）", "分享", "删除"
         };
-        new AlertDialog.Builder(this)
+        AcDialog.builder(this)
                 .setTitle(f.getName())
                 .setItems(items, new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int which) {
@@ -526,7 +534,7 @@ public class ToolsActivity extends Activity {
         input.setSingleLine(true);
         input.setText(f.getName());
         input.setSelection(input.getText().length());
-        new AlertDialog.Builder(this)
+        AcDialog.builder(this)
                 .setTitle("重命名")
                 .setView(input)
                 .setPositiveButton("确定", new DialogInterface.OnClickListener() {
@@ -539,7 +547,7 @@ public class ToolsActivity extends Activity {
                         final File target = new File(exportsDir(), name);
                         if (!target.equals(f) && target.exists()) {
                             // rename(2) 会静默覆盖已存在的目标文件，先确认避免数据丢失
-                            new AlertDialog.Builder(ToolsActivity.this)
+                            AcDialog.builder(ToolsActivity.this)
                                     .setTitle("文件已存在")
                                     .setMessage(name + " 已存在，是否覆盖？")
                                     .setPositiveButton("覆盖", new DialogInterface.OnClickListener() {
@@ -582,7 +590,7 @@ public class ToolsActivity extends Activity {
     }
 
     private void deleteFile(final File f) {
-        new AlertDialog.Builder(this)
+        AcDialog.builder(this)
                 .setTitle("删除 " + f.getName() + " ?")
                 .setPositiveButton("删除", new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
@@ -636,7 +644,7 @@ public class ToolsActivity extends Activity {
         for (int i = 0; i < files.size(); i++) {
             names[i] = files.get(i).getName();
         }
-        new AlertDialog.Builder(this)
+        AcDialog.builder(this)
                 .setTitle("选择代码文件")
                 .setItems(names, new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int which) {

@@ -42,7 +42,7 @@ import java.util.concurrent.Executors;
  * 而用户在这个页面上看不到那条消息，不知道自己在破坏什么。
  * 要删就先删会话，图片会自己变成无引用。
  */
-public class StorageAttachmentsActivity extends Activity {
+public class StorageAttachmentsActivity extends ThemedActivity {
 
     private static final String TAG = "StorageAtt";
 
@@ -386,7 +386,7 @@ public class StorageAttachmentsActivity extends Activity {
         items.add("详细信息");
         if (it.refs == 0) items.add("删除");
 
-        new AlertDialog.Builder(this)
+        AcDialog.builder(this)
                 .setTitle(it.refs > 0
                         ? "使用中 · " + it.refs + " 个会话引用"
                         : "无引用图片")
@@ -423,7 +423,7 @@ public class StorageAttachmentsActivity extends Activity {
                 + (it.refs > 0
                 ? "这张图仍被对话引用，删除后消息里的图片会无法显示。"
                 : "这张图不与任何对话关联，可以安全删除。");
-        new AlertDialog.Builder(this)
+        AcDialog.builder(this)
                 .setTitle(it.refs > 0 ? "使用中的图片" : "无引用图片")
                 .setMessage(msg)
                 .setNegativeButton("关闭", null)
@@ -441,7 +441,7 @@ public class StorageAttachmentsActivity extends Activity {
         for (int i = 0; i < orphans.size(); i++) {
             if (selected.contains(orphans.get(i).name)) bytes += orphans.get(i).bytes;
         }
-        new AlertDialog.Builder(this)
+        AcDialog.builder(this)
                 .setTitle("删除图片")
                 .setMessage("删除 " + selected.size() + " 张图片？\n\n共 "
                         + StorageReport.size(bytes) + "，不与任何对话关联。\n此操作不可恢复。")
@@ -555,17 +555,20 @@ public class StorageAttachmentsActivity extends Activity {
             h.size.setText(StorageReport.size(it.bytes));
             h.sub.setText((it.refs > 0 ? "用于 " + it.refs + " 个会话" : "无会话引用")
                     + " · " + TIME_FMT.format(new Date(it.mtime)));
+            ThemeRecolor.applyTo(convertView);
 
             if (selectionMode) {
                 h.check.setVisibility(View.VISIBLE);
                 h.check.setChecked(selected.contains(it.name));
                 convertView.setBackgroundColor(selected.contains(it.name)
-                        ? 0xFFFFF3CD : 0xFFFFFFFF);
+                        ? ThemeRecolor.listMarkBg(convertView.getContext(), 0xFFFFF3CD)
+                        : ThemeRecolor.listBg(convertView.getContext()));
             } else {
                 h.check.setVisibility(View.GONE);
                 // 高亮优先级低于多选：选中态必须压过定位态，否则用户分不清自己选了哪张
                 convertView.setBackgroundColor(it.name.equals(highlight)
-                        ? 0xFFE3F2FD : 0xFFFFFFFF);
+                        ? ThemeRecolor.listMarkBg(convertView.getContext(), 0xFFE3F2FD)
+                        : ThemeRecolor.listBg(convertView.getContext()));
             }
 
             h.thumb.setTag(it.name);

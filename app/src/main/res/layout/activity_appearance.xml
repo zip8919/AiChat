@@ -1,0 +1,428 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/background"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:orientation="vertical"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:padding="16dp">
+
+        <TextView
+            android:id="@+id/appearance_title"
+            android:textSize="20sp"
+            android:textStyle="bold"
+            android:textColor="@color/text_primary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="4dp"
+            android:text="外观" />
+
+        <!-- 未保存状态提示：CLEAN 时 GONE，不占高度避免布局跳动 -->
+        <TextView
+            android:id="@+id/appearance_status"
+            android:textSize="12sp"
+            android:textColor="#E67E22"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="8dp"
+            android:visibility="gone"
+            android:text="" />
+
+        <!-- 1 深色模式 -->
+        <LinearLayout
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="48dp">
+            <TextView
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:textColor="@color/text_primary"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="深色模式" />
+            <Switch
+                android:id="@+id/dark_switch"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content" />
+        </LinearLayout>
+
+        <!-- 2 主题颜色：标签行 + 常驻自定义入口；下方 5x2 网格由代码生成 -->
+        <LinearLayout
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="48dp">
+            <TextView
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:textColor="@color/text_primary"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="主题颜色" />
+            <TextView
+                android:id="@+id/color_info"
+                android:textSize="13sp"
+                android:clickable="true"
+                android:background="?android:attr/selectableItemBackground"
+                android:padding="6dp"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:tag="主题颜色会作为主色应用到 ActionBar 与消息界面。自定义取色可指定任意颜色；选中内置色或自定义色都会记为「显式覆盖」，优先于主题默认值。"
+                android:text="ⓘ" />
+            <TextView
+                android:id="@+id/color_custom"
+                android:textSize="12sp"
+                android:textColor="@color/primary"
+                android:clickable="true"
+                android:background="?android:attr/selectableItemBackground"
+                android:padding="6dp"
+                android:singleLine="true"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="＋ 自定义" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/color_grid"
+            android:orientation="vertical"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="4dp" />
+
+        <LinearLayout
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="8dp">
+            <TextView
+                android:id="@+id/color_selected"
+                android:textSize="12sp"
+                android:textColor="@color/text_secondary"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:singleLine="true"
+                android:ellipsize="end"
+                android:text="" />
+            <TextView
+                android:id="@+id/color_follow"
+                android:textSize="12sp"
+                android:textColor="@color/primary"
+                android:clickable="true"
+                android:background="?android:attr/selectableItemBackground"
+                android:padding="6dp"
+                android:singleLine="true"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="跟随主题" />
+        </LinearLayout>
+
+        <!-- 3 显示大小百分比 -->
+        <LinearLayout
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="48dp">
+            <TextView
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:textColor="@color/text_primary"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="显示大小" />
+            <TextView
+                android:id="@+id/scale_info"
+                android:textSize="13sp"
+                android:clickable="true"
+                android:background="?android:attr/selectableItemBackground"
+                android:padding="6dp"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:tag="只缩放文字，不改变按钮与布局尺寸。50%~250% 是给移植到其他 DPI 设备用的适配旋钮，本设备已按屏幕适配，默认 100% 无需修改。主题不覆盖此项。"
+                android:text="ⓘ" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="48dp">
+            <SeekBar
+                android:id="@+id/scale_seek"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:max="200" />
+            <TextView
+                android:id="@+id/scale_value"
+                android:textSize="12sp"
+                android:textColor="@color/text_primary"
+                android:gravity="right"
+                android:typeface="monospace"
+                android:singleLine="true"
+                android:layout_width="56dp"
+                android:layout_height="wrap_content"
+                android:text="100%" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/scale_warning"
+            android:textSize="12sp"
+            android:textColor="#C62828"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:visibility="gone"
+            android:text="当前倍率下部分长文字会换行或省略" />
+
+        <Button
+            android:id="@+id/scale_preview"
+            android:textSize="12sp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:visibility="gone"
+            android:text="预览效果" />
+
+        <!-- 4 字体大小档位 -->
+        <LinearLayout
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="48dp">
+            <TextView
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:textColor="@color/text_primary"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="字体大小" />
+            <TextView
+                android:id="@+id/font_size_info"
+                android:textSize="13sp"
+                android:clickable="true"
+                android:background="?android:attr/selectableItemBackground"
+                android:padding="6dp"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:tag="界面文字的 5 档微调，独立于「显示大小」。显示大小是整体倍率，字体大小是在此基础上再叠加的档位；两者都只作用于原生界面文字，消息页文字只跟随显示大小。"
+                android:text="ⓘ" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="48dp">
+            <SeekBar
+                android:id="@+id/font_step_seek"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:max="4" />
+            <TextView
+                android:id="@+id/font_step_value"
+                android:textSize="12sp"
+                android:textColor="@color/text_primary"
+                android:gravity="right"
+                android:singleLine="true"
+                android:layout_width="56dp"
+                android:layout_height="wrap_content"
+                android:text="标准" />
+        </LinearLayout>
+
+        <!-- 5 字体选择器 -->
+        <LinearLayout
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="48dp">
+            <TextView
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:textColor="@color/text_primary"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="字体" />
+            <TextView
+                android:id="@+id/font_follow"
+                android:textSize="12sp"
+                android:textColor="@color/primary"
+                android:clickable="true"
+                android:background="?android:attr/selectableItemBackground"
+                android:padding="6dp"
+                android:singleLine="true"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="跟随主题" />
+        </LinearLayout>
+
+        <Spinner
+            android:id="@+id/font_spinner"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="48dp" />
+
+        <!-- 6 自定义主题选择器（不是开关） -->
+        <LinearLayout
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="48dp">
+            <TextView
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:textColor="@color/text_primary"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="自定义主题" />
+            <TextView
+                android:id="@+id/theme_info"
+                android:textSize="13sp"
+                android:clickable="true"
+                android:background="?android:attr/selectableItemBackground"
+                android:padding="6dp"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:tag="覆盖优先级：你手动改过的项 大于 自定义主题 大于 内置默认。选中主题只重置「跟随主题」的项，已手动改过的项会保留。每项旁的「跟随主题」可单项清除覆盖。"
+                android:text="ⓘ" />
+        </LinearLayout>
+
+        <Spinner
+            android:id="@+id/theme_spinner"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="48dp" />
+
+        <TextView
+            android:id="@+id/theme_meta"
+            android:textSize="12sp"
+            android:textColor="@color/text_secondary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:singleLine="true"
+            android:ellipsize="end"
+            android:text="" />
+
+        <TextView
+            android:id="@+id/theme_font_missing"
+            android:textSize="12sp"
+            android:textColor="#B26A00"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:visibility="gone"
+            android:text="字体缺失" />
+
+        <!-- 7 两个管理按钮 -->
+        <LinearLayout
+            android:orientation="horizontal"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp">
+            <Button
+                android:id="@+id/manage_fonts"
+                android:textSize="12sp"
+                android:singleLine="true"
+                android:ellipsize="end"
+                android:minWidth="0dp"
+                android:padding="4dp"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="管理字体" />
+            <Button
+                android:id="@+id/manage_themes"
+                android:textSize="12sp"
+                android:singleLine="true"
+                android:ellipsize="end"
+                android:minWidth="0dp"
+                android:padding="4dp"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="管理自定义主题" />
+        </LinearLayout>
+
+        <Button
+            android:id="@+id/follow_all"
+            android:textSize="12sp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="全部跟随主题" />
+
+        <TextView
+            android:id="@+id/save_info"
+            android:textSize="12sp"
+            android:textColor="@color/primary"
+            android:clickable="true"
+            android:background="?android:attr/selectableItemBackground"
+            android:padding="6dp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:tag="临时保存只在本次运行生效，应用被杀或重启后自动回到上次永久保存的外观；永久保存会写入配置文件，重启后仍然保留。两者都不删除已导入的字体与主题文件；重置只回到内置默认，仍需点永久保存才写盘。"
+            android:text="ⓘ 临时与永久保存的区别" />
+
+        <!-- 8 底部三按钮：一行等宽，重置用描边样式在代码里设置 -->
+        <LinearLayout
+            android:orientation="horizontal"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:layout_marginBottom="24dp">
+            <Button
+                android:id="@+id/btn_reset"
+                android:textSize="12sp"
+                android:singleLine="true"
+                android:ellipsize="end"
+                android:minWidth="0dp"
+                android:padding="4dp"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="重置" />
+            <Button
+                android:id="@+id/btn_temp"
+                android:textSize="12sp"
+                android:singleLine="true"
+                android:ellipsize="end"
+                android:minWidth="0dp"
+                android:padding="4dp"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="临时保存" />
+            <Button
+                android:id="@+id/btn_permanent"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:singleLine="true"
+                android:ellipsize="end"
+                android:minWidth="0dp"
+                android:padding="4dp"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="永久保存" />
+        </LinearLayout>
+
+    </LinearLayout>
+</ScrollView>

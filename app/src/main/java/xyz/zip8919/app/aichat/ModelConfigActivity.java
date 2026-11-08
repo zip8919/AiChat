@@ -17,7 +17,7 @@ import android.widget.Toast;
 import java.util.ArrayList;
 import java.util.List;
 
-public class ModelConfigActivity extends Activity {
+public class ModelConfigActivity extends ThemedActivity {
     private static final String TAG = "ModelConfig";
     private ConfigManager configManager;
     private ListView providerList, modelList;
@@ -109,7 +109,7 @@ public class ModelConfigActivity extends Activity {
 
     private void showProviderActionDialog(final int pos) {
         String[] items = {"编辑", "删除"};
-        new AlertDialog.Builder(this)
+        AcDialog.builder(this)
                 .setTitle(providers.get(pos).name)
                 .setItems(items, new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
@@ -150,7 +150,7 @@ public class ModelConfigActivity extends Activity {
         if (p != null) keyEt.setText(p.apiKey);
         layout.addView(keyEt);
 
-        new AlertDialog.Builder(this)
+        AcDialog.builder(this)
                 .setTitle(isEdit ? "编辑提供商" : "添加提供商")
                 .setView(layout)
                 .setPositiveButton("保存", new DialogInterface.OnClickListener() {
@@ -206,7 +206,7 @@ public class ModelConfigActivity extends Activity {
 
     private void showDeleteProviderDialog(final int pos) {
         final ProviderInfo p = providers.get(pos);
-        new AlertDialog.Builder(this)
+        AcDialog.builder(this)
                 .setTitle("删除提供商")
                 .setMessage("确定删除 " + p.name + "？引用该提供商的模型将一并删除。")
                 .setPositiveButton("删除", new DialogInterface.OnClickListener() {
@@ -245,7 +245,7 @@ public class ModelConfigActivity extends Activity {
 
     private void showModelActionDialog(final int pos) {
         String[] items = {"编辑", "删除"};
-        new AlertDialog.Builder(this)
+        AcDialog.builder(this)
                 .setTitle(models.get(pos).name)
                 .setItems(items, new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
@@ -293,7 +293,7 @@ public class ModelConfigActivity extends Activity {
         visionTip.setPadding(0, 0, 0, 8);
         layout.addView(visionTip);
 
-        new AlertDialog.Builder(this)
+        AcDialog.builder(this)
                 .setTitle(isEdit ? "编辑模型" : "添加模型")
                 .setView(layout)
                 .setPositiveButton("保存", new DialogInterface.OnClickListener() {
@@ -330,7 +330,7 @@ public class ModelConfigActivity extends Activity {
 
     private void showDeleteModelDialog(final int pos) {
         final ModelInfo m = models.get(pos);
-        new AlertDialog.Builder(this)
+        AcDialog.builder(this)
                 .setTitle("删除模型")
                 .setMessage("确定删除 " + m.name + "？")
                 .setPositiveButton("删除", new DialogInterface.OnClickListener() {

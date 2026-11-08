@@ -239,7 +239,7 @@ final class FileActions {
                                 | android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
                         input.setText(content);
                         input.setTextSize(12);
-                        new AlertDialog.Builder(a)
+                        AcDialog.builder(a)
                                 .setTitle("编辑 " + f.getName())
                                 .setView(input)
                                 .setPositiveButton("保存", new DialogInterface.OnClickListener() {
@@ -307,7 +307,7 @@ final class FileActions {
         wv.setLayoutParams(new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, viewH));
         wv.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null);
-        AlertDialog dialog = new AlertDialog.Builder(a)
+        AlertDialog dialog = AcDialog.builder(a)
                 .setTitle(f.getName() + "  [" + lang + "]")
                 .setView(wv)
                 .setPositiveButton("复制全部", new DialogInterface.OnClickListener() {
@@ -420,7 +420,7 @@ final class FileActions {
                 + "</body></html>";
         wv.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null);
 
-        AlertDialog dialog = new AlertDialog.Builder(a)
+        AlertDialog dialog = AcDialog.builder(a)
                 .setTitle(f.getName())
                 .setView(wv)
                 .setPositiveButton("打开方式", new DialogInterface.OnClickListener() {

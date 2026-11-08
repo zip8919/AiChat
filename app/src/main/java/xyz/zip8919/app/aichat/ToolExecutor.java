@@ -104,7 +104,8 @@ final class ToolExecutor {
             String question, Host host) throws Exception {
         int executed = 0;
         int skipped = 0;
-        boolean visionInjected = false;
+        /** 首个图片工具的原始结果。整轮 tool 消息补齐后才注入，见下方注释。 */
+        String visionSource = null;
         int total = calls == null ? 0 : calls.length();
         for (int i = 0; i < total; i++) {
             // 打断后立刻停手：原来只在每轮末尾检查 isAlive，用户点了停止仍会把
@@ -112,6 +113,10 @@ final class ToolExecutor {
             // 「未配置搜索密钥」写进结果并弹提示，误导用户去改设置。
             if (!host.isAlive()) {
                 LogUtil.i("ToolExecutor", "aborted before tool %d/%d", i + 1, total);
+                // 中止也必须把剩下每个 tool_call_id 补上结果：assistant(tool_calls)
+                // 后面少一条 tool 消息，下一次请求就是 400
+                // （insufficient tool messages following tool_calls message）。
+                backfill(conversation, toolHistory, calls, i, ToolCalls.abortNotice());
                 return new Outcome(executed, skipped, true);
             }
             JSONObject call = calls.optJSONObject(i);
@@ -165,10 +170,15 @@ final class ToolExecutor {
 
             WebSearchTool.extractSources(result, sources);
             ToolCalls.appendResult(conversation, toolHistory, id, result);
-            // 视觉注入只能在 tool 结果之后：顺序反了模型会先看到图、后看到「搜到了什么」，
-            // 多数端点还会因为 tool 与 assistant 不连续直接 400。
-            if (!visionInjected && host.visionEnabled()) {
-                visionInjected = injectImages(conversation, result, host);
+            // 视觉注入**不能**在这里立刻做：超限的调用（下面 i 更大的那几条）还没补
+            // tool 结果，此时插一条 user 消息就会形成
+            //   assistant(tool_calls) → tool, tool, tool → user → tool, tool
+            // 这种顺序，端点直接 400
+            // （An assistant message with 'tool_calls' must be followed by tool messages
+            //   responding to each 'tool_call_id'）。
+            // 改成记下首个带图的工具结果，等整轮 tool 消息全部补齐后再注入。
+            if (visionSource == null && host.visionEnabled() && hasImages(result)) {
+                visionSource = result;
             }
             // 所有工具都打卡片：时间工具此前被跳过，界面上完全看不到
             trace.append(WebSearchTool.buildTraceBlock(name, args, result));
@@ -176,10 +186,47 @@ final class ToolExecutor {
             host.onTraceAppended(trace.toString());
 
             if (!host.isAlive()) {
+                backfill(conversation, toolHistory, calls, i + 1, ToolCalls.abortNotice());
                 return new Outcome(executed, skipped, true);
             }
         }
+        // 整轮 tool 消息已齐全，此时插入多模态 user 消息才是合法顺序：
+        // assistant(tool_calls) → tool × N → user(图片)
+        if (visionSource != null) injectImages(conversation, visionSource, host);
         return new Outcome(executed, skipped, false);
+    }
+
+    /** 结果里是否带 {@code images} 数组（图片搜索工具的标志）。 */
+    private static boolean hasImages(String result) {
+        if (result == null || result.length() < 2) return false;
+        try {
+            org.json.JSONArray imgs = new org.json.JSONObject(result).optJSONArray("images");
+            return imgs != null && imgs.length() > 0;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /**
+     * 给 {@code from} 起尚未回结果的调用补占位 tool 消息。
+     *
+     * <p>只在「中止」路径用：用户点了停止后剩下的调用不再执行，但 assistant 消息里
+     * 已经有全部 tool_call_id，少一条 tool 回复就是下一次请求的 400。
+     */
+    private static void backfill(JSONArray conversation, JSONArray toolHistory,
+                                 JSONArray calls, int from, String content) {
+        if (calls == null) return;
+        for (int i = Math.max(0, from); i < calls.length(); i++) {
+            JSONObject c = calls.optJSONObject(i);
+            if (c == null) continue;
+            if (c.optString("name", "").length() == 0) continue;
+            String id = c.optString("id", "");
+            try {
+                ToolCalls.appendResult(conversation, toolHistory, id, content);
+            } catch (Exception e) {
+                LogUtil.w("ToolExecutor", "backfill failed: %s", e.getMessage());
+            }
+        }
     }
 
     /**

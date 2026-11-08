@@ -34,7 +34,9 @@ final class ChatTransport {
         JSONObject body = new JSONObject();
         body.put("model", model);
         body.put("stream", stream);
-        body.put("messages", messages);
+        // 唯一出口统一做一次协议修复：把 tool_calls 与其 tool 回复重新配平，
+        // 位置在最后一个出口而不是每个拼接点，坏历史（已落盘）也能自愈。
+        body.put("messages", MessageSanitizer.sanitize(messages));
         if (tools != null && tools.length() > 0) {
             body.put("tools", tools);
             body.put("tool_choice", "auto");

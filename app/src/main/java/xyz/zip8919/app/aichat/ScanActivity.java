@@ -24,7 +24,7 @@ import android.widget.Toast;
 import java.util.ArrayList;
 import java.util.List;
 
-public class ScanActivity extends Activity {
+public class ScanActivity extends ThemedActivity {
 
     private static final String TAG = "ScanActivity";
     private static final Uri CONTENT_URI = Uri.parse("content://com.jxw.wbzc/query");
@@ -360,7 +360,7 @@ public class ScanActivity extends Activity {
                             labels[i] = label + "  " + preview;
                         }
 
-                        new AlertDialog.Builder(ScanActivity.this)
+                        AcDialog.builder(ScanActivity.this)
                             .setTitle("选择摘抄记录")
                             .setItems(labels, new DialogInterface.OnClickListener() {
                                 @Override
@@ -397,7 +397,7 @@ public class ScanActivity extends Activity {
             getString(R.string.copy_and_insert)
         };
 
-        new AlertDialog.Builder(this)
+        AcDialog.builder(this)
             .setTitle(getString(R.string.done))
             .setItems(options, new DialogInterface.OnClickListener() {
                 @Override

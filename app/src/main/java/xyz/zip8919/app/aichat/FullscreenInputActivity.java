@@ -20,7 +20,7 @@ import android.widget.TextView;
  * <p>不做草稿持久化：主输入框是唯一数据源，这里改了又取消就应当等于没改过，
  * 否则用户会看到两份互相覆盖的文本。
  */
-public class FullscreenInputActivity extends Activity {
+public class FullscreenInputActivity extends ThemedActivity {
 
     public static final String EXTRA_TEXT = "fullscreen_text";
     public static final String EXTRA_RESULT = "fullscreen_result";
@@ -66,7 +66,7 @@ public class FullscreenInputActivity extends Activity {
                 final int len = edit.getText().length();
                 if (len == 0) return;
                 // 这里没有后悔药：主界面清空也先问一句，长文更是如此
-                new AlertDialog.Builder(FullscreenInputActivity.this)
+                AcDialog.builder(FullscreenInputActivity.this)
                         .setTitle("清空输入")
                         .setMessage("将清空全部 " + len + " 字。清空后无法撤销。")
                         .setPositiveButton("清空", new DialogInterface.OnClickListener() {

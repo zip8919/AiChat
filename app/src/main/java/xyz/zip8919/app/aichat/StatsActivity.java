@@ -30,7 +30,7 @@ import java.util.Map;
  * <p>自定义区间用「日期」而不是「最近 N 天」：用户问的通常是「上周三到周五
  * 那几次搜索花了多少」，那是个具体的日期范围，换算成天数反而要先自己数一遍。
  */
-public class StatsActivity extends Activity {
+public class StatsActivity extends ThemedActivity {
 
     private static final String TAG = "StatsActivity";
 
@@ -190,7 +190,7 @@ public class StatsActivity extends Activity {
     }
 
     private void confirmClear() {
-        new AlertDialog.Builder(this)
+        AcDialog.builder(this)
                 .setTitle("清空统计")
                 .setMessage("将删除本机全部使用统计（含按模型、按服务商的累计数据）。\n"
                         + "会话内容、设置、导出文件都不受影响。确定继续？")

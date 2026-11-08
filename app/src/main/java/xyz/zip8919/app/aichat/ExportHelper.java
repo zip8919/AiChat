@@ -32,7 +32,7 @@ final class ExportHelper {
         input.setSingleLine(true);
         input.setText("code_" + type + "_" + System.currentTimeMillis());
         input.setSelection(input.getText().length());
-        new AlertDialog.Builder(activity)
+        AcDialog.builder(activity)
                 .setTitle("保存代码")
                 .setMessage("文件名（自动追加 ." + ext + "）")
                 .setView(input)
@@ -56,7 +56,7 @@ final class ExportHelper {
 
     private static void confirmOverwrite(final Activity activity, final String fileName,
             final String lang, final String code) {
-        new AlertDialog.Builder(activity)
+        AcDialog.builder(activity)
                 .setTitle("文件已存在")
                 .setMessage(fileName + " 已存在，是否覆盖？")
                 .setPositiveButton("覆盖", new DialogInterface.OnClickListener() {

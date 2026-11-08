@@ -73,7 +73,7 @@ final class ViewerExport {
             showFailure(a, "预览尚未就绪，请等内容显示后再导出。");
             return;
         }
-        new AlertDialog.Builder(a)
+        AcDialog.builder(a)
                 .setTitle("导出为图片 · 选择格式")
                 .setItems(new String[]{"PNG（无损，体积大）", "JPEG（有损，体积小）"},
                         new DialogInterface.OnClickListener() {
@@ -560,7 +560,7 @@ final class ViewerExport {
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
 
-        final AlertDialog dlg = new AlertDialog.Builder(a)
+        final AlertDialog dlg = AcDialog.builder(a)
                 .setTitle("导出成功")
                 .setView(box)
                 .setPositiveButton("关闭", null)
@@ -618,7 +618,7 @@ final class ViewerExport {
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
 
-        final AlertDialog dlg = new AlertDialog.Builder(a)
+        final AlertDialog dlg = AcDialog.builder(a)
                 .setTitle("重命名")
                 .setMessage("只填文件名即可，扩展名 " + ext + " 会自动保留。")
                 .setView(box)
@@ -693,7 +693,7 @@ final class ViewerExport {
     private static void showFailure(Activity a, String msg) {
         if (a.isFinishing() || a.isDestroyed()) return;
         try {
-            new AlertDialog.Builder(a)
+            AcDialog.builder(a)
                     .setTitle("导出失败")
                     .setMessage(msg == null ? "未知错误" : msg)
                     .setPositiveButton("知道了", null)

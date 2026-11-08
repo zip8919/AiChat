@@ -55,7 +55,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-public class MainActivity extends Activity {
+public class MainActivity extends ThemedActivity {
     private static final String TAG = "MainActivity";
     /** 拍照目标文件跨 Activity 重建的保存键。 */
     private static final String STATE_CAMERA_OUTPUT = "camera_output_path";
@@ -145,6 +145,10 @@ public class MainActivity extends Activity {
     private volatile boolean loadingOlderMessages = false;
 
     private AtomicBoolean isRequestInProgress = new AtomicBoolean(false);
+    /** 公式出图颜色签名：已生效的那个。 */
+    private volatile String tintSigApplied;
+    /** 流式输出期间发生、但还没收尾的颜色变更签名；非空表示待补一次重灌。 */
+    private volatile String tintSigPending;
     /**
      * 「立即重试」信号：429 等待期间由 JS bridge 置位，请求线程每 200 ms 读一次。
      *
@@ -301,7 +305,7 @@ public class MainActivity extends Activity {
     private void showFirstLaunchDialog() {
         // 文案与「关于 → 使用说明」共用一份，避免两处漂移
         String msg = HelpText.full();
-        new AlertDialog.Builder(this)
+        AcDialog.builder(this)
                 .setTitle("欢迎使用 AiChat")
                 .setMessage(msg)
                 .setCancelable(false)
@@ -326,6 +330,8 @@ public class MainActivity extends Activity {
         LogUtil.i(TAG, "onDestroy: cleaning up handler / connection / webview");
         // 清空主线程消息队列里挂起的回调（消息菜单、长按等），避免销毁后弹窗
         handler.removeCallbacksAndMessages(null);
+        // 解绑外观刷新监听：它是单例上的回调，持有本 Activity 引用，不解会泄漏
+        AppearanceManager.getInstance(this).setChangeListener(null);
         // 先自增代数再断开连接：在途请求看到代数变化后不再回写 UI / 落盘，
         // 否则页面已销毁，请求线程仍能把消息写进已卸载的会话文件。
         if (isRequestInProgress.get()) {
@@ -434,6 +440,57 @@ public class MainActivity extends Activity {
                 view.invalidate();
             }
         });
+
+        // 外观设置：注册 WebView 侧样式刷新（复用 webViewEvalJs，按 SDK 分流 + 线程编组）。
+        // ChangeListener 在任一外观项改动时触发，只替换 <style> 文本与 setTextZoom，
+        // 绝不 loadDataWithBaseURL 重灌，因此不会打断流式输出、不重置滚动位置。
+        final AppearanceManager am = AppearanceManager.getInstance(this);
+        am.setChangeListener(new WebViewRefresher(new WebViewRefresher.Host() {
+            @Override
+            public void evalJs(String js) {
+                webViewEvalJs(js);
+            }
+            @Override
+            public void applyZoom(int percent) {
+                if (conversationWebView == null) return;
+                conversationWebView.getSettings().setTextZoom(percent);
+            }
+        }));
+        WebViewRefresher.applyInitialZoom(conversationWebView, am.getDisplayPercent());
+
+        // 公式是 MathRenderer 预渲染的 PNG，字色在出图时就画死了，换 CSS 不可能变色；
+        // MessageHtmlRenderer 的缓存又只按正文做 key。所以切颜色时必须「清缓存 + 重灌整页」，
+        // 否则就是实机上的「公式颜色不立即变化，要切会话才变」。
+        // 只比较颜色签名：显示大小/字号变化不重灌，避免白白丢滚动位置。
+        tintSigApplied = tintSig(am);
+        am.addChangeListener(new AppearanceManager.ChangeListener() {
+            public void onAppearanceChanged(AppearanceManager mm) {
+                String sig = tintSig(mm);
+                if (sig.equals(tintSigApplied)) return;
+                if (isRequestInProgress.get()) {
+                    // 流式输出中不能重灌整页，但**也不能把 lastSig 推进**：
+                    // 推进了就等于「这次颜色变化已经处理过」，之后再没有事件来收尾，
+                    // 公式会一直停在旧底色，直到手动切会话才重渲染
+                    // （用户实测的「公式颜色要切会话才变」）。
+                    // 记下来，等本轮结束再补一次。
+                    tintSigPending = sig;
+                    return;
+                }
+                tintSigApplied = sig;
+                tintSigPending = null;
+                MessageHtmlRenderer.clearRenderCache();
+                refreshWebView();
+            }
+        });
+    }
+
+    /** 只包含「会改变公式出图颜色」的项，避免显示大小变化也被当成颜色变更。 */
+    private static String tintSig(AppearanceManager m) {
+        boolean dark = m.isDark();
+        return (dark ? "d" : "l") + "|" + m.getThemeId()
+                + "|" + m.getEffectiveColor(ThemeTokens.AC_TEXT, dark)
+                + "|" + m.getEffectiveColor(ThemeTokens.AC_BG, dark)
+                + "|" + m.getEffectiveColor(ThemeTokens.AC_CODE_BG, dark);
     }
 
     private void bindQueue() {
@@ -620,10 +677,39 @@ public class MainActivity extends Activity {
     private void setRequestInProgress(boolean value) {
         isRequestInProgress.set(value);
         refreshSendButton();
+        if (!value) flushPendingTint();
+    }
+
+    /**
+     * 本轮结束后补做「流式期间被推迟」的颜色重灌。
+     *
+     * <p>没有这一步，切深浅色正好赶上模型输出时，公式会停在旧颜色上，
+     * 一直要手动切会话才更新。
+     */
+    private void flushPendingTint() {
+        final String sig = tintSigPending;
+        if (sig == null) return;
+        tintSigPending = null;
+        tintSigApplied = sig;
+        Runnable task = new Runnable() {
+            public void run() {
+                MessageHtmlRenderer.clearRenderCache();
+                refreshWebView();
+            }
+        };
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) task.run();
+        else runOnUiThread(task);
     }
 
     private void showAttachMenu() {
-        PopupMenu menu = new PopupMenu(this, plusButton);
+        // PopupMenu 是独立 Window，弹层底板由 context 主题的 panelBackground 决定，
+        // 跟 Activity 里刷了多少 View 无关 —— 深色下按加号弹出一片白就是这个原因。
+        // 换一个深色主题的 ContextThemeWrapper 去构造，弹层才是深底浅字。
+        Context menuCtx = this;
+        if (AppearanceManager.getInstance(this).isDark()) {
+            menuCtx = new android.view.ContextThemeWrapper(this, android.R.style.Theme_Holo);
+        }
+        PopupMenu menu = new PopupMenu(menuCtx, plusButton);
         menu.getMenu().add(0, MENU_ATTACH_TEXT, 0, R.string.upload_text_file);
         menu.getMenu().add(0, MENU_ATTACH_IMAGE, 1, R.string.upload_image);
         menu.getMenu().add(0, MENU_ATTACH_CAMERA, 2, R.string.take_photo);
@@ -822,7 +908,7 @@ public class MainActivity extends Activity {
         input.setHint(R.string.image_url_hint);
         input.setSingleLine(true);
         input.setInputType(InputType.TYPE_TEXT_VARIATION_URI);
-        new AlertDialog.Builder(this)
+        AcDialog.builder(this)
                 .setTitle(R.string.upload_image_url)
                 .setView(input)
                 .setPositiveButton("添加", new DialogInterface.OnClickListener() {
@@ -1044,6 +1130,15 @@ public class MainActivity extends Activity {
         int pad10 = dp(10);
         int pad4 = dp(4);
         int gap = dp(6);
+        // 第二行用 Span 着色，setTextColor 覆盖不到它，必须在这里按当前主题取色
+        int metaColor = getResources().getColor(R.color.text_secondary);
+        try {
+            AppearanceManager am = AppearanceManager.getInstance(this);
+            if (!am.isAppearanceDefault()) {
+                metaColor = am.getEffectiveColor(ThemeTokens.AC_TEXT_SECONDARY, am.isDark());
+            }
+        } catch (Throwable ignored) {
+        }
         for (int i = 0; i < pendingAttachments.size(); i++) {
             final int index = i;
             AttachmentText.File a = pendingAttachments.get(i);
@@ -1055,7 +1150,7 @@ public class MainActivity extends Activity {
             int metaFrom = line1.length() + 1;
             label.setSpan(new RelativeSizeSpan(0.84f), metaFrom, label.length(),
                     Spanned.SPAN_INCLUSIVE_EXCLUSIVE);
-            label.setSpan(new ForegroundColorSpan(getResources().getColor(R.color.text_secondary)),
+            label.setSpan(new ForegroundColorSpan(metaColor),
                     metaFrom, label.length(), Spanned.SPAN_INCLUSIVE_EXCLUSIVE);
 
             TextView chip = new TextView(this);
@@ -1094,6 +1189,9 @@ public class MainActivity extends Activity {
             });
             attachmentBar.addView(chip);
         }
+        // chip 是代码 new 出来的，不走 LayoutInflater，inflate 钩子覆盖不到。
+        // 这里补一次即时着色：深色下浅蓝底会被刷成表面色，文字也跟着变亮。
+        ThemeRecolor.applyTree(attachmentBar, this);
     }
 
     /** 附件条缩略图：base64 data URI → Bitmap；失败返回 null，文字卡片照常显示。 */
@@ -1190,7 +1288,7 @@ public class MainActivity extends Activity {
             public void onClick(View v) {
                 final boolean hasAttachment = !pendingAttachments.isEmpty();
                 LogUtil.d(TAG, "click: clear_input, attachment=%s", hasAttachment);
-                new AlertDialog.Builder(MainActivity.this)
+                AcDialog.builder(MainActivity.this)
                         .setTitle("清空输入")
                         .setMessage(hasAttachment
                                 ? "将清空输入框中的文字，并移除 " + pendingAttachments.size()
@@ -3009,7 +3107,7 @@ public class MainActivity extends Activity {
                         tv.setPadding(24, 24, 24, 24);
                         android.widget.ScrollView sv = new android.widget.ScrollView(MainActivity.this);
                         sv.addView(tv);
-                        new AlertDialog.Builder(MainActivity.this)
+                        AcDialog.builder(MainActivity.this)
                                 .setTitle("错误详情")
                                 .setView(sv)
                                 .setPositiveButton("关闭", null)
@@ -3122,6 +3220,51 @@ public class MainActivity extends Activity {
             handler.post(new Runnable() {
                 public void run() {
                     ExportHelper.saveCode(MainActivity.this, lang, code);
+                }
+            });
+        }
+
+        /**
+         * actheme 代码块「导入主题」：照 saveCode 模板回主线程，三级校验（内部统一
+         * 清洗 AI 输出）→ 原子写 themes/。只落盘并提示，不自动切换当前外观、
+         * 不发网络、不读聊天记录。
+         */
+        @JavascriptInterface
+        public void importTheme(final String text) {
+            LogUtil.d(TAG, "JsBridge.importTheme: len=%s",
+                    text == null ? "null" : text.length());
+            handler.post(new Runnable() {
+                public void run() {
+                    try {
+                        // 脱壳/清洗统一交给 ThemeValidator → ThemeText.clean()，
+                        // 不再在这里手写只认 ```actheme 的围栏解析。
+                        ThemeValidator.Result vr = ThemeValidator.validate(
+                                text, FontRepository.getInstance().installedIds());
+                        if (vr.blocked || vr.theme == null) {
+                            Toast.makeText(MainActivity.this,
+                                    "导入失败：" + vr.blockReason, Toast.LENGTH_LONG).show();
+                            return;
+                        }
+                        // 名称补名/截断已在 ThemeValidator 统一处理（自动补名 + 警告）
+                        Theme t = vr.theme;
+                        t.id = "";
+                        t.builtin = false;
+                        String id = ThemeRepository.getInstance().save(t);
+                        if (id == null) {
+                            Toast.makeText(MainActivity.this,
+                                    "导入失败：存储不可写", Toast.LENGTH_LONG).show();
+                            return;
+                        }
+                        ThemeRepository.getInstance().invalidate();
+                        String tip = vr.warnings.isEmpty()
+                                ? "已导入主题「" + t.name + "」，可在 设置 › 外观 › 管理自定义主题 中启用"
+                                : "已导入「" + t.name + "」（有 " + vr.warnings.size() + " 条校验提示）";
+                        Toast.makeText(MainActivity.this, tip, Toast.LENGTH_LONG).show();
+                    } catch (Throwable e) {
+                        LogUtil.w(TAG, "importTheme failed: %s", e.getMessage());
+                        Toast.makeText(MainActivity.this,
+                                "导入失败：" + e.getMessage(), Toast.LENGTH_LONG).show();
+                    }
                 }
             });
         }
@@ -3268,7 +3411,7 @@ public class MainActivity extends Activity {
         LogUtil.d(TAG, "showMessageMenu: pos=%d role=%s len=%s", pos, msg.role,
                 msg.content == null ? "null" : msg.content.length());
 
-        new AlertDialog.Builder(this)
+        AcDialog.builder(this)
                 .setTitle("操作消息")
                 .setItems(items, new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface dialog, int which) {
@@ -3434,7 +3577,7 @@ public class MainActivity extends Activity {
         tv.setTextIsSelectable(true);
         tv.setPadding(32, 32, 32, 32);
         tv.setTextSize(14);
-        new AlertDialog.Builder(this)
+        AcDialog.builder(this)
                 .setTitle(title)
                 .setView(tv)
                 .setPositiveButton("关闭", null)
@@ -3463,7 +3606,7 @@ public class MainActivity extends Activity {
             return;
         }
         final String[] items = {"复制已生成内容", "选择文本", "重新生成", "停止生成"};
-        new AlertDialog.Builder(this)
+        AcDialog.builder(this)
                 .setTitle("操作消息")
                 .setItems(items, new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface dialog, int which) {
@@ -3546,7 +3689,7 @@ public class MainActivity extends Activity {
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         input.setLayoutParams(lp);
 
-        new AlertDialog.Builder(this)
+        AcDialog.builder(this)
                 .setTitle("修改消息")
                 .setView(input)
                 .setPositiveButton("确定", new DialogInterface.OnClickListener() {
@@ -3801,7 +3944,7 @@ public class MainActivity extends Activity {
 
     /** 回复进行中点击重试：确认 → 打断 → 等旧线程退出 → 清理旧 UI（校验代数）→ 重发。 */
     private void confirmInterruptAndRetry(final int pos) {
-        new AlertDialog.Builder(this)
+        AcDialog.builder(this)
                 .setTitle("确认")
                 .setMessage("当前回复正在进行，是否打断该请求并重试？")
                 .setPositiveButton("确定", new DialogInterface.OnClickListener() {
@@ -4003,7 +4146,7 @@ public class MainActivity extends Activity {
     }
 
     private void showConfirmDialog(String message, final Runnable onConfirm) {
-        new AlertDialog.Builder(this)
+        AcDialog.builder(this)
                 .setTitle("确认")
                 .setMessage(message)
                 .setPositiveButton("确定", new DialogInterface.OnClickListener() {

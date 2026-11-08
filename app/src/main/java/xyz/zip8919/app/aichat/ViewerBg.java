@@ -136,7 +136,7 @@ final class ViewerBg {
             items[i] = (PRESETS[i] == current ? "[当前] " : "") + PRESET_NAMES[i];
         }
         items[PRESET_NAMES.length] = "自定义（输入 #RRGGBB）…";
-        new AlertDialog.Builder(a)
+        AcDialog.builder(a)
                 .setTitle("查看器背景色")
                 .setItems(items, new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int which) {
@@ -168,7 +168,7 @@ final class ViewerBg {
 
         // 覆盖「确定」的默认监听：校验不通过时保留对话框并在输入框上常驻报错，
         // 不用 Toast（一闪而过看不清），也不会像系统默认那样点一下就把框关掉。
-        final AlertDialog dlg = new AlertDialog.Builder(a)
+        final AlertDialog dlg = AcDialog.builder(a)
                 .setTitle("自定义背景色")
                 .setMessage("输入 6 位十六进制，例如 #F5F5DC\n（字体颜色保持固定，不随背景反色）")
                 .setView(box)

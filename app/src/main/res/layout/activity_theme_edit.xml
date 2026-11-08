@@ -1,0 +1,214 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/background"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:orientation="vertical"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:padding="16dp">
+
+        <TextView
+            android:id="@+id/edit_title"
+            android:textSize="20sp"
+            android:textStyle="bold"
+            android:textColor="@color/text_primary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="4dp"
+            android:text="编辑主题" />
+
+        <TextView
+            android:id="@+id/edit_hint"
+            android:textSize="12sp"
+            android:textColor="@color/text_secondary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="8dp"
+            android:text="明暗两套 CSS 分别编辑，切换时自动暂存当前一套。" />
+
+        <LinearLayout
+            android:orientation="horizontal"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="8dp">
+            <Button
+                android:id="@+id/btn_mode_light"
+                android:textSize="12sp"
+                android:singleLine="true"
+                android:ellipsize="end"
+                android:minWidth="0dp"
+                android:padding="4dp"
+                android:minHeight="48dp"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:text="● 浅色" />
+            <Button
+                android:id="@+id/btn_mode_dark"
+                android:textSize="12sp"
+                android:singleLine="true"
+                android:ellipsize="end"
+                android:minWidth="0dp"
+                android:padding="4dp"
+                android:minHeight="48dp"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:text="○ 深色" />
+        </LinearLayout>
+
+        <TextView
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:textColor="@color/text_primary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="名称（必填，不超过 32 字）" />
+        <EditText
+            android:id="@+id/edit_name"
+            android:textSize="14sp"
+            android:singleLine="true"
+            android:minHeight="48dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <TextView
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:textColor="@color/text_primary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="作者" />
+        <EditText
+            android:id="@+id/edit_author"
+            android:textSize="14sp"
+            android:singleLine="true"
+            android:minHeight="48dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <TextView
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:textColor="@color/text_primary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="描述" />
+        <EditText
+            android:id="@+id/edit_desc"
+            android:textSize="14sp"
+            android:singleLine="true"
+            android:minHeight="48dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <TextView
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:textColor="@color/text_primary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="WebView CSS" />
+
+        <EditText
+            android:id="@+id/edit_css"
+            android:textSize="12sp"
+            android:typeface="monospace"
+            android:inputType="textMultiLine"
+            android:gravity="top"
+            android:minLines="8"
+            android:maxLines="16"
+            android:scrollbars="vertical"
+            android:minHeight="48dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="只写颜色与字体规则，不要改布局属性" />
+
+        <LinearLayout
+            android:orientation="horizontal"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp">
+            <Button
+                android:id="@+id/btn_import"
+                android:textSize="12sp"
+                android:singleLine="true"
+                android:ellipsize="end"
+                android:minWidth="0dp"
+                android:padding="2dp"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:text="导入" />
+            <Button
+                android:id="@+id/btn_clear"
+                android:textSize="12sp"
+                android:singleLine="true"
+                android:ellipsize="end"
+                android:minWidth="0dp"
+                android:padding="2dp"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:text="清空" />
+            <Button
+                android:id="@+id/btn_paste"
+                android:textSize="12sp"
+                android:singleLine="true"
+                android:ellipsize="end"
+                android:minWidth="0dp"
+                android:padding="2dp"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:text="粘贴" />
+            <Button
+                android:id="@+id/btn_save_as"
+                android:textSize="12sp"
+                android:singleLine="true"
+                android:ellipsize="end"
+                android:minWidth="0dp"
+                android:padding="2dp"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:text="另存为" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:orientation="horizontal"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:layout_marginBottom="24dp">
+            <Button
+                android:id="@+id/btn_prompt"
+                android:textSize="12sp"
+                android:singleLine="true"
+                android:ellipsize="end"
+                android:minWidth="0dp"
+                android:padding="4dp"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:text="生成提示词" />
+            <Button
+                android:id="@+id/btn_save"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:singleLine="true"
+                android:ellipsize="end"
+                android:minWidth="0dp"
+                android:padding="4dp"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:text="保存主题" />
+        </LinearLayout>
+
+    </LinearLayout>
+</ScrollView>

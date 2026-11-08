@@ -25,7 +25,7 @@ import java.util.ArrayList;
 import java.util.List;
 import org.json.JSONObject;
 
-public class SettingsActivity extends Activity {
+public class SettingsActivity extends ThemedActivity {
     private static final String TAG = "SettingsActivity";
     private static final String PREFS_NAME = "aichat_settings";
     private static final String KEY_SYSTEM_PROMPT = "system_prompt";
@@ -200,6 +200,13 @@ public class SettingsActivity extends Activity {
                 startActivity(new Intent(SettingsActivity.this, StorageActivity.class));
             }
         });
+        findViewById(R.id.appearance_entry).setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                LogUtil.d(TAG, "click: appearance -> AppearanceActivity");
+                startActivity(new Intent(SettingsActivity.this, AppearanceActivity.class));
+            }
+        });
+        refreshAppearanceEntry();
         ((Button) findViewById(R.id.about_button)).setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 startActivity(new Intent(SettingsActivity.this, AboutActivity.class));
@@ -286,7 +293,7 @@ public class SettingsActivity extends Activity {
      * 用户还没点，拿到的永远是默认值。这里反过来——默认保持勾选，只有明确取消才回滚。
      */
     private void confirmRisk(String title, String message, final CompoundButton target) {
-        new AlertDialog.Builder(this)
+        AcDialog.builder(this)
                 .setTitle(title)
                 .setMessage(message)
                 .setPositiveButton("我已了解，继续开启", null)
@@ -367,7 +374,7 @@ public class SettingsActivity extends Activity {
                 public void onClick(View v) {
                     Object detail = v.getTag();
                     if (detail == null) return;
-                    new AlertDialog.Builder(SettingsActivity.this)
+                    AcDialog.builder(SettingsActivity.this)
                             .setTitle("说明")
                             .setMessage(detail.toString())
                             .setPositiveButton("知道了", null)
@@ -486,7 +493,7 @@ public class SettingsActivity extends Activity {
             doSaveSettings();
             return;
         }
-        new AlertDialog.Builder(this)
+        AcDialog.builder(this)
                 .setTitle("系统提示词已修改")
                 .setMessage("系统提示词位于每次请求的最前面。改动会让服务端的前缀缓存"
                         + "从改动位置起失效——下一次请求的整段上下文按未命中计费，"
@@ -691,7 +698,7 @@ public class SettingsActivity extends Activity {
                             }
                             LogUtil.i(TAG, "queryBalance OK: %s", sb.toString().replace("\n", " | "));
 
-                            new AlertDialog.Builder(SettingsActivity.this)
+                            AcDialog.builder(SettingsActivity.this)
                                     .setTitle(dsProvider.name + " 余额")
                                     .setMessage(sb.toString())
                                     .setPositiveButton("确定", null)
@@ -712,6 +719,24 @@ public class SettingsActivity extends Activity {
         LogUtil.d(TAG, "onResume");
         refreshTitleModelSpinner();
         refreshStorageEntry();
+        refreshAppearanceEntry();
+    }
+
+    /** 外观入口副标题显示当前主题名（实现方案 Q1）；12sp 单行超长省略。 */
+    private void refreshAppearanceEntry() {
+        final android.widget.TextView sub =
+                (android.widget.TextView) findViewById(R.id.appearance_entry_sub);
+        if (sub == null) return;
+        try {
+            AppearanceManager am = AppearanceManager.getInstance(this);
+            String name = am.getActiveThemeName();
+            String text = (name == null || name.length() == 0) ? "内置默认" : name;
+            if (am.isDark()) text = text + " · 深色";
+            sub.setText(text);
+        } catch (Throwable t) {
+            // 外观系统异常不能拖垮设置页，最坏情况副标题显示内置默认
+            sub.setText("内置默认");
+        }
     }
 
     /**
@@ -998,7 +1023,7 @@ public class SettingsActivity extends Activity {
         final EditText input = new EditText(this);
         input.setHint("预设名称");
         input.setSingleLine(true);
-        new AlertDialog.Builder(this)
+        AcDialog.builder(this)
                 .setTitle("保存为预设")
                 .setView(input)
                 .setPositiveButton("保存", new DialogInterface.OnClickListener() {
@@ -1043,7 +1068,7 @@ public class SettingsActivity extends Activity {
         for (int i = 0; i < presetList.size(); i++)
             names[i] = presetList.get(i)[0] + "  — " + (presetList.get(i)[1].length() > 15
                 ? presetList.get(i)[1].substring(0, 15) + "..." : presetList.get(i)[1]);
-        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        AlertDialog.Builder builder = AcDialog.builder(this);
         builder.setTitle("管理预设（点击选择，长按编辑/删除）");
         android.widget.ListView lv = new android.widget.ListView(this);
         lv.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_list_item_1, names));
@@ -1058,7 +1083,7 @@ public class SettingsActivity extends Activity {
         });
         lv.setOnItemLongClickListener(new AdapterView.OnItemLongClickListener() {
             public boolean onItemLongClick(AdapterView<?> p, View v, final int pos, long id) {
-                new AlertDialog.Builder(SettingsActivity.this)
+                AcDialog.builder(SettingsActivity.this)
                         .setTitle(presetList.get(pos)[0])
                         .setItems(new String[]{"修改", "删除"}, new DialogInterface.OnClickListener() {
                             public void onClick(DialogInterface d, int w) {
@@ -1120,7 +1145,7 @@ public class SettingsActivity extends Activity {
         promptEdit.setLayoutParams(lp);
         layout.addView(promptEdit);
 
-        new AlertDialog.Builder(this)
+        AcDialog.builder(this)
                 .setTitle(isNew ? "新建预设" : "修改预设")
                 .setView(layout)
                 .setPositiveButton("保存", new DialogInterface.OnClickListener() {

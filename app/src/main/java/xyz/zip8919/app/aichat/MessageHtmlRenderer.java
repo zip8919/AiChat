@@ -46,6 +46,19 @@ public class MessageHtmlRenderer {
     private static final Map<String, String> renderCache =
             Collections.synchronizedMap(new LinkedHashMap<String, String>(32, 0.75f, true));
 
+    /**
+     * 清空 HTML 缓存。
+     *
+     * <p>缓存 key 只有消息正文，不含外观。公式是预渲染 PNG（字色在出图时就画死了），
+     * 切深浅色后如果命中旧缓存，页面上仍是旧颜色的公式图 —— 表现就是
+     * 「公式颜色不立即变化，要切换会话重进才会变」。切色时先清缓存再重灌整页。
+     */
+    public static void clearRenderCache() {
+        synchronized (renderCache) {
+            renderCache.clear();
+        }
+    }
+
     public static String buildConversationHtml(List<Message> messages, int from, Context ctx) {
         long startTs = System.currentTimeMillis();
         int total = messages == null ? 0 : messages.size();

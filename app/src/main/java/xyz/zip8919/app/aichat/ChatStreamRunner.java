@@ -193,7 +193,10 @@ final class ChatStreamRunner {
         HttpURLConnection conn = null;
         try {
             JSONArray conversation = job.isResume()
-                    ? job.resume.conversation
+                    // 续跑复用的是上一次失败时保存的 conversation，那份可能停在
+                    // 「assistant(tool_calls) 已写入、tool 结果还没写」的半截状态。
+                    // 原样重发必然 400，这里先做一次配对校验。
+                    ? ChatHistory.sanitizeToolPairs(job.resume.conversation)
                     : buildConversation(job.effectiveSystemPrompt);
             JSONArray toolDefs = WebSearchTool.buildToolDefinitions(
                     job.webSearchEnabled, job.httpToolEnabled);

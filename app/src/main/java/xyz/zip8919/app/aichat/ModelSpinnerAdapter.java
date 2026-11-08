@@ -60,6 +60,9 @@ class ModelSpinnerAdapter extends BaseAdapter {
         String name = (m == null || m.name == null) ? "" : m.name;
 
         bindProvider(providerTv, m);
+        // 模型名本身也要跟主题：深色下 layout 的 @color/text_primary 是黑字。
+        // 放末尾而不放 obtain()，是因为 convertView 复用时不会再 inflate。
+        ThemeRecolor.applyTo(v);
 
         int avail = parent.getWidth() - parent.getPaddingLeft() - parent.getPaddingRight()
                 - v.getPaddingLeft() - v.getPaddingRight();
@@ -101,16 +104,23 @@ class ModelSpinnerAdapter extends BaseAdapter {
         nameTv.setText((m == null || m.name == null) ? "" : m.name);
         nameTv.setEllipsize(android.text.TextUtils.TruncateAt.MIDDLE);
         bindProvider(providerTv, m);
+        // 模型名本身也要跟主题：深色下 layout 的 @color/text_primary 是黑字。
+        // 放末尾而不放 obtain()，是因为 convertView 复用时不会再 inflate。
+        ThemeRecolor.applyTo(v);
         return v;
     }
 
     private static void bindProvider(TextView tv, ModelInfo m) {
-        if (m == null || m.provider == null || m.provider.trim().isEmpty()) {
-            tv.setText("未指定服务商");
-            tv.setTextColor(COLOR_PROVIDER_MISSING);
+        boolean missing = (m == null || m.provider == null || m.provider.trim().isEmpty());
+        tv.setText(missing ? "未指定服务商" : m.provider);
+        // 写死 #888888 在深色底上几乎融进背景，必须跟着主题走。
+        // 颜色仍是内置默认时保持原值，零回归。
+        AppearanceManager am = AppearanceManager.getInstance(tv.getContext());
+        if (am.isColorDefault()) {
+            tv.setTextColor(missing ? COLOR_PROVIDER_MISSING : COLOR_PROVIDER_NORMAL);
         } else {
-            tv.setText(m.provider);
-            tv.setTextColor(COLOR_PROVIDER_NORMAL);
+            tv.setTextColor(am.getEffectiveColor(
+                    ThemeTokens.AC_TEXT_SECONDARY, am.isDark()));
         }
     }
 

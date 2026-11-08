@@ -15,6 +15,10 @@ public class StorageManager {
     private static final String CONFIG_FILE = "config.json";
     private static final String CONVERSATIONS_DIR = "conversations";
     private static final String EXPORTS_DIR = "exports";
+    // 外观设置：主题文件、字体文件、外观配置快照
+    private static final String THEMES_DIR = "themes";
+    private static final String FONTS_DIR = "fonts";
+    private static final String APPEARANCE_FILE = "appearance.json";
     private static final String DATA_SUBDIR = "Android/data/xyz.zip8919.app.aichat/files";
     private static final String ROOT_PREF_FILE = ".storage_root";
 
@@ -158,6 +162,15 @@ public class StorageManager {
         File attDir = new File(this.basePath, "attachments");
         if (!attDir.exists() && !attDir.mkdirs()) {
             LogUtil.w(TAG, "createDirectories: cannot mkdir attachments %s", attDir.getAbsolutePath());
+        }
+        // 外观设置的资源目录，同样提前建好，失败只记日志不阻断启动
+        File themesDir = new File(this.basePath, THEMES_DIR);
+        if (!themesDir.exists() && !themesDir.mkdirs()) {
+            LogUtil.w(TAG, "createDirectories: cannot mkdir themes %s", themesDir.getAbsolutePath());
+        }
+        File fontsDir = new File(this.basePath, FONTS_DIR);
+        if (!fontsDir.exists() && !fontsDir.mkdirs()) {
+            LogUtil.w(TAG, "createDirectories: cannot mkdir fonts %s", fontsDir.getAbsolutePath());
         }
         return ok;
     }
@@ -531,6 +544,88 @@ public class StorageManager {
 
     public String getConversationsPath() {
         return this.conversationsPath;
+    }
+
+    // ---- 外观设置：路径与原子写 ----
+
+    /** 外观配置快照的绝对路径。 */
+    public String getAppearancePath() {
+        return this.basePath + File.separator + APPEARANCE_FILE;
+    }
+
+    public String getThemesDir() {
+        return this.basePath + File.separator + THEMES_DIR;
+    }
+
+    public String getFontsDir() {
+        return this.basePath + File.separator + FONTS_DIR;
+    }
+
+    public String loadAppearance() {
+        String content = readFile(getAppearancePath());
+        LogUtil.d(TAG, "loadAppearance: %s, len=%d", getAppearancePath(),
+                content == null ? 0 : content.length());
+        return content;
+    }
+
+    public boolean saveAppearance(String content) {
+        return writeTextAtomic(getAppearancePath(), content);
+    }
+
+    /**
+     * 通用文本原子写：复用 writeFile 的 .tmp → rename；目标已存在导致部分 ROM
+     * rename 失败时，删掉旧文件再试一次，避免「覆盖保存」静默失败。
+     */
+    public boolean writeTextAtomic(String path, String content) {
+        boolean ok = writeFile(path, content);
+        if (!ok) {
+            File target = new File(path);
+            if (target.exists() && target.delete()) {
+                ok = writeFile(path, content);
+                LogUtil.w(TAG, "writeTextAtomic: retried after deleting stale target %s ok=%s", path, ok);
+            }
+        }
+        return ok;
+    }
+
+    /**
+     * 通用字节原子写（字体 .ttf/.otf 导入用）。与 saveExportBytes 同款 .tmp → rename，
+     * 但接受任意绝对路径而非固定写入 exports。
+     */
+    public boolean writeBytesAtomic(String path, byte[] bytes) {
+        if (path == null || bytes == null) return false;
+        File file = new File(path);
+        File parent = file.getParentFile();
+        if (parent != null && !parent.exists() && !parent.mkdirs()) {
+            LogUtil.e(TAG, "writeBytesAtomic mkdirs failed: %s", parent.getAbsolutePath());
+            return false;
+        }
+        File tmp = new File(path + ".tmp");
+        FileOutputStream out = null;
+        boolean ok = false;
+        try {
+            out = new FileOutputStream(tmp);
+            out.write(bytes);
+            out.flush();
+            out.close();
+            out = null;
+            if (tmp.renameTo(file)) {
+                ok = true;
+            } else if (file.exists() && file.delete() && tmp.renameTo(file)) {
+                ok = true;
+            } else {
+                LogUtil.e(TAG, "writeBytesAtomic rename failed: %s", path);
+            }
+        } catch (IOException e) {
+            LogUtil.e(TAG, "writeBytesAtomic failed: %s : %s", path, e.getMessage());
+        } finally {
+            if (out != null) {
+                try { out.close(); } catch (IOException ignored) {}
+            }
+            if (!ok && tmp.exists()) tmp.delete();
+        }
+        LogUtil.i(TAG, "writeBytesAtomic: %d bytes -> %s ok=%s", bytes.length, path, ok);
+        return ok;
     }
 
     public String getStorageInfo() {

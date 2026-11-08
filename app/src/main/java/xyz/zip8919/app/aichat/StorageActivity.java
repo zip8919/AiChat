@@ -25,7 +25,7 @@ import java.io.File;
  * <p>扫描一律在后台线程、结果缓存 60 秒。从本页进分类页再返回时，
  * 除非超过缓存时间，否则不重扫——用户点两下就等两次「统计中…」是不能接受的。
  */
-public class StorageActivity extends Activity {
+public class StorageActivity extends ThemedActivity {
 
     /** 从存储管理跳到其它管理页时带上，用于把返回路径指回本页。 */
     public static final String EXTRA_FROM_STORAGE = "from_storage";
@@ -232,6 +232,7 @@ public class StorageActivity extends Activity {
 
     private View createCategoryRow(final int index) {
         View row = LayoutInflater.from(this).inflate(R.layout.item_storage_category, categories, false);
+        ThemeRecolor.applyTo(row);
         ((View) row.findViewById(R.id.cat_stripe)).setBackgroundColor(
                 getResources().getColor(catColors[index]));
         ((TextView) row.findViewById(R.id.cat_title)).setText(catTitles[index]);
@@ -288,7 +289,7 @@ public class StorageActivity extends Activity {
                 + "包括：拍照与裁剪的中间图（7 天）、网页缓存与临时文件（1 天）、"
                 + "导入残留与写入中转（24 小时 / 1 小时）。\n\n"
                 + "正在使用的文件不会被动到。";
-        new AlertDialog.Builder(this)
+        AcDialog.builder(this)
                 .setTitle("临时文件")
                 .setMessage(msg)
                 .setPositiveButton("清理", new DialogInterface.OnClickListener() {
@@ -317,7 +318,7 @@ public class StorageActivity extends Activity {
                 }
             }
         }
-        new AlertDialog.Builder(this)
+        AcDialog.builder(this)
                 .setTitle("其他文件")
                 .setMessage(sb.toString())
                 .setNegativeButton("关闭", null)
@@ -366,7 +367,7 @@ public class StorageActivity extends Activity {
         }
         msg.append("这些文件不属于任何对话，删除后无法恢复。");
 
-        new AlertDialog.Builder(this)
+        AcDialog.builder(this)
                 .setTitle("安全清理")
                 .setMessage(msg.toString())
                 .setPositiveButton("清理", new DialogInterface.OnClickListener() {
@@ -433,6 +434,7 @@ public class StorageActivity extends Activity {
         for (int i = 0; i < r.top.size(); i++) {
             final StorageReport.Entry e = r.top.get(i);
             View row = inflater.inflate(R.layout.item_storage_file, topList, false);
+            ThemeRecolor.applyTo(row);
             ((TextView) row.findViewById(R.id.file_name)).setText(e.file.getName());
             ((TextView) row.findViewById(R.id.file_cat)).setText(
                     StorageReport.categoryName(e.category)
@@ -573,7 +575,7 @@ public class StorageActivity extends Activity {
                 + "旧版本的图片存在应用私有目录，打开应用后会自动迁移到这里，无需 root。");
         box.addView(foot);
 
-        new AlertDialog.Builder(this)
+        AcDialog.builder(this)
                 .setTitle("存储位置")
                 .setView(box)
                 .setNegativeButton("关闭", null)

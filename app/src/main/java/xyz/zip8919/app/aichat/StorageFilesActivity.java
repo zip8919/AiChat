@@ -37,7 +37,7 @@ import java.util.Locale;
  * <p>删除与重命名仍然走 {@link StorageManager}：同一份文件不能有两套改名逻辑，
  * 否则「改名失败但界面显示成功」这种事迟早发生。
  */
-public class StorageFilesActivity extends Activity {
+public class StorageFilesActivity extends ThemedActivity {
 
     private static final String TAG = "StorageFiles";
 
@@ -197,7 +197,7 @@ public class StorageFilesActivity extends Activity {
                 "打开方式（第三方应用）", "分享",
                 "重命名", "删除"
         };
-        new AlertDialog.Builder(this)
+        AcDialog.builder(this)
                 .setTitle(f.getName())
                 .setItems(items, new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int which) {
@@ -223,7 +223,7 @@ public class StorageFilesActivity extends Activity {
         final EditText input = new EditText(this);
         input.setText(f.getName());
         input.setSelectAllOnFocus(true);
-        new AlertDialog.Builder(this)
+        AcDialog.builder(this)
                 .setTitle("重命名")
                 .setView(input)
                 .setPositiveButton("确定", new DialogInterface.OnClickListener() {
@@ -251,7 +251,7 @@ public class StorageFilesActivity extends Activity {
     }
 
     private void confirmDelete(final File f) {
-        new AlertDialog.Builder(this)
+        AcDialog.builder(this)
                 .setTitle("删除文件")
                 .setMessage("删除 " + f.getName() + "？\n\n"
                         + StorageReport.size(f.length()) + "，此操作不可恢复。")
@@ -305,8 +305,10 @@ public class StorageFilesActivity extends Activity {
             ((TextView) row.findViewById(R.id.file_cat)).setText(
                     ext + fmt.format(new Date(f.lastModified())));
             ((TextView) row.findViewById(R.id.file_size)).setText(StorageReport.size(f.length()));
+            ThemeRecolor.applyTo(row);
             row.setBackgroundColor(f.getName().equals(highlight)
-                    ? 0xFFE3F2FD : 0xFFFFFFFF);
+                    ? ThemeRecolor.listMarkBg(row.getContext(), 0xFFE3F2FD)
+                    : ThemeRecolor.listBg(row.getContext()));
             return row;
         }
     }

@@ -111,7 +111,90 @@ final class ChatHistory {
             mm.put("content", apiContentOf(m, vision));
             msgs.put(mm);
         }
-        return msgs;
+        // 出口兜底：任何一条上游路径漏掉 tool 响应都不会把非法序列发出去
+        return sanitizeToolPairs(msgs);
+    }
+
+    /**
+     * 保证 messages 里每个 assistant(tool_calls) 后面都紧跟齐全的 tool 响应。
+     *
+     * <p>为什么必须在<b>出口</b>再做一次，而不是只信 {@link #appendToolHistory}：
+     * 那个方法只管 toolHistory 这一路，而真实请求还有别的来源 ——
+     * <ul>
+     *   <li>续跑（{@code StreamJob}）直接把上一次的 toolHistory JSON 原样搬过来，
+     *       搬运时不做配对检查；</li>
+     *   <li>旧会话按正文里的 {@code [tool]} 卡片恢复工具历史，恢复结果可能残缺；</li>
+     *   <li>工具执行到一半用户打断 / 请求失败，落盘的就是半截记录。</li>
+     * </ul>
+     * 任意一条漏掉一个 tool 响应，DeepSeek 就返回 400：
+     * 「An assistant message with 'tool_calls' must be followed by tool messages
+     * responding to each 'tool_call_id'」。
+     *
+     * <p>策略是<b>降级而不是报错</b>：配不齐就去掉这条 assistant 的 tool_calls，
+     * 只保留正文；正文也空就连整条丢弃。少一轮工具上下文，好过整个请求失败。
+     */
+    static JSONArray sanitizeToolPairs(JSONArray msgs) throws Exception {
+        if (msgs == null) return new JSONArray();
+        JSONArray out = new JSONArray();
+        JSONObject pendingAssistant = null;
+        java.util.Set<String> needIds = new java.util.HashSet<String>();
+        List<JSONObject> pendingTools = new ArrayList<JSONObject>();
+
+        for (int i = 0; i < msgs.length(); i++) {
+            JSONObject o = msgs.optJSONObject(i);
+            if (o == null) continue;
+            String role = o.optString("role", "");
+            JSONArray calls = o.optJSONArray("tool_calls");
+
+            if ("assistant".equals(role) && calls != null && calls.length() > 0) {
+                flushToolGroup(out, pendingAssistant, needIds, pendingTools);
+                pendingAssistant = o;
+                needIds.clear();
+                pendingTools.clear();
+                for (int k = 0; k < calls.length(); k++) {
+                    JSONObject c = calls.optJSONObject(k);
+                    if (c != null) needIds.add(c.optString("id", ""));
+                }
+                continue;
+            }
+
+            if ("tool".equals(role)) {
+                if (pendingAssistant == null) continue;   // 孤立的 tool 响应，直接丢
+                String id = o.optString("tool_call_id", "");
+                if (id.length() == 0 && !needIds.isEmpty()) {
+                    // 老数据没写 id：按顺序补第一个待响应 id，保证能配上
+                    id = needIds.iterator().next();
+                    JSONObject t = new JSONObject();
+                    t.put("role", "tool");
+                    t.put("tool_call_id", id);
+                    t.put("content", o.optString("content", ""));
+                    o = t;
+                }
+                if (needIds.remove(id)) pendingTools.add(o);
+                continue;
+            }
+
+            flushToolGroup(out, pendingAssistant, needIds, pendingTools);
+            pendingAssistant = null;
+            out.put(o);
+        }
+        flushToolGroup(out, pendingAssistant, needIds, pendingTools);
+        return out;
+    }
+
+    private static void flushToolGroup(JSONArray out, JSONObject assistant,
+                                       java.util.Set<String> needIds, List<JSONObject> tools)
+            throws Exception {
+        if (assistant == null) return;
+        if (!needIds.isEmpty()) {
+            // 没配齐：降级成纯文本 assistant，避免 400
+            assistant.remove("tool_calls");
+            String text = assistant.optString("content", "");
+            if (text.length() > 0) out.put(assistant);
+            return;
+        }
+        out.put(assistant);
+        for (int i = 0; i < tools.size(); i++) out.put(tools.get(i));
     }
 
     /**

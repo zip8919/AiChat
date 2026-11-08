@@ -333,10 +333,20 @@ final class MarkdownPipeline {
                 ? "<div id=\"older-hint\" onclick=\"loadOlderNow()\">上滑加载更早的 "
                         + olderCount + " 条消息</div>"
                 : "<div id=\"older-hint\" style=\"display:none\"></div>";
+
+        // 三段式样式（全局规则 R3）：Chromium 30 不支持 CSS 变量，主题色靠
+        // 「基础 CSS → token 规则 → 用户 CSS」的追加顺序覆盖。后两段带 id，
+        // WebViewRefresher 只替换它们的 textContent 即可即时换肤，不重灌整页。
+        AppearanceManager m = AppearanceManager.getInstance();
+        String themeCss = ThemeCssBuilder.themeStyleContent(m, m.isDark());
+        String fontCss = ThemeCssBuilder.fontStyleContent(m);
+
         return "<!DOCTYPE html>\n<html>\n<head>\n" +
                "<meta charset=\"utf-8\">\n" +
                "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1,user-scalable=no\">\n" +
                "<style>\n" + RendererAssets.CSS + "\n</style>\n" +
+               "<style id=\"ac-theme\">\n" + themeCss + "\n</style>\n" +
+               "<style id=\"ac-font\">\n" + fontCss + "\n</style>\n" +
                "</head>\n<body>\n" +
                hint +
                "<div id=\"msgs\">\n" + bodyHtml + "\n</div>\n" +

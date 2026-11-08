@@ -114,6 +114,37 @@
             android:exported="false"
             android:configChanges="screenSize|orientation|keyboardHidden"/>
 
+        <activity
+            android:label="外观"
+            android:name="xyz.zip8919.app.aichat.AppearanceActivity"
+            android:exported="false"
+            android:configChanges="screenSize|orientation|keyboardHidden"/>
+
+        <activity
+            android:label="管理字体"
+            android:name="xyz.zip8919.app.aichat.FontManagerActivity"
+            android:exported="false"
+            android:configChanges="screenSize|orientation|keyboardHidden"/>
+
+        <activity
+            android:label="管理自定义主题"
+            android:name="xyz.zip8919.app.aichat.ThemeManagerActivity"
+            android:exported="false"
+            android:configChanges="screenSize|orientation|keyboardHidden"/>
+
+        <activity
+            android:label="编辑主题"
+            android:name="xyz.zip8919.app.aichat.ThemeEditActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize"
+            android:configChanges="screenSize|orientation|keyboardHidden"/>
+
+        <activity
+            android:label="主题预览"
+            android:name="xyz.zip8919.app.aichat.ThemePreviewActivity"
+            android:exported="false"
+            android:configChanges="screenSize|orientation|keyboardHidden"/>
+
         <!-- 相机输出：只暴露 cache/camera 下一个文件，靠 Intent 临时写授权，不对外开放 -->
         <provider
             android:name=".CameraOutputProvider"

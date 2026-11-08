@@ -15,7 +15,7 @@ import android.widget.Toast;
  * 关于页。版本号、开源许可、使用说明，以及「检查更新」入口（跳 {@link UpdateActivity}）。
  * 「反馈建议」仍是占位入口，不接后端。
  */
-public class AboutActivity extends Activity {
+public class AboutActivity extends ThemedActivity {
 
     private static final String TAG = "AboutActivity";
 
@@ -70,7 +70,7 @@ public class AboutActivity extends Activity {
      * 使用说明与首启弹窗同源（{@link HelpText}），随时可回查。
      */
     private void showHelp() {
-        new AlertDialog.Builder(this)
+        AcDialog.builder(this)
                 .setTitle("使用说明")
                 .setMessage(HelpText.full())
                 .setPositiveButton("关闭", new DialogInterface.OnClickListener() {
@@ -91,7 +91,7 @@ public class AboutActivity extends Activity {
                 + "• commonmark-java\n  github.com/commonmark/commonmark-java\n\n"
                 + "• jlatexmath-android\n  github.com/noties/jlatexmath-android\n\n"
                 + "• Conscrypt\n  github.com/google/conscrypt\n";
-        new AlertDialog.Builder(this)
+        AcDialog.builder(this)
                 .setTitle("开源许可")
                 .setMessage(text)
                 .setPositiveButton("关闭", new DialogInterface.OnClickListener() {

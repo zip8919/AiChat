@@ -193,7 +193,7 @@ final class ViewerController {
             }
         });
 
-        final AlertDialog dlg = new AlertDialog.Builder(activity)
+        final AlertDialog dlg = AcDialog.builder(activity)
                 .setView(view)
                 .setCancelable(true)
                 .create();
@@ -356,7 +356,7 @@ final class ViewerController {
             }
         });
 
-        final AlertDialog tDlg = new AlertDialog.Builder(activity)
+        final AlertDialog tDlg = AcDialog.builder(activity)
                 .setView(view)
                 .setCancelable(true)
                 .create();
@@ -498,7 +498,7 @@ final class ViewerController {
             }
         });
 
-        final AlertDialog cDlg = new AlertDialog.Builder(activity)
+        final AlertDialog cDlg = AcDialog.builder(activity)
                 .setView(view)
                 .setCancelable(true)
                 .create();
@@ -764,7 +764,7 @@ final class ViewerController {
             }
         });
 
-        final AlertDialog dlg = new AlertDialog.Builder(activity)
+        final AlertDialog dlg = AcDialog.builder(activity)
                 .setView(view)
                 .setCancelable(true)
                 .create();

@@ -185,17 +185,25 @@ public class ConversationAdapter extends BaseAdapter {
             sub.append(" · ").append(StorageReport.size(conv.fileBytes));
         }
         holder.timeView.setText(sub.toString());
+        // 先把标题/副行文字与底色按主题刷一遍，再按选中/高亮覆盖底色。
+        // 顺序不能反：applyTo 会把背景重置成常规底色。
+        ThemeRecolor.applyTo(convertView);
         if (selectionMode) {
             boolean checked = selectedIds.contains(conv.id);
             holder.checkView.setVisibility(View.VISIBLE);
             holder.checkView.setChecked(checked);
-            convertView.setBackgroundColor(checked ? 0xFFFFF3CD : 0xFFFFFFFF);
+            // 选中/普通底色不能写死 #FFF3CD/#FFFFFF：getView 每次 bind 都会执行，
+            // 会把 ThemeRecolor 刷好的深色底重新盖成白色。
+            convertView.setBackgroundColor(checked
+                    ? ThemeRecolor.listMarkBg(convertView.getContext(), 0xFFFFF3CD)
+                    : ThemeRecolor.listBg(convertView.getContext()));
         } else {
             holder.checkView.setVisibility(View.GONE);
             holder.checkView.setChecked(false);
             // 高亮只表达「你刚点的是这一条」，不能和选中态混淆，所以优先级放在选中之后
             convertView.setBackgroundColor(conv.id.equals(highlightId)
-                    ? 0xFFE3F2FD : 0xFFFFFFFF);
+                    ? ThemeRecolor.listMarkBg(convertView.getContext(), 0xFFE3F2FD)
+                    : ThemeRecolor.listBg(convertView.getContext()));
         }
         return convertView;
     }

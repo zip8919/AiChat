@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:orientation="vertical"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/background"
+    android:padding="16dp">
+
+    <TextView
+        android:id="@+id/manager_title"
+        android:textSize="20sp"
+        android:textStyle="bold"
+        android:textColor="@color/text_primary"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="4dp"
+        android:text="管理" />
+
+    <TextView
+        android:id="@+id/manager_hint"
+        android:textSize="12sp"
+        android:textColor="@color/text_secondary"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="8dp"
+        android:text="" />
+
+    <LinearLayout
+        android:orientation="horizontal"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="8dp">
+        <Button
+            android:id="@+id/btn_primary"
+            android:textSize="12sp"
+            android:singleLine="true"
+            android:ellipsize="end"
+            android:minWidth="0dp"
+            android:padding="4dp"
+            android:minHeight="48dp"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:text="添加" />
+        <Button
+            android:id="@+id/btn_secondary"
+            android:textSize="12sp"
+            android:singleLine="true"
+            android:ellipsize="end"
+            android:minWidth="0dp"
+            android:padding="4dp"
+            android:minHeight="48dp"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:text="新建" />
+        <Button
+            android:id="@+id/btn_multi"
+            android:textSize="12sp"
+            android:singleLine="true"
+            android:ellipsize="end"
+            android:minWidth="0dp"
+            android:padding="4dp"
+            android:minHeight="48dp"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:text="批量管理" />
+    </LinearLayout>
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+        <ListView
+            android:id="@+id/manager_list"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+        <TextView
+            android:id="@+id/manager_empty"
+            android:textSize="13sp"
+            android:textColor="@color/text_secondary"
+            android:gravity="center"
+            android:padding="24dp"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone"
+            android:text="" />
+    </FrameLayout>
+
+    <LinearLayout
+        android:id="@+id/manager_selection_bar"
+        android:orientation="vertical"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:visibility="gone">
+        <TextView
+            android:id="@+id/manager_selection_count"
+            android:textSize="12sp"
+            android:textColor="@color/text_secondary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="已选 0" />
+        <LinearLayout
+            android:orientation="horizontal"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content">
+            <Button
+                android:id="@+id/btn_act1"
+                android:textSize="12sp"
+                android:singleLine="true"
+                android:ellipsize="end"
+                android:minWidth="0dp"
+                android:padding="4dp"
+                android:minHeight="48dp"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:text="操作一" />
+            <Button
+                android:id="@+id/btn_act2"
+                android:textSize="12sp"
+                android:singleLine="true"
+                android:ellipsize="end"
+                android:minWidth="0dp"
+                android:padding="4dp"
+                android:minHeight="48dp"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:text="操作二" />
+            <Button
+                android:id="@+id/btn_act3"
+                android:textSize="12sp"
+                android:singleLine="true"
+                android:ellipsize="end"
+                android:minWidth="0dp"
+                android:padding="4dp"
+                android:minHeight="48dp"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:text="操作三" />
+        </LinearLayout>
+    </LinearLayout>
+
+</LinearLayout>

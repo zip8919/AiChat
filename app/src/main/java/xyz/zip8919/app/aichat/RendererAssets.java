@@ -48,6 +48,9 @@ final class RendererAssets {
             "pre .save-btn{position:absolute;top:4px;right:56px;padding:2px 8px;" +
             "font-size:11px;background:#e8f5e9;border:1px solid #a5d6a7;border-radius:3px;" +
             "color:#2e7d32;font-family:Roboto,sans-serif;}" +
+            "pre .import-btn{position:absolute;top:4px;right:56px;padding:2px 8px;" +
+            "font-size:11px;background:#f3e5f5;border:1px solid #ce93d8;border-radius:3px;" +
+            "color:#6a1b9a;font-family:Roboto,sans-serif;}" +
             "pre .preview-btn{position:absolute;top:4px;right:104px;padding:2px 8px;" +
             "font-size:11px;background:#e1f5fe;border:1px solid #81d4fa;border-radius:3px;" +
             "color:#0277bd;font-family:Roboto,sans-serif;}" +
@@ -230,16 +233,28 @@ final class RendererAssets {
             "setTimeout(function(){btn.textContent='复制';},2000);};" +
             "pre.appendChild(btn);" +
             "var langTag=pre.querySelector('.lang-tag');" +
+            "var lang=langTag?langTag.textContent.trim().toLowerCase():'';" +
+            "var narrow=(window.innerWidth<320);" +
             "var sbtn=document.createElement('button');" +
             "sbtn.className='save-btn';sbtn.textContent='保存';" +
             "sbtn.onclick=function(e){e.stopPropagation();e.preventDefault();" +
             "var code=pre.querySelector('code');" +
             "var text=code?code.textContent:pre.textContent;" +
-            "var saveLang=langTag?langTag.textContent.trim().toLowerCase():'';" +
-            "if(window.Android)Android.saveCode(saveLang,text);};" +
+            "if(window.Android)Android.saveCode(lang,text);};" +
+            "if(lang==='actheme'){" +
+            "if(narrow)sbtn.style.display='none';else sbtn.style.right='104px';}" +
             "pre.appendChild(sbtn);" +
+            "if(lang==='actheme'&&!pre.querySelector('.import-btn')){" +
+            "var ibtn=document.createElement('button');" +
+            "ibtn.className='import-btn';ibtn.textContent='导入主题';" +
+            "ibtn.onclick=function(e){e.stopPropagation();e.preventDefault();" +
+            "var code=pre.querySelector('code');" +
+            "var text=code?code.textContent:'';" +
+            "if(window.Android)Android.importTheme(text);" +
+            "ibtn.textContent='已导入';" +
+            "setTimeout(function(){ibtn.textContent='导入主题';},2000);};" +
+            "pre.appendChild(ibtn);}" +
             "if(langTag){" +
-            "var lang=langTag.textContent.trim().toLowerCase();" +
             "if((lang==='js'||lang==='javascript')&&!pre.querySelector('.run-btn')){" +
             "var rbtn=document.createElement('button');" +
             "rbtn.className='run-btn';rbtn.textContent='运行';" +
