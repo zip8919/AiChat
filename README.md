@@ -1,6 +1,6 @@
 # AiChat
 
-Android 词典笔 AI 对话应用（版本 1.14.1，minSdk 18 / targetSdk 18，真机 Android 4.4.2 / API 19）。基于 WebView + HTML/CSS 渲染 Markdown/LaTeX，通过任意 OpenAI 兼容端点调用大模型，内置 DeepSeek（不含 API Key）与商汤日日新 默认配置，默认模型 `deepseek-v4-flash`（商汤日日新）。
+Android 词典笔 AI 对话应用（版本 1.14.2，minSdk 18 / targetSdk 18，真机 Android 4.4.2 / API 19）。基于 WebView + HTML/CSS 渲染 Markdown/LaTeX，通过任意 OpenAI 兼容端点调用大模型，内置 DeepSeek（不含 API Key）与商汤日日新 默认配置，默认模型 `deepseek-v4-flash`（商汤日日新）。
 
 > 改代码前先看 [ARCHITECTURE.md](ARCHITECTURE.md)：请求链路图、类职责边界、并发约定、「想改 X 去哪」对照表。
 
@@ -34,7 +34,7 @@ Android 词典笔 AI 对话应用（版本 1.14.1，minSdk 18 / targetSdk 18，�
 - **代码执行器提示词可配** — 设置页可自定义环境提示词，支持占位符 `{android}` `{api}` `{webview}` `{model}` `{app_version}` `{ua}`，发送时按当前设备实际值填充；未知占位符原样保留。系统提示词与标题生成提示词使用同一套占位符规则。WebView 版本从 `WebSettings.getDefaultUserAgent()` 的 `Chrome/xx` 段提取（`WebViewFactory` 是隐藏 API，不可反射）
 - **设置** — 联网搜索、流式输出、实时渲染、调试日志、快速搜题开关；`http_request` 工具开关；429 重试策略；代码执行器提示词；模型/提供商管理；查询 DeepSeek 余额（显示总余额/充值/赠送）；存储空间管理与用量统计入口；关于页入口
 - **关于与使用说明** — 关于页显示应用名、版本号（`versionName (versionCode)`）、**使用说明（与首启弹窗同一份文案）**、检查更新、反馈建议、开源许可（commonmark-java / jlatexmath-android / Conscrypt）；反馈建议仍为占位。首次启动弹出使用说明与免责声明，必须点「同意并继续」才可用；确认前不会发送任何由外部 Intent 带入的消息
-- **版本更新**（关于页「检查更新」进入）— 直连 `api.github.com` 查最新 Release，按 `tag_name` 逐段比较数字判断新旧，展示更新说明；按 `Build.CPU_ABI` 自动挑对应架构的 APK（挑不到退 universal），也可手动切换。下载前内置 7 个加速镜像逐项测速并自动选最快，**测速是 HTTP 首字节探测（`Range: bytes=0-1023` 的 TTFB + 实读 1KB）而非 ICMP ping**——Android 上 ICMP 普遍被丢，测了也不代表下载快。镜像模板支持 `{url}` 占位符（省略则作前缀），可自定义添加、长按删除、选中项本地记忆。API 查询不走镜像（镜像只代理 `github.com/.../releases/download/`）；下载走已有的 `TlsCompat`（Conscrypt）兼容层，8KB 流式写盘、先 `.tmp` 再改名、按 API 给的 size 校验防截断，下载前清理旧 APK 避免占满可用存储；完成后经 `FilePathProvider` 的 `content://` 调起系统安装器。签名一致，覆盖安装不丢数据
+- **版本更新**（关于页「检查更新」进入）— 直连 `api.github.com` 查最新 Release，按 `tag_name` 逐段比较数字判断新旧，展示更新说明；按 `Build.CPU_ABI` 自动挑对应架构的 APK（挑不到退 universal），也可手动切换。下载前内置 7 个加速镜像逐项测速并自动选最快，**测速是 HTTP 首字节探测（`Range: bytes=0-1023` 的 TTFB + 实读 1KB）而非 ICMP ping**——Android 上 ICMP 普遍被丢，测了也不代表下载快。镜像模板支持 `{url}` 占位符（省略则作前缀），可自定义添加、长按删除、选中项本地记忆。API 查询不走镜像（镜像只代理 `github.com/.../releases/download/`）；下载走已有的 `TlsCompat`（Conscrypt）兼容层，8KB 流式写盘、先 `.tmp` 再改名、按 API 给的 size 校验防截断，下载前清理旧 APK 避免占满可用存储；完成后按系统版本调起安装器——**API 19（4.4）的 `PackageInstallerActivity` 只声明了 `file` scheme，必须用 `file://`**（`content://` 会因 Intent 匹配不到 Activity 而报「没有可用的安装器」，targetSdk 18 也不会触发 `FileUriExposedException`），API 24+ 才走 `FilePathProvider` 的 `content://` + 临时授权；若存储回退到内部私有目录会先把 APK 复制到外部公共 Downloads 再装。签名一致，覆盖安装不丢数据
 - **扫描识别** — 横屏扫描界面，调用词典笔系统 OCR 识别文字，支持加载摘抄记录、编辑、复制、插入
 - **快速搜题模式** — 开启后按扫描键直接跳转系统扫描应用，返回自动填入输入框
 - **屏幕旋转** — 右上角 ↻ 按钮切换横屏/竖屏
@@ -128,7 +128,7 @@ Tavily 的密钥在应用内「设置 → Tavily API Key」填写，仅保存在
 
 ```
 ├── app/
-│   ├── build.gradle                # versionName 1.14.1 / versionCode 62 / compileSdk 34
+│   ├── build.gradle                # versionName 1.14.2 / versionCode 63 / compileSdk 34
 │   ├── keystore/mc.jks             # 签名密钥库
 │   └── src/main/
 │       ├── AndroidManifest.xml     # 包名 xyz.zip8919.app.aichat，15 个 Activity

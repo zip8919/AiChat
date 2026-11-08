@@ -6,7 +6,10 @@ import android.content.ActivityNotFoundException;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.graphics.Typeface;
+import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
 import android.text.TextUtils;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -20,6 +23,11 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -390,20 +398,64 @@ public class UpdateActivity extends Activity implements UpdateManager.Callback {
             return;
         }
         try {
-            // 装在 exports 目录，复用 FilePathProvider 的 content:// 出口；
-            // targetSdk 18 虽不触发 FileUriExposedException，但 file:// 对外部安装器仍不可读。
+            // 4.4 的 PackageInstaller intent-filter 只声明 file scheme，不认 content://，
+            // 用 content:// 会直接 ActivityNotFoundException。targetSdk 18 也不会触发
+            // FileUriExposedException，所以这里必须走 file://。
+            // N+ 反过来禁止跨应用暴露 file://，才用 FilePathProvider 的 content://。
+            Uri uri;
+            if (Build.VERSION.SDK_INT >= 24) {
+                uri = FileActions.uriOf(apkFile);          // APK 在 exports，provider 能解析
+            } else {
+                uri = Uri.fromFile(worldReadable(apkFile));
+            }
             Intent i = new Intent(Intent.ACTION_VIEW);
-            i.setDataAndType(FileActions.uriOf(apkFile),
-                    "application/vnd.android.package-archive");
-            i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            i.setDataAndType(uri, "application/vnd.android.package-archive");
+            if (Build.VERSION.SDK_INT >= 24) {
+                i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            }
             i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             startActivity(i);
             LogUtil.i(TAG, "install: %s", apkFile.getName());
         } catch (ActivityNotFoundException e) {
-            Toast.makeText(this, "没有可用的安装器", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "未找到系统安装器，请用文件管理器打开已下载的 APK",
+                    Toast.LENGTH_LONG).show();
         } catch (Throwable t) {
             LogUtil.w(TAG, "install failed: " + t.getMessage());
             Toast.makeText(this, "调起安装失败", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    /**
+     * 外部存储可用时，APK 落在 Android/data/&lt;包名&gt;/files/exports，安装器凭
+     * READ_EXTERNAL_STORAGE 就能读 file://，原样返回。
+     * 只有当 StorageManager 回退到内部私有目录（/data/data/...）时才需要复制——
+     * 那个目录其他 uid 进不去，安装器拿到 file:// 也读不到字节。
+     */
+    private File worldReadable(File src) {
+        String internal = getFilesDir().getAbsolutePath();
+        if (!src.getAbsolutePath().startsWith(internal)) return src;
+
+        File dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+        if (dir == null) return src;
+        if (!dir.isDirectory() && !dir.mkdirs()) return src;
+        File dst = new File(dir, src.getName());
+        InputStream in = null;
+        OutputStream out = null;
+        try {
+            in = new FileInputStream(src);
+            out = new FileOutputStream(dst);
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+            out.flush();
+            LogUtil.i(TAG, "worldReadable: copied to %s", dst.getAbsolutePath());
+            return dst;
+        } catch (IOException e) {
+            LogUtil.w(TAG, "worldReadable copy failed: %s", e.getMessage());
+            return src;
+        } finally {
+            try { if (in != null) in.close(); } catch (Throwable t) {}
+            try { if (out != null) out.close(); } catch (Throwable t) {}
         }
     }
 
