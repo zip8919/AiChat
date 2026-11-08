@@ -344,7 +344,7 @@ public class ToolsActivity extends ThemedActivity {
 
     private void enterSelectionMode() {
         if (files.isEmpty()) {
-            Toast.makeText(this, "没有可用的已保存代码", Toast.LENGTH_SHORT).show();
+            AcToast.show(this, "没有可用的已保存代码");
             return;
         }
         selectionMode = true;
@@ -415,7 +415,7 @@ public class ToolsActivity extends ThemedActivity {
     private void confirmDeleteSelectedFiles() {
         final List<File> selected = getSelectedFiles();
         if (selected.isEmpty()) {
-            Toast.makeText(this, "请先选择要删除的代码", Toast.LENGTH_SHORT).show();
+            AcToast.show(this, "请先选择要删除的代码");
             return;
         }
         AcDialog.builder(this)
@@ -438,7 +438,7 @@ public class ToolsActivity extends ThemedActivity {
             }
         }
         LogUtil.i(TAG, "deleteSelectedFiles: %d/%d ok", ok, selected.size());
-        Toast.makeText(this, "已删除 " + ok + " 个文件", Toast.LENGTH_SHORT).show();
+        AcToast.show(this, "已删除 " + ok + " 个文件");
         StorageActivity.invalidateCache();
         selectionMode = false;
         refreshFiles();
@@ -516,7 +516,7 @@ public class ToolsActivity extends ThemedActivity {
     /** 三个文本入口的兜底：万一图片文件绕过菜单（如外部调用），不把字节当文本读。 */
     private boolean guardImage(File f) {
         if (!isImageFile(f)) return false;
-        Toast.makeText(this, "图片请用「预览图片」查看", Toast.LENGTH_SHORT).show();
+        AcToast.show(this, "图片请用「预览图片」查看");
         previewImage(f);
         return true;
     }
@@ -541,7 +541,7 @@ public class ToolsActivity extends ThemedActivity {
                     public void onClick(DialogInterface d, int w) {
                         final String name = ExportHelper.sanitizeName(input.getText().toString());
                         if (name.isEmpty()) {
-                            Toast.makeText(ToolsActivity.this, "文件名不能为空", Toast.LENGTH_SHORT).show();
+                            AcToast.show(ToolsActivity.this, "文件名不能为空");
                             return;
                         }
                         final File target = new File(exportsDir(), name);
@@ -570,7 +570,7 @@ public class ToolsActivity extends ThemedActivity {
         boolean ok = f.renameTo(target);
         LogUtil.i(TAG, "renameFile: %s -> %s ok=%s", f.getName(), name, ok);
         if (!ok) {
-            Toast.makeText(ToolsActivity.this, "重命名失败", Toast.LENGTH_SHORT).show();
+            AcToast.show(ToolsActivity.this, "重命名失败");
         }
         refreshFiles();
     }
@@ -597,7 +597,7 @@ public class ToolsActivity extends ThemedActivity {
                         boolean ok = f.delete();
                         LogUtil.i(TAG, "deleteFile: %s ok=%s", f.getName(), ok);
                         if (!ok) {
-                            Toast.makeText(ToolsActivity.this, "删除失败", Toast.LENGTH_SHORT).show();
+                            AcToast.show(ToolsActivity.this, "删除失败");
                         }
                         // 导出目录变了，存储管理页的缓存作废，否则返回后仍显示旧体积
                         StorageActivity.invalidateCache();
@@ -637,7 +637,7 @@ public class ToolsActivity extends ThemedActivity {
 
     private void pickFileIntoInput() {
         if (files.isEmpty()) {
-            Toast.makeText(this, "没有可用的已保存代码", Toast.LENGTH_SHORT).show();
+            AcToast.show(this, "没有可用的已保存代码");
             return;
         }
         final String[] names = new String[files.size()];
@@ -674,12 +674,12 @@ public class ToolsActivity extends ThemedActivity {
     private void pasteIntoInput() {
         ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
         if (cm == null || !cm.hasPrimaryClip() || cm.getPrimaryClip() == null) {
-            Toast.makeText(this, "剪贴板为空", Toast.LENGTH_SHORT).show();
+            AcToast.show(this, "剪贴板为空");
             return;
         }
         ClipData clip = cm.getPrimaryClip();
         if (clip.getItemCount() == 0) {
-            Toast.makeText(this, "剪贴板为空", Toast.LENGTH_SHORT).show();
+            AcToast.show(this, "剪贴板为空");
             return;
         }
         CharSequence text = clip.getItemAt(0).coerceToText(this);
@@ -689,7 +689,7 @@ public class ToolsActivity extends ThemedActivity {
 
     private void runJs(String code) {
         if (code == null || code.trim().isEmpty()) {
-            Toast.makeText(this, "请输入要运行的 JS 代码", Toast.LENGTH_SHORT).show();
+            AcToast.show(this, "请输入要运行的 JS 代码");
             return;
         }
         LogUtil.i(TAG, "runJs: len=%d", code.length());
@@ -715,8 +715,7 @@ public class ToolsActivity extends ThemedActivity {
 
     private void sendEnvPrompt(boolean send) {
         LogUtil.i(TAG, "sendEnvPrompt: send=%s", send);
-        Toast.makeText(this, send ? "已发送环境提示词" : "已插入环境提示词",
-                Toast.LENGTH_SHORT).show();
+        AcToast.show(this, send ? "已发送环境提示词" : "已插入环境提示词");
         startActivity(MainActivity.newPromptIntent(this, envPrompt(), send));
         finish();
     }
@@ -725,7 +724,7 @@ public class ToolsActivity extends ThemedActivity {
         ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
         if (cm != null) {
             cm.setPrimaryClip(ClipData.newPlainText("aichat", text));
-            Toast.makeText(this, "已复制到剪贴板", Toast.LENGTH_SHORT).show();
+            AcToast.show(this, "已复制到剪贴板");
         }
     }
 }

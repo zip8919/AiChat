@@ -107,8 +107,7 @@ final class MessageQueue {
         LogUtil.i(TAG, "enqueued: len=%d files=%d pending=%d",
                 text == null ? 0 : text.length(),
                 files == null ? 0 : files.size(), pending.size());
-        Toast.makeText(activity, "已排队 " + pending.size() + " 条，将在当前回复结束后发送",
-                Toast.LENGTH_SHORT).show();
+        AcToast.show(activity, "已排队 " + pending.size() + " 条，将在当前回复结束后发送");
     }
 
     /** 本轮回复结束：若队列非空且当前空闲，取出队首发送。 */
@@ -178,7 +177,7 @@ final class MessageQueue {
 
     void showManager() {
         if (pending.isEmpty()) {
-            Toast.makeText(activity, "没有排队中的消息", Toast.LENGTH_SHORT).show();
+            AcToast.show(activity, "没有排队中的消息");
             updateBar();
             return;
         }
@@ -245,7 +244,7 @@ final class MessageQueue {
         final int index = indexOf(id);
         if (index < 0) {
             LogUtil.i(TAG, "action on id=%d dropped, already sent (pending=%d)", id, pending.size());
-            Toast.makeText(activity, "该消息已发送", Toast.LENGTH_SHORT).show();
+            AcToast.show(activity, "该消息已发送");
             refreshManager();
             return;
         }
@@ -290,13 +289,13 @@ final class MessageQueue {
     private void move(int id, int delta) {
         int from = indexOf(id);
         if (from < 0) {
-            Toast.makeText(activity, "该消息已发送", Toast.LENGTH_SHORT).show();
+            AcToast.show(activity, "该消息已发送");
             refreshManager();
             return;
         }
         int to = from + delta;
         if (to < 0 || to >= pending.size()) {
-            Toast.makeText(activity, delta < 0 ? "已经在最前" : "已经在最后", Toast.LENGTH_SHORT).show();
+            AcToast.show(activity, delta < 0 ? "已经在最前" : "已经在最后");
             return;
         }
         QueuedMessage moved = pending.remove(from);
@@ -309,7 +308,7 @@ final class MessageQueue {
     private void remove(int id) {
         int index = indexOf(id);
         if (index < 0) {
-            Toast.makeText(activity, "该消息已发送", Toast.LENGTH_SHORT).show();
+            AcToast.show(activity, "该消息已发送");
             refreshManager();
             return;
         }
@@ -319,7 +318,7 @@ final class MessageQueue {
         updateBar();
         refreshManager();
         if (pending.isEmpty()) {
-            Toast.makeText(activity, "队列已清空", Toast.LENGTH_SHORT).show();
+            AcToast.show(activity, "队列已清空");
         }
     }
 
@@ -329,7 +328,7 @@ final class MessageQueue {
     private void jump(int id) {
         int index = indexOf(id);
         if (index < 0) {
-            Toast.makeText(activity, "该消息已发送", Toast.LENGTH_SHORT).show();
+            AcToast.show(activity, "该消息已发送");
             refreshManager();
             return;
         }

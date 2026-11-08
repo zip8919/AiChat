@@ -115,12 +115,12 @@ final class ViewerController {
                 images.add(info);
             }
         } catch (Exception e) {
-            Toast.makeText(activity, "无法加载图片列表", Toast.LENGTH_SHORT).show();
+            AcToast.show(activity, "无法加载图片列表");
             return;
         }
 
         if (images.isEmpty() || index < 0 || index >= images.size()) {
-            Toast.makeText(activity, "图片不可用", Toast.LENGTH_SHORT).show();
+            AcToast.show(activity, "图片不可用");
             return;
         }
 
@@ -304,7 +304,7 @@ final class ViewerController {
             tableDialog.dismiss();
         }
         if (tableHtml == null || tableHtml.isEmpty()) {
-            Toast.makeText(activity, "表格内容为空", Toast.LENGTH_SHORT).show();
+            AcToast.show(activity, "表格内容为空");
             return;
         }
 
@@ -445,7 +445,7 @@ final class ViewerController {
             codeDialog.dismiss();
         }
         if (code == null || code.isEmpty()) {
-            Toast.makeText(activity, "代码内容为空", Toast.LENGTH_SHORT).show();
+            AcToast.show(activity, "代码内容为空");
             return;
         }
 
@@ -670,7 +670,7 @@ final class ViewerController {
             docDialog.dismiss();
         }
         if (code == null || code.length() == 0) {
-            Toast.makeText(activity, "文件内容为空", Toast.LENGTH_SHORT).show();
+            AcToast.show(activity, "文件内容为空");
             return;
         }
 

@@ -229,11 +229,11 @@ public class MainActivity extends ThemedActivity {
 
         if (!storageManager.createDirectories()) {
             LogUtil.e(TAG, "createDirectories FAILED, basePath=%s", storageManager.getBasePath());
-            Toast.makeText(this, "无法访问外部存储", Toast.LENGTH_LONG).show();
+            AcToast.showLong(this, "无法访问外部存储");
         } else {
             LogUtil.i(TAG, "storage ready: %s (conversations=%s)",
                     storageManager.getStorageInfo(), storageManager.getConversationsPath());
-            Toast.makeText(this, storageManager.getStorageInfo(), Toast.LENGTH_LONG).show();
+            AcToast.showLong(this, storageManager.getStorageInfo());
         }
 
         configManager.load();
@@ -748,7 +748,7 @@ public class MainActivity extends ThemedActivity {
                     REQUEST_PICK_TEXT);
         } catch (Exception e) {
             LogUtil.w(TAG, "pickTextFile failed: %s", e.getMessage());
-            Toast.makeText(this, "没有可用的文件选择器", Toast.LENGTH_SHORT).show();
+            AcToast.show(this, "没有可用的文件选择器");
         }
     }
 
@@ -765,7 +765,7 @@ public class MainActivity extends ThemedActivity {
                     REQUEST_PICK_IMAGE);
         } catch (Exception e) {
             LogUtil.w(TAG, "pickImageFile failed: %s", e.getMessage());
-            Toast.makeText(this, "没有可用的图片选择器", Toast.LENGTH_SHORT).show();
+            AcToast.show(this, "没有可用的图片选择器");
         }
     }
 
@@ -785,7 +785,7 @@ public class MainActivity extends ThemedActivity {
     private void takePhoto() {
         Intent intent = new Intent(android.provider.MediaStore.ACTION_IMAGE_CAPTURE);
         if (intent.resolveActivity(getPackageManager()) == null) {
-            Toast.makeText(this, "没有可用的相机应用", Toast.LENGTH_SHORT).show();
+            AcToast.show(this, "没有可用的相机应用");
             return;
         }
         try {
@@ -801,7 +801,7 @@ public class MainActivity extends ThemedActivity {
             startActivityForResult(intent, REQUEST_TAKE_PHOTO);
         } catch (Exception e) {
             LogUtil.w(TAG, "takePhoto failed: %s", e.getMessage());
-            Toast.makeText(this, "启动相机失败", Toast.LENGTH_SHORT).show();
+            AcToast.show(this, "启动相机失败");
         }
     }
 
@@ -878,9 +878,7 @@ public class MainActivity extends ThemedActivity {
                     public void run() {
                         if (f == null) {
                             LogUtil.w(TAG, "stageImageForCrop failed: %s", error);
-                            Toast.makeText(MainActivity.this,
-                                    "读取图片失败: " + (error == null ? "未知错误" : error),
-                                    Toast.LENGTH_LONG).show();
+                            AcToast.showLong(MainActivity.this, "读取图片失败: " + (error == null ? "未知错误" : error));
                             return;
                         }
                         startCrop(f.getAbsolutePath(), displayName);
@@ -898,7 +896,7 @@ public class MainActivity extends ThemedActivity {
             startActivityForResult(intent, REQUEST_CROP);
         } catch (Exception e) {
             LogUtil.w(TAG, "startCrop failed: %s", e.getMessage());
-            Toast.makeText(this, "无法打开裁剪页", Toast.LENGTH_SHORT).show();
+            AcToast.show(this, "无法打开裁剪页");
         }
     }
 
@@ -915,8 +913,7 @@ public class MainActivity extends ThemedActivity {
                     public void onClick(DialogInterface d, int w) {
                         String url = input.getText().toString().trim();
                         if (url.length() == 0) {
-                            Toast.makeText(MainActivity.this, "请填写图片地址",
-                                    Toast.LENGTH_SHORT).show();
+                            AcToast.show(MainActivity.this, "请填写图片地址");
                             return;
                         }
                         importImageUrl(url);
@@ -933,7 +930,7 @@ public class MainActivity extends ThemedActivity {
      * 放主线程直接 ANR。
      */
     private void importImageUrl(final String url) {
-        Toast.makeText(this, "正在下载图片…", Toast.LENGTH_SHORT).show();
+        AcToast.show(this, "正在下载图片…");
         new Thread(new Runnable() {
             public void run() {
                 AttachmentText.File file = null;
@@ -952,9 +949,7 @@ public class MainActivity extends ThemedActivity {
                     public void run() {
                         if (loaded == null) {
                             LogUtil.w(TAG, "importImageUrl failed: %s", error);
-                            Toast.makeText(MainActivity.this,
-                                    "下载图片失败: " + (error == null ? "未知错误" : error),
-                                    Toast.LENGTH_LONG).show();
+                            AcToast.showLong(MainActivity.this, "下载图片失败: " + (error == null ? "未知错误" : error));
                             return;
                         }
                         // 链接下载的图片同样进裁剪页，与拍照/相册统一一条路
@@ -1002,9 +997,7 @@ public class MainActivity extends ThemedActivity {
                     public void run() {
                         if (loaded == null) {
                             LogUtil.w(TAG, "importTextFile failed: %s", error);
-                            Toast.makeText(MainActivity.this,
-                                    "读取失败: " + (error == null ? "未知错误" : error),
-                                    Toast.LENGTH_LONG).show();
+                            AcToast.showLong(MainActivity.this, "读取失败: " + (error == null ? "未知错误" : error));
                             return;
                         }
                         addAttachment(fileName, loaded.text, loaded.bytes);
@@ -1055,9 +1048,7 @@ public class MainActivity extends ThemedActivity {
                     public void run() {
                         if (loaded == null) {
                             LogUtil.w(TAG, "importImageFile failed: %s", error);
-                            Toast.makeText(MainActivity.this,
-                                    "读取图片失败: " + (error == null ? "未知错误" : error),
-                                    Toast.LENGTH_LONG).show();
+                            AcToast.showLong(MainActivity.this, "读取图片失败: " + (error == null ? "未知错误" : error));
                             return;
                         }
                         addAttachment(loaded);
@@ -1097,8 +1088,7 @@ public class MainActivity extends ThemedActivity {
     private void addAttachment(AttachmentText.File f) {
         // 上限来自设置（Limits），不再写死：不同机型内存差一个数量级
         if (pendingAttachments.size() >= Limits.maxAttachments) {
-            Toast.makeText(this, "最多附加 " + Limits.maxAttachments + " 个文件",
-                    Toast.LENGTH_SHORT).show();
+            AcToast.show(this, "最多附加 " + Limits.maxAttachments + " 个文件");
             return;
         }
         int total = f.chars();
@@ -1106,15 +1096,12 @@ public class MainActivity extends ThemedActivity {
             total += pendingAttachments.get(i).chars();
         }
         if (total > Limits.attachTotalChars) {
-            Toast.makeText(this,
-                    "附件合计超过 " + (Limits.attachTotalChars / 10000) + " 万字符，老设备内存扛不住",
-                    Toast.LENGTH_LONG).show();
+            AcToast.showLong(this, "附件合计超过 " + (Limits.attachTotalChars / 10000) + " 万字符，老设备内存扛不住");
             return;
         }
         pendingAttachments.add(f);
         refreshAttachmentBar();
-        Toast.makeText(this, "已附加 " + f.name + "（" + AttachmentText.sizeAndTokens(f) + "）",
-                Toast.LENGTH_SHORT).show();
+        AcToast.show(this, "已附加 " + f.name + "（" + AttachmentText.sizeAndTokens(f) + "）");
     }
 
     /** 重建附件条。条目少（≤5），每次全量重建比维护增删便宜。 */
@@ -1482,7 +1469,7 @@ public class MainActivity extends ThemedActivity {
         messages = conv.messages;
         LogUtil.i(TAG, "new conversation created: id=%s model=%s", conv.id, conv.model);
         refreshWebView();
-        Toast.makeText(this, "已创建新对话", Toast.LENGTH_SHORT).show();
+        AcToast.show(this, "已创建新对话");
     }
 
     /**
@@ -1756,8 +1743,7 @@ public class MainActivity extends ThemedActivity {
                         LogUtil.i(TAG, "switched: id=%s title=%s messages=%d",
                                 conv.id, conv.title, messages.size());
                         refreshWebView();
-                        Toast.makeText(MainActivity.this, "已切换到: " + conv.title,
-                                Toast.LENGTH_SHORT).show();
+                        AcToast.show(MainActivity.this, "已切换到: " + conv.title);
                     }
                 });
             }
@@ -1831,12 +1817,11 @@ public class MainActivity extends ThemedActivity {
                                 saved.length());
                         startCrop(saved.getAbsolutePath(), "photo.jpg");
                     } else {
-                        Toast.makeText(this, "保存照片失败，请重试", Toast.LENGTH_SHORT).show();
+                        AcToast.show(this, "保存照片失败，请重试");
                     }
                 } else {
                     LogUtil.w(TAG, "take photo produced no file (resultCode=%d)", resultCode);
-                    Toast.makeText(this, "拍照未完成或相机未返回图片，请重试",
-                            Toast.LENGTH_SHORT).show();
+                    AcToast.show(this, "拍照未完成或相机未返回图片，请重试");
                 }
             }
         } else if (requestCode == REQUEST_CROP) {
@@ -2021,7 +2006,7 @@ public class MainActivity extends ThemedActivity {
                 LogUtil.w(TAG, "quick scan launcher unavailable: com.jxw.wbzc (%s)", e.getMessage());
             }
             LogUtil.w(TAG, "quick scan: no external launcher available, aborted");
-            Toast.makeText(this, "请手动打开文本摘抄应用扫描", Toast.LENGTH_SHORT).show();
+            AcToast.show(this, "请手动打开文本摘抄应用扫描");
             expectingQuickScanResult = false;
         } else {
             LogUtil.d(TAG, "launchScan: builtin ScanActivity mode");
@@ -2029,7 +2014,7 @@ public class MainActivity extends ThemedActivity {
                 startActivityForResult(new Intent(this, ScanActivity.class), REQUEST_SCAN);
             } catch (Exception e) {
                 LogUtil.e(TAG, "launch ScanActivity failed", e);
-                Toast.makeText(this, "无法启动扫描: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                AcToast.showLong(this, "无法启动扫描: " + e.getMessage());
             }
         }
     }
@@ -2070,7 +2055,7 @@ public class MainActivity extends ThemedActivity {
         if (!storageManager.isStorageReady()) {
             LogUtil.w(TAG, "sendMessage: storage not ready (%s), conversation may not persist",
                     storageManager.getStorageInfo());
-            Toast.makeText(this, "存储不可用，本次对话可能无法保存", Toast.LENGTH_LONG).show();
+            AcToast.showLong(this, "存储不可用，本次对话可能无法保存");
         }
 
         loadSystemPrompt();
@@ -2080,14 +2065,14 @@ public class MainActivity extends ThemedActivity {
         if (selPos < 0 || availableModels == null || selPos >= availableModels.size()) {
             LogUtil.e(TAG, "sendMessage aborted: invalid model selection pos=%d, models=%d",
                     selPos, availableModels == null ? -1 : availableModels.size());
-            Toast.makeText(this, "未选择模型", Toast.LENGTH_SHORT).show();
+            AcToast.show(this, "未选择模型");
             return;
         }
         ProviderInfo provider = configManager.getProvider(availableModels.get(selPos).provider);
         if (provider == null) {
             LogUtil.e(TAG, "sendMessage aborted: provider null for model '%s'",
                     availableModels.get(selPos).name);
-            Toast.makeText(this, "未选择模型", Toast.LENGTH_SHORT).show();
+            AcToast.show(this, "未选择模型");
             return;
         }
 
@@ -2360,7 +2345,7 @@ public class MainActivity extends ThemedActivity {
         public void toast(final String msg) {
             runOnUiThread(new Runnable() {
                 public void run() {
-                    Toast.makeText(MainActivity.this, msg, Toast.LENGTH_SHORT).show();
+                    AcToast.show(MainActivity.this, msg);
                 }
             });
         }
@@ -2871,17 +2856,17 @@ public class MainActivity extends ThemedActivity {
                     try {
                         ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
                         cm.setPrimaryClip(ClipData.newPlainText("code", code));
-                        Toast.makeText(MainActivity.this, "代码已复制", Toast.LENGTH_SHORT).show();
+                        AcToast.show(MainActivity.this, "代码已复制");
                     } catch (Exception e1) {
                         LogUtil.w(TAG, "copyCode via ClipboardManager failed: %s, trying legacy API", e1.getMessage());
                         try {
                             android.text.ClipboardManager oldCm = (android.text.ClipboardManager)
                                     getSystemService(Context.CLIPBOARD_SERVICE);
                             oldCm.setText(code);
-                            Toast.makeText(MainActivity.this, "代码已复制", Toast.LENGTH_SHORT).show();
+                            AcToast.show(MainActivity.this, "代码已复制");
                         } catch (Exception e2) {
                             LogUtil.e(TAG, "copyCode failed entirely: " + e2.getMessage(), e2);
-                            Toast.makeText(MainActivity.this, "复制失败: " + e2.getMessage(), Toast.LENGTH_SHORT).show();
+                            AcToast.show(MainActivity.this, "复制失败: " + e2.getMessage());
                         }
                     }
                 }
@@ -2919,7 +2904,7 @@ public class MainActivity extends ThemedActivity {
                 startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
             } catch (Exception e) {
                 LogUtil.e(TAG, "openUrl failed: " + e.getMessage(), e);
-                Toast.makeText(MainActivity.this, "无法打开链接", Toast.LENGTH_SHORT).show();
+                AcToast.show(MainActivity.this, "无法打开链接");
             }
         }
 
@@ -3047,7 +3032,7 @@ public class MainActivity extends ThemedActivity {
                         Message m = messages.get(pos);
                         if (m == null || !m.isAssistant()) return;
                         if (isRequestInProgress.get()) {
-                            Toast.makeText(MainActivity.this, "当前回复仍在进行，请先停止", Toast.LENGTH_SHORT).show();
+                            AcToast.show(MainActivity.this, "当前回复仍在进行，请先停止");
                             return;
                         }
                         int userIdx = lastUserIndexBefore(pos);
@@ -3078,7 +3063,7 @@ public class MainActivity extends ThemedActivity {
                             return;
                         }
                         if (isRequestInProgress.get()) {
-                            Toast.makeText(MainActivity.this, "当前回复仍在进行，请先停止", Toast.LENGTH_SHORT).show();
+                            AcToast.show(MainActivity.this, "当前回复仍在进行，请先停止");
                             return;
                         }
                         resumeAssistantRequest(pos);
@@ -3131,7 +3116,7 @@ public class MainActivity extends ThemedActivity {
             LogUtil.d(TAG, "JsBridge.openRemoteImage: %s", LogUtil.preview(url, 120));
             handler.post(new Runnable() {
                 public void run() {
-                    Toast.makeText(MainActivity.this, "正在加载图片…", Toast.LENGTH_SHORT).show();
+                    AcToast.show(MainActivity.this, "正在加载图片…");
                     new Thread(new Runnable() {
                         public void run() {
                             String src = null;
@@ -3149,9 +3134,7 @@ public class MainActivity extends ThemedActivity {
                                 public void run() {
                                     if (viewer == null) return;
                                     if (data == null) {
-                                        Toast.makeText(MainActivity.this,
-                                                "加载图片失败: " + (error == null ? "未知错误" : error),
-                                                Toast.LENGTH_LONG).show();
+                                        AcToast.showLong(MainActivity.this, "加载图片失败: " + (error == null ? "未知错误" : error));
                                         return;
                                     }
                                     try {
@@ -3182,7 +3165,7 @@ public class MainActivity extends ThemedActivity {
                     try {
                         viewer.showImage(Integer.parseInt(indexStr), imagesJson);
                     } catch (Exception e) {
-                        Toast.makeText(MainActivity.this, "查看图片失败", Toast.LENGTH_SHORT).show();
+                        AcToast.show(MainActivity.this, "查看图片失败");
                     }
                 }
             });
@@ -3241,8 +3224,7 @@ public class MainActivity extends ThemedActivity {
                         ThemeValidator.Result vr = ThemeValidator.validate(
                                 text, FontRepository.getInstance().installedIds());
                         if (vr.blocked || vr.theme == null) {
-                            Toast.makeText(MainActivity.this,
-                                    "导入失败：" + vr.blockReason, Toast.LENGTH_LONG).show();
+                            AcToast.showLong(MainActivity.this, "导入失败：" + vr.blockReason);
                             return;
                         }
                         // 名称补名/截断已在 ThemeValidator 统一处理（自动补名 + 警告）
@@ -3251,19 +3233,17 @@ public class MainActivity extends ThemedActivity {
                         t.builtin = false;
                         String id = ThemeRepository.getInstance().save(t);
                         if (id == null) {
-                            Toast.makeText(MainActivity.this,
-                                    "导入失败：存储不可写", Toast.LENGTH_LONG).show();
+                            AcToast.showLong(MainActivity.this, "导入失败：存储不可写");
                             return;
                         }
                         ThemeRepository.getInstance().invalidate();
                         String tip = vr.warnings.isEmpty()
                                 ? "已导入主题「" + t.name + "」，可在 设置 › 外观 › 管理自定义主题 中启用"
                                 : "已导入「" + t.name + "」（有 " + vr.warnings.size() + " 条校验提示）";
-                        Toast.makeText(MainActivity.this, tip, Toast.LENGTH_LONG).show();
+                        AcToast.showLong(MainActivity.this, tip);
                     } catch (Throwable e) {
                         LogUtil.w(TAG, "importTheme failed: %s", e.getMessage());
-                        Toast.makeText(MainActivity.this,
-                                "导入失败：" + e.getMessage(), Toast.LENGTH_LONG).show();
+                        AcToast.showLong(MainActivity.this, "导入失败：" + e.getMessage());
                     }
                 }
             });
@@ -3384,8 +3364,7 @@ public class MainActivity extends ThemedActivity {
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
-                            Toast.makeText(MainActivity.this, "读取搜题结果失败: " + errMsg,
-                                    Toast.LENGTH_LONG).show();
+                            AcToast.showLong(MainActivity.this, "读取搜题结果失败: " + errMsg);
                         }
                     });
                 } finally {
@@ -3419,7 +3398,7 @@ public class MainActivity extends ThemedActivity {
                         int cur = messages.indexOf(msg);
                         if (cur < 0) {
                             LogUtil.w(TAG, "message menu action dropped: target message no longer present");
-                            Toast.makeText(MainActivity.this, "该消息已变化，操作已取消", Toast.LENGTH_SHORT).show();
+                            AcToast.show(MainActivity.this, "该消息已变化，操作已取消");
                             return;
                         }
                         LogUtil.i(TAG, "message menu action: curPos=%d which=%d (%s)", cur, which, items[which]);
@@ -3452,7 +3431,7 @@ public class MainActivity extends ThemedActivity {
         String text = textWithAttachments(messages.get(pos));
         if (text == null || text.isEmpty()) {
             LogUtil.w(TAG, "copyMessage: empty content at pos=%d", pos);
-            Toast.makeText(this, "内容为空", Toast.LENGTH_SHORT).show();
+            AcToast.show(this, "内容为空");
             return;
         }
         copyToClipboard(text);
@@ -3510,7 +3489,7 @@ public class MainActivity extends ThemedActivity {
      */
     private void openImageAttachment(final AttachmentText.File f) {
         if (f.path.length() == 0) {
-            Toast.makeText(this, "这张图片没有本地副本，无法查看", Toast.LENGTH_SHORT).show();
+            AcToast.show(this, "这张图片没有本地副本，无法查看");
             return;
         }
         new Thread(new Runnable() {
@@ -3520,9 +3499,7 @@ public class MainActivity extends ThemedActivity {
                     public void run() {
                         if (viewer == null) return;
                         if (src == null) {
-                            Toast.makeText(MainActivity.this,
-                                    "图片文件已丢失（可能被系统清理），请重新附加",
-                                    Toast.LENGTH_LONG).show();
+                            AcToast.showLong(MainActivity.this, "图片文件已丢失（可能被系统清理），请重新附加");
                             return;
                         }
                         try {
@@ -3535,7 +3512,7 @@ public class MainActivity extends ThemedActivity {
                             viewer.showImage(0, arr.toString());
                         } catch (Exception e) {
                             LogUtil.w(TAG, "openImageAttachment failed: %s", e.getMessage());
-                            Toast.makeText(MainActivity.this, "打开图片失败", Toast.LENGTH_SHORT).show();
+                            AcToast.show(MainActivity.this, "打开图片失败");
                         }
                     }
                 });
@@ -3556,10 +3533,10 @@ public class MainActivity extends ThemedActivity {
                 ((android.text.ClipboardManager) svc).setText(text);
                 LogUtil.d(TAG, "copyToClipboard: %d chars via legacy ClipboardManager", text.length());
             }
-            Toast.makeText(this, "已复制", Toast.LENGTH_SHORT).show();
+            AcToast.show(this, "已复制");
         } catch (Exception e) {
             LogUtil.e(TAG, "copyToClipboard failed: " + e.getMessage(), e);
-            Toast.makeText(this, "复制失败: " + e.getMessage(), Toast.LENGTH_LONG).show();
+            AcToast.showLong(this, "复制失败: " + e.getMessage());
         }
     }
 
@@ -3615,7 +3592,7 @@ public class MainActivity extends ThemedActivity {
                         } else if (which == 1) {
                             String text = streamingText();
                             if (text.isEmpty()) {
-                                Toast.makeText(MainActivity.this, "还没有生成内容", Toast.LENGTH_SHORT).show();
+                                AcToast.show(MainActivity.this, "还没有生成内容");
                             } else {
                                 showSelectableText("选择文本", text);
                             }
@@ -3638,13 +3615,13 @@ public class MainActivity extends ThemedActivity {
     private void retryStreaming() {
         if (messages == null || messages.isEmpty()) {
             LogUtil.w(TAG, "retryStreaming: no messages");
-            Toast.makeText(this, "找不到对应的提问，无法重新生成", Toast.LENGTH_SHORT).show();
+            AcToast.show(this, "找不到对应的提问，无法重新生成");
             return;
         }
         int pos = lastUserIndexBefore(messages.size());
         if (pos < 0) {
             LogUtil.w(TAG, "retryStreaming: no user message to retry");
-            Toast.makeText(this, "找不到对应的提问，无法重新生成", Toast.LENGTH_SHORT).show();
+            AcToast.show(this, "找不到对应的提问，无法重新生成");
             return;
         }
         LogUtil.i(TAG, "retryStreaming: retry from user pos=%d", pos);
@@ -3654,7 +3631,7 @@ public class MainActivity extends ThemedActivity {
     private void copyStreamingText() {
         String text = streamingText();
         if (text.isEmpty()) {
-            Toast.makeText(this, "还没有生成内容", Toast.LENGTH_SHORT).show();
+            AcToast.show(this, "还没有生成内容");
             return;
         }
         copyToClipboard(text);
@@ -3732,7 +3709,7 @@ public class MainActivity extends ThemedActivity {
                                                 webViewEvalJs((wholeDiv ? "replaceMsg(" : "updateMsgAt(")
                                                         + pos + ",'" + esc + "')");
                                                 conversationManager.saveCurrentConversation();
-                                                Toast.makeText(MainActivity.this, "已修改", Toast.LENGTH_SHORT).show();
+                                                AcToast.show(MainActivity.this, "已修改");
                                             }
                                         });
                                     }
@@ -3770,7 +3747,7 @@ public class MainActivity extends ThemedActivity {
                 // Reindex DOM: update data-idx of remaining messages after pos
                 webViewEvalJs("reindexFrom(" + pos + ")");
                 conversationManager.saveCurrentConversation();
-                Toast.makeText(MainActivity.this, "已删除", Toast.LENGTH_SHORT).show();
+                AcToast.show(MainActivity.this, "已删除");
             }
         });
     }
@@ -3795,7 +3772,7 @@ public class MainActivity extends ThemedActivity {
             }
             if (!hasUserBefore) {
                 LogUtil.w(TAG, "retryMessage aborted: no user message before pos=%d", pos);
-                Toast.makeText(this, "无法找到对应的用户消息", Toast.LENGTH_SHORT).show();
+                AcToast.show(this, "无法找到对应的用户消息");
                 return;
             }
             showConfirmDialog("将删除本条及之后共 " + n + " 条消息并重新生成回复，确定？", new Runnable() {
@@ -3834,12 +3811,12 @@ public class MainActivity extends ThemedActivity {
         loadSystemPrompt();
         int selPos = modelSpinner.getSelectedItemPosition();
         if (selPos < 0 || availableModels == null || selPos >= availableModels.size()) {
-            Toast.makeText(this, "未选择模型", Toast.LENGTH_SHORT).show();
+            AcToast.show(this, "未选择模型");
             return;
         }
         ProviderInfo provider = configManager.getProvider(availableModels.get(selPos).provider);
         if (provider == null) {
-            Toast.makeText(this, "未选择模型", Toast.LENGTH_SHORT).show();
+            AcToast.show(this, "未选择模型");
             return;
         }
         try {
@@ -3889,7 +3866,7 @@ public class MainActivity extends ThemedActivity {
                             am.toolHistory == null ? "" : am.toolHistory));
         } catch (Exception e) {
             LogUtil.e(TAG, "resumeAssistantRequest failed: %s", e.getMessage(), e);
-            Toast.makeText(this, "无法从此处继续，请重试整条消息", Toast.LENGTH_SHORT).show();
+            AcToast.show(this, "无法从此处继续，请重试整条消息");
         }
     }
 
@@ -4032,14 +4009,14 @@ public class MainActivity extends ThemedActivity {
         int selPos = modelSpinner.getSelectedItemPosition();
         if (selPos < 0 || availableModels == null || selPos >= availableModels.size()) {
             LogUtil.e(TAG, "execStreamingRequest aborted: invalid selection pos=%d", selPos);
-            Toast.makeText(this, "未选择模型", Toast.LENGTH_SHORT).show();
+            AcToast.show(this, "未选择模型");
             return;
         }
         ProviderInfo provider = configManager.getProvider(availableModels.get(selPos).provider);
         if (provider == null) {
             LogUtil.e(TAG, "execStreamingRequest aborted: provider null for '%s'",
                     availableModels.get(selPos).name);
-            Toast.makeText(this, "未选择模型", Toast.LENGTH_SHORT).show();
+            AcToast.show(this, "未选择模型");
             return;
         }
         String thinkingLevel = configManager.getThinkingLevel();
@@ -4052,7 +4029,7 @@ public class MainActivity extends ThemedActivity {
     private void rollbackTo(int pos) {
         if (pos >= messages.size() - 1) {
             LogUtil.d(TAG, "rollbackTo: already latest (pos=%d, size=%d)", pos, messages.size());
-            Toast.makeText(this, "已在最新位置", Toast.LENGTH_SHORT).show();
+            AcToast.show(this, "已在最新位置");
             return;
         }
         final int n = messages.size() - pos - 1;
@@ -4063,7 +4040,7 @@ public class MainActivity extends ThemedActivity {
                 if (renderedFrom > messages.size()) renderedFrom = messages.size();
                 removeDomRange(messages.size());
                 conversationManager.saveCurrentConversation();
-                Toast.makeText(MainActivity.this, "已回溯", Toast.LENGTH_SHORT).show();
+                AcToast.show(MainActivity.this, "已回溯");
             }
         });
     }
@@ -4082,7 +4059,7 @@ public class MainActivity extends ThemedActivity {
                 // 清空占位后 pos 可能已经越界（最后一条正是那条空 AI 占位）
                 int last = Math.min(pos, messages.size() - 1);
                 if (last < 0) {
-                    Toast.makeText(MainActivity.this, "没有可复制的消息", Toast.LENGTH_SHORT).show();
+                    AcToast.show(MainActivity.this, "没有可复制的消息");
                     return;
                 }
                 Conversation current = conversationManager.getCurrentConversation();
@@ -4140,7 +4117,7 @@ public class MainActivity extends ThemedActivity {
                 messages = branch.messages;
                 conversationManager.saveCurrentConversation();
                 refreshWebView();
-                Toast.makeText(MainActivity.this, "已创建分支: " + branch.title, Toast.LENGTH_SHORT).show();
+                AcToast.show(MainActivity.this, "已创建分支: " + branch.title);
             }
         });
     }

@@ -112,7 +112,7 @@ public class ConversationManagerActivity extends ThemedActivity {
         });
         if (!uiState.getBoolean(KEY_TOOLS_HINT_SHOWN, false)) {
             uiState.edit().putBoolean(KEY_TOOLS_HINT_SHOWN, true).apply();
-            Toast.makeText(this, "常用代码与 JS 运行器在「工具」里", Toast.LENGTH_LONG).show();
+            AcToast.showLong(this, "常用代码与 JS 运行器在「工具」里");
         }
 
         findViewById(R.id.new_conversation_button).setOnClickListener(new View.OnClickListener() {
@@ -138,7 +138,7 @@ public class ConversationManagerActivity extends ThemedActivity {
                 }
                 if (conversations == null || conversations.isEmpty()) {
                     LogUtil.w(TAG, "click: clear history but list empty");
-                    Toast.makeText(ConversationManagerActivity.this, "没有历史记录", Toast.LENGTH_SHORT).show();
+                    AcToast.show(ConversationManagerActivity.this, "没有历史记录");
                     return;
                 }
                 LogUtil.d(TAG, "click: clear history, %d conversations -> confirm dialog", conversations.size());
@@ -159,7 +159,7 @@ public class ConversationManagerActivity extends ThemedActivity {
             public void onClick(View v) {
                 if (conversations == null || conversations.isEmpty()) {
                     LogUtil.w(TAG, "click: select mode but list empty");
-                    Toast.makeText(ConversationManagerActivity.this, "没有历史记录", Toast.LENGTH_SHORT).show();
+                    AcToast.show(ConversationManagerActivity.this, "没有历史记录");
                     return;
                 }
                 enterSelectionMode();
@@ -313,7 +313,7 @@ public class ConversationManagerActivity extends ThemedActivity {
         final List<String> ids = adapter.getSelectedIds();
         if (ids.isEmpty()) {
             LogUtil.w(TAG, "delete selected: nothing selected");
-            Toast.makeText(this, "请先选择要删除的对话", Toast.LENGTH_SHORT).show();
+            AcToast.show(this, "请先选择要删除的对话");
             return;
         }
         AcDialog.builder(this)
@@ -338,7 +338,7 @@ public class ConversationManagerActivity extends ThemedActivity {
         // 会话文件变了，存储管理页的缓存立刻作废，否则返回后还显示旧的「已用」
         StorageActivity.invalidateCache();
         exitSelectionMode();
-        Toast.makeText(this, "已删除 " + removed + " 个对话", Toast.LENGTH_SHORT).show();
+        AcToast.show(this, "已删除 " + removed + " 个对话");
         // 排序后 conversations 是副本，不能再靠「列表变短」判断删除是否成功；
         // 直接按磁盘重载，顺便把体积重新算准
         loadConversations();
@@ -481,10 +481,10 @@ public class ConversationManagerActivity extends ThemedActivity {
                                 conversationManager.saveConversationAsync(conv);
                             }
                             adapter.notifyDataSetChanged();
-                            Toast.makeText(ConversationManagerActivity.this, "已重命名", Toast.LENGTH_SHORT).show();
+                            AcToast.show(ConversationManagerActivity.this, "已重命名");
                             LogUtil.i(TAG, "rename ok: id=%s -> '%s'", conv.id, newTitle);
                         } else {
-                            Toast.makeText(ConversationManagerActivity.this, "名称不能为空", Toast.LENGTH_SHORT).show();
+                            AcToast.show(ConversationManagerActivity.this, "名称不能为空");
                         }
                     }
                 })
@@ -504,7 +504,7 @@ public class ConversationManagerActivity extends ThemedActivity {
                         adapter.notifyDataSetChanged();
                         StorageActivity.invalidateCache();
                         LogUtil.d(TAG, "delete done: remaining=%d", conversations.size());
-                        Toast.makeText(ConversationManagerActivity.this, "已删除", Toast.LENGTH_SHORT).show();
+                        AcToast.show(ConversationManagerActivity.this, "已删除");
                     }
                 })
                 .setNegativeButton("取消", null)
@@ -527,7 +527,7 @@ public class ConversationManagerActivity extends ThemedActivity {
         adapter.notifyDataSetChanged();
         StorageActivity.invalidateCache();
         LogUtil.i(TAG, "clearAllHistory done: %d remaining", conversations.size());
-        Toast.makeText(this, "已清空所有历史对话", Toast.LENGTH_SHORT).show();
+        AcToast.show(this, "已清空所有历史对话");
     }
 
     @Override

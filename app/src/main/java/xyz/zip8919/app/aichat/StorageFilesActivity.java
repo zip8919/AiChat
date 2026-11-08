@@ -238,8 +238,7 @@ public class StorageFilesActivity extends ThemedActivity {
                         String renamed = StorageManager.getInstance(getApplicationContext())
                                 .renameExport(f.getName(), name);
                         if (renamed == null) {
-                            Toast.makeText(StorageFilesActivity.this, "重命名失败（重名或文件被占用）",
-                                    Toast.LENGTH_SHORT).show();
+                            AcToast.show(StorageFilesActivity.this, "重命名失败（重名或文件被占用）");
                             return;
                         }
                         StorageActivity.invalidateCache();
@@ -260,8 +259,7 @@ public class StorageFilesActivity extends ThemedActivity {
                         boolean ok = f.delete();
                         LogUtil.i(TAG, "delete: %s ok=%s", f.getName(), ok);
                         if (!ok) {
-                            Toast.makeText(StorageFilesActivity.this, "删除失败，文件可能被占用",
-                                    Toast.LENGTH_SHORT).show();
+                            AcToast.show(StorageFilesActivity.this, "删除失败，文件可能被占用");
                         }
                         StorageActivity.invalidateCache();
                         reload();

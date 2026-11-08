@@ -360,8 +360,7 @@ public class AppearanceActivity extends ThemedActivity {
                 AppearanceSpinnerAdapter.Entry e = themeAdapter.entryAt(pos);
                 if (e == null || e.header || e.value == null) return;
                 if (e.disabled) {
-                    Toast.makeText(AppearanceActivity.this,
-                            "该主题文件缺失或版本不兼容，不可选用", Toast.LENGTH_SHORT).show();
+                    AcToast.show(AppearanceActivity.this, "该主题文件缺失或版本不兼容，不可选用");
                     return;
                 }
                 if (e.value.equals(am.getThemeId())) return;
@@ -425,15 +424,14 @@ public class AppearanceActivity extends ThemedActivity {
             public void onClick(View v) {
                 am.applyTemp();
                 refreshStatus();
-                Toast.makeText(AppearanceActivity.this,
-                        "仅本次运行生效，重启后恢复上次保存", Toast.LENGTH_SHORT).show();
+                AcToast.show(AppearanceActivity.this, "仅本次运行生效，重启后恢复上次保存");
             }
         });
         btnPermanent.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 am.applyPermanent();
                 refreshStatus();
-                Toast.makeText(AppearanceActivity.this, "已永久保存", Toast.LENGTH_SHORT).show();
+                AcToast.show(AppearanceActivity.this, "已永久保存");
             }
         });
 
@@ -595,7 +593,7 @@ public class AppearanceActivity extends ThemedActivity {
                         am.reset();
                         refreshAll();
                         forceApplyAppearance();
-                        Toast.makeText(AppearanceActivity.this, "已重置，尚未写盘", Toast.LENGTH_SHORT).show();
+                        AcToast.show(AppearanceActivity.this, "已重置，尚未写盘");
                     }
                 })
                 .setNegativeButton("取消", null)
@@ -611,8 +609,7 @@ public class AppearanceActivity extends ThemedActivity {
                     public void onClick(DialogInterface d, int w) {
                         am.clearAllExplicit();
                         onUserChange();
-                        Toast.makeText(AppearanceActivity.this,
-                                "已清除全部手动覆盖", Toast.LENGTH_SHORT).show();
+                        AcToast.show(AppearanceActivity.this, "已清除全部手动覆盖");
                     }
                 })
                 .setNegativeButton("取消", null)

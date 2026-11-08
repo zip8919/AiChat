@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  主题生成提示词的预览面板。
+
+  为什么要预览：模板可自定义之后，用户填完需求直接「生成」就把提示词塞进聊天页，
+  看不到最终长什么样，错了只能重来一遍。这里给全文 + 「返回改需求」闭环。
+
+  高度写死 300dp 而不是 wrap_content：提示词有五六千字，wrap 会把对话框顶到屏幕外，
+  按钮点不到。滚动区固定，按钮永远可见。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:paddingLeft="16dp"
+    android:paddingRight="16dp"
+    android:paddingTop="8dp"
+    android:paddingBottom="4dp">
+
+    <TextView
+        android:id="@+id/preview_meta"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textSize="12sp"
+        android:textColor="@color/text_secondary"
+        android:paddingBottom="6dp"
+        android:text="" />
+
+    <ScrollView
+        android:id="@+id/preview_scroll"
+        android:layout_width="match_parent"
+        android:layout_height="300dp"
+        android:background="@drawable/edit_text_background"
+        android:padding="8dp"
+        android:scrollbars="vertical">
+
+        <TextView
+            android:id="@+id/preview_text"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textSize="11sp"
+            android:typeface="monospace"
+            android:textColor="@color/text_primary"
+            android:lineSpacingExtra="2dp"
+            android:text="" />
+    </ScrollView>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginTop="8dp">
+
+        <Button
+            android:id="@+id/btn_back"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:textSize="13sp"
+            android:text="返回改需求" />
+
+        <Button
+            android:id="@+id/btn_copy"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:textSize="13sp"
+            android:text="复制全文" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal">
+
+        <Button
+            android:id="@+id/btn_insert"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:textSize="13sp"
+            android:text="插入输入框" />
+
+        <Button
+            android:id="@+id/btn_send"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:textSize="13sp"
+            android:text="直接发送" />
+    </LinearLayout>
+</LinearLayout>

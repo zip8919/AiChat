@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  主题生成提示词模板编辑页。
+
+  为什么单独开一页而不塞进设置页：模板正文五六千字，放进设置页会把整页撑成
+  超长滚动，且设置页是「统一保存」语义，长文本编辑容易误触别的开关。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:orientation="vertical"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/background">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingLeft="14dp"
+        android:paddingRight="14dp"
+        android:paddingTop="12dp"
+        android:paddingBottom="4dp"
+        android:textSize="12sp"
+        android:textColor="@color/text_secondary"
+        android:text="占位符（生成时替换，共 19 个）：\n{desc} —— 你的主题需求，必填；模板里没写会自动追加到末尾。\n设备：{android} 系统版本 · {api} API 级别 · {model} 机型 · {brand} 厂商 · {cpu_abi} CPU 架构 · {app_version} 应用版本 · {app_package} 包名 · {locale} 语言 · {ua} User-Agent · {webview} WebView 版本\n屏幕：{screen} 分辨率 · {density} 屏幕密度\n时间：{date} 日期 · {time} 时间 · {datetime} 日期+时间 · {weekday} 星期 · {timezone} 时区\n存储：{free_storage} 可用空间\n\n留空即恢复内置默认。改坏了不影响已有主题。" />
+
+    <EditText
+        android:id="@+id/template_edit"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:layout_margin="12dp"
+        android:gravity="top"
+        android:background="@drawable/edit_text_background"
+        android:padding="10dp"
+        android:textSize="11sp"
+        android:typeface="monospace"
+        android:textColor="@color/text_primary"
+        android:textColorHint="@color/text_secondary"
+        android:inputType="textMultiLine"
+        android:hint="在此编辑主题生成提示词模板…" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:paddingLeft="12dp"
+        android:paddingRight="12dp"
+        android:paddingBottom="12dp">
+
+        <Button
+            android:id="@+id/btn_reset"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:textSize="14sp"
+            android:text="恢复默认" />
+
+        <Button
+            android:id="@+id/btn_save"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:textSize="14sp"
+            android:text="保存" />
+    </LinearLayout>
+</LinearLayout>

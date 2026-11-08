@@ -196,7 +196,7 @@ public class ScanActivity extends ThemedActivity {
             LogUtil.d(TAG, "launchSystemScan: wbzc.MainActivity unavailable: %s", e.getMessage());
         }
         LogUtil.w(TAG, "launchSystemScan: no system scan activity found");
-        Toast.makeText(this, "请手动打开文本摘抄应用扫描", Toast.LENGTH_LONG).show();
+        AcToast.showLong(this, "请手动打开文本摘抄应用扫描");
     }
 
     @Override
@@ -204,7 +204,7 @@ public class ScanActivity extends ThemedActivity {
         for (int code : SCAN_KEY_CODES) {
             if (keyCode == code) {
                 LogUtil.d(TAG, "scan key detected: %d", keyCode);
-                Toast.makeText(this, "检测到扫描键: " + keyCode, Toast.LENGTH_SHORT).show();
+                AcToast.show(this, "检测到扫描键: " + keyCode);
                 expectingScanResult = true;
                 try {
                     Intent intent = new Intent();
@@ -346,7 +346,7 @@ public class ScanActivity extends ThemedActivity {
 
                         if (items.isEmpty()) {
                             LogUtil.w(TAG, "showExcerptPicker: no excerpts found");
-                            Toast.makeText(ScanActivity.this, "没有找到摘抄记录，请先在文本摘抄中扫描并保存", Toast.LENGTH_LONG).show();
+                            AcToast.showLong(ScanActivity.this, "没有找到摘抄记录，请先在文本摘抄中扫描并保存");
                             return;
                         }
 

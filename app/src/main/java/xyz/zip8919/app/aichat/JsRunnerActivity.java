@@ -328,7 +328,7 @@ public class JsRunnerActivity extends ThemedActivity {
     private void runCurrent() {
         final String code = codeInput.getText().toString();
         if (code.trim().isEmpty()) {
-            Toast.makeText(this, "请输入要运行的代码", Toast.LENGTH_SHORT).show();
+            AcToast.show(this, "请输入要运行的代码");
             return;
         }
         output.setLength(0);
@@ -364,7 +364,7 @@ public class JsRunnerActivity extends ThemedActivity {
      */
     private void abortRun() {
         if (state != ST_RUNNING) {
-            Toast.makeText(this, "当前没有正在运行的程序", Toast.LENGTH_SHORT).show();
+            AcToast.show(this, "当前没有正在运行的程序");
             return;
         }
         long ms = System.currentTimeMillis() - runStartedAt;
@@ -478,13 +478,13 @@ public class JsRunnerActivity extends ThemedActivity {
     private void copyOutput() {
         String text = outputView.getText().toString();
         if (text.isEmpty()) {
-            Toast.makeText(this, "没有输出可复制", Toast.LENGTH_SHORT).show();
+            AcToast.show(this, "没有输出可复制");
             return;
         }
         ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
         if (cm != null) {
             cm.setPrimaryClip(ClipData.newPlainText("aichat", text));
-            Toast.makeText(this, "已复制输出", Toast.LENGTH_SHORT).show();
+            AcToast.show(this, "已复制输出");
         }
     }
 
@@ -492,7 +492,7 @@ public class JsRunnerActivity extends ThemedActivity {
         ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
         if (cm == null || !cm.hasPrimaryClip() || cm.getPrimaryClip() == null
                 || cm.getPrimaryClip().getItemCount() == 0) {
-            Toast.makeText(this, "剪贴板为空", Toast.LENGTH_SHORT).show();
+            AcToast.show(this, "剪贴板为空");
             return;
         }
         CharSequence text = cm.getPrimaryClip().getItemAt(0).coerceToText(this);
@@ -504,7 +504,7 @@ public class JsRunnerActivity extends ThemedActivity {
     private void saveToExports() {
         String code = codeInput.getText().toString();
         if (code.trim().isEmpty()) {
-            Toast.makeText(this, "代码内容为空，无法保存", Toast.LENGTH_SHORT).show();
+            AcToast.show(this, "代码内容为空，无法保存");
             return;
         }
         // 复用导出扩展名映射：不再把 html/svg 之外的语言（py/go/md…）一律写成 .js
@@ -512,8 +512,7 @@ public class JsRunnerActivity extends ThemedActivity {
         String name = "code_" + System.currentTimeMillis() + "." + ext;
         String path = StorageManager.getInstance().saveExport(name, code);
         LogUtil.i(TAG, "saveToExports: lang=%s path=%s", lang, path);
-        Toast.makeText(this, path == null ? "保存失败" : ("已保存到 " + path),
-                Toast.LENGTH_SHORT).show();
+        AcToast.show(this, path == null ? "保存失败" : ("已保存到 " + path));
     }
 
     @Override

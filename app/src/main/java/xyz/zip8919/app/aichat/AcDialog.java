@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Context;
 import android.view.ContextThemeWrapper;
+import android.view.View;
 
 /**
  * 对话框工厂（替代直接 {@code new AlertDialog.Builder(...)}）。
@@ -13,11 +14,19 @@ import android.view.ContextThemeWrapper;
  * 深色外观下底板仍是 Holo Light 的白，于是出现「白底 + 被刷亮的文字」——正是实机上
  * 「弹出的菜单和提示是白色背景」那一条。
  *
- * <p><b>做法</b>：把 Context 包一层系统自带的 {@code Theme_Holo_Dialog}（深色变体），
- * 让 dialog 背景、分割线、列表项、按钮文字一起变深。用系统主题而不是自定义 style，
- * 是为了不新增资源、也不依赖具体 ROM 的属性名。
+ * <p><b>做法</b>：<b>只在深色外观下</b>把 Context 包一层系统自带的
+ * {@code Theme_Holo_Dialog}，让 dialog 背景、分割线、列表项、按钮文字一起变深。
+ * 浅色下原样返回 ctx。
  *
- * <p><b>零回归</b>：浅色/默认外观下原样返回 ctx，行为与改动前完全一致。
+ * <p>之前这里写成「非深色但选了主题也包」，导致<b>浅色模式 + 任意自定义主题时
+ * 弹窗全是深色</b>：{@code Theme_Holo_Dialog} 只有深色变体，浅色请求也套上它，
+ * 弹窗底板就永远是黑的。这是本轮「浅色模式弹窗和提示也是深色」的直接原因。
+ *
+ * <p><b>着色时机</b>：{@code create()} 与 {@code show()} 都要刷。全工程有 11 处写成
+ * {@code AcDialog.builder(this)...create()} 之后手动 {@code show()}，这类弹窗
+ * 根本不经过 {@code Builder.show()}，只在 show 里刷等于整个 View 树从未着色 ——
+ * 表现就是「弹窗里的输入框文字还是黑的」。create 阶段 View 尚未 layout，
+ * 背景 drawable 没有 bounds，故再挂一帧补刷一次（幂等，无副作用）。
  *
  * <p><b>只包 Activity</b>：用 Application 上下文创建 Dialog 没有 Window token，
  * 会直接抛 BadTokenException；遇到非 Activity 上下文一律原样返回。
@@ -32,7 +41,7 @@ final class AcDialog {
     }
 
     /**
-     * 在 {@code show()} 之后补刷一次内容树。
+     * 在 {@code create()} / {@code show()} 之后补刷一次内容树。
      *
      * <p>{@code Theme_Holo_Dialog} 只解决窗口底板；dialog 里的 EditText、列表行
      * 如果自己写了 {@code @color/white}，深色下仍是白块。而且 dialog 的 content
@@ -44,16 +53,35 @@ final class AcDialog {
         }
 
         @Override
+        public AlertDialog create() {
+            AlertDialog d = super.create();
+            recolor(d);
+            return d;
+        }
+
+        @Override
         public AlertDialog show() {
             AlertDialog d = super.show();
+            recolor(d);
+            return d;
+        }
+
+        private static void recolor(AlertDialog d) {
             try {
-                if (d.getWindow() != null) {
-                    ThemeRecolor.applyTo(d.getWindow().getDecorView());
-                }
+                if (d == null || d.getWindow() == null) return;
+                final View decor = d.getWindow().getDecorView();
+                if (decor == null) return;
+                ThemeRecolor.applyTo(decor);
+                // create() 阶段还没 layout：背景 drawable 的 bounds 为空，
+                // sampleSolidColor 采不到颜色。挂一帧等布局完成再补一次。
+                decor.post(new Runnable() {
+                    public void run() {
+                        ThemeRecolor.applyTo(decor);
+                    }
+                });
             } catch (Throwable t) {
                 LogUtil.w("AcDialog", "recolor dialog failed: " + t.getMessage());
             }
-            return d;
         }
     }
 
@@ -66,7 +94,9 @@ final class AcDialog {
         if (!(ctx instanceof Activity)) return ctx;
         try {
             AppearanceManager m = AppearanceManager.getInstance(ctx);
-            if (!m.isDark() && m.getThemeId().length() == 0) return ctx;
+            // 只有深色才换深色对话框主题。浅色 + 自定义主题也必须走浅色对话框，
+            // 否则「浅色模式下弹窗和提示是深色」会一直存在。
+            if (!m.isDark()) return ctx;
             return new ContextThemeWrapper(ctx, android.R.style.Theme_Holo_Dialog);
         } catch (Throwable t) {
             return ctx;

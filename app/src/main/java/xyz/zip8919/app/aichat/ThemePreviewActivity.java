@@ -184,6 +184,6 @@ public class ThemePreviewActivity extends ThemedActivity {
     }
 
     private void toast(String s) {
-        Toast.makeText(this, s, Toast.LENGTH_SHORT).show();
+        AcToast.show(this, s);
     }
 }

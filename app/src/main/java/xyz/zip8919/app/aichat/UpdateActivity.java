@@ -314,7 +314,7 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
 
     private void runProbe() {
         if (asset == null || downloading) {
-            Toast.makeText(this, "请先检查更新成功", Toast.LENGTH_SHORT).show();
+            AcToast.show(this, "请先检查更新成功");
             return;
         }
         probeStale = false;
@@ -412,7 +412,7 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
 
     private void install() {
         if (apkFile == null || !apkFile.isFile()) {
-            Toast.makeText(this, "安装包不存在", Toast.LENGTH_SHORT).show();
+            AcToast.show(this, "安装包不存在");
             return;
         }
         try {
@@ -435,11 +435,10 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
             startActivity(i);
             LogUtil.i(TAG, "install: %s", apkFile.getName());
         } catch (ActivityNotFoundException e) {
-            Toast.makeText(this, "未找到系统安装器，请用文件管理器打开已下载的 APK",
-                    Toast.LENGTH_LONG).show();
+            AcToast.showLong(this, "未找到系统安装器，请用文件管理器打开已下载的 APK");
         } catch (Throwable t) {
             LogUtil.w(TAG, "install failed: " + t.getMessage());
-            Toast.makeText(this, "调起安装失败", Toast.LENGTH_SHORT).show();
+            AcToast.show(this, "调起安装失败");
         }
     }
 
@@ -482,7 +481,7 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
     private void addCustom() {
         String t = UpdateManager.addCustomMirror(this, customInput.getText().toString());
         if (t == null) {
-            Toast.makeText(this, "请填写有效的镜像地址", Toast.LENGTH_SHORT).show();
+            AcToast.show(this, "请填写有效的镜像地址");
             return;
         }
         customInput.setText("");

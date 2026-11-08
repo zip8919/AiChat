@@ -147,8 +147,7 @@ public class StorageAttachmentsActivity extends ThemedActivity {
         selectBtn.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 if (incomplete) {
-                    Toast.makeText(StorageAttachmentsActivity.this,
-                            "部分会话无法读取，暂不能清理图片", Toast.LENGTH_SHORT).show();
+                    AcToast.show(StorageAttachmentsActivity.this, "部分会话无法读取，暂不能清理图片");
                     return;
                 }
                 if (showOrphans) {
@@ -156,8 +155,7 @@ public class StorageAttachmentsActivity extends ThemedActivity {
                     selected.clear();
                     render();
                 } else {
-                    Toast.makeText(StorageAttachmentsActivity.this,
-                            "使用中的图片不能在这里删除，请先删除对应会话", Toast.LENGTH_LONG).show();
+                    AcToast.showLong(StorageAttachmentsActivity.this, "使用中的图片不能在这里删除，请先删除对应会话");
                 }
             }
         });
@@ -434,7 +432,7 @@ public class StorageAttachmentsActivity extends ThemedActivity {
 
     private void confirmDelete() {
         if (selected.isEmpty()) {
-            Toast.makeText(this, "请先选择要删除的图片", Toast.LENGTH_SHORT).show();
+            AcToast.show(this, "请先选择要删除的图片");
             return;
         }
         long bytes = 0;
@@ -486,10 +484,8 @@ public class StorageAttachmentsActivity extends ThemedActivity {
                 runOnUiThread(new Runnable() {
                     public void run() {
                         if (isFinishing()) return;
-                        Toast.makeText(StorageAttachmentsActivity.this,
-                                "已删除 " + okCount + " 张，释放 " + StorageReport.size(freed)
-                                        + (failCount > 0 ? "，" + failCount + " 张被占用" : ""),
-                                Toast.LENGTH_SHORT).show();
+                        AcToast.show(StorageAttachmentsActivity.this, "已删除 " + okCount + " 张，释放 " + StorageReport.size(freed)
+                                        + (failCount > 0 ? "，" + failCount + " 张被占用" : ""));
                         exitSelection();
                         // 总览页的缓存已过期，否则返回后仍显示旧数字
                         StorageActivity.invalidateCache();

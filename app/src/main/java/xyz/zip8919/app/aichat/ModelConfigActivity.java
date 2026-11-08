@@ -161,27 +161,27 @@ public class ModelConfigActivity extends ThemedActivity {
                         String key = keyEt.getText().toString().trim();
                         if (name.isEmpty() || url.isEmpty()) {
                             LogUtil.w(TAG, "provider save rejected: name='%s' url='%s' (empty)", name, url);
-                            Toast.makeText(ModelConfigActivity.this, "名称和URL不能为空", Toast.LENGTH_SHORT).show();
+                            AcToast.show(ModelConfigActivity.this, "名称和URL不能为空");
                             return;
                         }
                         // URL 必须以 http:// 或 https:// 开头（不区分大小写）
                         String lowerUrl = url.toLowerCase();
                         if (!lowerUrl.startsWith("http://") && !lowerUrl.startsWith("https://")) {
                             LogUtil.w(TAG, "provider save rejected: url '%s' must start with http(s)://", url);
-                            Toast.makeText(ModelConfigActivity.this, "URL必须以 http:// 或 https:// 开头", Toast.LENGTH_SHORT).show();
+                            AcToast.show(ModelConfigActivity.this, "URL必须以 http:// 或 https:// 开头");
                             return;
                         }
                         // chatPath 非空则必须以 "/" 开头
                         if (!path.isEmpty() && !path.startsWith("/")) {
                             LogUtil.w(TAG, "provider save rejected: chatPath '%s' must start with '/'", path);
-                            Toast.makeText(ModelConfigActivity.this, "Chat Path必须以 / 开头", Toast.LENGTH_SHORT).show();
+                            AcToast.show(ModelConfigActivity.this, "Chat Path必须以 / 开头");
                             return;
                         }
                         // 重名校验：同名 provider 会让 getProvider 的首个匹配产生二义
                         for (int i = 0; i < providers.size(); i++) {
                             if ((!isEdit || i != editPos.intValue()) && name.equals(providers.get(i).name)) {
                                 LogUtil.w(TAG, "provider save rejected: duplicate name '%s'", name);
-                                Toast.makeText(ModelConfigActivity.this, "该提供商名称已存在", Toast.LENGTH_SHORT).show();
+                                AcToast.show(ModelConfigActivity.this, "该提供商名称已存在");
                                 return;
                             }
                         }
@@ -302,13 +302,13 @@ public class ModelConfigActivity extends ThemedActivity {
                         String prov = provEt.getText().toString().trim();
                         if (name.isEmpty() || prov.isEmpty()) {
                             LogUtil.w(TAG, "model save rejected: name='%s' provider='%s' (empty)", name, prov);
-                            Toast.makeText(ModelConfigActivity.this, "名称和提供商不能为空", Toast.LENGTH_SHORT).show();
+                            AcToast.show(ModelConfigActivity.this, "名称和提供商不能为空");
                             return;
                         }
                         // 提供商必须已存在，否则该模型按名永远解析不到 provider
                         if (configManager.getProvider(prov) == null) {
                             LogUtil.w(TAG, "model save rejected: provider '%s' not found", prov);
-                            Toast.makeText(ModelConfigActivity.this, "提供商不存在: " + prov, Toast.LENGTH_SHORT).show();
+                            AcToast.show(ModelConfigActivity.this, "提供商不存在: " + prov);
                             return;
                         }
                         ModelInfo info = isEdit ? m : new ModelInfo();

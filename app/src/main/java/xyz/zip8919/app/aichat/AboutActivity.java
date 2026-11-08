@@ -44,7 +44,7 @@ public class AboutActivity extends ThemedActivity {
         });
         feedback.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
-                Toast.makeText(AboutActivity.this, "反馈建议功能待开发", Toast.LENGTH_SHORT).show();
+                AcToast.show(AboutActivity.this, "反馈建议功能待开发");
             }
         });
         licenses.setOnClickListener(new View.OnClickListener() {

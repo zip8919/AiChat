@@ -112,7 +112,7 @@ final class FileActions {
      */
     static void open(Activity a, File f) {
         if (a == null || f == null || !f.isFile()) {
-            Toast.makeText(a, "文件不存在", Toast.LENGTH_SHORT).show();
+            AcToast.show(a, "文件不存在");
             return;
         }
         String mime = mimeOf(f.getName());
@@ -123,17 +123,17 @@ final class FileActions {
             a.startActivity(Intent.createChooser(view, "打开 " + f.getName()));
             LogUtil.i(TAG, "open: %s mime=%s", f.getName(), mime);
         } catch (ActivityNotFoundException e) {
-            Toast.makeText(a, "没有能打开 " + f.getName() + " 的应用", Toast.LENGTH_LONG).show();
+            AcToast.showLong(a, "没有能打开 " + f.getName() + " 的应用");
         } catch (Throwable t) {
             LogUtil.w(TAG, "open failed: %s : %s", f.getName(), t.getMessage());
-            Toast.makeText(a, "打开失败", Toast.LENGTH_SHORT).show();
+            AcToast.show(a, "打开失败");
         }
     }
 
     /** 分享给其它应用（微信 / 邮件 / 网盘…）。 */
     static void share(Activity a, File f) {
         if (a == null || f == null || !f.isFile()) {
-            Toast.makeText(a, "文件不存在", Toast.LENGTH_SHORT).show();
+            AcToast.show(a, "文件不存在");
             return;
         }
         String mime = mimeOf(f.getName());
@@ -147,7 +147,7 @@ final class FileActions {
             LogUtil.i(TAG, "share: %s mime=%s", f.getName(), mime);
         } catch (Throwable t) {
             LogUtil.w(TAG, "share failed: %s : %s", f.getName(), t.getMessage());
-            Toast.makeText(a, "分享失败", Toast.LENGTH_SHORT).show();
+            AcToast.show(a, "分享失败");
         }
     }
 
@@ -171,7 +171,7 @@ final class FileActions {
                 if (content == null) {
                     a.runOnUiThread(new Runnable() {
                         public void run() {
-                            Toast.makeText(a, "读取失败", Toast.LENGTH_SHORT).show();
+                            AcToast.show(a, "读取失败");
                         }
                     });
                     return;
@@ -216,11 +216,11 @@ final class FileActions {
     static void editText(final Activity a, final File f, final Runnable onSaved) {
         if (a == null || f == null || !f.isFile()) return;
         if (isImage(f.getName())) {
-            Toast.makeText(a, "图片不能当文本编辑", Toast.LENGTH_SHORT).show();
+            AcToast.show(a, "图片不能当文本编辑");
             return;
         }
         if (isBinary(f.getName())) {
-            Toast.makeText(a, "该类型不是文本文件，不能编辑", Toast.LENGTH_SHORT).show();
+            AcToast.show(a, "该类型不是文本文件，不能编辑");
             return;
         }
         new Thread(new Runnable() {
@@ -230,7 +230,7 @@ final class FileActions {
                 a.runOnUiThread(new Runnable() {
                     public void run() {
                         if (content == null) {
-                            Toast.makeText(a, "读取失败", Toast.LENGTH_SHORT).show();
+                            AcToast.show(a, "读取失败");
                             return;
                         }
                         final android.widget.EditText input = new android.widget.EditText(a);
@@ -249,7 +249,7 @@ final class FileActions {
                                         LogUtil.i(TAG, "editText: save %s ok=%s",
                                                 f.getName(), (ok != null));
                                         if (ok == null) {
-                                            Toast.makeText(a, "保存失败", Toast.LENGTH_SHORT).show();
+                                            AcToast.show(a, "保存失败");
                                             return;
                                         }
                                         StorageActivity.invalidateCache();
@@ -282,7 +282,7 @@ final class FileActions {
                     public void run() {
                         if (a.isFinishing()) return;
                         if (content == null) {
-                            Toast.makeText(a, "读取失败", Toast.LENGTH_SHORT).show();
+                            AcToast.show(a, "读取失败");
                             return;
                         }
                         String lang = sniffLang(f.getName(), content);
@@ -317,7 +317,7 @@ final class FileActions {
                                         android.content.Context.CLIPBOARD_SERVICE);
                         if (cm != null) {
                             cm.setPrimaryClip(android.content.ClipData.newPlainText("aichat", content));
-                            Toast.makeText(a, "已复制到剪贴板", Toast.LENGTH_SHORT).show();
+                            AcToast.show(a, "已复制到剪贴板");
                         }
                     }
                 })
@@ -357,7 +357,7 @@ final class FileActions {
     static void previewImage(final Activity a, final File f) {
         // 参数必须 final：匿名内部类要捕获它们（项目按 Java 7 语法编译）
         if (a == null || f == null || !f.isFile()) {
-            Toast.makeText(a, "图片不存在", Toast.LENGTH_SHORT).show();
+            AcToast.show(a, "图片不存在");
             return;
         }
         new Thread(new Runnable() {
@@ -367,8 +367,7 @@ final class FileActions {
                     public void run() {
                         if (a.isFinishing()) return;
                         if (uri == null) {
-                            Toast.makeText(a, "这张图太大，改用「打开方式」查看",
-                                    Toast.LENGTH_LONG).show();
+                            AcToast.showLong(a, "这张图太大，改用「打开方式」查看");
                             return;
                         }
                         showImageDialog(a, f, uri);

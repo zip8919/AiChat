@@ -92,7 +92,7 @@ final class ColorPickerDialog {
                         String hex = ThemeCssBuilder.hexOf(color[0]);
                         // 高亮色（低饱和 + 高明度）作强调色时需配深字，给一次明确提示
                         if (cur[1] < 0.25f && cur[2] > 0.8f) {
-                            Toast.makeText(a, "这是浅色，作强调色时请配深色文字", Toast.LENGTH_LONG).show();
+                            AcToast.showLong(a, "这是浅色，作强调色时请配深色文字");
                         }
                         if (cb != null) cb.onPicked(hex);
                     }

@@ -23,7 +23,7 @@ final class ExportHelper {
     /** 弹出"保存代码"对话框；文件名可编辑，重名走覆盖确认。 */
     static void saveCode(final Activity activity, final String lang, final String code) {
         if (code == null || code.trim().isEmpty()) {
-            Toast.makeText(activity, "代码内容为空，无法保存", Toast.LENGTH_SHORT).show();
+            AcToast.show(activity, "代码内容为空，无法保存");
             return;
         }
         final String ext = extForLang(lang);
@@ -72,9 +72,9 @@ final class ExportHelper {
         String path = StorageManager.getInstance().saveExport(fileName, code);
         LogUtil.i(TAG, "saveCode: lang=%s file=%s path=%s", lang, fileName, path);
         if (path == null) {
-            Toast.makeText(activity, "保存失败", Toast.LENGTH_SHORT).show();
+            AcToast.show(activity, "保存失败");
         } else {
-            Toast.makeText(activity, "已保存到 " + path, Toast.LENGTH_LONG).show();
+            AcToast.showLong(activity, "已保存到 " + path);
         }
     }
 

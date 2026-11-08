@@ -410,7 +410,7 @@ public class StorageActivity extends ThemedActivity {
                             text = "已释放 " + StorageReport.size(bytes) + "，共 " + count + " 个文件";
                             if (failed > 0) text += "，" + failed + " 个被占用未删除";
                         }
-                        Toast.makeText(StorageActivity.this, text, Toast.LENGTH_SHORT).show();
+                        AcToast.show(StorageActivity.this, text);
                         refresh(true);
                     }
                 });
@@ -620,7 +620,7 @@ public class StorageActivity extends ThemedActivity {
         btn.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 if (path == null) {
-                    Toast.makeText(StorageActivity.this, "路径不可用", Toast.LENGTH_SHORT).show();
+                    AcToast.show(StorageActivity.this, "路径不可用");
                     return;
                 }
                 copy(path);
@@ -635,9 +635,9 @@ public class StorageActivity extends ThemedActivity {
         try {
             ClipboardManager cm = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
             cm.setPrimaryClip(ClipData.newPlainText("path", text));
-            Toast.makeText(this, "已复制", Toast.LENGTH_SHORT).show();
+            AcToast.show(this, "已复制");
         } catch (Throwable t) {
-            Toast.makeText(this, "复制失败", Toast.LENGTH_SHORT).show();
+            AcToast.show(this, "复制失败");
         }
     }
 

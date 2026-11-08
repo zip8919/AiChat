@@ -448,7 +448,7 @@ public class FontManagerActivity extends ThemedActivity {
     }
 
     private void toast(String s) {
-        Toast.makeText(this, s, Toast.LENGTH_SHORT).show();
+        AcToast.show(this, s);
     }
 
     private int dp(int v) {

@@ -140,6 +140,13 @@
             android:configChanges="screenSize|orientation|keyboardHidden"/>
 
         <activity
+            android:label="主题生成提示词"
+            android:name="xyz.zip8919.app.aichat.ThemePromptTemplateActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize"
+            android:configChanges="screenSize|orientation|keyboardHidden"/>
+
+        <activity
             android:label="主题预览"
             android:name="xyz.zip8919.app.aichat.ThemePreviewActivity"
             android:exported="false"

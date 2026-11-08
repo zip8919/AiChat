@@ -207,6 +207,12 @@ public class SettingsActivity extends ThemedActivity {
             }
         });
         refreshAppearanceEntry();
+        findViewById(R.id.theme_prompt_entry).setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                startActivity(new Intent(SettingsActivity.this, ThemePromptTemplateActivity.class));
+            }
+        });
+        refreshThemePromptEntry();
         ((Button) findViewById(R.id.about_button)).setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 startActivity(new Intent(SettingsActivity.this, AboutActivity.class));
@@ -643,7 +649,7 @@ public class SettingsActivity extends ThemedActivity {
         LogUtil.ENABLED = logEnabled;
         LogUtil.i(TAG, "saveSettings: prefs committed, logging %s", logEnabled ? "enabled" : "DISABLED");
 
-        Toast.makeText(this, "设置已保存", Toast.LENGTH_SHORT).show();
+        AcToast.show(this, "设置已保存");
         finish();
     }
 
@@ -658,7 +664,7 @@ public class SettingsActivity extends ThemedActivity {
         if (balanceProvider == null) balanceProvider = configManager.getProvider("DeepSeek");
         if (balanceProvider == null || balanceProvider.apiKey == null || balanceProvider.apiKey.isEmpty()) {
             LogUtil.w(TAG, "queryBalance aborted: provider=%s", balanceProvider == null ? "null" : "empty key");
-            Toast.makeText(this, "未配置可查询余额的提供商 API Key", Toast.LENGTH_SHORT).show();
+            AcToast.show(this, "未配置可查询余额的提供商 API Key");
             return;
         }
         final ProviderInfo dsProvider = balanceProvider;
@@ -679,7 +685,7 @@ public class SettingsActivity extends ThemedActivity {
 
                         if (result == null) {
                             LogUtil.w(TAG, "queryBalance: result is null");
-                            Toast.makeText(SettingsActivity.this, "查询失败", Toast.LENGTH_SHORT).show();
+                            AcToast.show(SettingsActivity.this, "查询失败");
                             return;
                         }
 
@@ -705,7 +711,7 @@ public class SettingsActivity extends ThemedActivity {
                                     .show();
                         } catch (Exception e) {
                             LogUtil.e(TAG, "queryBalance parse failed: " + e.getMessage(), e);
-                            Toast.makeText(SettingsActivity.this, "解析余额失败", Toast.LENGTH_SHORT).show();
+                            AcToast.show(SettingsActivity.this, "解析余额失败");
                         }
                     }
                 });
@@ -720,6 +726,15 @@ public class SettingsActivity extends ThemedActivity {
         refreshTitleModelSpinner();
         refreshStorageEntry();
         refreshAppearanceEntry();
+        refreshThemePromptEntry();
+    }
+
+    /** 主题生成提示词入口：副标题显示模板来源，从模板页返回后刷新。 */
+    private void refreshThemePromptEntry() {
+        android.widget.TextView sub =
+                (android.widget.TextView) findViewById(R.id.theme_prompt_entry_sub);
+        if (sub == null) return;
+        sub.setText(ThemePromptStore.isCustomized(this) ? "自定义" : "内置默认");
     }
 
     /** 外观入口副标题显示当前主题名（实现方案 Q1）；12sp 单行超长省略。 */
@@ -1016,7 +1031,7 @@ public class SettingsActivity extends ThemedActivity {
         final String prompt = systemPromptEdit.getText().toString().trim();
         if (prompt.isEmpty()) {
             LogUtil.w(TAG, "saveCurrentAsPreset aborted: prompt empty");
-            Toast.makeText(this, "系统提示词为空", Toast.LENGTH_SHORT).show();
+            AcToast.show(this, "系统提示词为空");
             return;
         }
         LogUtil.d(TAG, "saveCurrentAsPreset: promptLen=%d", prompt.length());
@@ -1031,26 +1046,26 @@ public class SettingsActivity extends ThemedActivity {
                         String name = input.getText().toString().trim();
                         if (name.isEmpty()) {
                             LogUtil.w(TAG, "saveCurrentAsPreset aborted: name empty");
-                            Toast.makeText(SettingsActivity.this, "名称不能为空", Toast.LENGTH_SHORT).show();
+                            AcToast.show(SettingsActivity.this, "名称不能为空");
                             return;
                         }
                         for (String[] p : presetList) {
                             if (p[0].equals(name)) {
                                 LogUtil.w(TAG, "saveCurrentAsPreset aborted: duplicate name '%s'", name);
-                                Toast.makeText(SettingsActivity.this, "名称已存在", Toast.LENGTH_SHORT).show();
+                                AcToast.show(SettingsActivity.this, "名称已存在");
                                 return;
                             }
                         }
                         if (presetList.size() >= 20) {
                             LogUtil.w(TAG, "saveCurrentAsPreset aborted: limit reached (%d)", presetList.size());
-                            Toast.makeText(SettingsActivity.this, "最多20个预设", Toast.LENGTH_SHORT).show();
+                            AcToast.show(SettingsActivity.this, "最多20个预设");
                             return;
                         }
                         LogUtil.i(TAG, "saveCurrentAsPreset: adding '%s'", name);
                         presetList.add(new String[]{name, prompt});
                         savePresets();
                         refreshPresetSpinner();
-                        Toast.makeText(SettingsActivity.this, "已保存", Toast.LENGTH_SHORT).show();
+                        AcToast.show(SettingsActivity.this, "已保存");
                     }
                 })
                 .setNegativeButton("取消", null)
@@ -1060,7 +1075,7 @@ public class SettingsActivity extends ThemedActivity {
     private void showManagePresetsDialog() {
         if (presetList.isEmpty()) {
             LogUtil.d(TAG, "showManagePresetsDialog: no presets");
-            Toast.makeText(this, "暂无预设", Toast.LENGTH_SHORT).show();
+            AcToast.show(this, "暂无预设");
             return;
         }
         LogUtil.d(TAG, "showManagePresetsDialog: %d presets", presetList.size());
@@ -1078,7 +1093,7 @@ public class SettingsActivity extends ThemedActivity {
                 presetSpinner.setSelection(pos + 1);
                 systemPromptEdit.setText(presetList.get(pos)[1]);
                 if (manageDialog != null) manageDialog.dismiss();
-                Toast.makeText(SettingsActivity.this, "已选择: " + presetList.get(pos)[0], Toast.LENGTH_SHORT).show();
+                AcToast.show(SettingsActivity.this, "已选择: " + presetList.get(pos)[0]);
             }
         });
         lv.setOnItemLongClickListener(new AdapterView.OnItemLongClickListener() {
@@ -1098,7 +1113,7 @@ public class SettingsActivity extends ThemedActivity {
                                     refreshPresetSpinner();
                                     if (manageDialog != null) manageDialog.dismiss();
                                     if (!presetList.isEmpty()) showManagePresetsDialog();
-                                    Toast.makeText(SettingsActivity.this, "已删除", Toast.LENGTH_SHORT).show();
+                                    AcToast.show(SettingsActivity.this, "已删除");
                                 }
                             }
                         }).show();
@@ -1154,20 +1169,20 @@ public class SettingsActivity extends ThemedActivity {
                         String prompt = promptEdit.getText().toString().trim();
                         if (name.isEmpty() || prompt.isEmpty()) {
                             LogUtil.w(TAG, "editPreset aborted: empty name or prompt");
-                            Toast.makeText(SettingsActivity.this, "名称和提示词不能为空", Toast.LENGTH_SHORT).show();
+                            AcToast.show(SettingsActivity.this, "名称和提示词不能为空");
                             return;
                         }
                         if (isNew) {
                             for (String[] p : presetList) {
                                 if (p[0].equals(name)) {
                                     LogUtil.w(TAG, "editPreset aborted: duplicate name '%s'", name);
-                                    Toast.makeText(SettingsActivity.this, "名称已存在", Toast.LENGTH_SHORT).show();
+                                    AcToast.show(SettingsActivity.this, "名称已存在");
                                     return;
                                 }
                             }
                             if (presetList.size() >= 20) {
                                 LogUtil.w(TAG, "editPreset aborted: limit reached (%d)", presetList.size());
-                                Toast.makeText(SettingsActivity.this, "最多20个预设", Toast.LENGTH_SHORT).show();
+                                AcToast.show(SettingsActivity.this, "最多20个预设");
                                 return;
                             }
                             LogUtil.i(TAG, "editPreset: create '%s' (%d chars)", name, prompt.length());
@@ -1177,7 +1192,7 @@ public class SettingsActivity extends ThemedActivity {
                                 for (String[] p : presetList) {
                                     if (p[0].equals(name)) {
                                         LogUtil.w(TAG, "editPreset aborted: duplicate name '%s'", name);
-                                        Toast.makeText(SettingsActivity.this, "名称已存在", Toast.LENGTH_SHORT).show();
+                                        AcToast.show(SettingsActivity.this, "名称已存在");
                                         return;
                                     }
                                 }
@@ -1189,7 +1204,7 @@ public class SettingsActivity extends ThemedActivity {
                         savePresets();
                         refreshPresetSpinner();
                         showManagePresetsDialog();
-                        Toast.makeText(SettingsActivity.this, "已保存", Toast.LENGTH_SHORT).show();
+                        AcToast.show(SettingsActivity.this, "已保存");
                     }
                 })
                 .setNegativeButton("取消", null)

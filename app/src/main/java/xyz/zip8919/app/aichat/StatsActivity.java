@@ -140,7 +140,13 @@ public class StatsActivity extends ThemedActivity {
     private void pickDate(final boolean isFrom, long initial, final boolean chainNext) {
         Calendar c = Calendar.getInstance();
         c.setTimeInMillis(initial);
-        DatePickerDialog dlg = new DatePickerDialog(this,
+        // DatePickerDialog 是独立 Window，windowBackground 与内部文字都由构造它的
+        // context 主题决定，Activity 里刷了多少 View 都影响不到它。深色下必须换
+        // Holo 对话框主题，否则会在深色页面上弹出一块刺眼的白板。
+        android.content.Context dlgCtx = AppearanceManager.getInstance(this).isDark()
+                ? new android.view.ContextThemeWrapper(this, android.R.style.Theme_Holo_Dialog)
+                : this;
+        DatePickerDialog dlg = new DatePickerDialog(dlgCtx,
                 new DatePickerDialog.OnDateSetListener() {
                     public void onDateSet(DatePicker view, int year, int month, int day) {
                         Calendar picked = Calendar.getInstance();

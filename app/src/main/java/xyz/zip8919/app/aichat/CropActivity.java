@@ -60,7 +60,7 @@ public class CropActivity extends ThemedActivity {
         srcPath = getIntent().getStringExtra(EXTRA_SRC_PATH);
         displayName = getIntent().getStringExtra(EXTRA_NAME);
         if (srcPath == null || srcPath.length() == 0) {
-            Toast.makeText(this, "没有可裁剪的图片", Toast.LENGTH_SHORT).show();
+            AcToast.show(this, "没有可裁剪的图片");
             finish();
             return;
         }
@@ -152,9 +152,7 @@ public class CropActivity extends ThemedActivity {
                     public void run() {
                         if (isFinishing()) return;
                         if (decoded == null) {
-                            Toast.makeText(CropActivity.this,
-                                    "打开图片失败: " + (error == null ? "未知错误" : error),
-                                    Toast.LENGTH_LONG).show();
+                            AcToast.showLong(CropActivity.this, "打开图片失败: " + (error == null ? "未知错误" : error));
                             finish();
                             return;
                         }
@@ -169,10 +167,8 @@ public class CropActivity extends ThemedActivity {
                             if (head != null) {
                                 head.setText(head.getText() + "  ⚠ 低分辨率");
                             }
-                            Toast.makeText(CropActivity.this,
-                                    "原图只有 " + sourceW + "×" + sourceH
-                                            + "，放大会模糊。建议从相册选原图，或换系统相机重拍",
-                                    Toast.LENGTH_LONG).show();
+                            AcToast.showLong(CropActivity.this, "原图只有 " + sourceW + "×" + sourceH
+                                            + "，放大会模糊。建议从相册选原图，或换系统相机重拍");
                         }
                     }
                 });
@@ -198,14 +194,14 @@ public class CropActivity extends ThemedActivity {
             rotated = Bitmap.createBitmap(current, 0, 0,
                     current.getWidth(), current.getHeight(), matrix, true);
         } catch (OutOfMemoryError e) {
-            Toast.makeText(this, "内存不足，无法旋转", Toast.LENGTH_SHORT).show();
+            AcToast.show(this, "内存不足，无法旋转");
             return;
         } catch (Exception e) {
-            Toast.makeText(this, "旋转失败: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+            AcToast.show(this, "旋转失败: " + e.getMessage());
             return;
         }
         if (rotated == null) {
-            Toast.makeText(this, "旋转失败", Toast.LENGTH_SHORT).show();
+            AcToast.show(this, "旋转失败");
             return;
         }
         source = rotated;
@@ -220,7 +216,7 @@ public class CropActivity extends ThemedActivity {
         if (source == null) return;
         final Rect rect = cropView.computeCropRect();
         if (rect.width() <= 0 || rect.height() <= 0) {
-            Toast.makeText(this, "请先选择裁剪范围", Toast.LENGTH_SHORT).show();
+            AcToast.show(this, "请先选择裁剪范围");
             return;
         }
         setBusy(true);
@@ -268,9 +264,7 @@ public class CropActivity extends ThemedActivity {
                         if (isFinishing()) return;
                         setBusy(false);
                         if (path == null) {
-                            Toast.makeText(CropActivity.this,
-                                    "裁剪失败: " + (error == null ? "未知错误" : error),
-                                    Toast.LENGTH_LONG).show();
+                            AcToast.showLong(CropActivity.this, "裁剪失败: " + (error == null ? "未知错误" : error));
                             return;
                         }
                         returnPath(path);

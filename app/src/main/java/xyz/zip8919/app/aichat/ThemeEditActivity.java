@@ -32,6 +32,8 @@ public class ThemeEditActivity extends ThemedActivity {
     private Theme t;
     private boolean darkMode;
     private String originalJson;
+    /** 上次填的主题需求：「返回改需求」时回填，避免重打。 */
+    private String lastDesc = "";
 
     private TextView title;
     private EditText nameEdit, authorEdit, descEdit, cssEdit;
@@ -336,9 +338,18 @@ public class ThemeEditActivity extends ThemedActivity {
     // ---- 生成提示词（六步，解耦） ----
 
     private void startPromptFlow() {
+        startPromptFlow(null);
+    }
+
+    /** @param initial 非空则回填上次输入：「返回改需求」不该让用户重打一遍 */
+    private void startPromptFlow(String initial) {
         final EditText et = new EditText(this);
         et.setHint("例如：暖白纸墨风、暗色低饱和、适合夜间阅读");
         et.setMinLines(2);
+        if (initial != null && initial.length() > 0) {
+            et.setText(initial);
+            et.setSelection(initial.length());
+        }
         final AlertDialog d = AcDialog.builder(this)
                 .setTitle("你想要什么样的主题？")
                 .setView(et)
@@ -355,7 +366,8 @@ public class ThemeEditActivity extends ThemedActivity {
                             return;   // 不 dismiss，空描述不允许继续
                         }
                         d.dismiss();
-                        showPrompt(buildPrompt(desc));
+                        lastDesc = desc;
+                        showPromptPreview(desc, ThemePromptStore.render(ThemeEditActivity.this, desc));
                     }
                 });
             }
@@ -363,146 +375,65 @@ public class ThemeEditActivity extends ThemedActivity {
         d.show();
     }
 
+    // 提示词模板已移到设置：ThemePromptStore 负责读取、填 {desc} 与设备类占位符。
+    // 内置默认模板与原硬编码版本逐字一致，改过的用户也只会影响自己的输出。
+
     /**
-     * 默认提示词：先把「这个软件是什么、界面由什么构成、能改什么」讲清楚，
-     * 再给真实选择器清单与可导入的完整示例，让 AI 像读过源码一样设计 CSS。
+     * 预览最终提示词，再决定下一步。
      *
-     * <p>早期版本只说「我要一个 .actheme」，模板里 css 还是空串并明令「只能写颜色、
-     * 不要改布局」，结果 AI 一律只吐颜色、CSS 留空，而且输出 ```json 导致导入失败。
-     * 现在：明确支持形状/样式（方形搜索卡片、代码卡片特定样式）、css 必须非空、
-     * 输出约束写死，配合 ThemeValidator 的容错清洗做到「生成即可导入」。
+     * <p>原来只有一个「已生成」的列表弹框，用户看不到正文，模板一旦被自定义过，
+     * 发出去才发现不对，只能整个流程重来。现在给全文 + 「返回改需求」，
+     * 描述回填到输入框，改完再生成。
+     *
+     * <p>动作沿用 {@link MainActivity#newPromptIntent} 的 EXTRA_PROMPT /
+     * EXTRA_PROMPT_SEND 协议，插入/发送两条路与之前完全一致。
      */
-    private String buildPrompt(String desc) {
-        StringBuilder p = new StringBuilder();
-        p.append("你在为一个 AI 聊天 Android 应用编写主题文件 .actheme。下面这段是该应用的源码摘要，")
-         .append("请当作你已经读过它的代码，据此设计主题。\n\n");
+    private void showPromptPreview(final String desc, final String prompt) {
+        View panel = getLayoutInflater().inflate(R.layout.dialog_prompt_preview, null);
+        TextView meta = (TextView) panel.findViewById(R.id.preview_meta);
+        TextView body = (TextView) panel.findViewById(R.id.preview_text);
+        // 300dp 写死在布局里，小屏（480dp 高）会把按钮顶出屏幕，这里按屏高收一收。
+        View scroll = panel.findViewById(R.id.preview_scroll);
+        int maxH = (int) (getResources().getDisplayMetrics().heightPixels * 0.42f);
+        if (maxH > 0 && scroll.getLayoutParams().height > maxH) {
+            scroll.getLayoutParams().height = maxH;
+            scroll.requestLayout();
+        }
+        body.setText(prompt);
+        meta.setText(prompt.length() + " 字 · "
+                + (ThemePromptStore.isCustomized(this) ? "自定义模板" : "内置模板")
+                + " · 占位符已按当前设备填充");
 
-        p.append("【一、这是什么软件、界面由什么构成】\n")
-         .append("一个运行在 Android 4.4（API 18/19）上的 AI 对话客户端，屏幕很窄（258dp 宽）。\n")
-         .append("· 原生界面：顶部有模型选择、思考等级、扫描按钮；下面是消息区；底部是输入框。")
-         .append("按钮、卡片、顶部栏、输入框的颜色由 16 个 token 控制，CSS 不影响它们。\n")
-         .append("· 消息区：不是原生控件，而是一个 WebView，把 AI 回复的 Markdown 渲染成 HTML。")
-         .append("内核是 Chromium 30，不支持 CSS 变量 var()、flex、gap、object-fit；")
-         .append("请用传统写法（float / inline-block / border / border-radius / background）。\n")
-         .append("· 主题分 light（浅色）与 dark（深色）两套，用户可随时切换。\n\n");
+        final AlertDialog d = AcDialog.builder(this)
+                .setTitle("提示词预览")
+                .setView(panel)
+                .create();
 
-        p.append("【二、主题能改什么（不只是颜色）】\n")
-         .append("1) tokens：16 个颜色值，控制原生界面与消息区基底色。\n")
-         .append("2) css：作用于消息 WebView 的任意 CSS。除了颜色，还可以改【形状与样式】：")
-         .append("border-radius（写 0 就是方形）、border（粗细/实线虚线/颜色）、background（纯色或渐变）、")
-         .append("padding、margin、box-shadow、font-size、font-family、font-weight、letter-spacing、")
-         .append("line-height、text-shadow、opacity 等。\n")
-         .append("   例：「搜索卡片变成棕色方形」→ .tool-card{border-radius:0;background:#6D4C41;}\n")
-         .append("   例：「代码卡片用虚线边框的特定样式」→ pre{border:1px dashed #8D6E63;border-radius:2px;}\n")
-         .append("3) fonts：ui / mono 字体引用，只能填 system 或已安装字体 id，不要内嵌字体文件。\n\n");
-
-        p.append("【三、消息 WebView 的真实 CSS 选择器（照这些名字写，别自己编）】\n")
-         .append("· 页面/消息：body, .msg, .msg.user, .msg.user .bubble, .msg.user.failed .bubble, ")
-         .append(".msg.ai, .msg.ai .content, .msg-meta, .msg-meta-sub, .msg-menu-btn, .mdot, #older-hint\n")
-         .append("· Markdown：h1~h6, p, li, ul, ol, blockquote, a, strong, em, hr, mark, del, s, ")
-         .append("sup, sub, img, svg, table, th, td, .table-scroll, .svg-scroll\n")
-         .append("· 代码：pre, pre code, code, pre .lang-tag, pre .copy-btn, pre .save-btn, ")
-         .append("pre .import-btn, pre .preview-btn, pre .run-btn, ")
-         .append(".tk-kw, .tk-str, .tk-cmt, .tk-num, .tk-type, .tk-fn, .tk-op\n")
-         .append("· 搜索/工具卡片：.tool-card, .tool-card-head, .tool-item, .tool-title, .tool-meta, ")
-         .append(".tool-summary, .tool-arrow, .tool-hint, .tool-status, .tool-trim, .tool-fold, ")
-         .append(".tool-imgs, .tool-img-cell, .tool-fetch-content, .tool-error, .tool-empty, .tool-body\n")
-         .append("· 思考块/流式：.thinking-block, .thinking-toggle, .stream-tail, .stream-tail.plain\n")
-         .append("· 来源/脚注：.sources-block, .sources-head, .sources-body, .src-item, .src-arrow, ")
-         .append(".fn-ref, .fn-def\n")
-         .append("· 附件：.attach-list, .attach-item, .attach-ico, .attach-thumb, .attach-body, ")
-         .append(".attach-name, .attach-sub, .attach-cut, .attach-view\n")
-         .append("· 错误/重试：.error-card, .err-title, .err-summary, .err-actions, .err-btn, ")
-         .append(".err-btn.retry, .retry-btn, .retry-reason\n")
-         .append("· 数学：.math-block, .math-inline\n\n");
-
-        p.append("【四、16 个 token（值只能是 #RRGGBB）】\n")
-         .append("ac_primary 顶部栏/主按钮；ac_primary_dark 按压态；ac_accent 强调/引用边；")
-         .append("ac_bg 页面底；ac_surface 卡片/输入框表面；ac_text 主文字；")
-         .append("ac_text_secondary 次要文字；ac_divider 分隔线；ac_bubble_user 用户气泡；")
-         .append("ac_bubble_ai AI 消息；ac_danger 错误；ac_track 轨道/高亮；")
-         .append("ac_code_bg 代码底；ac_code_text 代码字；ac_link 链接；ac_border 边框。\n\n");
-
-        p.append("【五、我的主题需求】\n").append(desc).append("\n\n");
-
-        p.append("【六、输出格式（必须严格遵守，否则无法导入）】\n")
-         .append("只输出一个 ```actheme 代码块，代码块内是纯 JSON，不要任何解释文字。\n")
-         .append("结构：\n")
-         .append("{\n")
-         .append("  \"format\": \"actheme\",\n")
-         .append("  \"version\": 1,\n")
-         .append("  \"meta\": {\"name\": \"主题名\", \"author\": \"\", \"description\": \"\"},\n")
-         .append("  \"fonts\": {\"ui\": \"system\", \"mono\": \"system\"},\n")
-         .append("  \"light\": {\"tokens\": {...}, \"css\": \"...\"},\n")
-         .append("  \"dark\":  {\"tokens\": {...}, \"css\": \"...\"}\n")
-         .append("}\n")
-         .append("硬性要求：\n")
-         .append("1. format 必须是 actheme，version 必须是数字 1，meta.name 必填且不超过 32 字。\n")
-         .append("2. light 与 dark 两套都要写完整；每套的 css 必须非空，且至少包含一条改形状/样式的规则")
-         .append("（如 border-radius 或 border），不能只给颜色。\n")
-         .append("3. css 是单行字符串：CSS 内部一律不要用双引号（需要引号时用单引号），")
-         .append("不要写真实换行，多条规则直接连写。JSON 里的双引号只用于字段名和字符串值。\n")
-         .append("4. JSON 里不要写注释（// 或 /* */），不要尾逗号，不要用单引号包字段名。\n")
-         .append("5. 不要用 position:fixed、@import、url(http...)、javascript:；")
-         .append("不要给 body/pre/table/img 设固定像素 width、overflow-x、word-wrap、")
-         .append("white-space:nowrap（会撑破 258dp 窄屏）。\n")
-         .append("6. 只使用第三节列出的选择器。请输出完整闭合的 JSON，不要截断。\n\n");
-
-        p.append("【七、完整示例（示范「棕色方形搜索卡片 + 代码卡片特定样式」，仅供格式参考，不要照抄配色）】\n")
-         .append("```actheme\n")
-         .append("{\"format\":\"actheme\",\"version\":1,")
-         .append("\"meta\":{\"name\":\"棕纸示例\",\"author\":\"\",\"description\":\"搜索卡片方形、代码卡片虚线框\"},")
-         .append("\"fonts\":{\"ui\":\"system\",\"mono\":\"system\"},")
-         .append("\"light\":{\"tokens\":{\"ac_primary\":\"#6D4C41\",\"ac_primary_dark\":\"#4E342E\",")
-         .append("\"ac_accent\":\"#A1887F\",\"ac_bg\":\"#FAF6EF\",\"ac_surface\":\"#FFFDF7\",")
-         .append("\"ac_text\":\"#3E2723\",\"ac_text_secondary\":\"#795548\",\"ac_divider\":\"#E0D7C8\",")
-         .append("\"ac_bubble_user\":\"#EFE6D8\",\"ac_bubble_ai\":\"#FFFDF7\",\"ac_link\":\"#8D6E63\",")
-         .append("\"ac_border\":\"#D7C4B5\",\"ac_code_bg\":\"#F0E7DA\",\"ac_code_text\":\"#3E2723\"},")
-         .append("\"css\":\".tool-card{border-radius:0;background:#6D4C41;border:1px solid #4E342E;}")
-         .append(".tool-card-head{background:#5D4037;color:#FFF3E0;}")
-         .append(".tool-title,.tool-status{color:#FFE0B2;}")
-         .append("pre{border-radius:2px;border:1px dashed #8D6E63;background:#F0E7DA;}\"},")
-         .append("\"dark\":{\"tokens\":{\"ac_primary\":\"#A1887F\",\"ac_primary_dark\":\"#5D4037\",")
-         .append("\"ac_accent\":\"#BCAAA4\",\"ac_bg\":\"#241C18\",\"ac_surface\":\"#2E241F\",")
-         .append("\"ac_text\":\"#EFEBE9\",\"ac_text_secondary\":\"#BCAAA4\",\"ac_divider\":\"#4E342E\",")
-         .append("\"ac_bubble_user\":\"#3E2F28\",\"ac_bubble_ai\":\"#2E241F\",\"ac_link\":\"#BCAAA4\",")
-         .append("\"ac_border\":\"#4E342E\",\"ac_code_bg\":\"#1E1714\",\"ac_code_text\":\"#EFEBE9\"},")
-         .append("\"css\":\".tool-card{border-radius:0;background:#4E342E;border:1px solid #8D6E63;}")
-         .append(".tool-card-head{background:#3E2F28;color:#EFEBE9;}")
-         .append(".tool-title,.tool-status{color:#D7CCC8;}")
-         .append("pre{border-radius:2px;border:1px dashed #8D6E63;background:#1E1714;}\"}}\n")
-         .append("```\n");
-        return p.toString();
-    }
-
-    /**
-     * 生成后交互对齐扫描页 / 环境提示词：插入到输入框、复制、直接发送三选一，
-     * 复用 MainActivity.newPromptIntent 的 EXTRA_PROMPT / EXTRA_PROMPT_SEND 协议。
-     */
-    private void showPrompt(final String prompt) {
-        final String[] items = {
-                "插入到输入框 — 先改再发",
-                "复制提示词 — 贴到别处",
-                "直接发送给 AI — 回聊天页发出"
-        };
-        AcDialog.builder(this)
-                .setTitle("提示词已生成")
-                .setItems(items, new DialogInterface.OnClickListener() {
-                    public void onClick(DialogInterface d, int which) {
-                        if (which == 0) {
-                            startActivity(MainActivity.newPromptIntent(
-                                    ThemeEditActivity.this, prompt, false));
-                        } else if (which == 1) {
-                            copyToClipboard(prompt);
-                            toast("提示词已复制");
-                        } else {
-                            startActivity(MainActivity.newPromptIntent(
-                                    ThemeEditActivity.this, prompt, true));
-                        }
-                    }
-                })
-                .setNegativeButton("取消", null)
-                .show();
+        panel.findViewById(R.id.btn_back).setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                d.dismiss();
+                startPromptFlow(desc);   // 回填描述，改完再生成
+            }
+        });
+        panel.findViewById(R.id.btn_copy).setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                copyToClipboard(prompt);
+                toast("提示词已复制");
+            }
+        });
+        panel.findViewById(R.id.btn_insert).setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                d.dismiss();
+                startActivity(MainActivity.newPromptIntent(ThemeEditActivity.this, prompt, false));
+            }
+        });
+        panel.findViewById(R.id.btn_send).setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                d.dismiss();
+                startActivity(MainActivity.newPromptIntent(ThemeEditActivity.this, prompt, true));
+            }
+        });
+        d.show();
     }
 
     private void copyToClipboard(String text) {
@@ -563,6 +494,6 @@ public class ThemeEditActivity extends ThemedActivity {
     }
 
     private void toast(String s) {
-        Toast.makeText(this, s, Toast.LENGTH_SHORT).show();
+        AcToast.show(this, s);
     }
 }

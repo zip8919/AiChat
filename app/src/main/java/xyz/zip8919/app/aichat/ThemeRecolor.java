@@ -121,8 +121,10 @@ final class ThemeRecolor {
     static final class BaseStyle {
         Integer bgColor;             // 取样得到的原始纯色；null = 透明或非纯色，跳过
         ColorStateList textColors;   // 原始文字色（含 pressed/disabled 状态）
+        ColorStateList hintColors;   // 输入框 placeholder 原色，回退时用
         Drawable origSelector;       // send_button 这类被整体替换的 selector，回退时用
         Drawable origDivider;        // ListView 分割线原件，回退时用
+        Drawable origInputBg;        // EditText 被换成深色圆角底之前的原件
         boolean captured;
     }
 
@@ -253,7 +255,20 @@ final class ThemeRecolor {
 
         // 3) 文字：按原始色反查；未命中的深色字在深色模式下做可读性兜底
         if (v instanceof TextView) {
-            applyTextColorByMap((TextView) v, bs, m, dark);
+            if (isAlertDialogTitle(v)) {
+                // AlertDialog 的标题必须保持对话框主题自带的颜色。
+                // 底板是 9-patch，sampleSolidColor 拿不到纯色、paintBackground 也改不动，
+                // 若只把标题刷成 ac_text，标题与底板就会各走一套配色：
+                // 浅色 Holo Light 底板 + 自定义主题的浅色文字 = 白底白字。
+                // 反过来保留主题原色，深色底板配白字、浅色底板配黑字，永远成对。
+                if (bs.textColors != null) {
+                    ((TextView) v).setTextColor(bs.textColors);
+                }
+            } else {
+                applyTextColorByMap((TextView) v, bs, m, dark);
+                applyInputHint((TextView) v, bs, m, dark);
+            }
+            applyInputBackground(v, bs, m, dark);
         }
         applyPopup(v, m, dark, false);
         applyDivider(v, bs, m, dark, false);
@@ -323,6 +338,13 @@ final class ThemeRecolor {
 
     private static void applyTextColorByMap(TextView tv, BaseStyle bs, AppearanceManager m,
                                             boolean dark) {
+        // 输入框不参与「按色反查」：EditText 的默认文字色来自它<b>构造时那个 Context</b> 的主题，
+        // 对话框里的输入框普遍写成 new EditText(activity)，而 activity 是浅色主题 ——
+        // View 一出生就带黑色，再被塞进深色 dialog 就是深底黑字。可读性不该赌启发式命中。
+        if (tv instanceof android.widget.EditText) {
+            tv.setTextColor(m.getEffectiveColor(ThemeTokens.AC_TEXT, dark));
+            return;
+        }
         if (bs.textColors == null) return;
         int base = bs.textColors.getDefaultColor();
         String token = TEXT_MAP.get(Integer.valueOf(base));
@@ -338,6 +360,100 @@ final class ThemeRecolor {
         }
     }
 
+    /**
+     * 输入框的 hint（placeholder）跟随次要文字色。
+     *
+     * <p>hint 此前完全没人管：{@code setHintTextColor} 不会随背景变深而自动跟随，
+     * 深色下留的是浅色主题里的深灰，几乎看不见——「输入框里那句提示没了」就是这个。
+     */
+    private static void applyInputHint(TextView tv, BaseStyle bs, AppearanceManager m,
+                                       boolean dark) {
+        if (!(tv instanceof android.widget.EditText) || bs.hintColors == null) return;
+        try {
+            tv.setHintTextColor(m.getEffectiveColor(ThemeTokens.AC_TEXT_SECONDARY, dark));
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /**
+     * 深色下把「浅底输入框」换成主题深色圆角底。
+     *
+     * <p>为什么必须做：对话框里的 EditText 普遍是 {@code new EditText(activity)}，
+     * activity 是 Holo Light，背景取的是白色 9-patch。文字已经按主题刷成浅色，
+     * 底却还是白的 —— 结果是「白框 + 白字」，比原来的黑字更难看清。
+     *
+     * <p>只处理采样到浅色实色的情况：透明背景（只有下划线）、深色底、
+     * 以及用户自绘的 selector 一律不动，避免破坏原有视觉。
+     * 原件存进快照，回浅色外观时原样还原。
+     */
+    private static void applyInputBackground(View v, BaseStyle bs, AppearanceManager m, boolean dark) {
+        if (!(v instanceof android.widget.EditText)) return;
+        // 浅色（含自定义浅色主题）一律还原原件：深色时换上的圆角深底如果留着，
+        // 切回浅色就会变成「浅底上一块深色输入框」，比原来的问题更显眼。
+        if (!dark) {
+            if (bs.origInputBg != null) {
+                try {
+                    v.setBackgroundDrawable(bs.origInputBg);
+                } catch (Throwable ignored) {
+                }
+                bs.origInputBg = null;
+            }
+            return;
+        }
+        // 已经换过主题色圆角底：只更新颜色，避免每次遍历都新建 drawable。
+        // （这时再用 sampleSolidColor 采样会拿到深色，走不到下面的替换逻辑。）
+        if (bs.origInputBg != null && v.getBackground() instanceof GradientDrawable) {
+            float d = v.getResources().getDisplayMetrics().density;
+            GradientDrawable g = (GradientDrawable) v.getBackground();
+            g.setColor(m.getEffectiveColor(ThemeTokens.AC_SURFACE, true));
+            g.setStroke(Math.max(1, (int) d), m.getEffectiveColor(ThemeTokens.AC_BORDER, true));
+            return;
+        }
+        Integer sampled = sampleSolidColor(v.getBackground());
+        if (sampled == null || !isLightColor(sampled.intValue())) return;
+
+        if (bs.origInputBg == null) bs.origInputBg = v.getBackground();
+        float density = v.getResources().getDisplayMetrics().density;
+        GradientDrawable g = new GradientDrawable();
+        g.setColor(m.getEffectiveColor(ThemeTokens.AC_SURFACE, true));
+        g.setCornerRadius(4 * density);
+        g.setStroke(Math.max(1, (int) density), m.getEffectiveColor(ThemeTokens.AC_BORDER, true));
+
+        // setBackgroundDrawable 会用新 drawable 的 padding 覆盖 View 的既有内边距，
+        // 先存后还原，避免文字贴边、行高跳动。
+        int l = v.getPaddingLeft(), t = v.getPaddingTop();
+        int r = v.getPaddingRight(), b = v.getPaddingBottom();
+        v.setBackgroundDrawable(g);
+        v.setPadding(l, t, r, b);
+    }
+
+    private static boolean isLightColor(int color) {
+        int r = Color.red(color), g = Color.green(color), b = Color.blue(color);
+        return (r * 299 + g * 587 + b * 114) / 1000 >= 160;
+    }
+
+    /** {@code android.R.id.alertTitle} 是隐藏字段，只能运行时解析；-2 表示尚未解析。 */
+    private static int alertTitleId = -2;
+
+    /**
+     * 是否是 AlertDialog 的标题。
+     *
+     * <p>只认 {@code alertTitle}，不认通用的 {@code android.R.id.title} ——
+     * 后者在普通布局里也会被使用，误判会让那些文字在深色下保持原色（黑字）。
+     */
+    private static boolean isAlertDialogTitle(View v) {
+        int id = v.getId();
+        if (id == View.NO_ID) return false;
+        if (alertTitleId == -2) {
+            try {
+                alertTitleId = v.getResources().getIdentifier("alertTitle", "id", "android");
+            } catch (Throwable t) {
+                alertTitleId = 0;
+            }
+        }
+        return alertTitleId > 0 && id == alertTitleId;
+    }
+
     private static BaseStyle capture(View v) {
         BaseStyle bs = new BaseStyle();
         bs.bgColor = sampleSolidColor(v.getBackground());
@@ -345,6 +461,16 @@ final class ThemeRecolor {
             try {
                 bs.textColors = ((TextView) v).getTextColors();
             } catch (Throwable ignored) {
+            }
+            if (v instanceof android.widget.EditText) {
+                try {
+                    bs.hintColors = ((android.widget.EditText) v).getHintTextColors();
+                } catch (Throwable ignored) {
+                }
+                try {
+                    bs.origInputBg = v.getBackground();
+                } catch (Throwable ignored) {
+                }
             }
         }
         if (v instanceof android.widget.ListView) {
@@ -383,6 +509,18 @@ final class ThemeRecolor {
         }
         if (v instanceof TextView && bs.textColors != null) {
             ((TextView) v).setTextColor(bs.textColors);
+        }
+        if (v instanceof TextView && bs.hintColors != null) {
+            ((TextView) v).setHintTextColor(bs.hintColors);
+        }
+        // 放在背景还原之后：EditText 的白色 9-patch 会被上面的纯色分支换成
+        // ColorDrawable，这里再用原件覆盖回来，圆角/描边/内边距一并复原。
+        if (v instanceof android.widget.EditText && bs.origInputBg != null) {
+            try {
+                v.setBackgroundDrawable(bs.origInputBg);
+            } catch (Throwable ignored) {
+            }
+            bs.origInputBg = null;
         }
         if (v instanceof android.widget.ListView) {
             try {
