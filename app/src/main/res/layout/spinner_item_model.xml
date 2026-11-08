@@ -16,10 +16,13 @@
     android:paddingTop="2dp"
     android:paddingBottom="2dp">
 
+    <!-- 两行都关掉字体自带的上下留白：收紧行高，给 48dp 容器留出余量，
+         避免字号被系统字体缩放放大时第二行再次被裁。 -->
     <TextView
         android:id="@+id/model_item_text"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:includeFontPadding="false"
         android:singleLine="true"
         android:maxLines="1"
         android:textSize="14sp"
@@ -31,6 +34,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="1dp"
+        android:includeFontPadding="false"
         android:singleLine="true"
         android:maxLines="1"
         android:textSize="10sp"
