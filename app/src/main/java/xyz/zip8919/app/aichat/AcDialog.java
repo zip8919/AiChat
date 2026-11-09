@@ -3,6 +3,7 @@ package xyz.zip8919.app.aichat;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Context;
+import android.os.Build;
 import android.view.ContextThemeWrapper;
 import android.view.View;
 
@@ -74,9 +75,15 @@ final class AcDialog {
                 ThemeRecolor.applyTo(decor);
                 // create() 阶段还没 layout：背景 drawable 的 bounds 为空，
                 // sampleSolidColor 采不到颜色。挂一帧等布局完成再补一次。
+                // 这个 Runnable 跑在消息队列里，一旦抛异常就没有外层 catch 可接 ——
+                // 4.4 低内存机上遍历 + 采样 bitmap 失败会直接打崩主线程，必须自己兜住。
                 decor.post(new Runnable() {
                     public void run() {
-                        ThemeRecolor.applyTo(decor);
+                        try {
+                            ThemeRecolor.applyTo(decor);
+                        } catch (Throwable ignored) {
+                            // 着色失败只是配色不理想，绝不能因此闪退
+                        }
                     }
                 });
             } catch (Throwable t) {
@@ -92,6 +99,15 @@ final class AcDialog {
 
     private static Context wrap(Context ctx) {
         if (!(ctx instanceof Activity)) return ctx;
+        // API 19 及以下（4.4 及更早）不套 Holo Dialog 主题。
+        //
+        // 4.4 上 ContextThemeWrapper + Theme_Holo_Dialog 这个组合会让 AlertDialog
+        // 在 create() 阶段拿不到完整主题属性（老 Holo 的 dialogTheme 指向的
+        // Theme.Holo.Dialog.Alert 在该版本缺少部分自定义 ROM 裁剪掉的资源），
+        // 表现为「任何弹窗一打开就闪退」。5.0+ 无此问题。
+        // 老设备优先保证弹得出来：不换主题，底板沿用界面自身主题，内容区仍由
+        // recolor 刷色，视觉上是「浅底板 + 深色文字」，可读但不完美，远好于闪退。
+        if (Build.VERSION.SDK_INT < 21) return ctx;
         try {
             AppearanceManager m = AppearanceManager.getInstance(ctx);
             // 只有深色才换深色对话框主题。浅色 + 自定义主题也必须走浅色对话框，
@@ -99,6 +115,7 @@ final class AcDialog {
             if (!m.isDark()) return ctx;
             return new ContextThemeWrapper(ctx, android.R.style.Theme_Holo_Dialog);
         } catch (Throwable t) {
+            LogUtil.w("AcDialog", "wrap failed: " + t.getMessage());
             return ctx;
         }
     }

@@ -2,6 +2,7 @@ package xyz.zip8919.app.aichat;
 
 import android.content.Context;
 import android.graphics.drawable.GradientDrawable;
+import android.os.Build;
 import android.util.TypedValue;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -35,6 +36,17 @@ final class AcToast {
 
     private static void show(Context ctx, CharSequence text, boolean longDuration) {
         if (ctx == null || text == null) return;
+        // API 19 及以下一律用系统 Toast。
+        //
+        // 4.4 的自定义 Toast 走的是 TN + WindowManager 的老实现：view 的
+        // LayoutParams、token 与 attach 状态在部分 ROM 上不兼容，setView 之后
+        // show 会抛 WindowManager$BadTokenException 甚至远程异常。系统 Toast 在
+        // 这些机器上反而稳定，且 Holo 默认就是深灰底 —— 视觉不理想，但不能为了
+        // 「浅色底」把提示做成闪退。
+        if (Build.VERSION.SDK_INT < 21) {
+            Toast.makeText(ctx, text, longDuration ? Toast.LENGTH_LONG : Toast.LENGTH_SHORT).show();
+            return;
+        }
         try {
             AppearanceManager m = AppearanceManager.getInstance(ctx);
             if (m.isAppearanceDefault() && !ThemeApplier.everCustomized()) {

@@ -69,6 +69,11 @@ public class ApiClient {
             conn = (HttpURLConnection) url.openConnection();
             conn.setRequestMethod("GET");
             conn.setRequestProperty("Accept", "application/json");
+            // 显式拒接压缩：Android 4.4 的 HttpURLConnection 在部分 ROM 上不会
+            // 对「服务端主动 gzip」做透明解压，拿到的是 gzip 二进制，交给
+            // JSONObject 必然抛异常 —— 表现就是「余额解析错误」。声明 identity
+            // 后服务端返回明文 JSON，同时下面仍按 Content-Encoding 兜一层。
+            conn.setRequestProperty("Accept-Encoding", "identity");
             conn.setRequestProperty("Authorization", "Bearer " + provider.apiKey);
             conn.setConnectTimeout(15000);
             conn.setReadTimeout(15000);
@@ -84,16 +89,25 @@ public class ApiClient {
                 return null;
             }
 
-            BufferedReader reader = new BufferedReader(
-                    new InputStreamReader(conn.getInputStream(), "UTF-8"));
+            java.io.InputStream in = conn.getInputStream();
+            String enc = conn.getContentEncoding();
+            if (enc != null && enc.toLowerCase().contains("gzip")) {
+                LogUtil.w(TAG, "queryBalance body gzip-encoded, decoding manually");
+                in = new java.util.zip.GZIPInputStream(in);
+            }
+            BufferedReader reader = new BufferedReader(new InputStreamReader(in, "UTF-8"));
             StringBuilder sb = new StringBuilder();
             String line;
             while ((line = reader.readLine()) != null) {
                 sb.append(line);
             }
             reader.close();
-            LogUtil.i(TAG, "queryBalance <- len=%d body=%s", sb.length(), LogUtil.preview(sb.toString(), 500));
-            return sb.toString();
+            String body = sb.toString().trim();
+            // 部分中转/广告网关会在 JSON 前塞 UTF-8 BOM，JSONObject 会直接抛
+            if (body.length() > 0 && body.charAt(0) == '\uFEFF') body = body.substring(1);
+            LogUtil.i(TAG, "queryBalance <- len=%d body=%s", body.length(),
+                    LogUtil.preview(body, 500));
+            return body;
         } catch (Exception e) {
             LogUtil.e(TAG, "queryBalance EXCEPTION: " + e.getMessage(), e);
             return null;

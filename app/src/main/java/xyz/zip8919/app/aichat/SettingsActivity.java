@@ -710,8 +710,14 @@ public class SettingsActivity extends ThemedActivity {
                                     .setPositiveButton("确定", null)
                                     .show();
                         } catch (Exception e) {
-                            LogUtil.e(TAG, "queryBalance parse failed: " + e.getMessage(), e);
-                            AcToast.show(SettingsActivity.this, "解析余额失败");
+                            // 把原始响应摘要一并带出来：4.4 上余额「解析错误」多为
+                            // 服务端返回了非 JSON（网关错误页 / 未解压的 gzip），
+                            // 只报「解析失败」永远定位不到是哪一种。
+                            LogUtil.e(TAG, "queryBalance parse failed: " + e.getMessage()
+                                    + " body=" + LogUtil.preview(result, 800), e);
+                            String brief = result.trim();
+                            if (brief.length() > 60) brief = brief.substring(0, 60) + "…";
+                            AcToast.show(SettingsActivity.this, "余额返回异常: " + brief);
                         }
                     }
                 });
