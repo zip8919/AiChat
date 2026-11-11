@@ -4,7 +4,12 @@ import android.content.res.ColorStateList;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.ColorFilter;
+import android.graphics.Paint;
+import android.graphics.Path;
+import android.graphics.PixelFormat;
 import android.graphics.Rect;
+import android.graphics.RectF;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
@@ -125,6 +130,7 @@ final class ThemeRecolor {
         Drawable origSelector;       // send_button 这类被整体替换的 selector，回退时用
         Drawable origDivider;        // ListView 分割线原件，回退时用
         Drawable origInputBg;        // EditText 被换成深色圆角底之前的原件
+        Drawable origBg;             // 系统按钮 / Spinner 的 9-patch 底被换成主题底之前的原件
         boolean captured;
     }
 
@@ -242,18 +248,13 @@ final class ThemeRecolor {
             return;
         }
 
-        // 2) 背景：按原始纯色反查
-        if (bs.bgColor != null) {
-            String bgToken = BG_MAP.get(bs.bgColor);
-            if (bgToken != null) {
-                int c = keepOriginal(m, bgToken, dark)
-                        ? bs.bgColor.intValue()
-                        : m.getEffectiveColor(bgToken, dark);
-                paintBackground(v, bs, c);
-            }
-        }
+        // 2) 背景定色 + 3) 文字定色，顺序不能反。
+        //
+        //    反相兜底必须以「这块底真的变深了」为前提。早期两件事各走各的，遇到
+        //    刷不动的系统 9-patch 底（默认按钮、Spinner、对话框里的 EditText）就只剩
+        //    文字被刷白、底还是浅灰 —— 用户看到的「按钮字是白的、底却是浅的」。
+        boolean bgDark = resolveBackground(v, bs, m, dark);
 
-        // 3) 文字：按原始色反查；未命中的深色字在深色模式下做可读性兜底
         if (v instanceof TextView) {
             if (isAlertDialogTitle(v)) {
                 // AlertDialog 的标题必须保持对话框主题自带的颜色。
@@ -265,13 +266,137 @@ final class ThemeRecolor {
                     ((TextView) v).setTextColor(bs.textColors);
                 }
             } else {
-                applyTextColorByMap((TextView) v, bs, m, dark);
+                applyTextColorByMap((TextView) v, bs, m, dark, bgDark);
                 applyInputHint((TextView) v, bs, m, dark);
             }
-            applyInputBackground(v, bs, m, dark);
         }
         applyPopup(v, m, dark, false);
         applyDivider(v, bs, m, dark, false);
+    }
+
+    /**
+     * 把背景刷成主题色，并回答一个必须回答的问题：<b>这块底现在是深色吗</b>。
+     *
+     * <p>文字要不要反相、输入框文字能不能用浅色，全看这个返回值。返回 false 时
+     * 调用方必须保留原文字色，否则就是浅底白字。
+     *
+     * <p>之所以要单独成方法：layout 里绝大多数按钮 / Spinner 根本没有
+     * {@code android:background}，用的是 Holo 自带的 9-patch + StateListDrawable。
+     * 这类 drawable 既不能 setColor（API 18 读不回来），也不能只改其中一层，
+     * 只能整体换成主题底 —— 换完之后必须重新算底色，不能沿用采样值。
+     */
+    private static boolean resolveBackground(View v, BaseStyle bs, AppearanceManager m, boolean dark) {
+        // 0) 深色时被整体替换过的系统控件底，回到浅色必须先还原。
+        //    注意这里不能用 restore()：restore 是「回内置默认」的整份还原，
+        //    而自定义浅色主题下依然要保留主题自己刷的颜色。
+        if (!dark && bs.origBg != null) {
+            try {
+                v.setBackgroundDrawable(bs.origBg);
+            } catch (Throwable ignored) {
+            }
+            bs.origBg = null;
+        }
+
+        // 1) 输入框：单独一套规则（新建 drawable，绝不原地改资源）
+        if (v instanceof android.widget.EditText) {
+            Boolean r = applyInputBackground(v, bs, m, dark);
+            if (r != null) return r.booleanValue();
+            Integer cur = sampleSolidColor(v.getBackground());
+            return cur == null ? dark : isDarkColor(cur.intValue());
+        }
+
+        // 2) 纯色 / 形状 drawable：按原始色反查 token
+        Boolean painted = null;
+        if (bs.bgColor != null) {
+            String bgToken = BG_MAP.get(bs.bgColor);
+            if (bgToken != null) {
+                int c = keepOriginal(m, bgToken, dark)
+                        ? bs.bgColor.intValue()
+                        : m.getEffectiveColor(bgToken, dark);
+                if (paintBackground(v, bs, c)) painted = Boolean.valueOf(isDarkColor(c));
+            }
+        }
+
+        if (painted != null) return painted.booleanValue();
+
+        // 3) 系统默认控件背景（9-patch / selector）：深色下整体换主题底
+        if (dark && isThemedControlHost(v) && paintThemedControlBg(v, bs, m)) return true;
+
+        // 4) 其余按实际采样判断；透明背景跟随窗口
+        Integer cur = sampleSolidColor(v.getBackground());
+        return cur == null ? dark : isDarkColor(cur.intValue());
+    }
+
+    /** 背景来自系统主题、需要整体替换的控件类型。 */
+    private static boolean isThemedControlHost(View v) {
+        if (v instanceof android.widget.Spinner) return true;
+        return v instanceof android.widget.Button && !(v instanceof android.widget.CompoundButton);
+    }
+
+    /**
+     * 给「背景是系统 9-patch / selector」的按钮与下拉框换一套主题底。
+     *
+     * <p>为什么必须换：Holo 的 {@code btn_default}、{@code spinner_background_holo_light}
+     * 是九宫格 + 状态列表，API 18 既读不回原色也没法只改填充。不换的后果是深色模式下
+     * 一片浅色块，而文字已经被刷成白色 —— 全部不可读。
+     *
+     * <p>按钮换成圆角实色 + 描边（保留按下 / 禁用态）；下拉框换成圆角实色 + 右侧三角，
+     * 三角必须自己画：原 9-patch 的箭头跟着底一起被替换掉了，不补一个用户就不知道能点。
+     *
+     * @return true 表示已换成深色主题底
+     */
+    private static boolean paintThemedControlBg(View v, BaseStyle bs, AppearanceManager m) {
+        try {
+            // 先看现状再决定，两个都不能碰：
+            //   · 透明/半透明底：这是有意为之（图片预览层上的「取消/完成」、
+            //     只有下划线的输入框），替换成实色块会把整页盖住；
+            //   · 已经是深色底：Holo 深色对话框的按钮本来就对，重画只是丢样式。
+            Integer cur = sampleSolidColor(v.getBackground());
+            if (cur == null) return false;
+            if (!isLightColor(cur.intValue())) return true;
+
+            if (bs.origBg == null) bs.origBg = v.getBackground();
+            float d = v.getResources().getDisplayMetrics().density;
+            if (v instanceof android.widget.Spinner) {
+                // 已经是我们自绘的底：不重复新建，否则每次 onResume 都产生垃圾
+                if (v.getBackground() instanceof SpinnerBg) return true;
+                int extra = (int) (18 * d);
+                setBackgroundKeepPadding(v, new SpinnerBg(m, d));
+                int l = v.getPaddingLeft(), t = v.getPaddingTop(), b = v.getPaddingBottom();
+                v.setPadding(l, t, Math.max(v.getPaddingRight(), extra), b);
+            } else {
+                setBackgroundKeepPadding(v, stateRounded(
+                        m.getEffectiveColor(ThemeTokens.AC_SURFACE, true),
+                        m.getEffectiveColor(ThemeTokens.AC_BORDER, true), 4 * d, d));
+            }
+            return true;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /** {@code setBackgroundDrawable} 会用新 drawable 的 padding 覆盖 View 内边距，先存后还原。 */
+    private static void setBackgroundKeepPadding(View v, Drawable d) {
+        int l = v.getPaddingLeft(), t = v.getPaddingTop();
+        int r = v.getPaddingRight(), b = v.getPaddingBottom();
+        v.setBackgroundDrawable(d);
+        v.setPadding(l, t, r, b);
+    }
+
+    private static Drawable stateRounded(int color, int border, float radius, float d) {
+        StateListDrawable s = new StateListDrawable();
+        s.addState(new int[]{android.R.attr.state_pressed}, rounded(shade(color, 1.22f), border, radius, d));
+        s.addState(new int[]{-android.R.attr.state_enabled}, rounded(shade(color, 0.7f), border, radius, d));
+        s.addState(new int[]{}, rounded(color, border, radius, d));
+        return s;
+    }
+
+    private static GradientDrawable rounded(int color, int border, float radius, float d) {
+        GradientDrawable g = new GradientDrawable();
+        g.setColor(color);
+        g.setCornerRadius(radius);
+        g.setStroke(Math.max(1, (int) d), border);
+        return g;
     }
 
     /**
@@ -337,7 +462,7 @@ final class ThemeRecolor {
     }
 
     private static void applyTextColorByMap(TextView tv, BaseStyle bs, AppearanceManager m,
-                                            boolean dark) {
+                                            boolean dark, boolean bgDark) {
         // 输入框不参与「按色反查」：EditText 的默认文字色来自它<b>构造时那个 Context</b> 的主题，
         // 对话框里的输入框普遍写成 new EditText(activity)，而 activity 是浅色主题 ——
         // View 一出生就带黑色，再被塞进深色 dialog 就是深底黑字。可读性不该赌启发式命中。
@@ -354,8 +479,10 @@ final class ThemeRecolor {
             return;
         }
         // 兜底：深色模式下，未命中映射的深色文字反相成 ac_text(dark)。
-        // 关键前提：背景此时已由第 2 步同步刷深，不会再出现「浅底白字」。
-        if (dark && isDarkColor(base) && Color.alpha(base) > 64) {
+        // 【前提】背景必须真的已经是深色。BG_MAP 只覆盖十几个硬编码色，
+        // 系统按钮 / Spinner / 自绘 9-patch 的底色全都查不到，此时背景原样不动，
+        // 再把文字刷白就是「浅底白字」—— 比不刷还糟。
+        if (dark && bgDark && isDarkColor(base) && Color.alpha(base) > 64) {
             tv.setTextColor(m.getEffectiveColor(ThemeTokens.AC_TEXT, true));
         }
     }
@@ -376,48 +503,62 @@ final class ThemeRecolor {
     }
 
     /**
-     * 深色下把「浅底输入框」换成主题深色圆角底。
+     * 把输入框的底换成主题色，并返回<b>换完之后这块底是不是深色</b>。
      *
      * <p>为什么必须做：对话框里的 EditText 普遍是 {@code new EditText(activity)}，
      * activity 是 Holo Light，背景取的是白色 9-patch。文字已经按主题刷成浅色，
      * 底却还是白的 —— 结果是「白框 + 白字」，比原来的黑字更难看清。
      *
-     * <p>只处理采样到浅色实色的情况：透明背景（只有下划线）、深色底、
-     * 以及用户自绘的 selector 一律不动，避免破坏原有视觉。
-     * 原件存进快照，回浅色外观时原样还原。
+     * <p>为什么不在 {@link #paintBackground} 里一起做：那个方法对 GradientDrawable
+     * 是<b>原地 mutate + setColor</b>，而 {@code edit_text_background} 是资源 drawable，
+     * 全进程共享同一份 GradientState。原地改的后果是所有输入框一起变色，且快照里
+     * 存的「原件」跟着变脏 —— 切回浅色时还原出来的还是深色。这里一律<b>新建</b>
+     * 一个 GradientDrawable，原件只在必要时整份换回。
+     *
+     * @return null 表示没接管（透明底 / 深色自绘底），调用方按实际采样判断；
+     *         TRUE / FALSE 表示当前底色是深还是浅
      */
-    private static void applyInputBackground(View v, BaseStyle bs, AppearanceManager m, boolean dark) {
-        if (!(v instanceof android.widget.EditText)) return;
-        // 浅色（含自定义浅色主题）一律还原原件：深色时换上的圆角深底如果留着，
-        // 切回浅色就会变成「浅底上一块深色输入框」，比原来的问题更显眼。
-        if (!dark) {
-            if (bs.origInputBg != null) {
+    private static Boolean applyInputBackground(View v, BaseStyle bs, AppearanceManager m, boolean dark) {
+        if (!(v instanceof android.widget.EditText)) return null;
+        float density = v.getResources().getDisplayMetrics().density;
+        Drawable cur = v.getBackground();
+        // 现在挂着的还是不是原始那个 drawable —— 用来区分「原件」和「我们自己换上的」
+        boolean ours = bs.origInputBg != null && cur != null && cur != bs.origInputBg;
+
+        // 浅色 + 内置默认外观：什么都不做，零回归。
+        // 浅色 + 自定义主题：表面色可能不是白色，仍需跟随，走下面的替换。
+        boolean needThemed = dark || !m.isColorDefault();
+        if (!needThemed) {
+            if (ours) {
                 try {
                     v.setBackgroundDrawable(bs.origInputBg);
                 } catch (Throwable ignored) {
                 }
                 bs.origInputBg = null;
             }
-            return;
+            return Boolean.FALSE;
         }
-        // 已经换过主题色圆角底：只更新颜色，避免每次遍历都新建 drawable。
-        // （这时再用 sampleSolidColor 采样会拿到深色，走不到下面的替换逻辑。）
-        if (bs.origInputBg != null && v.getBackground() instanceof GradientDrawable) {
-            float d = v.getResources().getDisplayMetrics().density;
-            GradientDrawable g = (GradientDrawable) v.getBackground();
-            g.setColor(m.getEffectiveColor(ThemeTokens.AC_SURFACE, true));
-            g.setStroke(Math.max(1, (int) d), m.getEffectiveColor(ThemeTokens.AC_BORDER, true));
-            return;
-        }
-        Integer sampled = sampleSolidColor(v.getBackground());
-        if (sampled == null || !isLightColor(sampled.intValue())) return;
 
-        if (bs.origInputBg == null) bs.origInputBg = v.getBackground();
-        float density = v.getResources().getDisplayMetrics().density;
+        // 已经是我们换上的那份：原地改颜色即可（这份 state 只属于当前 View，安全）
+        if (ours && cur instanceof GradientDrawable) {
+            GradientDrawable g = (GradientDrawable) cur;
+            g.setColor(m.getEffectiveColor(ThemeTokens.AC_SURFACE, dark));
+            g.setStroke(Math.max(1, (int) density), m.getEffectiveColor(ThemeTokens.AC_BORDER, dark));
+            return dark ? Boolean.TRUE : Boolean.FALSE;
+        }
+
+        // 深色自绘底 / 透明底不动，避免破坏原有视觉
+        Integer sampled = sampleSolidColor(cur);
+        if (sampled == null) return null;
+        if (!isLightColor(sampled.intValue())) {
+            return dark ? Boolean.TRUE : Boolean.FALSE;
+        }
+
+        if (bs.origInputBg == null) bs.origInputBg = cur;
         GradientDrawable g = new GradientDrawable();
-        g.setColor(m.getEffectiveColor(ThemeTokens.AC_SURFACE, true));
-        g.setCornerRadius(4 * density);
-        g.setStroke(Math.max(1, (int) density), m.getEffectiveColor(ThemeTokens.AC_BORDER, true));
+        g.setColor(m.getEffectiveColor(ThemeTokens.AC_SURFACE, dark));
+        g.setCornerRadius(8 * density);
+        g.setStroke(Math.max(1, (int) density), m.getEffectiveColor(ThemeTokens.AC_BORDER, dark));
 
         // setBackgroundDrawable 会用新 drawable 的 padding 覆盖 View 的既有内边距，
         // 先存后还原，避免文字贴边、行高跳动。
@@ -425,6 +566,7 @@ final class ThemeRecolor {
         int r = v.getPaddingRight(), b = v.getPaddingBottom();
         v.setBackgroundDrawable(g);
         v.setPadding(l, t, r, b);
+        return dark ? Boolean.TRUE : Boolean.FALSE;
     }
 
     private static boolean isLightColor(int color) {
@@ -490,6 +632,14 @@ final class ThemeRecolor {
             } catch (Throwable ignored) {
             }
             bs.origSelector = null;
+        } else if (bs.origBg != null) {
+            // 系统按钮 / 下拉框的 9-patch 原件优先于下面的纯色分支：
+            // 深色时它被整体换成了主题底，回浅色必须整套还原（圆角、箭头、按下态）。
+            try {
+                v.setBackgroundDrawable(bs.origBg);
+            } catch (Throwable ignored) {
+            }
+            bs.origBg = null;
         } else if (bs.bgColor != null) {
             // 回默认同理：绝不 setColor 原件，否则会把共享 ConstantState 写成
             // 上一次的颜色，下一次 inflate 的 View 一出生就带着旧主题色
@@ -538,8 +688,11 @@ final class ThemeRecolor {
      *
      * <p>这里刻意不去改 GradientDrawable 的 stroke：API 18 没有 getStroke 系列 getter，
      * 改了就再也还原不回去，属于明确回归。深色下留一道浅灰细边比丢样式安全得多。
+     *
+     * @return true 表示这个 View 的背景确实被改了；false 表示类型不支持、原样未动
+     *         （调用方据此判断「底到底有没有变深」，不能盲目把文字刷白）
      */
-    private static void paintBackground(View v, BaseStyle bs, int color) {
+    private static boolean paintBackground(View v, BaseStyle bs, int color) {
         Drawable d = v.getBackground();
         if (d instanceof ColorDrawable) {
             // **必须换新实例，不能 setColor**：从资源取到的 ColorDrawable 之间共享
@@ -548,17 +701,22 @@ final class ThemeRecolor {
             // BG_MAP 查不到 → 永远刷不回来。表现就是
             // 「浅→深正常，深→浅不对，必须重进 APP」。
             v.setBackgroundDrawable(new ColorDrawable(color));
+            return true;
         } else if (d instanceof GradientDrawable) {
             // GradientDrawable.setColor 同样会写共享的 GradientState；mutate() 先复制
             // 一份自己的状态，圆角/描边/Angle 一起带过来，既不丢样式也不污染他人。
             Drawable own = d.mutate();
             ((GradientDrawable) own).setColor(color);
             if (own != d) v.setBackgroundDrawable(own);
+            return true;
         } else if (v.getId() == R.id.send_button && d instanceof StateListDrawable) {
             if (bs.origSelector == null) bs.origSelector = d;
             v.setBackgroundDrawable(ovalSelector(v, color));
+            return true;
         }
-        // 其它类型：不动
+        // 其它类型（9-patch、自定义 selector）：这里不动，交给 resolveBackground 的
+        // 「系统控件整体换底」分支处理，绝不在此处强行替换成实色矩形。
+        return false;
     }
 
     private static StateListDrawable ovalSelector(View v, int primary) {
@@ -641,5 +799,78 @@ final class ThemeRecolor {
     private static boolean isDarkColor(int color) {
         int r = Color.red(color), g = Color.green(color), b = Color.blue(color);
         return (r * 299 + g * 587 + b * 114) / 1000 < 128;
+    }
+
+    /**
+     * 深色模式下的下拉框底板：圆角实色 + 细描边 + 右侧下拉三角。
+     *
+     * <p>为什么不用 XML：原 9-patch 里的箭头会随底一起被换掉，用户就看不出这里能点。
+     * gradientDrawable 只能画一个形状，{@code LayerDrawable} 在 API 23 以下又不支持
+     * 逐层 gravity，所以直接自绘：一个 drawable、两笔绘制，几行代码比堆 XML 更可控。
+     *
+     * <p>{@link #getPadding(Rect)} 返回右侧留白，保证文字不会压到三角上。
+     */
+    private static final class SpinnerBg extends Drawable {
+
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final RectF rect = new RectF();
+        private final Path arrow = new Path();
+        private final int surface, border, arrowColor;
+        private final float stroke, radius, arrowW, arrowH, inset;
+
+        SpinnerBg(AppearanceManager m, float d) {
+            this.surface = m.getEffectiveColor(ThemeTokens.AC_SURFACE, true);
+            this.border = m.getEffectiveColor(ThemeTokens.AC_BORDER, true);
+            this.arrowColor = m.getEffectiveColor(ThemeTokens.AC_TEXT_SECONDARY, true);
+            this.stroke = Math.max(1, (int) d);
+            this.radius = 4 * d;
+            this.arrowW = 10 * d;
+            this.arrowH = 5 * d;
+            this.inset = 8 * d;
+        }
+
+        @Override
+        public void draw(Canvas c) {
+            Rect b = getBounds();
+            rect.set(b.left + stroke / 2f, b.top + stroke / 2f,
+                    b.right - stroke / 2f, b.bottom - stroke / 2f);
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(surface);
+            c.drawRoundRect(rect, radius, radius, paint);
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeWidth(stroke);
+            paint.setColor(border);
+            c.drawRoundRect(rect, radius, radius, paint);
+
+            float cx = b.right - inset - arrowW / 2f;
+            float cy = b.centerY();
+            arrow.reset();
+            arrow.moveTo(cx - arrowW / 2f, cy - arrowH / 2f);
+            arrow.lineTo(cx + arrowW / 2f, cy - arrowH / 2f);
+            arrow.lineTo(cx, cy + arrowH / 2f);
+            arrow.close();
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(arrowColor);
+            c.drawPath(arrow, paint);
+        }
+
+        @Override
+        public boolean getPadding(Rect p) {
+            p.set(0, 0, (int) (inset + arrowW + inset / 2f), 0);
+            return true;
+        }
+
+        @Override
+        public void setAlpha(int alpha) {
+        }
+
+        @Override
+        public void setColorFilter(ColorFilter cf) {
+        }
+
+        @Override
+        public int getOpacity() {
+            return PixelFormat.OPAQUE;
+        }
     }
 }

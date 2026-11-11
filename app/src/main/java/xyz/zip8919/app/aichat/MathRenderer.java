@@ -40,6 +40,19 @@ final class MathRenderer {
     static int cacheSize() {
         return latexCache.size();
     }
+
+    /**
+     * 清空公式位图缓存。
+     *
+     * <p>key 里已经带了字色和降级底色，理论上不会串色；这里仍提供显式清空：
+     * 一是切主题后旧图占着 2 MB 上限纯属浪费，二是万一将来 key 维度变少，
+     * 忘记清就等于「公式颜色不跟随」。宁可多清一次。
+     */
+    static void clearCache() {
+        synchronized (latexCache) {
+            latexCache.clear();
+        }
+    }
     // Extract \ce{...} → convert to LaTeX → render with jlatexmath → @@MATHn@@ image.
     static String extractAndRenderCe(String text, float density, List<String> mathTags) {
         StringBuilder out = new StringBuilder();
@@ -378,14 +391,23 @@ final class MathRenderer {
         // 现在背景透明、字色取 ac_text。key 必须带上字色 —— 否则浅色下渲染的缓存
         // 会在切深色后被复用，公式永远不换色。
         int fgColor = 0xFF000000;
+        // 渲染失败时的降级块：原来写死 #f6f8fa 浅底 + #555 灰字，深色模式下就是
+        // 一块浅色方块。大公式在低内存机上渲染失败率不低，用户看到的
+        // 「公式是浅色样式、重启后又好了」大多走的是这条降级分支。
+        int fallbackBg = 0xFFF6F8FA;
+        int fallbackFg = 0xFF555555;
         try {
             AppearanceManager am = AppearanceManager.getInstance();
             if (am != null && !am.isAppearanceDefault()) {
-                fgColor = am.getEffectiveColor(ThemeTokens.AC_TEXT, am.isDark());
+                boolean dark = am.isDark();
+                fgColor = am.getEffectiveColor(ThemeTokens.AC_TEXT, dark);
+                fallbackBg = am.getEffectiveColor(ThemeTokens.AC_SURFACE, dark);
+                fallbackFg = am.getEffectiveColor(ThemeTokens.AC_TEXT_SECONDARY, dark);
             }
         } catch (Throwable ignored) {
         }
-        String key = formula + (block ? "b" : "i") + ":" + Integer.toHexString(fgColor);
+        String key = formula + (block ? "b" : "i") + ":" + Integer.toHexString(fgColor)
+                + ":" + Integer.toHexString(fallbackBg);
         String cached = latexCache.get(key);
         if (cached != null) {
             LogUtil.v(TAG, "latex CACHE hit: block=%s %s", block, LogUtil.preview(formula, 80));
@@ -459,11 +481,16 @@ final class MathRenderer {
 
         // Clean fallback — monospace code-style, not debug-yellow
         if (imgTag == null) {
+            String bgHex = String.format("#%06X", 0xFFFFFF & fallbackBg);
+            String fgHex = String.format("#%06X", 0xFFFFFF & fallbackFg);
             if (block) {
-                imgTag = "<div class=\"math-block\" style=\"background:#f6f8fa;padding:10px;border:1px solid #d1d5da;border-radius:4px;\">"
-                    + "<code style=\"font-size:14px;color:#555;\">" + Html.esc(formula) + "</code></div>";
+                imgTag = "<div class=\"math-block\" style=\"background:" + bgHex
+                    + ";padding:10px;border-radius:4px;\">"
+                    + "<code style=\"font-size:14px;color:" + fgHex + ";\">"
+                    + Html.esc(formula) + "</code></div>";
             } else {
-                imgTag = "<code style=\"font-size:0.9em;background:#f0f0f0;padding:1px 5px;border-radius:3px;color:#555;\">"
+                imgTag = "<code style=\"font-size:0.9em;background:" + bgHex
+                    + ";padding:1px 5px;border-radius:3px;color:" + fgHex + ";\">"
                     + Html.esc(formula) + "</code>";
             }
         }

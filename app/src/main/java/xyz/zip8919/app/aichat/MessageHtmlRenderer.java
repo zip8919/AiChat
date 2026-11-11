@@ -57,6 +57,9 @@ public class MessageHtmlRenderer {
         synchronized (renderCache) {
             renderCache.clear();
         }
+        // 公式位图缓存一并清：它虽然按字色分 key，但旧图在 2 MB 上限里白占地方，
+        // 而且一旦有人改了 key 的维度却忘了这里，就会复现「公式不换色」。
+        MathRenderer.clearCache();
     }
 
     public static String buildConversationHtml(List<Message> messages, int from, Context ctx) {
