@@ -175,7 +175,7 @@ final class ViewerBg {
                 .setPositiveButton("确定", null)
                 .setNegativeButton("取消", null)
                 .create();
-        dlg.setOnShowListener(new DialogInterface.OnShowListener() {
+        AcDialog.onShow(dlg, new DialogInterface.OnShowListener() {
             public void onShow(DialogInterface di) {
                 dlg.getButton(AlertDialog.BUTTON_POSITIVE)
                         .setOnClickListener(new View.OnClickListener() {

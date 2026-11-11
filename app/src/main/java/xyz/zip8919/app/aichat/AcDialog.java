@@ -3,7 +3,7 @@ package xyz.zip8919.app.aichat;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Context;
-import android.os.Build;
+import android.content.DialogInterface;
 import android.view.ContextThemeWrapper;
 import android.view.View;
 
@@ -42,11 +42,19 @@ final class AcDialog {
     }
 
     /**
-     * 在 {@code create()} / {@code show()} 之后补刷一次内容树。
+     * 在 {@code show()} 之后补刷一次内容树。
      *
      * <p>{@code Theme_Holo_Dialog} 只解决窗口底板；dialog 里的 EditText、列表行
      * 如果自己写了 {@code @color/white}，深色下仍是白块。而且 dialog 的 content
      * 常常用 {@code LayoutInflater.from(ctx)} 自建，ThemedActivity 的钩子够不到。
+     *
+     * <p><b>刷色时机必须是 show 之后，不能在 create 阶段</b>：4.4 上
+     * {@code Dialog.getWindow().getDecorView()} 会立刻 {@code installDecor()}，
+     * 把 contentParent 建出来；紧接着 {@code show()} 里的
+     * {@code AlertController.installContent()} 再 requestFeature 就会抛
+     * <pre>AndroidRuntimeException: requestFeature() must be called before adding content</pre>
+     * 这正是「4.4 上任何弹窗一打开就闪退」的根因。5.0+ 的 AlertController 不走
+     * requestFeature，所以只有老系统崩。
      */
     private static final class ThemedBuilder extends AlertDialog.Builder {
         ThemedBuilder(Context ctx) {
@@ -56,39 +64,60 @@ final class AcDialog {
         @Override
         public AlertDialog create() {
             AlertDialog d = super.create();
-            recolor(d);
+            // 只挂回调，不碰 Window。
+            bindRecolor(d, null);
             return d;
         }
 
         @Override
         public AlertDialog show() {
-            AlertDialog d = super.show();
-            recolor(d);
-            return d;
+            // create() 已绑好 OnShowListener，show 时自动刷，这里不能再碰 decor。
+            return super.show();
         }
+    }
 
-        private static void recolor(AlertDialog d) {
-            try {
-                if (d == null || d.getWindow() == null) return;
-                final View decor = d.getWindow().getDecorView();
-                if (decor == null) return;
-                ThemeRecolor.applyTo(decor);
-                // create() 阶段还没 layout：背景 drawable 的 bounds 为空，
-                // sampleSolidColor 采不到颜色。挂一帧等布局完成再补一次。
-                // 这个 Runnable 跑在消息队列里，一旦抛异常就没有外层 catch 可接 ——
-                // 4.4 低内存机上遍历 + 采样 bitmap 失败会直接打崩主线程，必须自己兜住。
-                decor.post(new Runnable() {
-                    public void run() {
-                        try {
-                            ThemeRecolor.applyTo(decor);
-                        } catch (Throwable ignored) {
-                            // 着色失败只是配色不理想，绝不能因此闪退
-                        }
-                    }
-                });
-            } catch (Throwable t) {
-                LogUtil.w("AcDialog", "recolor dialog failed: " + t.getMessage());
+    /**
+     * 调用方要在 show 之后做自己的事（调输入法、改布局）时用这个入口。
+     *
+     * <p>不要直接 {@code dialog.setOnShowListener(...)}：那会覆盖掉这里的着色回调，
+     * 弹窗里的输入框、列表行就回到「白底黑字配深色主题」的状态。
+     */
+    static void onShow(AlertDialog d, DialogInterface.OnShowListener extra) {
+        if (d == null) return;
+        bindRecolor(d, extra);
+    }
+
+    private static void bindRecolor(final AlertDialog d,
+                                    final DialogInterface.OnShowListener extra) {
+        d.setOnShowListener(new DialogInterface.OnShowListener() {
+            public void onShow(DialogInterface dialog) {
+                recolor(d);
+                if (extra != null) extra.onShow(dialog);
             }
+        });
+    }
+
+    private static void recolor(AlertDialog d) {
+        try {
+            if (d == null || d.getWindow() == null) return;
+            final View decor = d.getWindow().getDecorView();
+            if (decor == null) return;
+            ThemeRecolor.applyTo(decor);
+            // show 之后已经 attach，但首帧可能还没 layout：背景 drawable 的 bounds
+            // 为空时 sampleSolidColor 采不到颜色。挂一帧补一次。
+            // 这个 Runnable 跑在消息队列里，没有外层 catch 可接 —— 4.4 低内存机上
+            // 遍历 + 采样 bitmap 失败会直接打崩主线程，必须自己兜住。
+            decor.post(new Runnable() {
+                public void run() {
+                    try {
+                        ThemeRecolor.applyTo(decor);
+                    } catch (Throwable ignored) {
+                        // 着色失败只是配色不理想，绝不能因此闪退
+                    }
+                }
+            });
+        } catch (Throwable t) {
+            LogUtil.w("AcDialog", "recolor dialog failed: " + t.getMessage());
         }
     }
 
@@ -99,15 +128,6 @@ final class AcDialog {
 
     private static Context wrap(Context ctx) {
         if (!(ctx instanceof Activity)) return ctx;
-        // API 19 及以下（4.4 及更早）不套 Holo Dialog 主题。
-        //
-        // 4.4 上 ContextThemeWrapper + Theme_Holo_Dialog 这个组合会让 AlertDialog
-        // 在 create() 阶段拿不到完整主题属性（老 Holo 的 dialogTheme 指向的
-        // Theme.Holo.Dialog.Alert 在该版本缺少部分自定义 ROM 裁剪掉的资源），
-        // 表现为「任何弹窗一打开就闪退」。5.0+ 无此问题。
-        // 老设备优先保证弹得出来：不换主题，底板沿用界面自身主题，内容区仍由
-        // recolor 刷色，视觉上是「浅底板 + 深色文字」，可读但不完美，远好于闪退。
-        if (Build.VERSION.SDK_INT < 21) return ctx;
         try {
             AppearanceManager m = AppearanceManager.getInstance(ctx);
             // 只有深色才换深色对话框主题。浅色 + 自定义主题也必须走浅色对话框，

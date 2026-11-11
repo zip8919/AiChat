@@ -103,8 +103,7 @@ public class ApiClient {
             }
             reader.close();
             String body = sb.toString().trim();
-            // 部分中转/广告网关会在 JSON 前塞 UTF-8 BOM，JSONObject 会直接抛
-            if (body.length() > 0 && body.charAt(0) == '\uFEFF') body = body.substring(1);
+            body = sanitizeJson(body);
             LogUtil.i(TAG, "queryBalance <- len=%d body=%s", body.length(),
                     LogUtil.preview(body, 500));
             return body;
@@ -114,6 +113,32 @@ public class ApiClient {
         } finally {
             if (conn != null) conn.disconnect();
         }
+    }
+
+    /**
+     * 清洗余额响应体，只保留最外层的 JSON 对象。
+     *
+     * <p>实机上出现过「body 看着是正常 JSON，{@code new JSONObject} 却抛异常」：
+     * 首部混进了 UTF-8 BOM 或零宽字符，肉眼完全看不出来；部分网关还会在 JSON
+     * 前后附加一小段不可见字节。这里统一剔掉不可见字符，并截取第一个 '{' 到
+     * 最后一个 '}'，比直接把原始流交给 JSONObject 稳。
+     */
+    private static String sanitizeJson(String raw) {
+        if (raw == null) return null;
+        StringBuilder sb = new StringBuilder(raw.length());
+        for (int i = 0; i < raw.length(); i++) {
+            char c = raw.charAt(i);
+            if (c == '\uFEFF' || c == '\u0000' || c == '\u200B'
+                    || c == '\u200C' || c == '\u200D') {
+                continue;
+            }
+            sb.append(c);
+        }
+        String s = sb.toString().trim();
+        int start = s.indexOf('{');
+        int end = s.lastIndexOf('}');
+        if (start >= 0 && end > start) return s.substring(start, end + 1);
+        return s;
     }
 
     // ---- private helpers ----

@@ -356,7 +356,7 @@ public class ThemeEditActivity extends ThemedActivity {
                 .setPositiveButton("生成", null)
                 .setNegativeButton("取消", null)
                 .create();
-        d.setOnShowListener(new DialogInterface.OnShowListener() {
+        AcDialog.onShow(d, new DialogInterface.OnShowListener() {
             public void onShow(DialogInterface di) {
                 d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(new View.OnClickListener() {
                     public void onClick(View v) {
