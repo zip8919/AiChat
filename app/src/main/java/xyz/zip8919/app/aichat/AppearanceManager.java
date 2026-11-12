@@ -237,13 +237,19 @@ public final class AppearanceManager {
 
     public void setExplicit(String key, String value, boolean dark) {
         if (key == null || value == null) return;
-        working.explicitFor(dark).put(key, value);
+        java.util.Map<String, String> m = working.explicitFor(dark);
+        // 值没变就不 bump。bump 的代价是「所有存活页面整树重刷」，
+        // 逐属性编辑页拖动滑条时会有大量重复值（手指停住、点一下不动），
+        // 每一条都当改动处理，4.x 上就是白白卡一下。
+        if (value.equals(m.get(key))) return;
+        m.put(key, value);
         bump();
     }
 
     public void clearExplicit(String key, boolean dark) {
         if (key == null) return;
-        working.explicitFor(dark).remove(key);
+        java.util.Map<String, String> m = working.explicitFor(dark);
+        if (m.remove(key) == null) return;   // 本来就没覆盖，不必重刷
         bump();
     }
 

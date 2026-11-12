@@ -5,7 +5,6 @@ import android.content.DialogInterface;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
-import android.os.SystemClock;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.view.Gravity;
@@ -457,11 +456,15 @@ public class ThemeAttrActivity extends ThemedActivity {
 
         final float[] c = {hsv[0], hsv[1], hsv[2]};
         final int[] color = {cur};
+        // 预览块只建一次 drawable，之后原地改色。拖动时 onProgressChanged 每秒会来
+        // 几十次，每次 new GradientDrawable 在 4.x 上就是成片的临时对象与 GC。
+        final GradientDrawable previewBg = rounded(cur, 6);
+        preview.setBackgroundDrawable(previewBg);
 
         final Runnable sync = new Runnable() {
             public void run() {
                 color[0] = Color.HSVToColor(c);
-                preview.setBackgroundDrawable(rounded(color[0], 6));
+                previewBg.setColor(color[0]);
             }
         };
         sync.run();
@@ -473,13 +476,16 @@ public class ThemeAttrActivity extends ThemedActivity {
                 else if (s.getId() == 2) c[1] = progress / 100f;
                 else if (s.getId() == 3) c[2] = progress / 100f;
                 sync.run();
+                // 拖动过程中**不写全局**：setExplicit 会 bump 一次，通知进程里所有存活
+                // 页面整树重刷（主界面几十个 View，每个 9-patch 底还要建位图采样），
+                // 4.x 上就是「拖一格卡一下、滑条根本不跟手」。
+                // 预览块已经实时跟随，抬手时（onStopTrackingTouch）再落一次值。
                 // 不回写 hex 输入框：用户可能正在里面打字，抢焦点会打断输入
-                applyLive(token, hexOf(color[0]));
             }
             public void onStartTrackingTouch(SeekBar s) {}
             public void onStopTrackingTouch(SeekBar s) {
-                // 停手时强制落一次，避免节流把最后一格丢掉
-                applyLiveForce(token, hexOf(color[0]));
+                // 停手落值：界面整体跟着换色，作为「松手即预览」的收口
+                setValue(token, hexOf(color[0]));
             }
         };
         root.addView(labeled("色相", 360, Math.round(hsv[0]), 1, l));
@@ -494,8 +500,9 @@ public class ThemeAttrActivity extends ThemedActivity {
                 if (v == null) return;
                 color[0] = v.intValue();
                 Color.colorToHSV(color[0], c);
-                preview.setBackgroundDrawable(rounded(color[0], 6));
-                applyLive(token, hexOf(color[0]));
+                previewBg.setColor(color[0]);
+                // 同上：只更新预览，落值交给「确定」/ 松手。逐字符写全局会把输入框
+                // 自己所在的对话框连同背景页一起重刷，光标都会被刷丢。
             }
         });
 
@@ -525,21 +532,6 @@ public class ThemeAttrActivity extends ThemedActivity {
             }
         });
         d.show();
-    }
-
-    private static final long LIVE_INTERVAL_MS = 150;
-    private long lastLiveAt;
-
-    private void applyLive(String token, String hex) {
-        long now = SystemClock.uptimeMillis();
-        if (now - lastLiveAt < LIVE_INTERVAL_MS) return;
-        lastLiveAt = now;
-        setValue(token, hex);
-    }
-
-    private void applyLiveForce(String token, String hex) {
-        lastLiveAt = SystemClock.uptimeMillis();
-        setValue(token, hex);
     }
 
     private View labeled(String text, int max, int progress, int id,

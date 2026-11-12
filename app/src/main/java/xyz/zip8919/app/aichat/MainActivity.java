@@ -167,6 +167,8 @@ public class MainActivity extends ThemedActivity {
      * 用户看到的是「要重启 App 才变色」。存字段后生命周期与本 Activity 对齐。
      */
     private AppearanceManager.ChangeListener webTintListener;
+    /** WebView 侧样式刷新器；后台跳过、回前台补一次，见 {@link #bindWebView()}。 */
+    private WebViewRefresher webRefresher;
     /**
      * 本页是否在前台可见。
      *
@@ -491,7 +493,7 @@ public class MainActivity extends ThemedActivity {
         // ChangeListener 在任一外观项改动时触发，只替换 <style> 文本与 setTextZoom，
         // 绝不 loadDataWithBaseURL 重灌，因此不会打断流式输出、不重置滚动位置。
         final AppearanceManager am = AppearanceManager.getInstance(this);
-        am.setChangeListener(new WebViewRefresher(new WebViewRefresher.Host() {
+        webRefresher = new WebViewRefresher(new WebViewRefresher.Host() {
             @Override
             public void evalJs(String js) {
                 webViewEvalJs(js);
@@ -501,7 +503,18 @@ public class MainActivity extends ThemedActivity {
                 if (conversationWebView == null) return;
                 conversationWebView.getSettings().setTextZoom(percent);
             }
-        }));
+        });
+        // 后台直接跳过：样式替换虽然不重灌页面，但要现算整份主题 CSS（含 16 个 token
+        // 的 resolve）再跨进程 eval 一次 JavaScript。逐属性编辑页拖动取色时每松一次手
+        // 都会走一遍，堆在主线程队列里就是肉眼可见的卡顿。
+        // 回前台由 onResume 补一次，不会漏样式。
+        final WebViewRefresher refresher = webRefresher;
+        am.setChangeListener(new AppearanceManager.ChangeListener() {
+            public void onAppearanceChanged(AppearanceManager mm) {
+                if (!uiVisible) return;
+                refresher.onAppearanceChanged(mm);
+            }
+        });
         WebViewRefresher.applyInitialZoom(conversationWebView, am.getDisplayPercent());
 
         // 公式是 MathRenderer 预渲染的 PNG，字色在出图时就画死了，换 CSS 不可能变色；
@@ -2031,6 +2044,11 @@ public class MainActivity extends ThemedActivity {
         // 放在 onResume 而不是 onCreate：用户可能一直不退出这个界面。
         NetSecurity.set(SettingsActivity.isTrustAllCerts(this),
                 SettingsActivity.isHttpAllowPrivateHost(this));
+        // 后台期间 AppearanceManager 的通知被跳过了（见 bindWebView），这里补一次
+        // 样式与字号。纯 <style> 文本替换，不重灌页面、不动滚动位置。
+        if (webRefresher != null) {
+            webRefresher.onAppearanceChanged(AppearanceManager.getInstance(this));
+        }
         loadSystemPrompt();
         refreshModelSpinner();
         // 弹对话框/切后台回来时，硬件加速合成层偶发不主动重绘，表现为

@@ -26,6 +26,17 @@ public class ThemedActivity extends Activity {
 
     private long appliedRevision = -1;
     private AppearanceManager.ChangeListener pageListener;
+    /**
+     * 是否处于前台。
+     *
+     * <p><b>为什么需要它</b>：{@link AppearanceManager#bump()} 会通知进程里所有存活的
+     * ThemedActivity。逐属性编辑页拖动取色时，每改一次颜色就会解析栈下 3～5 个页面
+     * 的整棵 View 树（每个非纯色背景的 View 还要建 9x9 位图采样）。4.x 机器上这就是
+     * 「拖一格卡一下」的直接来源 —— 而压在后面的页面用户根本看不见。
+     *
+     * <p>后台页面不刷不会漏：{@link #onResume()} 本来就无条件整树刷一次。
+     */
+    private boolean resumed;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -39,6 +50,7 @@ public class ThemedActivity extends Activity {
         // 页面级监听：切深浅色时立刻重刷本页，不必等 onResume、更不必重进 APP
         pageListener = new AppearanceManager.ChangeListener() {
             public void onAppearanceChanged(AppearanceManager mm) {
+                if (!resumed) return;   // 后台页交给 onResume，见字段注释
                 forceApplyAppearance();
             }
         };
@@ -143,6 +155,7 @@ public class ThemedActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        resumed = true;
         // 这里**不能**用 revision 短路。
         //
         // setContentView 只保证「布局骨架」已存在；折叠组、异步列表、动态 addView
@@ -153,6 +166,13 @@ public class ThemedActivity extends Activity {
         AppearanceManager m = AppearanceManager.getInstance(this);
         appliedRevision = m.getRevision();
         m.applyTo(this);
+    }
+
+    @Override
+    protected void onPause() {
+        // 先摘掉前台标记再交给父类：bump 可能就发生在这个窗口里
+        resumed = false;
+        super.onPause();
     }
 
     /** 只有 revision 变化才重刷，避免每次返回都遍历 View 树。 */

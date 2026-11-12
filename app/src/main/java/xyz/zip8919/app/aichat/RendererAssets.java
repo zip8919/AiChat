@@ -35,26 +35,31 @@ final class RendererAssets {
             "background:#f5f5f5;color:#555;}" +
             "code{font-family:'Courier New',monospace;background:#f0f0f0;" +
             "padding:1px 4px;border-radius:3px;font-size:0.9em;color:#C7254E;}" +
+            // 顶部不再靠 pre 的 padding 给按钮留位置。
+            // 语言标签 / 复制 / 保存 都是绝对定位，压在 pre 的 padding 上——
+            // 只要主题 CSS 里写了 pre{padding:8px}（很常见），按钮就正好盖住第一行代码。
+            // 现在改由流内的 .code-head 撑出高度，padding 被主题改小也压不到正文。
             "pre{position:relative;background:#f6f8fa;border:1px solid #e1e4e8;" +
-            "border-radius:4px;padding:28px 12px 10px 12px;margin:8px 0;" +
+            "border-radius:4px;padding:0 12px 10px 12px;margin:8px 0;" +
             "overflow-x:auto;-webkit-overflow-scrolling:touch;}" +
+            "pre .code-head{display:block;height:28px;font-size:0;line-height:0;}" +
             "pre code{background:transparent;padding:0;color:#333;white-space:pre;" +
             "word-wrap:normal;font-size:13px;line-height:1.5;display:block;}" +
-            "pre .lang-tag{position:absolute;top:4px;left:12px;font-size:10px;" +
+            "pre .lang-tag{position:absolute;top:6px;left:12px;font-size:10px;line-height:14px;" +
             "color:#999;font-family:Roboto,sans-serif;}" +
-            "pre .copy-btn{position:absolute;top:4px;right:8px;padding:2px 8px;" +
+            "pre .copy-btn{position:absolute;top:4px;right:8px;padding:2px 8px;line-height:16px;" +
             "font-size:11px;background:#e1e4e8;border:1px solid #ccc;border-radius:3px;" +
             "color:#555;font-family:Roboto,sans-serif;}" +
-            "pre .save-btn{position:absolute;top:4px;right:56px;padding:2px 8px;" +
+            "pre .save-btn{position:absolute;top:4px;right:56px;padding:2px 8px;line-height:16px;" +
             "font-size:11px;background:#e8f5e9;border:1px solid #a5d6a7;border-radius:3px;" +
             "color:#2e7d32;font-family:Roboto,sans-serif;}" +
-            "pre .import-btn{position:absolute;top:4px;right:56px;padding:2px 8px;" +
+            "pre .import-btn{position:absolute;top:4px;right:56px;padding:2px 8px;line-height:16px;" +
             "font-size:11px;background:#f3e5f5;border:1px solid #ce93d8;border-radius:3px;" +
             "color:#6a1b9a;font-family:Roboto,sans-serif;}" +
-            "pre .preview-btn{position:absolute;top:4px;right:104px;padding:2px 8px;" +
+            "pre .preview-btn{position:absolute;top:4px;right:104px;padding:2px 8px;line-height:16px;" +
             "font-size:11px;background:#e1f5fe;border:1px solid #81d4fa;border-radius:3px;" +
             "color:#0277bd;font-family:Roboto,sans-serif;}" +
-            "pre .run-btn{position:absolute;top:4px;right:104px;padding:2px 8px;" +
+            "pre .run-btn{position:absolute;top:4px;right:104px;padding:2px 8px;line-height:16px;" +
             "font-size:11px;background:#fff3e0;border:1px solid #ffcc80;border-radius:3px;" +
             "color:#e65100;font-family:Roboto,sans-serif;}" +
             "table{border-collapse:collapse;margin:8px 0;font-size:13px;white-space:nowrap;}" +
@@ -222,6 +227,14 @@ final class RendererAssets {
             "function addCopyBtns(root){" +
             "var pres=(root||document).querySelectorAll('pre');" +
             "for(var i=0;i<pres.length;i++){(function(pre){" +
+            // 顶部占位块：语言标签/复制/保存都是绝对定位，原来靠 pre 的 padding-top
+            // 给它们腾地方。主题 CSS 一旦把 pre 的 padding 改小，按钮就压到第一行代码上
+            // （用户反馈的「部分主题代码块第一行被遮住」）。改成流内占位，
+            // padding 怎么变都压不到正文。放在 copy-btn 判重之前，已有按钮的老节点
+            // 也能补上这块，不必等下次重灌页面。
+            "if(!pre.querySelector('.code-head')){" +
+            "var hd=document.createElement('div');hd.className='code-head';" +
+            "if(pre.firstChild)pre.insertBefore(hd,pre.firstChild);else pre.appendChild(hd);}" +
             "if(pre.querySelector('.copy-btn'))return;" +
             "var btn=document.createElement('button');" +
             "btn.className='copy-btn';btn.textContent='复制';" +
@@ -669,7 +682,10 @@ final class RendererAssets {
             // 之后续跑只能走 fallback 重建，等于又闪一次。
             "var b=c.querySelector('.stream-base');" +
             "var t=c.querySelector('.stream-tail');" +
-            "if(b){b.innerHTML=html;if(t)t.innerHTML='';}" +
+            // 清空内容的同时必须把 plain 类摘掉：.stream-tail.plain::after 画的是
+            // 流式光标 ▍，只清 innerHTML 不摘类的话，光标会孤零零留在最后占一整行
+            // 且永不消失（用户反馈的「生成完末尾多一行光标」）。
+            "if(b){b.innerHTML=html;if(t){t.className='stream-tail';t.innerHTML='';}}" +
             "else{c.className='content';c.innerHTML=html;}" +
             "applyToolStates(c);" +
             "clearStatus();" +
@@ -789,7 +805,9 @@ final class RendererAssets {
             "t.className='stream-tail';t.innerHTML=html;window.__restoreScroll(t,s);" +
             "clearStatus();addCopyBtns(t);applyToolStates(t);smartScrollToBottom();};" +
             "window.__applyTailText=function(t,text){var s=window.__snapScroll(t);" +
-            "t.className='stream-tail plain';t.textContent=text;window.__restoreScroll(t,s);" +
+            // 空文本不挂 plain：挂了就会画出一个孤零零的流式光标 ▍
+            "t.className=text?'stream-tail plain':'stream-tail';t.textContent=text;" +
+            "window.__restoreScroll(t,s);" +
             "clearStatus();smartScrollToBottom();};" +
             "window.__guardHold=function(){" +
             // 每次渲染帧落地前先检查：闸门超时就强制释放并丢弃缓存帧，
@@ -911,7 +929,9 @@ final class RendererAssets {
             // 保留 base/tail 骨架：整段替换会把它抹掉，之后续跑只能走 fallback
             // 重建，等于又闪一次；增量渲染也失去可靠的落点。
             "var b=c.querySelector('.stream-base'),t=c.querySelector('.stream-tail');" +
-            "if(b){b.innerHTML=html;if(t)t.innerHTML='';}else{c.innerHTML=html;}" +
+            // 与 updateLastMsg 同理：只清内容不摘 plain 类，流式光标 ▍ 会永久留在末尾
+            "if(b){b.innerHTML=html;if(t){t.className='stream-tail';t.innerHTML='';}}" +
+            "else{c.innerHTML=html;}" +
             "runScripts(c);}}" +
             "else{var bb=all[i].querySelector('.bubble');if(bb){bb.innerHTML=html;runScripts(bb);}}" +
             "clearStatus();addCopyBtns();return;}}};" +
@@ -940,6 +960,12 @@ final class RendererAssets {
             "if(ms.length>0){" +
             "var last=ms[ms.length-1];" +
             "last.setAttribute('data-idx',''+idx);" +
+            // 定型后这条气泡不再是「流式中」：tail 里残留的 .plain 类会让
+            // .stream-tail.plain::after 的流式光标 ▍ 一直挂在末尾，占掉一行。
+            // 只摘类不动内容：中断路径下 tail 里可能还有没并进 base 的增量，
+            // 清空就等于把用户已经看到的最后一段删掉。
+            "var tt=last.querySelector('.stream-tail');" +
+            "if(tt)tt.className='stream-tail';" +
             "var btn=last.querySelector('.msg-menu-btn');" +
             "if(btn)btn.setAttribute('onclick'," +
             "\"if(window.Android)Android.messageMenu('\"+idx+\"');event.stopPropagation();return false;\");" +
