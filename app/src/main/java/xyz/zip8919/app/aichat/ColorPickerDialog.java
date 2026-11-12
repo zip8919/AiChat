@@ -58,10 +58,12 @@ final class ColorPickerDialog {
         final float[] cur = {hsv[0], hsv[1], hsv[2]};
         final int[] color = {start};
 
+        final ColorDrawable previewBg = new ColorDrawable(start);
+        preview.setBackgroundDrawable(previewBg);
         final Runnable refresh = new Runnable() {
             public void run() {
                 color[0] = Color.HSVToColor(cur);
-                preview.setBackgroundDrawable(new ColorDrawable(color[0]));
+                previewBg.setColor(color[0]);
                 hexTv.setText(ThemeCssBuilder.hexOf(color[0]));
             }
         };

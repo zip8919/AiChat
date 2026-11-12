@@ -241,6 +241,8 @@ public class ConversationManagerActivity extends ThemedActivity {
                     return true;
                 }
                 LogUtil.d(TAG, "item long click: pos=%d", pos);
+                // 列表由后台线程重载，滑动/刷新瞬间长按可能拿到越界 pos
+                if (pos < 0 || pos >= conversations.size()) return true;
                 showActionDialog(conversations.get(pos));
                 return true;
             }
@@ -354,7 +356,7 @@ public class ConversationManagerActivity extends ThemedActivity {
                         loaded == null ? -1 : loaded.size());
                 runOnUiThread(new Runnable() {
                     public void run() {
-                        if (isFinishing()) return;
+                        if (isFinishing() || isDestroyed()) return;
                         conversations = loaded;
                         if (adapter == null) {
                             adapter = new ConversationAdapter(ConversationManagerActivity.this, conversations);

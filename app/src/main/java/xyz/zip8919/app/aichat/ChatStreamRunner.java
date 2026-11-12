@@ -234,6 +234,7 @@ final class ChatStreamRunner {
                 if (round != retryRound) {
                     retryRound = round;
                     retryCount = 0;
+                    last429Body = "";  // 上一轮的配额超限原因不能串到本轮错误卡片
                 }
                 if (!session.isAlive(job.generation)) {
                     LogUtil.i(TAG, "round loop aborted before round %d", round);
@@ -287,7 +288,10 @@ final class ChatStreamRunner {
                         conn = null;
                         session.setConnection(null);
                         boolean alive = sleepInterruptible(waitMs, job.generation);
-                        ui.onRetryWaitEnd();
+                        // 收卡片：hideRetryCard 只由这个回调触发，用户停止时
+                        // 代数不变仍要收；代数过期说明新请求已接管 UI，
+                        // 此时不能把新请求刚显示的倒计时卡片隐掉。
+                        if (session.isCurrent(job.generation)) ui.onRetryWaitEnd();
                         if (!alive) {
                             LogUtil.i(TAG, "429 retry wait aborted by user");
                             return;
@@ -336,8 +340,10 @@ final class ChatStreamRunner {
                     LogUtil.e(TAG, "request failed (round %d): %s", round, st.errorDetail);
                     String failReason = ErrorReport.providerMessage(bodyForReport);
                     if (failReason.length() > 80) failReason = failReason.substring(0, 80) + "…";
-                    ui.toast("请求失败: HTTP " + code
-                            + (failReason.length() > 0 ? " · " + failReason : ""));
+                    if (session.isCurrent(job.generation)) {
+                        ui.toast("请求失败: HTTP " + code
+                                + (failReason.length() > 0 ? " · " + failReason : ""));
+                    }
                     return;
                 }
 
@@ -375,7 +381,7 @@ final class ChatStreamRunner {
                     if (TraceKit.cap(st.trace)) ui.onTraceTrimmed();
                     st.errorDetail = ErrorReport.build(job.providerName, job.modelName,
                             job.chatEndpoint, round, rr.httpCode, rr.rawBody, rr.cause);
-                    ui.toast(rr.error);
+                    if (session.isCurrent(job.generation)) ui.toast(rr.error);
                     return;
                 }
 

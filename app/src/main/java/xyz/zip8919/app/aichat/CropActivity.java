@@ -47,6 +47,8 @@ public class CropActivity extends ThemedActivity {
     private String displayName;
     /** 按屏幕尺寸采样解码后的位图；裁剪坐标系就建在它上面。 */
     private Bitmap source;
+    /** onDestroy 的 recycle 与后台裁剪的 drawBitmap 互斥，防 "recycled bitmap"。 */
+    private final Object cropLock = new Object();
     /** 累计旋转角度，只用于按钮文案；真正的坐标系始终是当前的 {@link #source}。 */
     private int rotationDegrees;
     private ProgressDialog progress;
@@ -150,7 +152,10 @@ public class CropActivity extends ThemedActivity {
                 final int sourceW = srcW, sourceH = srcH;
                 handler.post(new Runnable() {
                     public void run() {
-                        if (isFinishing()) return;
+                        if (isFinishing() || isDestroyed()) {
+                            if (decoded != null) decoded.recycle();
+                            return;
+                        }
                         if (decoded == null) {
                             AcToast.showLong(CropActivity.this, "打开图片失败: " + (error == null ? "未知错误" : error));
                             finish();
@@ -186,30 +191,34 @@ public class CropActivity extends ThemedActivity {
      */
     private void rotateSource() {
         if (source == null || source.isRecycled()) return;
-        final Bitmap current = source;
-        Matrix matrix = new Matrix();
-        matrix.postRotate(90);
-        Bitmap rotated = null;
-        try {
-            rotated = Bitmap.createBitmap(current, 0, 0,
-                    current.getWidth(), current.getHeight(), matrix, true);
-        } catch (OutOfMemoryError e) {
-            AcToast.show(this, "内存不足，无法旋转");
-            return;
-        } catch (Exception e) {
-            AcToast.show(this, "旋转失败: " + e.getMessage());
-            return;
+        // 与 onDestroy 的 recycle(source) 共用一把锁，旋转期间不允许回收
+        synchronized (cropLock) {
+            if (source == null || source.isRecycled()) return;
+            final Bitmap current = source;
+            Matrix matrix = new Matrix();
+            matrix.postRotate(90);
+            Bitmap rotated = null;
+            try {
+                rotated = Bitmap.createBitmap(current, 0, 0,
+                        current.getWidth(), current.getHeight(), matrix, true);
+            } catch (OutOfMemoryError e) {
+                AcToast.show(this, "内存不足，无法旋转");
+                return;
+            } catch (Exception e) {
+                AcToast.show(this, "旋转失败: " + e.getMessage());
+                return;
+            }
+            if (rotated == null) {
+                AcToast.show(this, "旋转失败");
+                return;
+            }
+            source = rotated;
+            rotationDegrees = (rotationDegrees + 90) % 360;
+            cropView.setBitmap(source);
+            rotateBtn.setText("旋转 " + rotationDegrees + "°");
+            // setBitmap 已切到新图，旧图此刻不再被 CropView 引用
+            if (!current.isRecycled()) current.recycle();
         }
-        if (rotated == null) {
-            AcToast.show(this, "旋转失败");
-            return;
-        }
-        source = rotated;
-        rotationDegrees = (rotationDegrees + 90) % 360;
-        cropView.setBitmap(source);
-        rotateBtn.setText("旋转 " + rotationDegrees + "°");
-        // setBitmap 已切到新图，旧图此刻不再被 CropView 引用
-        if (!current.isRecycled()) current.recycle();
     }
 
     private void doCrop() {
@@ -226,15 +235,21 @@ public class CropActivity extends ThemedActivity {
                 String err = null;
                 Bitmap cropped = null;
                 try {
-                    try {
-                        cropped = Bitmap.createBitmap(source, rect.left, rect.top,
-                                rect.width(), rect.height());
-                    } catch (IllegalArgumentException iae) {
-                        // 某些设备上 createBitmap 对越界极其敏感，退一步走 Canvas 重绘
-                        cropped = Bitmap.createBitmap(rect.width(), rect.height(),
-                                Bitmap.Config.ARGB_8888);
-                        Canvas c = new Canvas(cropped);
-                        c.drawBitmap(source, -rect.left, -rect.top, null);
+                    // onDestroy 会 recycle(source)：点「完成」立刻返回时两者会并发。
+                    synchronized (cropLock) {
+                        if (source == null || source.isRecycled()) {
+                            throw new IllegalStateException("source bitmap released");
+                        }
+                        try {
+                            cropped = Bitmap.createBitmap(source, rect.left, rect.top,
+                                    rect.width(), rect.height());
+                        } catch (IllegalArgumentException iae) {
+                            // 某些设备上 createBitmap 对越界极其敏感，退一步走 Canvas 重绘
+                            cropped = Bitmap.createBitmap(rect.width(), rect.height(),
+                                    Bitmap.Config.ARGB_8888);
+                            Canvas c = new Canvas(cropped);
+                            c.drawBitmap(source, -rect.left, -rect.top, null);
+                        }
                     }
                     File dir = new File(getCacheDir(), "camera");
                     if (!dir.exists() && !dir.mkdirs()) throw new Exception("无法创建缓存目录");
@@ -261,7 +276,7 @@ public class CropActivity extends ThemedActivity {
                 final String error = err;
                 handler.post(new Runnable() {
                     public void run() {
-                        if (isFinishing()) return;
+                        if (isFinishing() || isDestroyed()) return;
                         setBusy(false);
                         if (path == null) {
                             AcToast.showLong(CropActivity.this, "裁剪失败: " + (error == null ? "未知错误" : error));
@@ -302,9 +317,14 @@ public class CropActivity extends ThemedActivity {
             progress = null;
         }
         // source 是裁剪的唯一来源，Activity 结束时必须还回去
-        if (source != null) {
-            source.recycle();
-            source = null;
+        synchronized (cropLock) {
+            // CropView 仍持有同一个 Bitmap：已排队的 traversal 若在这之后
+            // 再绘一帧，就会抛 "trying to use a recycled bitmap"。
+            if (cropView != null) cropView.setBitmap(null);
+            if (source != null) {
+                source.recycle();
+                source = null;
+            }
         }
     }
 }

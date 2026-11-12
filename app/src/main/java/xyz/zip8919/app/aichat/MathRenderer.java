@@ -434,16 +434,22 @@ final class MathRenderer {
                 }
 
                 d.setBounds(0, 0, w, h);
-                Bitmap bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
-                Canvas c = new Canvas(bmp);
-                // 不再 drawColor(WHITE)：画布本身是透明的，铺白就是深色模式的病根
-                d.draw(c);
+                Bitmap bmp = null;
+                String b64 = null;
+                try {
+                    bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+                    Canvas c = new Canvas(bmp);
+                    // 不再 drawColor(WHITE)：画布本身是透明的，铺白就是深色模式的病根
+                    d.draw(c);
 
-                // Render to base64 data URI — no file:// access needed
-                ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                bmp.compress(Bitmap.CompressFormat.PNG, 90, baos);
-                String b64 = Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP);
-                bmp.recycle();
+                    // Render to base64 data URI — no file:// access needed
+                    ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                    bmp.compress(Bitmap.CompressFormat.PNG, 90, baos);
+                    b64 = Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP);
+                } finally {
+                    // compress/encode 抛异常时也要还掉这块 ARGB_8888 的 native 内存
+                    if (bmp != null) bmp.recycle();
+                }
 
                 String alt = Html.escAttr(formula);
                 // Block: explicit display dimensions (w/scale) so API 18

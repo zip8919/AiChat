@@ -42,9 +42,13 @@ final class AcToast {
                 return;
             }
             boolean dark = m.isDark();
-            float density = ctx.getResources().getDisplayMetrics().density;
+            Context app = ctx.getApplicationContext();
+            if (app == null) app = ctx;
+            float density = app.getResources().getDisplayMetrics().density;
 
-            TextView tv = new TextView(ctx);
+            // 自绘 View 会一直被系统 Toast 持有到超时；用 Application Context，
+            // 颜色全部来自 AppearanceManager，不依赖 Activity 主题。
+            TextView tv = new TextView(app);
             tv.setText(text);
             tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
             tv.setTextColor(m.getEffectiveColor(ThemeTokens.AC_TEXT, dark));
@@ -60,9 +64,7 @@ final class AcToast {
 
             // 用 Application context：Toast 会一直持有这个 Context 到超时结束，
             // 用 Activity 的话在其销毁后 show 可能抛 BadTokenException（4.x 上尤甚）。
-            // 自绘用的颜色全部来自 AppearanceManager，不依赖主题资源，换 Context 无副作用。
-            Context app = ctx.getApplicationContext();
-            Toast t = new Toast(app != null ? app : ctx);
+            Toast t = new Toast(app);
             t.setDuration(longDuration ? Toast.LENGTH_LONG : Toast.LENGTH_SHORT);
             t.setView(tv);
             t.show();

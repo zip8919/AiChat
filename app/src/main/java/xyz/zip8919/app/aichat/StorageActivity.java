@@ -143,7 +143,7 @@ public class StorageActivity extends ThemedActivity {
                 runOnUiThread(new Runnable() {
                     public void run() {
                         scanning = false;
-                        if (isFinishing()) return;
+                        if (isFinishing() || isDestroyed()) return;
                         sCached = r;
                         sCachedAt = System.currentTimeMillis();
                         apply(r);
@@ -402,7 +402,7 @@ public class StorageActivity extends ThemedActivity {
                 runOnUiThread(new Runnable() {
                     public void run() {
                         scanning = false;
-                        if (isFinishing()) return;
+                        if (isFinishing() || isDestroyed()) return;
                         String text;
                         if (count == 0) {
                             text = failed > 0 ? "没有可清理的文件（" + failed + " 个被占用）" : "没有可清理的文件";

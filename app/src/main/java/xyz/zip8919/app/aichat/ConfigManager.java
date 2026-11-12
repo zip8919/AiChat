@@ -3,6 +3,7 @@ package xyz.zip8919.app.aichat;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
@@ -22,8 +23,11 @@ public class ConfigManager {
 
     private ConfigManager() {
         this.storageManager = StorageManager.getInstance();
-        this.providers = new ArrayList<ProviderInfo>();
-        this.models = new ArrayList<ModelInfo>();
+        // 标题生成/搜索工具在后台线程遍历这两个列表，模型配置页在主线程增删：
+        // 裸 ArrayList 的增强 for 会抛 ConcurrentModificationException。
+        // COW 的迭代器是快照，且外部持有的引用照样能 add/remove，行为不变。
+        this.providers = new CopyOnWriteArrayList<ProviderInfo>();
+        this.models = new CopyOnWriteArrayList<ModelInfo>();
         this.defaultModel = "";
         this.enableThinking = true;
         this.thinkingLevel = "medium";

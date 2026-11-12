@@ -97,11 +97,14 @@ public class ApiClient {
             }
             BufferedReader reader = new BufferedReader(new InputStreamReader(in, "UTF-8"));
             StringBuilder sb = new StringBuilder();
-            String line;
-            while ((line = reader.readLine()) != null) {
-                sb.append(line);
+            try {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    sb.append(line);
+                }
+            } finally {
+                reader.close();
             }
-            reader.close();
             String body = sb.toString().trim();
             body = sanitizeJson(body);
             LogUtil.i(TAG, "queryBalance <- len=%d body=%s", body.length(),
@@ -123,7 +126,7 @@ public class ApiClient {
      * 前后附加一小段不可见字节。这里统一剔掉不可见字符，并截取第一个 '{' 到
      * 最后一个 '}'，比直接把原始流交给 JSONObject 稳。
      */
-    private static String sanitizeJson(String raw) {
+    static String sanitizeJson(String raw) {
         if (raw == null) return null;
         StringBuilder sb = new StringBuilder(raw.length());
         for (int i = 0; i < raw.length(); i++) {
@@ -265,17 +268,20 @@ public class ApiClient {
             BufferedReader reader = new BufferedReader(
                     new InputStreamReader(conn.getInputStream(), "UTF-8"));
             StringBuilder sb = new StringBuilder();
-            String line;
-            // 响应体设上限，避免超大/异常响应在 API19 设备上把整个 body 读进内存导致 OOM
-            while ((line = reader.readLine()) != null) {
-                sb.append(line);
-                if (sb.length() > MAX_RESPONSE_CHARS) {
-                    LogUtil.w(TAG, "doRequestWithError response exceeds %d chars, truncated", MAX_RESPONSE_CHARS);
-                    break;
+            try {
+                String line;
+                // 响应体设上限，避免超大/异常响应在 API19 设备上把整个 body 读进内存导致 OOM
+                while ((line = reader.readLine()) != null) {
+                    sb.append(line);
+                    if (sb.length() > MAX_RESPONSE_CHARS) {
+                        LogUtil.w(TAG, "doRequestWithError response exceeds %d chars, truncated", MAX_RESPONSE_CHARS);
+                        break;
+                    }
                 }
+            } finally {
+                reader.close();
             }
-            reader.close();
-            result.response = sb.toString();
+            result.response = sanitizeJson(sb.toString());
             LogUtil.d(TAG, "doRequestWithError <- %d chars in %d ms: %s", sb.length(),
                     System.currentTimeMillis() - startTs, LogUtil.preview(sb.toString(), 500));
         } catch (Exception e) {

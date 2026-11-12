@@ -82,7 +82,7 @@ final class SseRound {
         } finally {
             reader.close();
         }
-        r.rawBody = sb.toString();
+        r.rawBody = ApiClient.sanitizeJson(sb.toString());
 
         JSONObject json = new JSONObject(r.rawBody);
         r.usage = json.optJSONObject("usage");

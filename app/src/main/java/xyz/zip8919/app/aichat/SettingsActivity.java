@@ -716,7 +716,7 @@ public class SettingsActivity extends ThemedActivity {
                             LogUtil.e(TAG, "queryBalance parse failed: " + e.getMessage()
                                     + " body=" + LogUtil.preview(result, 800), e);
                             String brief = result.trim();
-                            if (brief.length() > 60) brief = brief.substring(0, 60) + "…";
+                            if (brief.length() > 60) brief = TextKit.cut(brief, 60) + "…";
                             AcToast.show(SettingsActivity.this, "余额返回异常: " + brief);
                         }
                     }
@@ -912,7 +912,13 @@ public class SettingsActivity extends ThemedActivity {
     }
 
     private static int clampPref(Context context, String key, int def, int min, int max) {
-        int v = context.getSharedPreferences(PREFS_NAME, 0).getInt(key, def);
+        int v;
+        try {
+            v = context.getSharedPreferences(PREFS_NAME, 0).getInt(key, def);
+        } catch (ClassCastException e) {
+            // 旧版/外部可能把它存成 String，getInt 会直接抛崩设置页
+            v = def;
+        }
         if (v < min) return min;
         if (v > max) return max;
         return v;
@@ -1088,7 +1094,7 @@ public class SettingsActivity extends ThemedActivity {
         final String[] names = new String[presetList.size()];
         for (int i = 0; i < presetList.size(); i++)
             names[i] = presetList.get(i)[0] + "  — " + (presetList.get(i)[1].length() > 15
-                ? presetList.get(i)[1].substring(0, 15) + "..." : presetList.get(i)[1]);
+                ? TextKit.cut(presetList.get(i)[1], 15) + "..." : presetList.get(i)[1]);
         AlertDialog.Builder builder = AcDialog.builder(this);
         builder.setTitle("管理预设（点击选择，长按编辑/删除）");
         android.widget.ListView lv = new android.widget.ListView(this);

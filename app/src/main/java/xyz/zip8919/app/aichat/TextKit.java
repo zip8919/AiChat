@@ -9,12 +9,23 @@ final class TextKit {
     private TextKit() {
     }
 
+    /** 按 UTF-16 code unit 截断，若切口落在代理对中间就退一格，避免留下孤立高代理。 */
+    static String cut(String s, int max) {
+        if (s == null) return "";
+        if (s.length() <= max) return s;
+        int n = max;
+        if (n > 0 && Character.isHighSurrogate(s.charAt(n - 1))) n--;
+        return s.substring(0, n);
+    }
+
     /** 单行化 + 截断，用于状态提示、标题这类要求短文本的地方。 */
     static String shorten(String text, int max) {
         if (text == null) return "";
         String one = text.replace('\n', ' ').replace('\r', ' ');
         if (one.length() <= max) return one;
-        return one.substring(0, max) + "...";
+        int cut = max;
+        if (cut > 0 && Character.isHighSurrogate(one.charAt(cut - 1))) cut--;
+        return one.substring(0, cut) + "...";
     }
 
     /**
@@ -51,7 +62,11 @@ final class TextKit {
         if (text == null) return "";
         String one = text.replace('\r', ' ').replace('\n', ' ');
         one = one.replaceAll("\\s+", " ").trim();
-        if (one.length() > 15) one = one.substring(0, 15);
+        if (one.length() > 15) {
+            int cut = 15;
+            if (Character.isHighSurrogate(one.charAt(cut - 1))) cut--;
+            one = one.substring(0, cut);
+        }
         return one;
     }
 

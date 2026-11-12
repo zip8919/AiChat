@@ -118,9 +118,11 @@ final class CrashCatcher implements Thread.UncaughtExceptionHandler {
         if (append) {
             old = readHead(f);
             // 只留最近 KEEP_SESSIONS 段，超出从最早的开始砍
-            int cut = old.indexOf("========== CRASH ");
-            for (int i = 1; i < KEEP_SESSIONS && cut >= 0; i++) {
-                cut = old.indexOf("========== CRASH ", cut + 1);
+            int cut = -1, idx = old.length();
+            for (int i = 0; i < KEEP_SESSIONS - 1; i++) {
+                idx = old.lastIndexOf("========== CRASH ", idx - 1);
+                if (idx < 0) break;
+                cut = idx;
             }
             if (cut > 0) old = old.substring(cut);
         }

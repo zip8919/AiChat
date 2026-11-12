@@ -30,6 +30,12 @@ public class FullscreenInputActivity extends ThemedActivity {
     private Button clear;
 
     @Override
+    protected void onSaveInstanceState(Bundle out) {
+        super.onSaveInstanceState(out);
+        if (edit != null) out.putString("fs_text", edit.getText().toString());
+    }
+
+    @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_fullscreen_input);
@@ -40,7 +46,9 @@ public class FullscreenInputActivity extends ThemedActivity {
         Button cancel = (Button) findViewById(R.id.fullscreen_cancel);
         Button done = (Button) findViewById(R.id.fullscreen_done);
 
-        String initial = getIntent().getStringExtra(EXTRA_TEXT);
+        String initial = savedInstanceState != null
+                ? savedInstanceState.getString("fs_text") : null;
+        if (initial == null) initial = getIntent().getStringExtra(EXTRA_TEXT);
         if (initial != null) {
             edit.setText(initial);
             edit.setSelection(initial.length());

@@ -128,12 +128,15 @@ public final class AppearanceManager {
      */
     public String colorSignature() {
         boolean dark = isDark();
-        return (dark ? "d" : "l") + "|" + getThemeId()
-                + "|" + getEffectiveColor(ThemeTokens.AC_TEXT, dark)
-                + "|" + getEffectiveColor(ThemeTokens.AC_BG, dark)
-                + "|" + getEffectiveColor(ThemeTokens.AC_SURFACE, dark)
-                + "|" + getEffectiveColor(ThemeTokens.AC_CODE_BG, dark)
-                + "|" + getEffectiveColor(ThemeTokens.AC_CODE_TEXT, dark);
+        // 逐属性页可以只改 AC_LINK / AC_BUBBLE_* / AC_TEXT_SECONDARY 等单个
+        // token；原来只签 5 个色，这类改动不会让 WebView 刷新、也不清渲染
+        // 缓存（公式降级块用 AC_TEXT_SECONDARY 出图），表现就是「要重启才变」。
+        StringBuilder sb = new StringBuilder((dark ? "d" : "l") + "|" + getThemeId());
+        String[] tokens = ThemeTokens.all();
+        for (int i = 0; i < tokens.length; i++) {
+            sb.append('|').append(getEffectiveColor(tokens[i], dark));
+        }
+        return sb.toString();
     }
 
     /** 由 ThemedActivity 在 setContentView / onResume 时调用。 */
@@ -314,7 +317,10 @@ public final class AppearanceManager {
 
     /** 从当前选中的自定义主题里取该 key 在指定明暗下的值；未选主题 / 未定义返回 null。 */
     private String themeValue(String key, boolean dark) {
-        return ThemeResolver.themeValue(working.themeId, key, dark);
+        // 后台渲染线程调 colorSignature() 时用的是 volatile 的 getThemeId()，
+        // 这里若读普通字段 working.themeId，切主题瞬间两者会不一致，
+        // 导致缓存签名算错、公式/气泡停在上一主题配色。
+        return ThemeResolver.themeValue(getThemeId(), key, dark);
     }
 
     /** 当前选中主题的名称，供 UI 显示「主题为 X」；无主题返回 null。 */

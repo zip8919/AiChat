@@ -193,6 +193,10 @@ public class MainActivity extends ThemedActivity {
     // 提到字段上是因为 renderTraceAsync 与流式 tick 都要用它做互斥。
     private final java.util.concurrent.atomic.AtomicInteger renderSeq =
             new java.util.concurrent.atomic.AtomicInteger();
+    // trace（base 层）渲染单独一个序号：tick 的 nextSeq() 只该作废流式 tail 渲染，
+    // 不该把在飞的整段工具卡片渲染判为过期。generation 守卫仍拦住跨请求的旧结果。
+    private final java.util.concurrent.atomic.AtomicInteger traceRenderSeq =
+            new java.util.concurrent.atomic.AtomicInteger();
     // 已经推到 WebView 的 trace（base 层）文本。流式期间状态行与工具卡片会交替
     // 下发，内容没变就只更新状态行，别再整段重渲染——那是低端机上最明显的闪烁源。
     private volatile String lastStreamTrace = "";
@@ -2393,6 +2397,7 @@ public class MainActivity extends ThemedActivity {
             // 下一次渲染会走整段 streamBase 重建，DOM 与文本重新对齐。
             lastStreamTrace = "";
             renderSeq.incrementAndGet();
+            traceRenderSeq.incrementAndGet(); // 同时作废在飞的 trace 渲染
             LogUtil.d(TAG, "trace trimmed: render base reset");
         }
 
@@ -2449,7 +2454,7 @@ public class MainActivity extends ThemedActivity {
         }
 
         public String renderHtml(String markdown) {
-            return MessageHtmlRenderer.contentToHtml(markdown, MainActivity.this);
+            return MessageHtmlRenderer.contentToHtml(markdown, MainActivity.this, false);
         }
 
         public void setContent(int aiIndex, String content) {
@@ -2515,6 +2520,7 @@ public class MainActivity extends ThemedActivity {
         final int finalIdx = settled.aiIndex;
         final boolean failed = settled.failed;
         renderSeq.incrementAndGet(); // 作废进行中的流式渲染
+        traceRenderSeq.incrementAndGet(); // 定稿后不许旧 trace 结果再改写 base
         new Thread(new Runnable() {
             public void run() {
                 try {
@@ -2543,6 +2549,12 @@ public class MainActivity extends ThemedActivity {
                     //      必须重渲染补上，否则结尾少几十个字。
                     final boolean domComplete = settled.content != null
                             && settled.content.equals(lastPushedContent);
+                    if (domComplete) {
+                        // DOM 已是最终态，不重渲染（避免公式图片重新解码闪一下），
+                        // 但流式路径全部 cacheable=false，这里要把定稿 HTML 预热进
+                        // 缓存，否则下次切会话/换肤整页重灌时必然全 miss。
+                        MessageHtmlRenderer.contentToHtml(settled.content, MainActivity.this, true);
+                    }
                     final String html = domComplete ? null
                             : MessageHtmlRenderer.contentToHtml(settled.content, MainActivity.this);
                     if (requestGeneration.get() != settled.generation) return;
@@ -2733,23 +2745,29 @@ public class MainActivity extends ThemedActivity {
         final boolean append = base0.length() > 0 && snapshot.startsWith(base0);
         final String part = append ? snapshot.substring(base0.length()) : snapshot;
 
-        final int mySeq = renderSeq.incrementAndGet();
+        final int mySeq = traceRenderSeq.incrementAndGet();
         new Thread(new Runnable() {
             public void run() {
-                final String html = MessageHtmlRenderer.contentToHtml(part, MainActivity.this);
+                final String html = MessageHtmlRenderer.contentToHtml(part, MainActivity.this, false);
                 runOnUiThread(new Runnable() {
                     public void run() {
                         if (requestGeneration.get() != generation) return;
-                        if (renderSeq.get() != mySeq) {
-                            LogUtil.d(TAG, "trace render superseded: seq %d/%d", mySeq, renderSeq.get());
+                        if (traceRenderSeq.get() != mySeq) {
+                            LogUtil.d(TAG, "trace render superseded: seq %d/%d", mySeq, traceRenderSeq.get());
                             return;
                         }
-                        lastStreamTrace = snapshot;
-                        if (append) {
-                            webViewEvalJs("streamAppendBase('" + jsEscape(html) + "')");
-                        } else {
-                            // 只写 base 层；tail 上正在流的内容原样保留
-                            webViewEvalJs("streamBase('" + jsEscape(html) + "')");
+                        // tick 与 trace 可能并发落地，StreamRenderer 已有
+                        // !baseNow.equals(baseRendered()) 二次校验兜住旧 base；
+                        // 这里再 bump renderSeq 反而会把同帧刚发出的 tail tick
+                        // 判过期，导致流式丢帧。只做幂等判重，不动序号。
+                        if (!snapshot.equals(lastStreamTrace)) {
+                            lastStreamTrace = snapshot;
+                            if (append) {
+                                webViewEvalJs("streamAppendBase('" + jsEscape(html) + "')");
+                            } else {
+                                // 只写 base 层；tail 上正在流的内容原样保留
+                                webViewEvalJs("streamBase('" + jsEscape(html) + "')");
+                            }
                         }
                         if (status != null) {
                             webViewEvalJs("setStatus('" + jsEscape(status) + "')");
@@ -2849,6 +2867,9 @@ public class MainActivity extends ThemedActivity {
                         pageReady = false;
                         pendingJs.clear();
                         conversationWebView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null);
+                        // 新 DOM 的 style 节点已重建，清掉 CSS 相等短路，
+                        // 否则下一次外观变更会跳过注入、样式停在初始值。
+                        if (webRefresher != null) webRefresher.reset();
                         updateUsageBar();
                         LogUtil.d(TAG, "webview reloaded: showing %d of %d messages (from=%d)",
                                 snapshot.size() - from, snapshot.size(), from);
@@ -2870,7 +2891,7 @@ public class MainActivity extends ThemedActivity {
         new Thread(new Runnable() {
             @Override
             public void run() {
-                final String html = MessageHtmlRenderer.contentToHtml(content, MainActivity.this);
+                final String html = MessageHtmlRenderer.contentToHtml(content, MainActivity.this, false);
                 runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
@@ -2976,13 +2997,23 @@ public class MainActivity extends ThemedActivity {
 
     private static String jsEscape(String s) {
         if (s == null) return "";
-        return s.replace("\\", "\\\\")
-                .replace("'", "\\'")
-                .replace("\n", "\\n")
-                .replace("\r", "\\r")
-                // ES5 里 U+2028/U+2029 仍是行终止符，直接出现在字符串字面量中是语法错误
-                .replace("\u2028", "\\u2028")
-                .replace("\u2029", "\\u2029");
+        // 单遍扫描，等价于原先 6 次 String.replace 的链式结果：
+        // 每类字符只按原字符映射一次，不会二次转义新插入的反斜杠。
+        StringBuilder out = new StringBuilder(s.length() + 16);
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            switch (c) {
+                case '\\': out.append("\\\\"); break;
+                case '\'': out.append("\\'"); break;
+                case '\n': out.append("\\n"); break;
+                case '\r': out.append("\\r"); break;
+                // ES5 里 U+2028/U+2029 仍是行终止符，字面量里必须转成转义序列
+                case '\u2028': out.append("\\u2028"); break;
+                case '\u2029': out.append("\\u2029"); break;
+                default: out.append(c);
+            }
+        }
+        return out.toString();
     }
 
     // ========== JavaScript bridge ==========

@@ -449,9 +449,16 @@ final class ViewerExport {
             wv.setLayerType(View.LAYER_TYPE_SOFTWARE, null);
         }
         try {
-            Bitmap b = Bitmap.createBitmap(vw, vh, Bitmap.Config.ARGB_8888);
+            // 与 captureFull 一致：超大可见区先按 fit 限边长/总像素，
+            // 否则 createBitmap + trimBorder/PNG 编码在 4.4 上容易 OOM。
+            // 常规分辨率 fit=1，输出与原来逐字节一致。
+            float s = fit(vw, vh);
+            int bw = Math.max(1, (int) (vw * s));
+            int bh = Math.max(1, (int) (vh * s));
+            Bitmap b = Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888);
             Canvas c = new Canvas(b);
             c.drawColor(bg);
+            c.scale(s, s);
             wv.draw(c);
             return b;
         } catch (Throwable e) {

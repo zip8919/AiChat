@@ -132,6 +132,11 @@ final class HttpRequestTool {
 
             long start = System.currentTimeMillis();
             conn = (HttpURLConnection) url.openConnection();
+            // ApiClient / ChatTransport / TavilyTool / WebSearchTool 都调了，
+            // 这里漏掉：4.4 的平台 TLS 栈无 GCM 套件，HTTPS 工具必握手失败。
+            if (conn instanceof HttpsURLConnection) {
+                TlsCompat.apply((HttpsURLConnection) conn);
+            }
             conn.setRequestMethod(method);
             conn.setConnectTimeout(timeout);
             conn.setReadTimeout(timeout);

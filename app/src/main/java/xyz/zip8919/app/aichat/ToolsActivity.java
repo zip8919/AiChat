@@ -655,6 +655,7 @@ public class ToolsActivity extends ThemedActivity {
                                 final String content = readFile(picked);
                                 runOnUiThread(new Runnable() {
                                     public void run() {
+                                        if (isFinishing() || isDestroyed()) return;
                                         if (content != null) {
                                             loadingFile = true;
                                             jsInput.setText(content);

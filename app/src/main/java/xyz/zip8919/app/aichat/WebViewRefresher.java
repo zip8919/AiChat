@@ -24,6 +24,14 @@ final class WebViewRefresher implements AppearanceManager.ChangeListener {
     }
 
     private final Host host;
+    private String lastThemeCss;
+    private String lastFontCss;
+
+    /** MainActivity 整页重灌后调用：新 DOM 的 style 是初始值，必须强制再注入一次。 */
+    void reset() {
+        lastThemeCss = null;
+        lastFontCss = null;
+    }
 
     WebViewRefresher(Host host) {
         this.host = host;
@@ -35,6 +43,15 @@ final class WebViewRefresher implements AppearanceManager.ChangeListener {
         boolean dark = m.isDark();
         String themeCss = ThemeCssBuilder.themeStyleContent(m, dark);
         String fontCss = ThemeCssBuilder.fontStyleContent(m);
+        // 字号/显示大小变化也会触发 bump，但 CSS 内容一个字没变：
+        // 只更新 zoom，省掉一次整段 JS 注入（长页面上是明显的帧开销）。
+        // 页面重灌时 buildPage 自带 style，跳过注入不会丢样式。
+        if (themeCss.equals(lastThemeCss) && fontCss.equals(lastFontCss)) {
+            host.applyZoom(ScalePolicy.textZoom(m.getDisplayPercent()));
+            return;
+        }
+        lastThemeCss = themeCss;
+        lastFontCss = fontCss;
         String js = "(function(){"
                 + "var t=document.getElementById('ac-theme');if(t)t.textContent='" + ThemeCssBuilder.jsString(themeCss) + "';"
                 + "var f=document.getElementById('ac-font');if(f)f.textContent='" + ThemeCssBuilder.jsString(fontCss) + "';"

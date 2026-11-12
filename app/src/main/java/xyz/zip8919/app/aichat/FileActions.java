@@ -32,6 +32,8 @@ final class FileActions {
 
     /** 单张图片做 base64 预览的上限，超出退回「用第三方应用打开」。 */
     private static final long PREVIEW_MAX_BYTES = 8L * 1024 * 1024;
+    /** 预览对话框能安全承载的 data URI 上限（字符数，约 3MB 原始字节）。 */
+    private static final int PREVIEW_URI_MAX_CHARS = 4 * 1024 * 1024;
 
     private FileActions() {
     }
@@ -171,6 +173,7 @@ final class FileActions {
                 if (content == null) {
                     a.runOnUiThread(new Runnable() {
                         public void run() {
+                            if (a.isFinishing() || a.isDestroyed()) return;
                             AcToast.show(a, "读取失败");
                         }
                     });
@@ -180,7 +183,7 @@ final class FileActions {
                 final String html = buildHighlightHtml(content, lang);
                 a.runOnUiThread(new Runnable() {
                     public void run() {
-                        if (a.isFinishing()) return;
+                        if (a.isFinishing() || a.isDestroyed()) return;
                         showTextDialog(a, f, content, lang, html);
                     }
                 });
@@ -229,6 +232,7 @@ final class FileActions {
                         .readFile(f.getAbsolutePath());
                 a.runOnUiThread(new Runnable() {
                     public void run() {
+                        if (a.isFinishing() || a.isDestroyed()) return;
                         if (content == null) {
                             AcToast.show(a, "读取失败");
                             return;
@@ -280,7 +284,7 @@ final class FileActions {
                         .readFile(f.getAbsolutePath());
                 a.runOnUiThread(new Runnable() {
                     public void run() {
-                        if (a.isFinishing()) return;
+                        if (a.isFinishing() || a.isDestroyed()) return;
                         if (content == null) {
                             AcToast.show(a, "读取失败");
                             return;
@@ -365,7 +369,7 @@ final class FileActions {
                 final String uri = readImageDataUri(f);
                 a.runOnUiThread(new Runnable() {
                     public void run() {
-                        if (a.isFinishing()) return;
+                        if (a.isFinishing() || a.isDestroyed()) return;
                         if (uri == null) {
                             AcToast.showLong(a, "这张图太大，改用「打开方式」查看");
                             return;
@@ -378,24 +382,34 @@ final class FileActions {
     }
 
     private static String readImageDataUri(File f) {
-        if (f.length() > PREVIEW_MAX_BYTES || f.length() == 0) return null;
-        FileInputStream in = null;
-        try {
-            in = new FileInputStream(f);
-            ByteArrayOutputStream bos = new ByteArrayOutputStream((int) f.length());
-            byte[] buf = new byte[8192];
-            int n;
-            while ((n = in.read(buf)) > 0) bos.write(buf, 0, n);
-            return "data:" + mimeOf(f.getName()) + ";base64,"
-                    + Base64.encodeToString(bos.toByteArray(), Base64.NO_WRAP);
-        } catch (IOException e) {
-            LogUtil.w(TAG, "readImageDataUri failed: %s", e.getMessage());
-            return null;
-        } finally {
-            if (in != null) {
-                try { in.close(); } catch (IOException ignored) { }
+        long len = f.length();
+        if (len > PREVIEW_MAX_BYTES || len == 0) return null;
+        String lower = f.getName().toLowerCase(Locale.US);
+        if (lower.endsWith(".gif") || lower.endsWith(".webp")) {
+            // 动图必须保留原始字节：BitmapFactory 只会取首帧，走采样会把动画弄没。
+            FileInputStream in = null;
+            try {
+                in = new FileInputStream(f);
+                ByteArrayOutputStream bos = new ByteArrayOutputStream((int) len);
+                byte[] buf = new byte[8192];
+                int n;
+                while ((n = in.read(buf)) > 0) bos.write(buf, 0, n);
+                String uri = "data:" + mimeOf(f.getName()) + ";base64,"
+                        + Base64.encodeToString(bos.toByteArray(), Base64.NO_WRAP);
+                return uri.length() <= PREVIEW_URI_MAX_CHARS ? uri : null;
+            } catch (IOException e) {
+                LogUtil.w(TAG, "readImageDataUri failed: %s", e.getMessage());
+                return null;
+            } finally {
+                if (in != null) {
+                    try { in.close(); } catch (IOException ignored) { }
+                }
             }
         }
+        // 静态图走采样：4000x3000 直接 base64 会让 WebView 解码出 48MB 位图。
+        // viewDataUri 按 alpha 重编码，输出可能反而大于输入，这里再卡一道上限。
+        String uri = AttachmentFiles.viewDataUri(f.getAbsolutePath());
+        return uri != null && uri.length() <= PREVIEW_URI_MAX_CHARS ? uri : null;
     }
 
     private static void showImageDialog(final Activity a, final File f, String dataUri) {

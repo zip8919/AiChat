@@ -56,25 +56,81 @@ final class UsageStats {
             flush();
         }
     };
-    private boolean dirty;
+    private volatile boolean dirty;
+    /** 只在 LOCK 内访问：load 任务是否已投递（幂等）。 */
+    private static boolean loaded;
+    /** 磁盘事件已并入 events；加载完成前禁止用半截快照覆盖 stats.json。 */
+    private volatile boolean ready;
+    /** 加载期间用户点过「清空」：磁盘内容不再回填。 */
+    private volatile boolean clearedWhileLoading;
+    private final List<Runnable> loadListeners = new ArrayList<Runnable>();
 
     static void init(Context ctx) {
         if (ctx == null) return;
+        UsageStats s;
+        boolean needLoad = false;
         synchronized (LOCK) {
             appContext = ctx.getApplicationContext();
-            if (instance == null) {
-                instance = new UsageStats();
-                instance.load();
-            }
+            if (instance == null) instance = new UsageStats();
+            s = instance;
+            if (!loaded) { loaded = true; needLoad = true; }
         }
+        if (needLoad) ensureLoaded(s);
     }
 
     /** 未初始化时返回一个空壳，调用方不用到处判 null（统计丢了不该影响主流程）。 */
     static UsageStats get() {
+        UsageStats s;
+        boolean needLoad = false;
         synchronized (LOCK) {
             if (instance == null) instance = new UsageStats();
-            return instance;
+            s = instance;
+            // 即使没有走 init() 的入口（后台组件先记一条事件），也必须加载，
+            // 否则 ready 永远 false，flush 会一直被门闩挡住、新事件永远不落盘。
+            if (!loaded) { loaded = true; needLoad = true; }
         }
+        if (needLoad) ensureLoaded(s);
+        return s;
+    }
+
+    /** 读盘 + 大 JSON 解析全部放到已有的 io 单线程，主线程零阻塞。 */
+    private static void ensureLoaded(final UsageStats s) {
+        s.io.execute(new Runnable() {
+            public void run() {
+                // load() 只 catch(Exception)：大 JSON 解析抛 OOM 这类 Error 时
+                // 也必须放行 ready 门闩，否则统计永不落盘、页面永不补刷。
+                try { s.load(); } finally { s.finishLoad(); }
+            }
+        });
+    }
+
+    private void finishLoad() {
+        ready = true;
+        final List<Runnable> ls;
+        synchronized (loadListeners) {
+            ls = new ArrayList<Runnable>(loadListeners);
+            loadListeners.clear();
+        }
+        ui.post(new Runnable() {
+            public void run() {
+                for (int i = 0; i < ls.size(); i++) {
+                    try { ls.get(i).run(); } catch (Throwable ignored) { }
+                }
+            }
+        });
+        // 加载期间攒下的 append / clear，加载完补一次完整落盘
+        if (dirty) schedule();
+    }
+
+    /** 加载完成后补刷一次页面；已就绪则立刻 post。 */
+    void whenLoaded(Runnable r) {
+        if (r == null) return;
+        boolean now;
+        synchronized (loadListeners) {
+            now = ready;
+            if (!now) loadListeners.add(r);
+        }
+        if (now) ui.post(r);
     }
 
     // ---------------------------------------------------------------- 数据模型
@@ -373,6 +429,7 @@ final class UsageStats {
         synchronized (this) {
             events.clear();
             dirty = true;
+            if (!ready) clearedWhileLoading = true;
         }
         flush();
     }
@@ -388,20 +445,29 @@ final class UsageStats {
     }
 
     private void flush() {
-        final String json;
+        final List<Ev> snapshot;
         synchronized (this) {
+            // 加载未完成时 events 只有本次启动的新事件，落盘会把磁盘历史覆盖掉。
+            // dirty 保持 true，finishLoad() 会补一次完整快照。
+            if (!ready) return;
             if (!dirty) return;
             dirty = false;
-            json = toJson();
+            // 主线程只做引用浅拷贝（Ev 入列后不再被修改），MB 级 JSON 构造
+            // 与几 MB 字符串拼接全部交给 io 线程。序列化期间的新 append 会
+            // 重新置 dirty，800ms 后用更新的快照再写一次，最终不丢事件。
+            snapshot = new ArrayList<Ev>(events);
         }
         io.execute(new Runnable() {
             public void run() {
                 try {
                     StorageManager sm = StorageManager.getInstance();
-                    if (sm == null) return;
-                    sm.saveStats(json);
+                    if (sm == null) { schedule(); return; }
+                    sm.saveStats(toJson(snapshot));
                 } catch (Exception e) {
                     LogUtil.w(TAG, "flush failed: %s", e.getMessage());
+                    // dirty 已在投递前清掉：写盘失败要重新排队，否则这批事件
+                    // 会一直等到下一次 append 才顺带补写，期间退出就永久丢。
+                    schedule();
                 }
             }
         });
@@ -428,18 +494,24 @@ final class UsageStats {
             JSONArray arr = root.optJSONArray("evs");
             if (arr == null) return;
             synchronized (this) {
+                List<Ev> disk = new ArrayList<Ev>();
                 for (int i = 0; i < arr.length(); i++) {
                     Ev e = readEvent(arr.optJSONArray(i));
-                    if (e != null) events.add(e);
+                    if (e != null) disk.add(e);
+                }
+                // 加载可能晚于本次启动的新事件：磁盘数据 ts 更早，必须插头部，
+                // 否则 earliestTs() 会算错、统计区间起点偏晚。
+                if (!clearedWhileLoading) {
+                    events.addAll(0, disk);
+                    int over = events.size() - MAX_EVENTS;
+                    if (over > 0) events.subList(0, over).clear();
                 }
             }
             LogUtil.i(TAG, "load: %d event(s)", events.size());
         } catch (Exception e) {
-            // 统计文件损坏不是致命问题：丢弃重来，不要让主流程起不来
+            // 统计文件损坏不是致命问题：丢弃磁盘内容、保留本次启动的新事件，
+            // 由 finishLoad() 的补写用干净数据覆盖 stats.json。
             LogUtil.w(TAG, "load failed, reset: %s", e.getMessage());
-            synchronized (this) {
-                events.clear();
-            }
         }
     }
 
@@ -462,28 +534,26 @@ final class UsageStats {
         return e;
     }
 
-    private String toJson() {
+    private String toJson(List<Ev> list) {
         try {
             JSONObject root = new JSONObject();
             root.put("v", 2);
             JSONArray arr = new JSONArray();
-            synchronized (this) {
-                for (int i = 0; i < events.size(); i++) {
-                    Ev e = events.get(i);
-                    JSONArray a = new JSONArray();
-                    a.put(e.ts);
-                    a.put(kindCode(e.kind));
-                    a.put(e.model);
-                    a.put(e.provider);
-                    a.put(e.name);
-                    a.put(e.pt);
-                    a.put(e.ct);
-                    a.put(e.cached);
-                    a.put(e.genMs);
-                    a.put(e.est ? 1 : 0);
-                    a.put(e.ok ? 1 : 0);
-                    arr.put(a);
-                }
+            for (int i = 0; i < list.size(); i++) {
+                Ev e = list.get(i);
+                JSONArray a = new JSONArray();
+                a.put(e.ts);
+                a.put(kindCode(e.kind));
+                a.put(e.model);
+                a.put(e.provider);
+                a.put(e.name);
+                a.put(e.pt);
+                a.put(e.ct);
+                a.put(e.cached);
+                a.put(e.genMs);
+                a.put(e.est ? 1 : 0);
+                a.put(e.ok ? 1 : 0);
+                arr.put(a);
             }
             root.put("evs", arr);
             return root.toString();

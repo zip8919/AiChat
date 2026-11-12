@@ -240,6 +240,7 @@ public class StorageAttachmentsActivity extends ThemedActivity {
                 sortByTime(o);
                 runOnUiThread(new Runnable() {
                     public void run() {
+                        if (isFinishing() || isDestroyed()) return;
                         loading = false;
                         used.clear();
                         used.addAll(u);
@@ -382,7 +383,8 @@ public class StorageAttachmentsActivity extends ThemedActivity {
         items.add("打开方式（第三方应用）");
         items.add("分享");
         items.add("详细信息");
-        if (it.refs == 0) items.add("删除");
+        // 索引不完整时「无引用」是不可信的：可能删掉历史消息正在用的图
+        if (it.refs == 0 && !incomplete) items.add("删除");
 
         AcDialog.builder(this)
                 .setTitle(it.refs > 0
@@ -483,7 +485,7 @@ public class StorageAttachmentsActivity extends ThemedActivity {
                 final long freed = bytes;
                 runOnUiThread(new Runnable() {
                     public void run() {
-                        if (isFinishing()) return;
+                        if (isFinishing() || isDestroyed()) return;
                         AcToast.show(StorageAttachmentsActivity.this, "已删除 " + okCount + " 张，释放 " + StorageReport.size(freed)
                                         + (failCount > 0 ? "，" + failCount + " 张被占用" : ""));
                         exitSelection();

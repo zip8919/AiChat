@@ -465,7 +465,8 @@ public final class UpdateManager {
                         try { in.close(); } catch (Throwable t) {}
                     }
                     if (cancelled) throw new Exception("已取消");
-                    if (expectSize > 0 && tmp.length() != expectSize) {
+                    long expected = expectSize > 0 ? expectSize : total;
+                    if (expected > 0 && tmp.length() != expected) {
                         throw new Exception("文件大小不符，可能被镜像截断或返回错误页");
                     }
                     if (target.exists() && !target.delete()) throw new Exception("无法覆盖旧包");

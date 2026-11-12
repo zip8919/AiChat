@@ -108,9 +108,20 @@ public final class ThemeTokens {
         return defaultHex(token, false);
     }
 
+    private static final java.util.concurrent.ConcurrentHashMap<String, String> HEX_CACHE =
+            new java.util.concurrent.ConcurrentHashMap<String, String>();
+
     public static String defaultHex(String token, boolean dark) {
-        int c = defaultColor(token, dark);
-        return String.format("#%06X", c & 0x00FFFFFF);
+        // getEffectiveColor 在整树遍历里每个 View 要调数次；值只由 (token, dark)
+        // 决定，缓存后省掉每次 String.format 与临时串，行为完全不变。
+        String key = (dark ? "d:" : "l:") + token;
+        String v = HEX_CACHE.get(key);
+        if (v == null) {
+            int c = defaultColor(token, dark);
+            v = String.format("#%06X", c & 0x00FFFFFF);
+            HEX_CACHE.put(key, v);
+        }
+        return v;
     }
 
     /** 支持 #RRGGBB / #AARRGGBB；非法返回 null。 */

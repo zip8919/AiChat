@@ -52,9 +52,14 @@ final class MarkdownPipeline {
         List<String> svgBlocks = new ArrayList<>();
         text = extractAndProtectSvg(text, svgBlocks);
 
-        text = MathRenderer.extractAndRenderCe(text, density, mathTags);   // \ce → LaTeX → jlatexmath image
-        text = MathRenderer.extractAndRenderLatex(text, density, mathTags);
-        text = MathRenderer.renderBareLatexCommands(text, density, mathTags);
+        // 代码块与 SVG 已在上两步换成哨兵，其中的 $ / \ 不会漏进来。
+        // 两者都没有时，下面三趟逐字符预处理输出恒等于输入，流式每 200ms
+        // 全量重跑纯属白做 3 次全文扫描 + 3 个 StringBuilder。
+        if (text.indexOf('$') >= 0 || text.indexOf('\\') >= 0) {
+            text = MathRenderer.extractAndRenderCe(text, density, mathTags);   // \ce → LaTeX → jlatexmath image
+            text = MathRenderer.extractAndRenderLatex(text, density, mathTags);
+            text = MathRenderer.renderBareLatexCommands(text, density, mathTags);
+        }
         text = preProcessExtensions(text);
         text = restoreCode(text, codeBlocks);
         Node document = PARSER.parse(text);
@@ -313,6 +318,10 @@ final class MarkdownPipeline {
     private static final Pattern P_SUP = Pattern.compile("\\^([^\\^\\s]+)\\^");
     private static final Pattern P_SUB = Pattern.compile("(?<![~])~([^~\\s]+)~(?!~)");
     private static String preProcessExtensions(String text) {
+        // 五个 Pattern 分别需要 ^ / ~ / ==；都没有时 replaceAll 全是空转
+        // （每个都要全文扫描 + Matcher 分配）。
+        if (text.indexOf('^') < 0 && text.indexOf('~') < 0
+                && text.indexOf("==") < 0) return text;
         // Footnote definitions [^id]: text at line start → hidden ref div
         text = P_FN_DEF.matcher(text).replaceAll(
                 "<div class=\"fn-def\" id=\"fn-$1\"><sup><a href=\"#fnref-$1\">[$1]</a></sup> $2</div>");

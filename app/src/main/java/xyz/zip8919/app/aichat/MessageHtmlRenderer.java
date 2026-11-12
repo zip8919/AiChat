@@ -520,8 +520,17 @@ public class MessageHtmlRenderer {
     }
 
     public static String contentToHtml(String text, Context ctx) {
+        return contentToHtml(text, ctx, true);
+    }
+
+    /**
+     * cacheable=false：流式每 200ms 的新正文都会产生一个新 key，若照常写入，
+     * 24 槽的 LRU 会被中间态轮占，历史消息缓存全被挤出，整页重灌时 40 条全 miss。
+     */
+    public static String contentToHtml(String text, Context ctx, boolean cacheable) {
         if (text == null || text.isEmpty()) return "";
         ensureCacheSig(ctx);
+        final String sigAtStart = renderCacheSig;
         String cached = renderCache.get(text);
         if (cached != null) return cached;
         long startTs = System.currentTimeMillis();
@@ -533,8 +542,11 @@ public class MessageHtmlRenderer {
         LogUtil.v(TAG, "contentToHtml: in=%d chars -> %d chars html in %d ms (thinking=%s, tool=%s)",
                 text.length(), html.length(), System.currentTimeMillis() - startTs,
                 hasThinking, hasTool);
-        if (html.length() <= RENDER_CACHE_MAX_HTML) {
+        if (cacheable && html.length() <= RENDER_CACHE_MAX_HTML) {
             synchronized (renderCache) {
+                // 后台渲染期间若换了皮肤，这次用的是旧 fgColor；签名已变，
+                // 绝不能把旧色 HTML 写回缓存（否则整页重灌永久命中旧公式）。
+                if (!sigAtStart.equals(renderCacheSig)) return html;
                 boolean present = renderCache.containsKey(text);
                 int totalBytes = html.length();
                 for (String v : renderCache.values()) totalBytes += v.length();
@@ -976,6 +988,9 @@ public class MessageHtmlRenderer {
                 case '<': sb.append("&lt;"); break;
                 case '>': sb.append("&gt;"); break;
                 case '\n': case '\r': case '\t': sb.append(' '); break;
+                // ES5 单引号字面量里 U+2028/2029 仍是行终止符，会截断 onclick
+                case '\u2028': sb.append("\\u2028"); break;
+                case '\u2029': sb.append("\\u2029"); break;
                 default: sb.append(c);
             }
         }

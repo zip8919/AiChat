@@ -282,15 +282,10 @@ public class StorageManager {
             out.flush();
             out.close();
             out = null;
-            if (tmp.renameTo(file)) {
+            if (renameAtomic(tmp, file)) {
                 ok = true;
             } else {
-                // 目标已存在时 rename 在部分 ROM 上失败；删掉旧的再试一次
-                if (file.exists() && file.delete() && tmp.renameTo(file)) {
-                    ok = true;
-                } else {
-                    LogUtil.e(TAG, "saveExportBytes rename failed: %s", file.getAbsolutePath());
-                }
+                LogUtil.e(TAG, "saveExportBytes rename failed: %s", file.getAbsolutePath());
             }
         } catch (IOException e) {
             LogUtil.e(TAG, "saveExportBytes failed: %s", e.getMessage());
@@ -399,8 +394,10 @@ public class StorageManager {
         String[] result = new String[files.length];
         int count = 0;
         for (int i = 0; i < files.length; i++) {
-            if (files[i].isFile()) {
-                result[count++] = files[i].getName();
+            String n = files[i].getName();
+            // 异常退出可能留下 .bak/.tmp，不能被当成一条幽灵会话
+            if (files[i].isFile() && !n.endsWith(".bak") && !n.endsWith(".tmp")) {
+                result[count++] = n;
             }
         }
         if (count != result.length) {
@@ -433,7 +430,7 @@ public class StorageManager {
             writer.flush();
             writer.close();
             writer = null;
-            if (!tmpFile.renameTo(file)) {
+            if (!renameAtomic(tmpFile, file)) {
                 LogUtil.e(TAG, "writeFile rename failed: " + filePath);
                 tmpFile.delete();
                 tmpFile = null;
@@ -454,7 +451,34 @@ public class StorageManager {
         }
     }
 
+    /**
+     * tmp → file 的原子替换。目标已存在时先挪到 .bak，任何一步失败都把
+     * .bak 还原；绝不直接 delete 旧文件。上次异常退出留下的孤儿 .bak
+     * 会先自愈，避免主文件消失后数据只留在备份里。
+     */
+    private static void recoverStaleBak(String path) {
+        if (path == null) return;
+        File f = new File(path);
+        File bak = new File(path + ".bak");
+        if (!f.exists() && bak.exists() && !bak.renameTo(f)) {
+            LogUtil.w(TAG, "stale .bak restore failed: %s", path);
+        }
+    }
+
+    private static boolean renameAtomic(File tmp, File file) {
+        File bak = new File(file.getAbsolutePath() + ".bak");
+        if (!file.exists() && bak.exists() && !bak.renameTo(file)) {
+            LogUtil.w(TAG, "stale .bak restore failed: %s", file.getAbsolutePath());
+        }
+        if (tmp.renameTo(file)) return true;
+        boolean saved = !file.exists() || file.renameTo(bak);
+        boolean ok = saved && tmp.renameTo(file);
+        if (!ok && saved && bak.exists()) bak.renameTo(file);
+        return ok;
+    }
+
     public String readFile(String filePath) {
+        recoverStaleBak(filePath);
         BufferedReader reader = null;
         try {
             File file = new File(filePath);
@@ -577,15 +601,9 @@ public class StorageManager {
      * rename 失败时，删掉旧文件再试一次，避免「覆盖保存」静默失败。
      */
     public boolean writeTextAtomic(String path, String content) {
-        boolean ok = writeFile(path, content);
-        if (!ok) {
-            File target = new File(path);
-            if (target.exists() && target.delete()) {
-                ok = writeFile(path, content);
-                LogUtil.w(TAG, "writeTextAtomic: retried after deleting stale target %s ok=%s", path, ok);
-            }
-        }
-        return ok;
+        // writeFile 内部已有 .bak 回滚，不能再删目标重试：删除成功而二次
+        // rename 失败就会把原文件弄丢。
+        return writeFile(path, content);
     }
 
     /**
@@ -609,9 +627,7 @@ public class StorageManager {
             out.flush();
             out.close();
             out = null;
-            if (tmp.renameTo(file)) {
-                ok = true;
-            } else if (file.exists() && file.delete() && tmp.renameTo(file)) {
+            if (renameAtomic(tmp, file)) {
                 ok = true;
             } else {
                 LogUtil.e(TAG, "writeBytesAtomic rename failed: %s", path);

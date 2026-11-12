@@ -20,6 +20,9 @@ final class ThemeRepository {
 
     private final StorageManager storage;
     private List<Theme> cache;
+    /** 目录签名：文件名 + lastModified + length；写路径置 forceCheck 强制重算。 */
+    private String dirSig;
+    private boolean forceCheck;
 
     private ThemeRepository() {
         this.storage = StorageManager.getInstance();
@@ -30,18 +33,26 @@ final class ThemeRepository {
         return instance;
     }
 
-    void invalidate() {
+    synchronized void invalidate() {
+        // 应用内写路径必须立刻看到新内容，直接清 cache 最稳妥；
+        // 目录签名缓存只用于「子页返回但磁盘未变」的读路径。
         cache = null;
+        forceCheck = true;
     }
 
     /** 内置在前、用户主题在后；文件损坏的条目仍出现在列表里，带标记置灰。 */
     synchronized List<Theme> list() {
-        if (cache != null) return cache;
+        File dir = new File(storage.getThemesDir());
+        File[] files = dir.listFiles();
+        // listFiles 返回 null 是「读取失败」而非「目录为空」：保留旧缓存，
+        // 否则用户主题会整批消失且长期不恢复。
+        if (files == null && cache != null) return cache;
+        String sig = directorySignature(files);
+        if (cache != null && !forceCheck && sig.equals(dirSig)) return cache;
+        forceCheck = false;
         List<Theme> out = new ArrayList<Theme>();
         out.addAll(BuiltinThemes.list());
 
-        File dir = new File(storage.getThemesDir());
-        File[] files = dir.listFiles();
         if (files != null) {
             for (int i = 0; i < files.length; i++) {
                 File f = files[i];
@@ -51,7 +62,22 @@ final class ThemeRepository {
             }
         }
         cache = out;
+        dirSig = sig;
         return out;
+    }
+
+    /** listFiles 顺序不保证，必须按 key 排序后再拼签名。 */
+    private static String directorySignature(File[] files) {
+        if (files == null) return "";
+        String[] keys = new String[files.length];
+        for (int i = 0; i < files.length; i++) {
+            File f = files[i];
+            keys[i] = f.getName() + ":" + f.lastModified() + ":" + f.length();
+        }
+        java.util.Arrays.sort(keys);
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < keys.length; i++) sb.append(keys[i]).append('|');
+        return sb.toString();
     }
 
     private Theme loadOne(File f) {
@@ -177,8 +203,14 @@ final class ThemeRepository {
     synchronized boolean rename(String id, String newName) {
         Theme t = find(id);
         if (t == null || t.builtin) return false;
+        String oldName = t.name;
         t.name = newName;
-        return save(t) != null;
+        if (save(t) == null) {
+            t.name = oldName;
+            cache = null;   // 内存与磁盘可能已不一致，强制下次重读
+            return false;
+        }
+        return true;
     }
 
     /** 导出到 exports/&lt;安全名&gt;.actheme，返回绝对路径，失败返回 null。 */

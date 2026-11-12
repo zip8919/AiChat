@@ -519,7 +519,7 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
     private void showNotes() {
         if (release == null) return;
         String body = release.body;
-        if (body.length() > 4000) body = body.substring(0, 4000) + "\n…（完整说明见 GitHub）";
+        if (body.length() > 4000) body = TextKit.cut(body, 4000) + "\n…（完整说明见 GitHub）";
         AcDialog.builder(this)
                 .setTitle(release.name.length() > 0 ? release.name : release.tag)
                 .setMessage(body)

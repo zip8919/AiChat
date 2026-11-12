@@ -59,12 +59,13 @@ public final class TlsCompat {
      * <p>只有在设置里显式打开「信任所有证书」时（自签证书的内网服务），才关掉校验，
      * 并打 warn 级日志留痕。
      */
+    private static volatile SSLSocketFactory normalFactory;
+    private static volatile SSLSocketFactory trustAllFactory;
+
     public static void apply(HttpsURLConnection conn) {
         boolean trustAll = NetSecurity.trustAllCerts();
         try {
-            SSLContext ssl = SSLContext.getInstance("TLSv1.2");
-            ssl.init(null, trustAll ? TRUST_ALL : systemTrustManagers(), null);
-            conn.setSSLSocketFactory(new AllEnabledFactory(ssl.getSocketFactory()));
+            conn.setSSLSocketFactory(factory(trustAll));
             if (trustAll) {
                 conn.setHostnameVerifier(ALWAYS_TRUE);
                 LogUtil.w(TAG, "apply: TRUST-ALL enabled for %s — cert check disabled",
@@ -74,6 +75,26 @@ public final class TlsCompat {
             }
         } catch (Exception e) {
             LogUtil.e(TAG, "apply failed", e);
+        }
+    }
+
+    /**
+     * 两套工厂各建一次：原来每个 HTTPS 请求都重建 SSLContext + 重读系统 CA 库
+     * + new 包装工厂，一轮工具调用能触发 5~10 次。工厂本身无状态、可共享。
+     * trustAll 布尔每次由 apply() 实时读取，设置页切换后下一次请求即生效；
+     * 因此必须缓存两套，不能只懒加载一个（那会把首见状态冻结住）。
+     */
+    private static SSLSocketFactory factory(boolean trustAll) throws Exception {
+        SSLSocketFactory f = trustAll ? trustAllFactory : normalFactory;
+        if (f != null) return f;
+        synchronized (TlsCompat.class) {
+            f = trustAll ? trustAllFactory : normalFactory;
+            if (f != null) return f;
+            SSLContext ssl = SSLContext.getInstance("TLSv1.2");
+            ssl.init(null, trustAll ? TRUST_ALL : systemTrustManagers(), null);
+            f = new AllEnabledFactory(ssl.getSocketFactory());
+            if (trustAll) trustAllFactory = f; else normalFactory = f;
+            return f;
         }
     }
 

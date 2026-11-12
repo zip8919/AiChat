@@ -137,7 +137,8 @@ final class ChatHistory {
         if (msgs == null) return new JSONArray();
         JSONArray out = new JSONArray();
         JSONObject pendingAssistant = null;
-        java.util.Set<String> needIds = new java.util.HashSet<String>();
+        // 同一 id 可能对应多条 tool 结果（脏历史/恢复），Set 去重会把它们丢掉
+        List<String> needIds = new ArrayList<String>();
         List<JSONObject> pendingTools = new ArrayList<JSONObject>();
 
         for (int i = 0; i < msgs.length(); i++) {
@@ -163,7 +164,7 @@ final class ChatHistory {
                 String id = o.optString("tool_call_id", "");
                 if (id.length() == 0 && !needIds.isEmpty()) {
                     // 老数据没写 id：按顺序补第一个待响应 id，保证能配上
-                    id = needIds.iterator().next();
+                    id = needIds.get(0);
                     JSONObject t = new JSONObject();
                     t.put("role", "tool");
                     t.put("tool_call_id", id);
@@ -183,7 +184,7 @@ final class ChatHistory {
     }
 
     private static void flushToolGroup(JSONArray out, JSONObject assistant,
-                                       java.util.Set<String> needIds, List<JSONObject> tools)
+                                       List<String> needIds, List<JSONObject> tools)
             throws Exception {
         if (assistant == null) return;
         if (!needIds.isEmpty()) {

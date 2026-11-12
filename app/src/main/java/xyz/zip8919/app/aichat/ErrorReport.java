@@ -50,7 +50,7 @@ final class ErrorReport {
         }
         if (responseBody != null && responseBody.trim().length() > 0) {
             String body = responseBody.length() > BODY_PREVIEW
-                    ? responseBody.substring(0, BODY_PREVIEW) + "…" : responseBody;
+                    ? TextKit.cut(responseBody, BODY_PREVIEW) + "…" : responseBody;
             sb.append("\n响应体（前 ").append(BODY_PREVIEW).append(" 字）：\n").append(body);
         }
         return sb.toString();
@@ -94,6 +94,6 @@ final class ErrorReport {
             // 非 JSON：走下面的纯文本兜底
         }
         String one = body.replace('\n', ' ').replace('\r', ' ').trim();
-        return one.length() > 300 ? one.substring(0, 300) + "…" : one;
+        return one.length() > 300 ? TextKit.cut(one, 300) + "…" : one;
     }
 }

@@ -120,6 +120,18 @@ public class StatsActivity extends ThemedActivity {
         });
         updateCustomButtons();
         render();
+        // 冷启动统计已改为后台加载：加载完成后补一次，历史数据才能显示。
+        UsageStats.get().whenLoaded(new Runnable() {
+            public void run() {
+                if (isFinishing() || isDestroyed()) return;
+                long e = UsageStats.get().earliestTs();
+                if (period != PERIOD_CUSTOM && e > 0) {
+                    customFrom = UsageStats.dayStart(e);
+                    updateCustomButtons();
+                }
+                render();
+            }
+        });
     }
 
     /** 进入自定义模式的入口：先选起始日，再接着选结束日。 */

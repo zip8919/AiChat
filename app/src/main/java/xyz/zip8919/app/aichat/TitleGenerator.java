@@ -51,10 +51,15 @@ final class TitleGenerator {
         // 提示词在主线程读：里面的 {ua} 占位符首次取值会初始化 WebView 内核，
         // 而 WebView 的核心方法只认主线程，放到下面的请求线程上做有概率直接崩。
         final String titlePrompt = SettingsActivity.getTitlePrompt(activity);
+        // 后台线程最长要跑 50s（连接+读超时），不能强引用 Activity：
+        // 期间退出/旋转页面会让整个 View 树与 WebView 都无法回收。
+        final android.content.Context app = activity.getApplicationContext();
+        final android.os.Handler main =
+                new android.os.Handler(android.os.Looper.getMainLooper());
         new Thread(new Runnable() {
             public void run() {
                 try {
-                    String titleModel = SettingsActivity.getTitleModel(activity);
+                    String titleModel = SettingsActivity.getTitleModel(app);
                     LogUtil.d(TAG, "generate: titleModel=%s", titleModel);
                     ModelInfo tmi = cfg.getModel(titleModel);
                     if (tmi == null) {
@@ -107,10 +112,19 @@ final class TitleGenerator {
                     }
 
                     final String finalTitle = title;
-                    activity.runOnUiThread(new Runnable() {
+                    main.post(new Runnable() {
                         public void run() {
-                            Conversation conv = cm.getCurrentConversation();
-                            if (conv == null || !convId.equals(conv.id)) {
+                            // getCurrentConversation() 带懒创建副作用：标题线程
+                            // 最长跑 50s，期间会话被删会在列表里凭空多一条空会话。
+                            Conversation conv = null;
+                            List<Conversation> all = cm.getConversations();
+                            if (all != null) {
+                                for (int k = 0; k < all.size(); k++) {
+                                    Conversation c = all.get(k);
+                                    if (c != null && convId.equals(c.id)) { conv = c; break; }
+                                }
+                            }
+                            if (conv == null) {
                                 LogUtil.d(TAG, "title dropped: conversation changed (started=%s, now=%s)",
                                         convId, conv == null ? "-" : conv.id);
                                 return;

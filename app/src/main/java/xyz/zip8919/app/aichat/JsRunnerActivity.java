@@ -251,7 +251,7 @@ public class JsRunnerActivity extends ThemedActivity {
         bridgeEverCalled = true;
         runOnUiThread(new Runnable() {
             public void run() {
-                if (isFinishing()) return;
+                if (isFinishing() || isDestroyed()) return;
                 // 首次输出前，先抹掉「（无输出）」这类占位
                 if (output.length() == 0) {
                     outputView.setText("");

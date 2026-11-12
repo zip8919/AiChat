@@ -25,8 +25,13 @@ final class AppearanceState {
     String themeId = "";
     int displayPercent = DEFAULT_PERCENT;
     int fontSizeStep = DEFAULT_STEP;
-    final Map<String, String> explicitLight = new HashMap<String, String>();
-    final Map<String, String> explicitDark = new HashMap<String, String>();
+    // 后台渲染线程会经 colorSignature() 读这两表，主线程同时在
+    // setExplicit/restoreExplicit 里写。4.4 的 HashMap 并发 resize 能形成
+    // 链表环导致死循环，clear+putAll 的中间态还会让颜色签名算错。
+    final Map<String, String> explicitLight =
+            new java.util.concurrent.ConcurrentHashMap<String, String>();
+    final Map<String, String> explicitDark =
+            new java.util.concurrent.ConcurrentHashMap<String, String>();
 
     static AppearanceState defaults() {
         return new AppearanceState();

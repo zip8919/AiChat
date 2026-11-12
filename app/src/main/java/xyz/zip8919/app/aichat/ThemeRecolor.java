@@ -877,6 +877,10 @@ final class ThemeRecolor {
     }
 
     private static void tintCompound(android.widget.CompoundButton cb, BaseStyle bs, int primary) {
+        // getButtonDrawable() 是 API 23 才加的；4.4 上每次调用都抛
+        // NoSuchMethodError 被下面 catch 吞掉，纯属白跑一趟还填异常栈。
+        // 23+ 保持原有染色外观不变，4.4 直接跳过。
+        if (android.os.Build.VERSION.SDK_INT < 23) return;
         try {
             Drawable bd = cb.getButtonDrawable();
             if (bd == null) return;
@@ -1011,28 +1015,35 @@ final class ThemeRecolor {
         return sampleSolidColor(d, 48);
     }
 
-    private static Integer sampleSolidColor(Drawable d, int size) {
+    // 采样只在主线程串行执行，9/48 两张位图可静态复用：原来每次
+    // createBitmap + recycle，一轮整树遍历就是上百次位图分配。
+    // 静态位图不能 recycle（recycle 后再 draw 必抛），改在每次 draw 前擦净。
+    private static final Bitmap SAMPLE_9 =
+            Bitmap.createBitmap(9, 9, Bitmap.Config.ARGB_8888);
+    private static final Bitmap SAMPLE_48 =
+            Bitmap.createBitmap(48, 48, Bitmap.Config.ARGB_8888);
+    private static final Canvas SAMPLE_C9 = new Canvas(SAMPLE_9);
+    private static final Canvas SAMPLE_C48 = new Canvas(SAMPLE_48);
+
+    private static synchronized Integer sampleSolidColor(Drawable d, int size) {
         if (d == null) return null;
-        Bitmap b = null;
+        if (size != 9 && size != 48) return null;
+        Bitmap b = size == 48 ? SAMPLE_48 : SAMPLE_9;
+        Canvas c = size == 48 ? SAMPLE_C48 : SAMPLE_C9;
+        Rect old = new Rect(d.getBounds());
         try {
-            b = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
-            Canvas c = new Canvas(b);
-            Rect old = new Rect(d.getBounds());
+            b.eraseColor(0);
             d.setBounds(0, 0, size, size);
             d.draw(c);
-            d.setBounds(old);
             int px = b.getPixel(size / 2, size / 2);
             if (Color.alpha(px) < 200) return null;
             return Integer.valueOf(px);
         } catch (Throwable t) {
             return null;
         } finally {
-            if (b != null) {
-                try {
-                    b.recycle();
-                } catch (Throwable ignored) {
-                }
-            }
+            // 某些 ROM 的 9-patch draw() 会抛异常：不还原 bounds 的话
+            // 这个 background 之后就只在左上角画一小块，偶现且极难查。
+            d.setBounds(old);
         }
     }
 
