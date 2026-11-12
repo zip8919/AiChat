@@ -148,7 +148,6 @@ final class ThemeRecolor {
         Drawable origIndeterminate;
         Drawable origSeekThumb;
         Drawable origCompoundBtn;
-        Drawable origSwitchTrack;
         /** 已套色时的「主色|轨道色|明暗」签名；相同就跳过，避免每帧重建 drawable。 */
         String tintSig;
         boolean sysTinted;
@@ -173,45 +172,8 @@ final class ThemeRecolor {
         AppearanceManager m = AppearanceManager.getInstance(ctx);
         boolean def = m.isAppearanceDefault();
         // 默认态且从未定制过：新 View 保持 layout 原色，零回归。
-        // 唯一的例外是开关轨道 —— 系统默认的绿色与整套蓝色配色冲突，
-        // 属于用户点名的显示问题，见 tintSwitches 的注释。
-        if (def && !ThemeApplier.everCustomized()) {
-            tintSwitches(v, m);
-            return;
-        }
+        if (def && !ThemeApplier.everCustomized()) return;
         walkTree(v, m, m.isDark(), def);
-    }
-
-    /**
-     * 默认外观下只处理开关。
-     *
-     * <p>默认态走「零回归」短路，整棵树都不碰，代价是开关会一直停在 ROM 自带的
-     * 绿色轨道上（Material 与多数国产 ROM 的 track 默认就是绿的），跟本应用的
-     * 蓝色主色完全不搭。开关没有文字、也没有语义色，按主色染不会破坏任何布局或
-     * 可读性，因此单独放行；其余控件在默认态仍保持系统原样。
-     *
-     * <p>只在 inflate 现场跑（每个 View 一次），不进逐帧路径。
-     */
-    private static void tintSwitches(View v, AppearanceManager m) {
-        try {
-            if (v instanceof android.widget.Switch) {
-                BaseStyle bs = (BaseStyle) v.getTag(R.id.ac_base_style);
-                if (bs == null) {
-                    bs = capture(v);
-                    v.setTag(R.id.ac_base_style, bs);
-                }
-                applySystemTint(v, bs, m, m.isDark(), false);
-                return;
-            }
-            if (v instanceof android.view.ViewGroup) {
-                android.view.ViewGroup g = (android.view.ViewGroup) v;
-                for (int i = 0; i < g.getChildCount(); i++) {
-                    tintSwitches(g.getChildAt(i), m);
-                }
-            }
-        } catch (Throwable t) {
-            LogUtil.w("ThemeRecolor", "tintSwitches failed: " + t.getMessage());
-        }
     }
 
     /**
@@ -819,11 +781,21 @@ final class ThemeRecolor {
                     || v instanceof android.widget.CompoundButton;
             if (!isSysCtl) return;
 
-            // Switch 单独放行：它的轨道是「开/关两态的大色块」，系统默认的绿
-            // （Material/国产 ROM）跟本应用的整套蓝色主题完全冲突，用户会直接
-            // 当成 bug 报上来。其余控件在默认外观下仍保持原样，零回归不变。
-            boolean isSwitch = v instanceof android.widget.Switch;
-            boolean nativeLook = def || (m.isColorDefault() && !isSwitch);
+            // Switch 整体交还系统，不参与着色（含自定义主题）。
+            //
+            // Holo（API 14~20）的 Switch 是「轨道 + 带文字的滑块」两件套：
+            // 「打开 / 关闭」两个字的底板是 thumb 里 9-patch 自带的实色矩形，
+            // 与轨道各自独立绘制。只染轨道 → 轨道变椭圆主色、thumb 底板还是
+            // 系统绿，比不染更难看；连 thumb 一起换 → 上面那层文字是 Switch
+            // 用 mTextPaint 直绘的，换 9-patch 必然撞色。
+            // 结论：这个控件在 4.x 上没有「只换颜色、不留残色」的合法改法，
+            // 回退到系统默认。曾染过色的也要还原（见下）。
+            if (v instanceof android.widget.Switch) {
+                restoreSysTint(v, bs);
+                return;
+            }
+
+            boolean nativeLook = def || m.isColorDefault();
             if (nativeLook) {
                 restoreSysTint(v, bs);
                 return;
@@ -843,9 +815,7 @@ final class ThemeRecolor {
                     tintSeekThumb((android.widget.SeekBar) v, bs, primary);
                 }
             }
-            if (v instanceof android.widget.Switch) {
-                tintSwitchTrack((android.widget.Switch) v, bs, primary, track);
-            } else if (v instanceof android.widget.CompoundButton) {
+            if (v instanceof android.widget.CompoundButton) {
                 tintCompound((android.widget.CompoundButton) v, bs, primary);
             }
             bs.sysTinted = true;
@@ -906,58 +876,6 @@ final class ThemeRecolor {
         }
     }
 
-    /**
-     * 开关的轨道：<b>整体换成自绘胶囊</b>，不再用 ColorFilter。
-     *
-     * <p><b>为什么 ColorFilter 不好使</b>：{@code Drawable.setColorFilter} 只作用在
-     * 它自己那一层。Material 与多数国产 ROM 的 track 是 {@code StateListDrawable}
-     * （开/关两张 9-patch），它的 {@code draw()} 只是把绘制转交给当前子 drawable，
-     * 子 drawable 根本拿不到父层那个 filter —— 于是「染了，但颜色一点没变」，
-     * 开关还停在系统默认的绿色/蓝色。这正是实机反馈的那一条。
-     *
-     * <p><b>为什么轨道可以整体替换、thumb 不能</b>：track 只承载「开/关」的底色，
-     * 没有文字也没有状态图形，替换成胶囊不丢任何信息；thumb 上则有 Switch 用
-     * {@code mTextPaint} 绘制的「打开 / 关闭」文字，换掉 thumb 的 9-patch 会让文字
-     * 与底色撞色。因此 thumb 一律保持原件。
-     *
-     * <p>尺寸沿用原 track 的 intrinsic 尺寸：{@code Switch.onMeasure} 用它算
-     * 控件高度与 thumb 行程，换一个尺寸不同的 drawable 会让整个开关行的高度跳动。
-     */
-    private static void tintSwitchTrack(android.widget.Switch sw, BaseStyle bs,
-                                        int primary, int track) {
-        try {
-            Drawable cur = sw.getTrackDrawable();
-            if (cur == null) return;
-            if (bs.origSwitchTrack == null) bs.origSwitchTrack = cur;
-            float d = sw.getResources().getDisplayMetrics().density;
-            int w = cur.getIntrinsicWidth();
-            int h = cur.getIntrinsicHeight();
-            if (w <= 0) w = Math.round(40 * d);
-            if (h <= 0) h = Math.round(20 * d);
-            sw.setTrackDrawable(switchTrack(primary, track, w, h));
-        } catch (Throwable t) {
-            LogUtil.w("ThemeRecolor", "tintSwitchTrack failed: " + t.getMessage());
-        }
-    }
-
-    /** 开 = 主色，关 = 轨道色；胶囊圆角取高度一半，窄屏也不会露出直角。 */
-    private static Drawable switchTrack(int on, int off, int w, int h) {
-        StateListDrawable s = new StateListDrawable();
-        s.addState(new int[]{android.R.attr.state_checked}, trackPill(on, w, h));
-        s.addState(new int[]{}, trackPill(off, w, h));
-        return s;
-    }
-
-    private static GradientDrawable trackPill(int color, int w, int h) {
-        GradientDrawable g = new GradientDrawable();
-        g.setCornerRadius(h / 2f);
-        g.setColor(color);
-        // 没有 setSize 的 GradientDrawable 的 intrinsic 尺寸是 -1，
-        // Switch 会据此把它算成 0 高，轨道直接消失。
-        g.setSize(w, h);
-        return g;
-    }
-
     private static void tintCompound(android.widget.CompoundButton cb, BaseStyle bs, int primary) {
         try {
             Drawable bd = cb.getButtonDrawable();
@@ -975,8 +893,7 @@ final class ThemeRecolor {
     private static void restoreSysTint(View v, BaseStyle bs) {
         if (!bs.sysTinted && bs.tintSig == null
                 && bs.origProgress == null && bs.origIndeterminate == null
-                && bs.origSeekThumb == null && bs.origCompoundBtn == null
-                && bs.origSwitchTrack == null) {
+                && bs.origSeekThumb == null && bs.origCompoundBtn == null) {
             return;   // 从未染过色，不做任何事（绝大多数 View 走这条）
         }
         try {
@@ -994,10 +911,6 @@ final class ThemeRecolor {
                     ((android.widget.SeekBar) v).setThumb(bs.origSeekThumb);
                     bs.origSeekThumb = null;
                 }
-            }
-            if (v instanceof android.widget.Switch && bs.origSwitchTrack != null) {
-                ((android.widget.Switch) v).setTrackDrawable(bs.origSwitchTrack);
-                bs.origSwitchTrack = null;
             }
             if (v instanceof android.widget.CompoundButton && bs.origCompoundBtn != null) {
                 ((android.widget.CompoundButton) v).setButtonDrawable(bs.origCompoundBtn);
