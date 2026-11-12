@@ -132,10 +132,63 @@ final class ThemePromptStore {
         b.append("4. JSON 里不要写注释（// 或 /* */），不要尾逗号，不要用单引号包字段名。").append('\n');
         b.append("5. 不要用 position:fixed、@import、url(http...)、javascript:；不要给 body/pre/table/img 设固定像素 width、overflow-x、word-wrap、white-space:nowrap（会撑破 258dp 窄屏）。").append('\n');
         b.append("6. 只使用第三节列出的选择器。请输出完整闭合的 JSON，不要截断。").append('\n');
+        b.append("7. 整个 JSON 必须格式化输出：每对字段单独一行，用 2 个空格缩进，token 一个一行。"
+                + "只有 css 的字符串值内部保持单行（那是 CSS，不是 JSON 结构）。不要输出压成一行的 JSON。").append('\n');
         b.append("").append('\n');
         b.append("【七、完整示例（示范「棕色方形搜索卡片 + 代码卡片特定样式」，仅供格式参考，不要照抄配色）】").append('\n');
         b.append("```actheme").append('\n');
-        b.append("{\"format\":\"actheme\",\"version\":1,\"meta\":{\"name\":\"棕纸示例\",\"author\":\"\",\"description\":\"搜索卡片方形、代码卡片虚线框\"},\"fonts\":{\"ui\":\"system\",\"mono\":\"system\"},\"light\":{\"tokens\":{\"ac_primary\":\"#6D4C41\",\"ac_primary_dark\":\"#4E342E\",\"ac_accent\":\"#A1887F\",\"ac_bg\":\"#FAF6EF\",\"ac_surface\":\"#FFFDF7\",\"ac_text\":\"#3E2723\",\"ac_text_secondary\":\"#795548\",\"ac_divider\":\"#E0D7C8\",\"ac_bubble_user\":\"#EFE6D8\",\"ac_bubble_ai\":\"#FFFDF7\",\"ac_link\":\"#8D6E63\",\"ac_border\":\"#D7C4B5\",\"ac_code_bg\":\"#F0E7DA\",\"ac_code_text\":\"#3E2723\"},\"css\":\".tool-card{border-radius:0;background:#6D4C41;border:1px solid #4E342E;}.tool-card-head{background:#5D4037;color:#FFF3E0;}.tool-title,.tool-status{color:#FFE0B2;}pre{border-radius:2px;border:1px dashed #8D6E63;background:#F0E7DA;}\"},\"dark\":{\"tokens\":{\"ac_primary\":\"#A1887F\",\"ac_primary_dark\":\"#5D4037\",\"ac_accent\":\"#BCAAA4\",\"ac_bg\":\"#241C18\",\"ac_surface\":\"#2E241F\",\"ac_text\":\"#EFEBE9\",\"ac_text_secondary\":\"#BCAAA4\",\"ac_divider\":\"#4E342E\",\"ac_bubble_user\":\"#3E2F28\",\"ac_bubble_ai\":\"#2E241F\",\"ac_link\":\"#BCAAA4\",\"ac_border\":\"#4E342E\",\"ac_code_bg\":\"#1E1714\",\"ac_code_text\":\"#EFEBE9\"},\"css\":\".tool-card{border-radius:0;background:#4E342E;border:1px solid #8D6E63;}.tool-card-head{background:#3E2F28;color:#EFEBE9;}.tool-title,.tool-status{color:#D7CCC8;}pre{border-radius:2px;border:1px dashed #8D6E63;background:#1E1714;}\"}}").append('\n');
+        b.append("{\n");
+        b.append("  \"format\": \"actheme\",\n");
+        b.append("  \"version\": 1,\n");
+        b.append("  \"meta\": {\"name\": \"棕纸示例\", \"author\": \"\", \"description\": \"搜索卡片方形、代码卡片虚线框\"},\n");
+        b.append("  \"fonts\": {\"ui\": \"system\", \"mono\": \"system\"},\n");
+        b.append("  \"light\": {\n");
+        b.append("    \"tokens\": {\n");
+        b.append("      \"ac_primary\": \"#6D4C41\",\n");
+        b.append("      \"ac_primary_dark\": \"#4E342E\",\n");
+        b.append("      \"ac_accent\": \"#A1887F\",\n");
+        b.append("      \"ac_bg\": \"#FAF6EF\",\n");
+        b.append("      \"ac_surface\": \"#FFFDF7\",\n");
+        b.append("      \"ac_text\": \"#3E2723\",\n");
+        b.append("      \"ac_text_secondary\": \"#795548\",\n");
+        b.append("      \"ac_divider\": \"#E0D7C8\",\n");
+        b.append("      \"ac_bubble_user\": \"#EFE6D8\",\n");
+        b.append("      \"ac_bubble_ai\": \"#FFFDF7\",\n");
+        b.append("      \"ac_danger\": \"#B3261E\",\n");
+        b.append("      \"ac_track\": \"#E8DED0\",\n");
+        b.append("      \"ac_link\": \"#8D6E63\",\n");
+        b.append("      \"ac_border\": \"#D7C4B5\",\n");
+        b.append("      \"ac_code_bg\": \"#F0E7DA\",\n");
+        b.append("      \"ac_code_text\": \"#3E2723\"\n");
+        b.append("    },\n");
+        b.append("    \"css\": \".tool-card{border-radius:0;background:#6D4C41;border:1px solid #4E342E;}"
+                + ".tool-card-head{background:#5D4037;color:#FFF3E0;}.tool-title,.tool-status{color:#FFE0B2;}"
+                + "pre{border-radius:2px;border:1px dashed #8D6E63;background:#F0E7DA;}\"\n");
+        b.append("  },\n");
+        b.append("  \"dark\": {\n");
+        b.append("    \"tokens\": {\n");
+        b.append("      \"ac_primary\": \"#A1887F\",\n");
+        b.append("      \"ac_primary_dark\": \"#5D4037\",\n");
+        b.append("      \"ac_accent\": \"#BCAAA4\",\n");
+        b.append("      \"ac_bg\": \"#241C18\",\n");
+        b.append("      \"ac_surface\": \"#2E241F\",\n");
+        b.append("      \"ac_text\": \"#EFEBE9\",\n");
+        b.append("      \"ac_text_secondary\": \"#BCAAA4\",\n");
+        b.append("      \"ac_divider\": \"#4E342E\",\n");
+        b.append("      \"ac_bubble_user\": \"#3E2F28\",\n");
+        b.append("      \"ac_bubble_ai\": \"#2E241F\",\n");
+        b.append("      \"ac_danger\": \"#F2B8B5\",\n");
+        b.append("      \"ac_track\": \"#4E342E\",\n");
+        b.append("      \"ac_link\": \"#BCAAA4\",\n");
+        b.append("      \"ac_border\": \"#4E342E\",\n");
+        b.append("      \"ac_code_bg\": \"#1E1714\",\n");
+        b.append("      \"ac_code_text\": \"#EFEBE9\"\n");
+        b.append("    },\n");
+        b.append("    \"css\": \".tool-card{border-radius:0;background:#4E342E;border:1px solid #8D6E63;}"
+                + ".tool-card-head{background:#3E2F28;color:#EFEBE9;}.tool-title,.tool-status{color:#D7CCC8;}"
+                + "pre{border-radius:2px;border:1px dashed #8D6E63;background:#1E1714;}\"\n");
+        b.append("  }\n");
+        b.append("}\n");
         b.append("```").append('\n');
         return b.toString();
     }

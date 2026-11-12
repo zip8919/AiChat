@@ -34,6 +34,8 @@ public class ThemeEditActivity extends ThemedActivity {
     private String originalJson;
     /** 上次填的主题需求：「返回改需求」时回填，避免重打。 */
     private String lastDesc = "";
+    /** 刚从属性编辑页返回，onResume 需要补一次标题刷新。 */
+    private boolean expectTokenReturn;
 
     private TextView title;
     private EditText nameEdit, authorEdit, descEdit, cssEdit;
@@ -138,6 +140,41 @@ public class ThemeEditActivity extends ThemedActivity {
         findViewById(R.id.btn_prompt).setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) { startPromptFlow(); }
         });
+        findViewById(R.id.btn_edit_tokens).setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { openTokenEditor(); }
+        });
+    }
+
+    /**
+     * 进入逐属性编辑。
+     *
+     * <p>用静态引用传内存对象，不走 Intent：主题含两套 map 与 CSS，序列化既慢又容易
+     * 在 64KB 事务上限边缘翻车。编辑结果直接落在这个 {@code t} 上，
+     * 返回后 {@link #isDirty()} 会自然发现变化。
+     */
+    private void openTokenEditor() {
+        collect();   // 先把名称/作者/CSS 同步进 t，避免编辑页看到过期的名字
+        expectTokenReturn = true;
+        ThemeAttrActivity.sTheme = t;
+        Intent i = new Intent(this, ThemeAttrActivity.class);
+        // 显式标出模式：静态引用是「一次性」的（目标页读完就置空），
+        // 连点两次时第二次会拿到 null，有这个标记就能识别并安全退出，
+        // 而不是悄悄退化成「外壳覆盖模式」让用户以为在改主题。
+        i.putExtra("theme_mode", true);
+        startActivity(i);
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (!expectTokenReturn) return;
+        expectTokenReturn = false;
+        // 从属性页返回：tokens 变了但界面元素没变。先 collect 保住用户正在输入的 CSS，
+        // 再刷新标题（名称可能在别处改过）。
+        collect();
+        title.setText(t.id.length() == 0 ? "新建主题" : "编辑主题 · " + t.name);
+        // 属性页里的预览是临时的（退出即收回），这里必须讲清楚，否则用户会以为没生效
+        AcToast.show(this, "颜色改动已写入主题，保存后在外观页选中该主题即可生效");
     }
 
     private void switchMode(boolean toDark) {

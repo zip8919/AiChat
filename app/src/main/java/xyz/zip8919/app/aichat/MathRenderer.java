@@ -407,7 +407,7 @@ final class MathRenderer {
         } catch (Throwable ignored) {
         }
         String key = formula + (block ? "b" : "i") + ":" + Integer.toHexString(fgColor)
-                + ":" + Integer.toHexString(fallbackBg);
+                + ":" + Integer.toHexString(fallbackBg) + ":" + Integer.toHexString(fallbackFg);
         String cached = latexCache.get(key);
         if (cached != null) {
             LogUtil.v(TAG, "latex CACHE hit: block=%s %s", block, LogUtil.preview(formula, 80));

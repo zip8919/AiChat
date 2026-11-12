@@ -47,6 +47,46 @@ public class MessageHtmlRenderer {
             Collections.synchronizedMap(new LinkedHashMap<String, String>(32, 0.75f, true));
 
     /**
+     * 缓存生成时的颜色签名。
+     *
+     * <p>原来靠外部（MainActivity 的 ChangeListener）在切色时显式调用
+     * {@link #clearRenderCache()}，而那是个<b>匿名监听器</b>，只被 AppearanceManager
+     * 的弱引用列表持有 —— 一旦 GC 回收，切色就不再触发清理，缓存里的旧 HTML
+     * （含旧颜色的公式 base64）会一直命中，表现为「公式要重启 App 才变色」。
+     *
+     * <p>现在把签名放进缓存自身：每次取用前比对，不一致就整体作废。这样无论
+     * 谁触发的、有没有触发清理，都不可能读到上一个主题的渲染结果。
+     */
+    private static volatile String renderCacheSig = "";
+
+    /**
+     * 若颜色签名已变，清空 HTML 缓存与公式位图缓存。
+     *
+     * <p>所有读取缓存的入口都必须先调它。开销是 5 次 getEffectiveColor，
+     * 相对整页渲染可以忽略。
+     */
+    private static void ensureCacheSig(Context ctx) {
+        String sig;
+        try {
+            // 必须带 Context：无参 getInstance() 在 StorageManager 未初始化时会用错 basePath
+            // 建出单例，之后整进程的外观读的都是那个错路径。
+            sig = AppearanceManager.getInstance(ctx).colorSignature();
+        } catch (Throwable t) {
+            // 外观未初始化（极早期调用）：不清缓存，按原样继续
+            return;
+        }
+        if (sig.equals(renderCacheSig)) return;
+        synchronized (renderCache) {
+            // 进锁再判一次：两个渲染线程可能同时发现签名变化
+            if (sig.equals(renderCacheSig)) return;
+            renderCache.clear();
+            renderCacheSig = sig;
+        }
+        MathRenderer.clearCache();
+        LogUtil.d(TAG, "render cache invalidated by color signature: %s", sig);
+    }
+
+    /**
      * 清空 HTML 缓存。
      *
      * <p>缓存 key 只有消息正文，不含外观。公式是预渲染 PNG（字色在出图时就画死了），
@@ -64,6 +104,7 @@ public class MessageHtmlRenderer {
 
     public static String buildConversationHtml(List<Message> messages, int from, Context ctx) {
         long startTs = System.currentTimeMillis();
+        ensureCacheSig(ctx);
         int total = messages == null ? 0 : messages.size();
         int start = Math.max(0, Math.min(from, total));
         LogUtil.d(TAG, "buildConversationHtml: %d messages, render from %d (cache=%d)",
@@ -480,6 +521,7 @@ public class MessageHtmlRenderer {
 
     public static String contentToHtml(String text, Context ctx) {
         if (text == null || text.isEmpty()) return "";
+        ensureCacheSig(ctx);
         String cached = renderCache.get(text);
         if (cached != null) return cached;
         long startTs = System.currentTimeMillis();

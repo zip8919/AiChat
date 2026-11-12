@@ -380,6 +380,12 @@ public class AppearanceActivity extends ThemedActivity {
             }
         });
 
+        findViewById(R.id.attr_edit).setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                startActivity(new Intent(AppearanceActivity.this, ThemeAttrActivity.class));
+            }
+        });
+
         findViewById(R.id.color_follow).setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 boolean dark = am.isDark();

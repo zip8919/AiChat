@@ -8,6 +8,7 @@ import android.graphics.ColorFilter;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.PixelFormat;
+import android.graphics.PorterDuff;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.drawable.ColorDrawable;
@@ -140,6 +141,17 @@ final class ThemeRecolor {
         boolean themedBg;
         /** 换上时的主题签名（明暗 + 表面色 + 描边色）；不同就重建。 */
         String themedSig;
+        // ---- 系统 tint 控件（SeekBar / ProgressBar / Switch / CheckBox / RadioButton）----
+        // 这五类在 API 18 上没有 setXxxTintList，颜色由 drawable 自带（Holo 默认蓝）。
+        // 只能换 progressDrawable / thumb / buttonDrawable / trackDrawable 并套色。
+        Drawable origProgress;
+        Drawable origIndeterminate;
+        Drawable origSeekThumb;
+        Drawable origCompoundBtn;
+        Drawable origSwitchTrack;
+        /** 已套色时的「主色|轨道色|明暗」签名；相同就跳过，避免每帧重建 drawable。 */
+        String tintSig;
+        boolean sysTinted;
         boolean captured;
     }
 
@@ -237,6 +249,7 @@ final class ThemeRecolor {
         if (def) {
             restore(v, bs);
             applyPopup(v, m, dark, true);
+            applySystemTint(v, bs, m, dark, true);
             return;
         }
 
@@ -283,6 +296,10 @@ final class ThemeRecolor {
         }
         applyPopup(v, m, dark, false);
         applyDivider(v, bs, m, dark, false);
+        // 4) 系统 tint 控件：进度条 / 拖动条 / 开关 / 单选 / 复选
+        //    这几类的颜色来自各自 drawable，setBackground 那套完全覆盖不到，
+        //    深色下就会留一圈 Holo 蓝。放在最后一步统一处理。
+        applySystemTint(v, bs, m, dark, false);
     }
 
     /**
@@ -739,6 +756,178 @@ final class ThemeRecolor {
             } catch (Throwable ignored) {
             }
         }
+        restoreSysTint(v, bs);
+    }
+
+    /**
+     * 系统 tint 控件按主题上色。
+     *
+     * <p><b>为什么单独一条通道</b>：{@code SeekBar} / {@code ProgressBar} / {@code Switch} /
+     * {@code CheckBox} / {@code RadioButton} 的颜色不住在 {@code getBackground()} 里，而是
+     * 各自的 {@code progressDrawable} / {@code thumb} / {@code trackDrawable} /
+     * {@code buttonDrawable}。API 18 没有 {@code setXxxTintList}，这些 drawable 由 Holo 主题
+     * 烘死成蓝色 —— 这就是「切了深色，进度条/开关还是亮的 Holo 蓝」的原因。
+     *
+     * <p><b>为什么用 ColorFilter 而不是自绘</b>：这些控件靠 drawable 的<b>图形</b>区分状态
+     * （选中是实心勾、未选中是空框；轨道开/关 alpha 不同），{@code SRC_IN} 只替换色相、
+     * 保留 alpha 与形状，状态区分自动成立。自绘一套要重新实现 thumb 位移、轨道动画，
+     * 收益不抵风险。
+     *
+     * <p><b>零回归</b>：内置浅色默认外观下直接还原原件（原生就是蓝的，改了反而破坏一致性）。
+     */
+    private static void applySystemTint(View v, BaseStyle bs, AppearanceManager m,
+                                        boolean dark, boolean def) {
+        try {
+            boolean isSysCtl = v instanceof android.widget.ProgressBar
+                    || v instanceof android.widget.CompoundButton;
+            if (!isSysCtl) return;
+
+            boolean nativeLook = def || m.isColorDefault();
+            if (nativeLook) {
+                restoreSysTint(v, bs);
+                return;
+            }
+            int primary = m.getEffectiveColor(ThemeTokens.AC_PRIMARY, dark);
+            int track = m.getEffectiveColor(ThemeTokens.AC_TRACK, dark);
+            String sig = (dark ? "d" : "l") + ":" + Integer.toHexString(primary)
+                    + ":" + Integer.toHexString(track);
+            // 已按当前主题染过：跳过。少了这一步，每次 onResume 都会重建 drawable，
+            // 老机器滚动列表时就是成片的临时对象。
+            if (bs.sysTinted && sig.equals(bs.tintSig)) return;
+
+            if (v instanceof android.widget.ProgressBar) {
+                // SeekBar 也是 ProgressBar：进度通道两者通用
+                tintProgress((android.widget.ProgressBar) v, bs, primary, track);
+                if (v instanceof android.widget.SeekBar) {
+                    tintSeekThumb((android.widget.SeekBar) v, bs, primary);
+                }
+            }
+            if (v instanceof android.widget.Switch) {
+                tintSwitchTrack((android.widget.Switch) v, bs, primary);
+            } else if (v instanceof android.widget.CompoundButton) {
+                tintCompound((android.widget.CompoundButton) v, bs, primary);
+            }
+            bs.sysTinted = true;
+            bs.tintSig = sig;
+        } catch (Throwable t) {
+            // 某类 ROM 的 drawable 结构不同，单点失败不能影响整页刷色
+            LogUtil.w("ThemeRecolor", "applySystemTint failed: " + t.getMessage());
+        }
+    }
+
+    private static void tintProgress(android.widget.ProgressBar pb, BaseStyle bs,
+                                     int primary, int track) {
+        Drawable pd = pb.getProgressDrawable();
+        if (pd != null) {
+            if (bs.origProgress == null) bs.origProgress = pd;
+            Drawable own = pd.mutate();
+            if (own instanceof android.graphics.drawable.LayerDrawable) {
+                // Holo 的 progress_horizontal 是「背景 + 进度 + 第二进度」三层。
+                // 整体染色会把轨道也染成主色，主色进度条压在主色轨道上就分不清了。
+                android.graphics.drawable.LayerDrawable ld =
+                        (android.graphics.drawable.LayerDrawable) own;
+                tintLayer(ld, android.R.id.background, track);
+                tintLayer(ld, android.R.id.progress, primary);
+                tintLayer(ld, android.R.id.secondaryProgress, primary);
+            } else {
+                own.setColorFilter(primary, PorterDuff.Mode.SRC_IN);
+            }
+            pb.setProgressDrawable(own);
+        }
+        Drawable ind = pb.getIndeterminateDrawable();
+        if (ind != null) {
+            // 不确定态是帧动画，只有一层，直接整体染主色
+            if (bs.origIndeterminate == null) bs.origIndeterminate = ind;
+            Drawable own = ind.mutate();
+            own.setColorFilter(primary, PorterDuff.Mode.SRC_IN);
+            pb.setIndeterminateDrawable(own);
+        }
+    }
+
+    private static void tintLayer(android.graphics.drawable.LayerDrawable ld, int id, int color) {
+        try {
+            Drawable layer = ld.findDrawableByLayerId(id);
+            if (layer != null) layer.setColorFilter(color, PorterDuff.Mode.SRC_IN);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static void tintSeekThumb(android.widget.SeekBar sb, BaseStyle bs, int primary) {
+        try {
+            // getThumb() 是 API 16+，minSdk 18 安全
+            Drawable th = sb.getThumb();
+            if (th == null) return;
+            if (bs.origSeekThumb == null) bs.origSeekThumb = th;
+            Drawable own = th.mutate();
+            own.setColorFilter(primary, PorterDuff.Mode.SRC_IN);
+            sb.setThumb(own);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static void tintSwitchTrack(android.widget.Switch sw, BaseStyle bs, int primary) {
+        try {
+            Drawable track = sw.getTrackDrawable();
+            if (track == null) return;
+            if (bs.origSwitchTrack == null) bs.origSwitchTrack = track;
+            // 轨道是 StateList：开/关两态的 alpha 不同，SRC_IN 只换色相，
+            // 「开=实主色、关=淡主色」的区分自动保留。thumb 保持白色不动。
+            Drawable own = track.mutate();
+            own.setColorFilter(primary, PorterDuff.Mode.SRC_IN);
+            sw.setTrackDrawable(own);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static void tintCompound(android.widget.CompoundButton cb, BaseStyle bs, int primary) {
+        try {
+            Drawable bd = cb.getButtonDrawable();
+            if (bd == null) return;
+            if (bs.origCompoundBtn == null) bs.origCompoundBtn = bd;
+            // 选中是实心勾、未选中是空框：形状本身区分状态，染色后依然分得清
+            Drawable own = bd.mutate();
+            own.setColorFilter(primary, PorterDuff.Mode.SRC_IN);
+            cb.setButtonDrawable(own);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /** 回到内置默认外观：把五类控件的原件整套换回去。 */
+    private static void restoreSysTint(View v, BaseStyle bs) {
+        if (!bs.sysTinted && bs.tintSig == null
+                && bs.origProgress == null && bs.origIndeterminate == null
+                && bs.origSeekThumb == null && bs.origCompoundBtn == null
+                && bs.origSwitchTrack == null) {
+            return;   // 从未染过色，不做任何事（绝大多数 View 走这条）
+        }
+        try {
+            if (v instanceof android.widget.ProgressBar) {
+                android.widget.ProgressBar pb = (android.widget.ProgressBar) v;
+                if (bs.origProgress != null) {
+                    pb.setProgressDrawable(bs.origProgress);
+                    bs.origProgress = null;
+                }
+                if (bs.origIndeterminate != null) {
+                    pb.setIndeterminateDrawable(bs.origIndeterminate);
+                    bs.origIndeterminate = null;
+                }
+                if (v instanceof android.widget.SeekBar && bs.origSeekThumb != null) {
+                    ((android.widget.SeekBar) v).setThumb(bs.origSeekThumb);
+                    bs.origSeekThumb = null;
+                }
+            }
+            if (v instanceof android.widget.Switch && bs.origSwitchTrack != null) {
+                ((android.widget.Switch) v).setTrackDrawable(bs.origSwitchTrack);
+                bs.origSwitchTrack = null;
+            }
+            if (v instanceof android.widget.CompoundButton && bs.origCompoundBtn != null) {
+                ((android.widget.CompoundButton) v).setButtonDrawable(bs.origCompoundBtn);
+                bs.origCompoundBtn = null;
+            }
+        } catch (Throwable ignored) {
+        }
+        bs.sysTinted = false;
+        bs.tintSig = null;
     }
 
     /**

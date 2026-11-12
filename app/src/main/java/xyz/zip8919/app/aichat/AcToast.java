@@ -58,7 +58,11 @@ final class AcToast {
                     m.getEffectiveColor(ThemeTokens.AC_BORDER, dark));
             tv.setBackgroundDrawable(bg);
 
-            Toast t = new Toast(ctx);
+            // 用 Application context：Toast 会一直持有这个 Context 到超时结束，
+            // 用 Activity 的话在其销毁后 show 可能抛 BadTokenException（4.x 上尤甚）。
+            // 自绘用的颜色全部来自 AppearanceManager，不依赖主题资源，换 Context 无副作用。
+            Context app = ctx.getApplicationContext();
+            Toast t = new Toast(app != null ? app : ctx);
             t.setDuration(longDuration ? Toast.LENGTH_LONG : Toast.LENGTH_SHORT);
             t.setView(tv);
             t.show();

@@ -106,6 +106,15 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content" />
 
+        <!-- 逐属性编辑：不写 JSON 也能改 16 个颜色 token 与字体 -->
+        <Button
+            android:id="@+id/btn_edit_tokens"
+            android:textSize="13sp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="逐属性编辑（16 色 + 字体）" />
+
         <TextView
             android:textSize="14sp"
             android:textStyle="bold"

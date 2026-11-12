@@ -127,6 +127,19 @@
                 android:text="跟随主题" />
         </LinearLayout>
 
+        <!-- 16 色 + 字体的逐项编辑入口（二级页，避免主流程被 18 行淹没） -->
+        <TextView
+            android:id="@+id/attr_edit"
+            android:textSize="13sp"
+            android:textColor="@color/primary"
+            android:clickable="true"
+            android:background="?android:attr/selectableItemBackground"
+            android:padding="6dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="8dp"
+            android:text="逐属性编辑：16 色调色 + 字体选择 ›" />
+
         <!-- 3 显示大小百分比 -->
         <LinearLayout
             android:orientation="horizontal"

@@ -159,6 +159,23 @@ public class MainActivity extends ThemedActivity {
     /** 流式输出期间发生、但还没收尾的颜色变更签名；非空表示待补一次重灌。 */
     private volatile String tintSigPending;
     /**
+     * 外观变更监听（负责清渲染缓存 + 重灌聊天页）。
+     *
+     * <p><b>必须存成字段</b>：AppearanceManager 的监听器列表只持弱引用，
+     * 早先这里是直接 addChangeListener(new ...)，那个匿名对象没有任何强引用，
+     * GC 一旦回收，切深浅色就不会再触发重灌 —— 公式停在旧颜色上，
+     * 用户看到的是「要重启 App 才变色」。存字段后生命周期与本 Activity 对齐。
+     */
+    private AppearanceManager.ChangeListener webTintListener;
+    /**
+     * 本页是否在前台可见。
+     *
+     * <p>外观编辑页拖动取色滑条时，每一下都会 bump 一次外观版本。此时聊天页在后台，
+     * 若照旧「清缓存 + 重灌整页」，等于让用户每拖一格就重建一次聊天 WebView ——
+     * 老机器上直接卡成幻灯片。后台时只记签名，回前台再补。
+     */
+    private volatile boolean uiVisible;
+    /**
      * 「立即重试」信号：429 等待期间由 JS bridge 置位，请求线程每 200 ms 读一次。
      *
      * <p>不用 interrupt 打断线程——那会连带触发「停止」的语义，
@@ -340,6 +357,10 @@ public class MainActivity extends ThemedActivity {
         // 清空主线程消息队列里挂起的回调（消息菜单、长按等），避免销毁后弹窗
         handler.removeCallbacksAndMessages(null);
         // 解绑外观刷新监听：它是单例上的回调，持有本 Activity 引用，不解会泄漏
+        if (webTintListener != null) {
+            AppearanceManager.getInstance(this).removeChangeListener(webTintListener);
+            webTintListener = null;
+        }
         AppearanceManager.getInstance(this).setChangeListener(null);
         // 先自增代数再断开连接：在途请求看到代数变化后不再回写 UI / 落盘，
         // 否则页面已销毁，请求线程仍能把消息写进已卸载的会话文件。
@@ -488,10 +509,18 @@ public class MainActivity extends ThemedActivity {
         // 否则就是实机上的「公式颜色不立即变化，要切会话才变」。
         // 只比较颜色签名：显示大小/字号变化不重灌，避免白白丢滚动位置。
         tintSigApplied = tintSig(am);
-        am.addChangeListener(new AppearanceManager.ChangeListener() {
+        // 防御性：若 bindWebView 被二次调用，先摘掉旧监听，
+        // 否则列表里会累积多个回调、同一次换色重灌多遍整页。
+        if (webTintListener != null) am.removeChangeListener(webTintListener);
+        webTintListener = new AppearanceManager.ChangeListener() {
             public void onAppearanceChanged(AppearanceManager mm) {
                 String sig = tintSig(mm);
                 if (sig.equals(tintSigApplied)) return;
+                if (!uiVisible) {
+                    // 后台：只记账，回前台再统一重灌（见 onResume）
+                    tintSigPending = sig;
+                    return;
+                }
                 if (isRequestInProgress.get()) {
                     // 流式输出中不能重灌整页，但**也不能把 lastSig 推进**：
                     // 推进了就等于「这次颜色变化已经处理过」，之后再没有事件来收尾，
@@ -506,16 +535,15 @@ public class MainActivity extends ThemedActivity {
                 MessageHtmlRenderer.clearRenderCache();
                 refreshWebView();
             }
-        });
+        };
+        am.addChangeListener(webTintListener);
     }
 
     /** 只包含「会改变公式出图颜色」的项，避免显示大小变化也被当成颜色变更。 */
     private static String tintSig(AppearanceManager m) {
-        boolean dark = m.isDark();
-        return (dark ? "d" : "l") + "|" + m.getThemeId()
-                + "|" + m.getEffectiveColor(ThemeTokens.AC_TEXT, dark)
-                + "|" + m.getEffectiveColor(ThemeTokens.AC_BG, dark)
-                + "|" + m.getEffectiveColor(ThemeTokens.AC_CODE_BG, dark);
+        // 统一由 AppearanceManager 计算：MessageHtmlRenderer 也用它做缓存自失效，
+        // 两处各写一份迟早会漂移。
+        return m.colorSignature();
     }
 
     private void bindQueue() {
@@ -714,6 +742,9 @@ public class MainActivity extends ThemedActivity {
     private void flushPendingTint() {
         final String sig = tintSigPending;
         if (sig == null) return;
+        // 不在前台就别重灌：pending 留着，onResume 时会补。
+        // 否则请求恰好在用户切走后结束，会在后台白白重建一次整页。
+        if (!uiVisible) return;
         tintSigPending = null;
         tintSigApplied = sig;
         Runnable task = new Runnable() {
@@ -1978,6 +2009,24 @@ public class MainActivity extends ThemedActivity {
     protected void onResume() {
         super.onResume();
         LogUtil.d(TAG, "onResume");
+        uiVisible = true;
+        // 在后台期间发生的外观改动只记了签名（避免每拖一格就重建整页），
+        // 回到前台时补一次。必须在 invalidate 之前，否则用户先看到的是旧配色。
+        if (tintSigPending != null) {
+            final String sig = tintSigPending;
+            if (isRequestInProgress.get()) {
+                // 还在流式输出：重灌整页会把正在长的那条气泡打回空白。
+                // pending 留着，等本轮结束由 flushPendingTint 收尾。
+                LogUtil.d(TAG, "onResume: tint change deferred (streaming)");
+            } else {
+                tintSigPending = null;
+                if (!sig.equals(tintSigApplied)) {
+                    tintSigApplied = sig;
+                    MessageHtmlRenderer.clearRenderCache();
+                    refreshWebView();
+                }
+            }
+        }
         // 设置页改完回到这里，两个网络安全开关必须立刻生效。
         // 放在 onResume 而不是 onCreate：用户可能一直不退出这个界面。
         NetSecurity.set(SettingsActivity.isTrustAllCerts(this),
@@ -1997,6 +2046,7 @@ public class MainActivity extends ThemedActivity {
     @Override
     protected void onPause() {
         LogUtil.d(TAG, "onPause");
+        uiVisible = false;
         super.onPause();
         conversationManager.saveCurrentConversation();
         // 这里不再 flushSaves：它是对主线程的阻塞等待（最长数秒），而 onPause 是

@@ -117,6 +117,25 @@ public final class AppearanceManager {
         return revision;
     }
 
+    /**
+     * 「会改变已渲染内容颜色」的签名：明暗 + 主题 id + 参与出图的 token。
+     *
+     * <p>公式是预渲染 PNG，字色在出图那一刻就画死了；{@link MessageHtmlRenderer}
+     * 的 HTML 缓存又只按正文做 key。两者都必须在签名变化时整体失效，否则就是
+     * 「切了深浅色，公式还是上一个主题的颜色，要重启才变」。
+     *
+     * <p>只放颜色项，不放显示大小/字号：那两项变化时重灌整页会白丢滚动位置。
+     */
+    public String colorSignature() {
+        boolean dark = isDark();
+        return (dark ? "d" : "l") + "|" + getThemeId()
+                + "|" + getEffectiveColor(ThemeTokens.AC_TEXT, dark)
+                + "|" + getEffectiveColor(ThemeTokens.AC_BG, dark)
+                + "|" + getEffectiveColor(ThemeTokens.AC_SURFACE, dark)
+                + "|" + getEffectiveColor(ThemeTokens.AC_CODE_BG, dark)
+                + "|" + getEffectiveColor(ThemeTokens.AC_CODE_TEXT, dark);
+    }
+
     /** 由 ThemedActivity 在 setContentView / onResume 时调用。 */
     public void applyTo(Activity activity) {
         if (applier == null) return;
@@ -231,6 +250,24 @@ public final class AppearanceManager {
     public void clearAllExplicit() {
         working.explicitLight.clear();
         working.explicitDark.clear();
+        bump();
+    }
+
+    /**
+     * 复制某一明暗套的全部显式覆盖，供逐属性编辑页做「取消 = 原样回滚」。
+     *
+     * <p>不能拿 {@link #discard()} 代替：那是回滚到<b>上次落盘</b>，会把用户
+     * 在外观页做的一堆未保存改动一起冲掉。
+     */
+    public java.util.Map<String, String> snapshotExplicit(boolean dark) {
+        return new java.util.HashMap<String, String>(working.explicitFor(dark));
+    }
+
+    /** 用快照整体替换某一明暗套的显式覆盖（取消编辑时回滚）。 */
+    public void restoreExplicit(boolean dark, java.util.Map<String, String> snapshot) {
+        java.util.Map<String, String> m = working.explicitFor(dark);
+        m.clear();
+        if (snapshot != null) m.putAll(snapshot);
         bump();
     }
 

@@ -122,6 +122,12 @@
             android:configChanges="screenSize|orientation|keyboardHidden"/>
 
         <activity
+            android:label="逐属性编辑"
+            android:name="xyz.zip8919.app.aichat.ThemeAttrActivity"
+            android:exported="false"
+            android:configChanges="screenSize|orientation|keyboardHidden"/>
+
+        <activity
             android:label="管理字体"
             android:name="xyz.zip8919.app.aichat.FontManagerActivity"
             android:exported="false"
