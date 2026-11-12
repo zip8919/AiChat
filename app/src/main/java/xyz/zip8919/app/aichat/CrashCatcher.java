@@ -63,6 +63,12 @@ final class CrashCatcher implements Thread.UncaughtExceptionHandler {
         }
         if (sDefault != null) {
             sDefault.uncaughtException(thread, ex);
+        } else {
+            // 没有前任处理器时必须自己结束进程：否则主线程抛出后仍留在消息循环里，
+            // 界面变成一块点不动的死窗，用户看到的是「卡死」而不是「闪退」，
+            // 系统还可能再补一个 ANR。
+            android.os.Process.killProcess(android.os.Process.myPid());
+            System.exit(10);
         }
     }
 

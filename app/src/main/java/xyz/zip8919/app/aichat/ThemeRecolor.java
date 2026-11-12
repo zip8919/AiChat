@@ -131,6 +131,15 @@ final class ThemeRecolor {
         Drawable origDivider;        // ListView 分割线原件，回退时用
         Drawable origInputBg;        // EditText 被换成深色圆角底之前的原件
         Drawable origBg;             // 系统按钮 / Spinner 的 9-patch 底被换成主题底之前的原件
+        /**
+         * 当前挂着的底是本类换上的（不是 layout 原件）。
+         *
+         * <p>必须显式记，不能靠「采样到的颜色深不深」反推：换过主题之后底是深色，
+         * 采样会判定「已经是深色，不用动」，于是换主题时按钮颜色永远停在上一个主题上。
+         */
+        boolean themedBg;
+        /** 换上时的主题签名（明暗 + 表面色 + 描边色）；不同就重建。 */
+        String themedSig;
         boolean captured;
     }
 
@@ -233,19 +242,21 @@ final class ThemeRecolor {
 
         // 1) 精确 token 通道优先（保留 E2 的扩展能力），命中即完全接管颜色
         String token = tokenTagOf(v);
-        if (token != null) {
-            if (isTextToken(token) && v instanceof TextView) {
-                int c = keepOriginal(m, token, dark) && bs.textColors != null
-                        ? bs.textColors.getDefaultColor()
-                        : m.getEffectiveColor(token, dark);
-                ((TextView) v).setTextColor(c);
-            } else {
-                int c = keepOriginal(m, token, dark) && bs.bgColor != null
-                        ? bs.bgColor.intValue()
-                        : m.getEffectiveColor(token, dark);
-                paintBackground(v, bs, c);
-            }
+        if (token != null && isTextToken(token) && v instanceof TextView) {
+            int c = keepOriginal(m, token, dark) && bs.textColors != null
+                    ? bs.textColors.getDefaultColor()
+                    : m.getEffectiveColor(token, dark);
+            ((TextView) v).setTextColor(c);
             return;
+        }
+        if (token != null) {
+            int c = keepOriginal(m, token, dark) && bs.bgColor != null
+                    ? bs.bgColor.intValue()
+                    : m.getEffectiveColor(token, dark);
+            // 刷得动就结束；刷不动（9-patch / selector）必须继续往下走，
+            // 交给第 3 步的系统控件换底。早期这里无条件 return，
+            // 结果是「打了 token 的按钮」深色下原样保留浅底。
+            if (paintBackground(v, bs, c)) return;
         }
 
         // 2) 背景定色 + 3) 文字定色，顺序不能反。
@@ -319,8 +330,14 @@ final class ThemeRecolor {
 
         if (painted != null) return painted.booleanValue();
 
-        // 3) 系统默认控件背景（9-patch / selector）：深色下整体换主题底
-        if (dark && isThemedControlHost(v) && paintThemedControlBg(v, bs, m)) return true;
+        // 3) 系统控件底（9-patch / selector）：按控件类型整体换主题底。
+        //
+        //    这里刻意不拿「采样到浅色」当触发条件。Holo 的 btn_default 是
+        //    9-patch 套 StateListDrawable，缩到 9x9 绘制时中心有可能落在透明
+        //    像素上，sampleSolidColor 返回 null；旧代码把 null 当作「不用动」，
+        //    结果深色下按钮永远是浅底 + 已经刷白的字。采样只用来排除「本来就是
+        //    深色的系统控件」和「真透明浮层按钮」，不再决定要不要换。
+        if (isThemedControlHost(v) && paintThemedControlBg(v, bs, m, dark)) return dark;
 
         // 4) 其余按实际采样判断；透明背景跟随窗口
         Integer cur = sampleSolidColor(v.getBackground());
@@ -345,34 +362,65 @@ final class ThemeRecolor {
      *
      * @return true 表示已换成深色主题底
      */
-    private static boolean paintThemedControlBg(View v, BaseStyle bs, AppearanceManager m) {
+    private static boolean paintThemedControlBg(View v, BaseStyle bs, AppearanceManager m,
+                                                boolean dark) {
         try {
-            // 先看现状再决定，两个都不能碰：
-            //   · 透明/半透明底：这是有意为之（图片预览层上的「取消/完成」、
-            //     只有下划线的输入框），替换成实色块会把整页盖住；
-            //   · 已经是深色底：Holo 深色对话框的按钮本来就对，重画只是丢样式。
-            Integer cur = sampleSolidColor(v.getBackground());
-            if (cur == null) return false;
-            if (!isLightColor(cur.intValue())) return true;
+            // 浅色：把深色时换掉的系统底整套还原（圆角、箭头、按下态都在原件里）
+            if (!dark) {
+                if (bs.themedBg) {
+                    if (bs.origBg != null) {
+                        try {
+                            v.setBackgroundDrawable(bs.origBg);
+                        } catch (Throwable ignored) {
+                        }
+                    }
+                    bs.themedBg = false;
+                    bs.themedSig = null;
+                    bs.origBg = null;
+                }
+                return false;
+            }
 
-            if (bs.origBg == null) bs.origBg = v.getBackground();
+            String sig = darkSig(m);
+            // 已经是本类换上、且是当前主题的底：不重建，避免每次 onResume 都产生垃圾
+            if (bs.themedBg && sig.equals(bs.themedSig)) return true;
+
+            Drawable bg = v.getBackground();
+            // 没有背景：换成实色底之后浅色模式没有「原件」可还原（origBg 为 null），
+            // 会永久留一块深色，比不换更糟。
+            if (bg == null) return false;
+            // 真透明（图片预览浮层上的「取消 / 完成」）：换成实色会把整页盖住，绝不能碰
+            if (bg instanceof ColorDrawable
+                    && Color.alpha(((ColorDrawable) bg).getColor()) < 200) return false;
+            // 系统深色控件（Holo Dark 对话框里的按钮）：本来就对，重画只是丢样式。
+            // 注意带上 !bs.themedBg：换主题时底已经是深色，不能因此判定「不用动」。
+            Integer cur = sampleSolidColor(bg);
+            if (cur != null && !isLightColor(cur.intValue()) && !bs.themedBg) return false;
+
+            if (bs.origBg == null) bs.origBg = bg;
             float d = v.getResources().getDisplayMetrics().density;
             if (v instanceof android.widget.Spinner) {
-                // 已经是我们自绘的底：不重复新建，否则每次 onResume 都产生垃圾
-                if (v.getBackground() instanceof SpinnerBg) return true;
-                int extra = (int) (18 * d);
-                setBackgroundKeepPadding(v, new SpinnerBg(m, d));
                 int l = v.getPaddingLeft(), t = v.getPaddingTop(), b = v.getPaddingBottom();
+                int extra = (int) (18 * d);
+                setBackgroundKeepPadding(v, new SpinnerBg(m, d, l, t, b));
                 v.setPadding(l, t, Math.max(v.getPaddingRight(), extra), b);
             } else {
                 setBackgroundKeepPadding(v, stateRounded(
                         m.getEffectiveColor(ThemeTokens.AC_SURFACE, true),
                         m.getEffectiveColor(ThemeTokens.AC_BORDER, true), 4 * d, d));
             }
+            bs.themedBg = true;
+            bs.themedSig = sig;
             return true;
         } catch (Throwable t) {
             return false;
         }
+    }
+
+    /** 深色控件底的主题签名：表面色 + 描边色，任一变化都必须重建。 */
+    private static String darkSig(AppearanceManager m) {
+        return Integer.toHexString(m.getEffectiveColor(ThemeTokens.AC_SURFACE, true)) + "/"
+                + Integer.toHexString(m.getEffectiveColor(ThemeTokens.AC_BORDER, true));
     }
 
     /** {@code setBackgroundDrawable} 会用新 drawable 的 padding 覆盖 View 内边距，先存后还原。 */
@@ -522,8 +570,11 @@ final class ThemeRecolor {
         if (!(v instanceof android.widget.EditText)) return null;
         float density = v.getResources().getDisplayMetrics().density;
         Drawable cur = v.getBackground();
+        // 完全没有背景的输入框（透明，只有光标）：换底之后浅色模式没有原件可还原，
+        // 会永久留一块深色。直接不接管。
+        if (cur == null) return null;
         // 现在挂着的还是不是原始那个 drawable —— 用来区分「原件」和「我们自己换上的」
-        boolean ours = bs.origInputBg != null && cur != null && cur != bs.origInputBg;
+        boolean ours = bs.origInputBg != null && cur != bs.origInputBg;
 
         // 浅色 + 内置默认外观：什么都不做，零回归。
         // 浅色 + 自定义主题：表面色可能不是白色，仍需跟随，走下面的替换。
@@ -547,10 +598,16 @@ final class ThemeRecolor {
             return dark ? Boolean.TRUE : Boolean.FALSE;
         }
 
-        // 深色自绘底 / 透明底不动，避免破坏原有视觉
+        // 深色自绘底 / 透明底不动，避免破坏原有视觉。
+        //
+        // 采样失败不再一律放弃：Holo 的 edit_text 背景是 9-patch 套 selector，
+        // 缩到 9x9 时中心可能落在透明像素上，采样返回 null。旧代码把 null 当成
+        // 「不用动」，深色下输入框就一直是白底；文字却按 EditText 规则刷成浅色，
+        // 白底白字。用类型区分：只有 ColorDrawable（真纯色、含透明）才可能是
+        // 「只有下划线的输入框」，其余 drawable 一律按职责换底。
         Integer sampled = sampleSolidColor(cur);
-        if (sampled == null) return null;
-        if (!isLightColor(sampled.intValue())) {
+        if (sampled == null && cur instanceof ColorDrawable) return null;
+        if (sampled != null && !isLightColor(sampled.intValue())) {
             return dark ? Boolean.TRUE : Boolean.FALSE;
         }
 
@@ -626,6 +683,10 @@ final class ThemeRecolor {
     }
 
     private static void restore(View v, BaseStyle bs) {
+        // 控件底标记先清：下面的 origBg 分支会把它整套换回去，留着标记会让下一次
+        // 深色遍历误以为「已经换过、签名也一致」，从而跳过重建。
+        bs.themedBg = false;
+        bs.themedSig = null;
         if (bs.origSelector != null) {
             try {
                 v.setBackgroundDrawable(bs.origSelector);
@@ -754,15 +815,32 @@ final class ThemeRecolor {
      */
     static Integer sampleSolidColor(Drawable d) {
         if (d == null) return null;
+        // 纯色快路径：列表行、被 setBackgroundColor 刷过的容器全是 ColorDrawable，
+        // 直接读颜色即可。原实现为每一个这样的 View 分配一张位图 + 一个 Canvas，
+        // 在 RecycleBin 里滚动时就是每秒几百次小对象分配，低端机上直接掉帧。
+        if (d instanceof ColorDrawable) {
+            int c = ((ColorDrawable) d).getColor();
+            return Color.alpha(c) < 200 ? null : Integer.valueOf(c);
+        }
+        Integer px = sampleSolidColor(d, 9);
+        // 9x9 对带描边 / 阴影 / padding 的 9-patch 太小：缩到这个尺寸时中心
+        // 可能正好落在透明像素上，采不到颜色。放大到 48x48 再试一次，
+        // 命中率明显提高，也让「系统按钮 / Spinner 是不是浅底」的判断不再靠猜。
+        if (px != null) return px;
+        return sampleSolidColor(d, 48);
+    }
+
+    private static Integer sampleSolidColor(Drawable d, int size) {
+        if (d == null) return null;
         Bitmap b = null;
         try {
-            b = Bitmap.createBitmap(9, 9, Bitmap.Config.ARGB_8888);
+            b = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
             Canvas c = new Canvas(b);
             Rect old = new Rect(d.getBounds());
-            d.setBounds(0, 0, 9, 9);
+            d.setBounds(0, 0, size, size);
             d.draw(c);
             d.setBounds(old);
-            int px = b.getPixel(4, 4);
+            int px = b.getPixel(size / 2, size / 2);
             if (Color.alpha(px) < 200) return null;
             return Integer.valueOf(px);
         } catch (Throwable t) {
@@ -817,8 +895,10 @@ final class ThemeRecolor {
         private final Path arrow = new Path();
         private final int surface, border, arrowColor;
         private final float stroke, radius, arrowW, arrowH, inset;
+        /** 原 View 的左/上/下内边距：不保留的话文字会贴到边框上。 */
+        private final int padL, padT, padB;
 
-        SpinnerBg(AppearanceManager m, float d) {
+        SpinnerBg(AppearanceManager m, float d, int padL, int padT, int padB) {
             this.surface = m.getEffectiveColor(ThemeTokens.AC_SURFACE, true);
             this.border = m.getEffectiveColor(ThemeTokens.AC_BORDER, true);
             this.arrowColor = m.getEffectiveColor(ThemeTokens.AC_TEXT_SECONDARY, true);
@@ -827,6 +907,9 @@ final class ThemeRecolor {
             this.arrowW = 10 * d;
             this.arrowH = 5 * d;
             this.inset = 8 * d;
+            this.padL = padL;
+            this.padT = padT;
+            this.padB = padB;
         }
 
         @Override
@@ -856,7 +939,9 @@ final class ThemeRecolor {
 
         @Override
         public boolean getPadding(Rect p) {
-            p.set(0, 0, (int) (inset + arrowW + inset / 2f), 0);
+            // 左侧必须保留原 padding：早期这里写 0，深色下所有下拉框的文字
+            // 都贴到边框上，与浅色时明显错位。
+            p.set(padL, padT, (int) (inset + arrowW + inset / 2f), padB);
             return true;
         }
 
@@ -870,7 +955,9 @@ final class ThemeRecolor {
 
         @Override
         public int getOpacity() {
-            return PixelFormat.OPAQUE;
+            // 必须是 TRANSLUCENT：这是圆角矩形，四角没有绘制内容。声明 OPAQUE
+            // 会让部分 ROM 的绘制路径跳过混合，四个角变成黑块。
+            return PixelFormat.TRANSLUCENT;
         }
     }
 }

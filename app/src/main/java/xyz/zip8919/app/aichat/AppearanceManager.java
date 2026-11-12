@@ -31,7 +31,19 @@ public final class AppearanceManager {
     private AppearanceState working;
     private AppearanceState committed;
     private boolean tempApplied;
-    private long revision;
+    private volatile long revision;
+    /**
+     * {@link #working} 里最常被<b>后台线程</b>读取的两个值的快照。
+     *
+     * <p>公式渲染（{@link MathRenderer}）、消息 HTML 构建都在后台线程跑，它们要读
+     * 当前明暗与主题。{@code working} 不是不可变对象，写入既不原子也不保证跨线程
+     * 可见 —— 切主题那一瞬间后台线程可能读到旧值，渲染出的公式/气泡就是上一个主题的
+     * 配色，而且会被缓存住。表现正是「公式要重启软件才变回正常」。
+     *
+     * <p>这两个字段只承载「布尔 + 不可变字符串」，volatile 足够保证读到完整值。
+     */
+    private volatile boolean darkSnapshot;
+    private volatile String themeIdSnapshot = "";
     private Applier applier;
     private ChangeListener changeListener;
 
@@ -49,6 +61,8 @@ public final class AppearanceManager {
         this.working = loaded.copy();
         this.tempApplied = false;
         this.revision = 1;
+        this.darkSnapshot = working.dark;
+        this.themeIdSnapshot = working.themeId == null ? "" : working.themeId;
         LogUtil.i(TAG, "init: revision=%d dark=%s theme=%s percent=%d",
                 revision, working.dark, working.themeId, working.displayPercent);
     }
@@ -116,6 +130,10 @@ public final class AppearanceManager {
 
     private void bump() {
         revision++;
+        // 任何一次外观改动都会走到这里，快照在这里统一发布：
+        // 先写快照再通知监听器，保证监听器（可能触发后台渲染）读到的已经是新值。
+        darkSnapshot = working.dark;
+        themeIdSnapshot = working.themeId == null ? "" : working.themeId;
         if (changeListener != null) {
             try {
                 changeListener.onAppearanceChanged(this);
@@ -145,7 +163,7 @@ public final class AppearanceManager {
     // ---- 标量 ----
 
     public boolean isDark() {
-        return working.dark;
+        return darkSnapshot;
     }
 
     public void setDark(boolean v) {
@@ -155,7 +173,7 @@ public final class AppearanceManager {
     }
 
     public String getThemeId() {
-        return working.themeId == null ? "" : working.themeId;
+        return themeIdSnapshot == null ? "" : themeIdSnapshot;
     }
 
     public void setThemeId(String id) {

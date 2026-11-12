@@ -557,6 +557,8 @@ final class RendererAssets {
             "var card=d.firstElementChild;" +
             "var menu=all[i].querySelector('.user-menu-wrap');" +
             "if(card){if(menu)all[i].insertBefore(card,menu);else all[i].appendChild(card);}" +
+            // 用户消息失败：这条是他自己刚发的，必须滚到能看见，不能等用户去找
+            "window.__userUp=false;smartScrollToBottom(true);" +
             "return;}}};" +
             "window.__userUp=false;" +
             "window.__touchY=null;" +
@@ -641,14 +643,21 @@ final class RendererAssets {
             "var t=s.querySelector('.retry-text');" +
             "if(left<=0){clearInterval(window.__retryTimer);window.__retryTimer=null;" +
             "if(t)t.textContent='正在重试…';return;}" +
-            "if(t)t.textContent=left+' 秒后重试（'+attempt+'/'+max+'）';},1000);};" +
+            "if(t)t.textContent=left+' 秒后重试（'+attempt+'/'+max+'）';},1000);" +
+            // 卡片插进来本身会顶高内容，不滚就藏在输入栏下面，用户只看到「卡住了」
+            "smartScrollToBottom();};" +
             "window.hideRetryCard=function(){" +
             "if(window.__retryTimer){clearInterval(window.__retryTimer);window.__retryTimer=null;}" +
             "var m=window.__lastAi();if(!m)return;" +
             "var s=m.querySelector('.tool-status');" +
-            "if(s&&s.parentNode)s.parentNode.removeChild(s);};" +
+            "if(s&&s.parentNode)s.parentNode.removeChild(s);" +
+            // 移除后高度骤降，随后的错误卡片或收尾内容同样需要贴底
+            "smartScrollToBottom();};" +
             "window.updateLastMsg=function(html){" +
             "var ms=document.querySelectorAll('.msg.ai .content');" +
+            // 这里不缓存：它是「整条消息定稿」，多半发生在页面重灌之后，
+            // 缓存下来的旧内容会在下一次新建气泡时被错误写入。页面未就绪的情况
+            // 由 Java 侧的 JS 队列兜住（onPageFinished 后重放）。
             "if(ms.length===0)return;" +
             "var c=ms[ms.length-1];" +
             // html 是这条消息的完整内容，被闸门挡住的缓存帧已经在里面了：
@@ -674,7 +683,7 @@ final class RendererAssets {
             // markdown 会被打回纯文本，看起来像「又变回没渲染的样子」。
             "window.streamBase=function(html){" +
             "var ms=document.querySelectorAll('.msg.ai .content');" +
-            "if(ms.length===0)return;" +
+            "if(ms.length===0){window.__orphanBase=html;return;}" +
             "var c=ms[ms.length-1];" +
             // 手指按在表格/代码块上：先缓存，抬手后由 __flushPending 写入。
             // 直接吞掉不行——Java 侧的 lastStreamTrace 已按「已推送」记账，
@@ -742,6 +751,8 @@ final class RendererAssets {
             "window.__holdRender=false;window.__holdToken=0;window.__holdSince=0;" +
             "window.__HOLD_MAX_MS=1200;window.__holdWatchdog=0;" +
             "window.__pendingTailHtml=null;window.__pendingTailText=null;window.__pendingBaseHtml=null;" +
+            // 气泡还没出现时先到的内容（见 appendAiDiv 里的补写逻辑）
+            "window.__orphanBase=null;window.__orphanTail=null;" +
             // 闸门必须有不依赖触摸事件的释放路径：流式每 200ms 用 innerHTML=
             // 重建 tail，会销毁正在被触摸的 <pre>/表格节点，touchend 可能根本
             // 不派发；连续两次命中横滑区也会让 180ms 定时器的 token 失效。
@@ -815,7 +826,7 @@ final class RendererAssets {
             "if(!document.hidden&&window.__holdRender){window.__endHold();window.__flushPending();}},true);" +
             "window.streamTailHtml=function(html){" +
             "var ms=document.querySelectorAll('.msg.ai .content');" +
-            "if(ms.length===0)return;" +
+            "if(ms.length===0){window.__orphanTail={h:html,t:null};return;}" +
             "var c=ms[ms.length-1];var t=c.querySelector('.stream-tail');" +
             "if(!t){var b=c.querySelector('.stream-base');" +
             "var keep=b?b.innerHTML:c.innerHTML;" +
@@ -828,7 +839,7 @@ final class RendererAssets {
             "window.__applyTailHtml(t,html);};" +
             "window.streamTailText=function(text){" +
             "var ms=document.querySelectorAll('.msg.ai .content');" +
-            "if(ms.length===0)return;" +
+            "if(ms.length===0){window.__orphanTail={h:null,t:text};return;}" +
             "var c=ms[ms.length-1];var t=c.querySelector('.stream-tail');" +
             "if(!t){var b=c.querySelector('.stream-base');" +
             "var keep=b?b.innerHTML:c.innerHTML;" +
@@ -849,6 +860,8 @@ final class RendererAssets {
             "var card=d.firstElementChild;" +
             "var menu=all[i].querySelector('.ai-menu-wrap');" +
             "if(card){if(menu)all[i].insertBefore(card,menu);else all[i].appendChild(card);}" +
+            // 重试耗尽后的错误卡片：高度已经变化，不滚就停在视口外
+            "smartScrollToBottom();" +
             "return;}}};" +
             "window.clearAssistantFailed=function(idx){" +
             "var all=document.querySelectorAll('.msg.ai');" +
@@ -880,6 +893,13 @@ final class RendererAssets {
             "<span class=\"mdot\"></span><span class=\"mdot\"></span><span class=\"mdot\"></span>" +
             "</button></div>';" +
             "document.getElementById('msgs').appendChild(d);" +
+            // 内容比气泡先到：appendAiDiv 之前到达的 streamBase / streamTail 会
+            // 因为找不到 .msg.ai 而只能丢弃，那一段就永久丢了（用户看到的
+            // 「有时候消息不渲染」）。这里把孤儿内容补回来。
+            "if(window.__orphanBase!=null){var ob=window.__orphanBase;window.__orphanBase=null;" +
+            "window.streamBase(ob);}" +
+            "if(window.__orphanTail!=null){var ot=window.__orphanTail;window.__orphanTail=null;" +
+            "if(ot.h!=null)window.streamTailHtml(ot.h);else window.streamTailText(ot.t);}" +
             "smartScrollToBottom();};" +
             "window.updateMsgAt=function(idx,html){" +
             "var all=document.querySelectorAll('.msg');" +

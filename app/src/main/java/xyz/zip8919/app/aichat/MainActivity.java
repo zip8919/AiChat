@@ -129,6 +129,15 @@ public class MainActivity extends ThemedActivity {
     // 发送键长按打断后，本次抬手的 click 不再触发发送
     private boolean sendButtonLongPressed = false;
     private WebView conversationWebView;
+    /**
+     * WebView 里的 DOM 是否可用（onPageFinished 之后）。
+     *
+     * <p>加载期间下发 JS 会被新一轮导航丢弃，DOM 里什么都没有，表现为
+     * 「有时候消息不自动渲染」。未就绪时先入 {@link #pendingJs} 排队，
+     * 页面就绪后按原顺序重放。
+     */
+    private volatile boolean pageReady = false;
+    private final java.util.ArrayDeque<String> pendingJs = new java.util.ArrayDeque<String>();
     private Spinner modelSpinner;
     private Spinner thinkingSpinner;
     private View queueBar;
@@ -438,6 +447,22 @@ public class MainActivity extends ThemedActivity {
                 // 内容齐全却没画出来，直到用户点开菜单/弹对话框触发窗口重绘才可见。
                 // invalidate 是最轻的兜底，不改 DOM、不引入闪烁。
                 view.invalidate();
+                // 页面可用了：把加载期间排队的 JS 一次性重放。
+                // 之前加载中调 evaluateJavascript / loadUrl("javascript:") 会被
+                // 新一轮导航直接丢弃，DOM 里既没有消息也没有尾巴 —— 表现就是
+                // 「有时候消息不会自动渲染」，重新进会话才正常。
+                pageReady = true;
+                flushPendingJs();
+            }
+
+            @Override
+            public void onReceivedError(WebView view, int errorCode, String description,
+                                        String failingUrl) {
+                // 加载失败也要放行队列：否则 pageReady 永远为 false，这个会话
+                // 之后所有消息都只进队列不显示，比渲染错位严重得多。
+                LogUtil.w(TAG, "webview error: %d %s url=%s", errorCode, description, failingUrl);
+                pageReady = true;
+                flushPendingJs();
             }
         });
 
@@ -741,7 +766,12 @@ public class MainActivity extends ThemedActivity {
     /** API 18 没有 Storage Access Framework，只能用 ACTION_GET_CONTENT。 */
     private void pickTextFile() {
         Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
-        intent.setType("text/*");
+        // 不能写死 text/*：.json 在系统 MimeTypeMap 里是 application/json，
+        // .actheme / .log / .env / 无扩展名文件更是 application/octet-stream，
+        // 用 text/* 过滤时它们在选择器里是灰的，用户根本点不进去 ——
+        // 「JSON、actheme 以及其他文件无法作为文本附件添加」就是这个原因。
+        // 放开成 */*，改在导入时判定内容是不是文本，二进制文件给明确提示。
+        intent.setType("*/*");
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         try {
             startActivityForResult(Intent.createChooser(intent, getString(R.string.upload_text_file)),
@@ -1237,6 +1267,10 @@ public class MainActivity extends ThemedActivity {
                 bos.write(buf, 0, n);
             }
             byte[] data = bos.toByteArray();
+            if (looksBinary(data)) {
+                throw new Exception("这不是文本文件（含二进制内容），"
+                        + "图片请用「上传图片」添加");
+            }
             String utf8 = new String(data, "UTF-8");
             if (utf8.indexOf('\uFFFD') < 0) return new LoadedText(utf8, total);
             String gbk = new String(data, "GBK");
@@ -1245,6 +1279,23 @@ public class MainActivity extends ThemedActivity {
         } finally {
             try { in.close(); } catch (Exception ignored) { }
         }
+    }
+
+    /**
+     * 粗判二进制：文本文件（UTF-8 / GBK / Latin-1）里不会出现 NUL 字节，
+     * zip / png / apk / so 这类容器和资源文件前几 KB 一定有。
+     *
+     * <p>选择器放开成 {@code *&#47;*} 之后必须有一道这样的闸门，否则用户点错一个
+     * 二进制文件，会得到一整屏 U+FFFD 替换字符，既占 token 又完全没法用。
+     * 只扫前 8KB：判据在文件头，没必要为 20MB 的文件全量走一遍。
+     */
+    private static boolean looksBinary(byte[] data) {
+        if (data == null) return false;
+        int n = Math.min(data.length, 8192);
+        for (int i = 0; i < n; i++) {
+            if (data[i] == 0) return true;
+        }
+        return false;
     }
 
     /**
@@ -2725,6 +2776,10 @@ public class MainActivity extends ThemedActivity {
                         // 整页重建，DOM 里不存在上一次流式留下的 base 骨架，
                         // 「已推送基准」必须作废，否则下一次 trace 渲染会误走增量
                         lastStreamTrace = "";
+                        // 新页面 = 新的 DOM：旧队列是针对旧页面排的，重放会重复追加。
+                        // 先关门清队，onPageFinished 再开。
+                        pageReady = false;
+                        pendingJs.clear();
                         conversationWebView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null);
                         updateUsageBar();
                         LogUtil.d(TAG, "webview reloaded: showing %d of %d messages (from=%d)",
@@ -2827,10 +2882,27 @@ public class MainActivity extends ThemedActivity {
         // onDestroy 后 WebView 已 destroy 并置空，迟到的回调直接丢弃
         WebView wv = conversationWebView;
         if (wv == null) return;
+        // 页面还没加载完：此刻 evaluateJavascript / loadUrl("javascript:") 都会被
+        // 随后的导航丢弃。排队到 onPageFinished 重放，避免「消息有时不渲染」。
+        if (!pageReady) {
+            if (pendingJs.size() < 300) pendingJs.add(js);
+            return;
+        }
         if (android.os.Build.VERSION.SDK_INT >= 19) {
             wv.evaluateJavascript(js, null);
         } else {
             wv.loadUrl("javascript:" + TextKit.forJsUrl(js));
+        }
+    }
+
+    /** onPageFinished / onReceivedError 后把加载期间排队的脚本按原顺序重放。 */
+    private void flushPendingJs() {
+        if (pendingJs.isEmpty()) return;
+        String[] all = pendingJs.toArray(new String[0]);
+        pendingJs.clear();
+        LogUtil.d(TAG, "flushPendingJs: replay %d deferred js", all.length);
+        for (String js : all) {
+            webViewEvalJs(js);
         }
     }
 
