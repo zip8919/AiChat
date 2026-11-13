@@ -135,7 +135,9 @@ final class TitleGenerator {
                             }
                             conv.title = finalTitle;
                             conv.titleGenerated = true;
-                            cm.saveCurrentConversation();
+                            // conv 是按发起时的 convId 找回的，可能已不是 current；
+                            // saveCurrentConversation() 会写到错误会话，按 conv 本身保存
+                            cm.saveConversationAsync(conv);
                             LogUtil.i(TAG, "conversation title set to: %s", finalTitle);
                         }
                     });

@@ -157,16 +157,37 @@ public class StorageFilesActivity extends ThemedActivity {
         scrollToHighlight();
     }
 
+    /**
+     * 文件名 → {size, mtime}。getView 每次 bind 都调 length()/lastModified() 就是两次
+     * stat 系统调用，滚一屏十来行就是二三十次（4.4 单核上 20~60ms/帧）。
+     * reload/sort 时取一次，之后列表滚动零磁盘 IO。
+     */
+    private final java.util.HashMap<String, long[]> fileMeta =
+            new java.util.HashMap<String, long[]>();
+
     private void sort() {
+        // 比较器里每调一次 length()/lastModified() 就是一次 stat 系统调用，
+        // 排序 n log n 次比较 × 2 次取值 ≈ 300+ 次 stat（50 个文件，30~100ms）。
+        // 先一次性取出 size/mtime，比较时只读内存。
+        final java.util.HashMap<String, long[]> meta = fileMeta;
+        meta.clear();
+        for (int i = 0; i < files.size(); i++) {
+            File f = files.get(i);
+            meta.put(f.getName(), new long[]{f.length(), f.lastModified()});
+        }
         Collections.sort(files, new Comparator<File>() {
             public int compare(File a, File b) {
+                long[] ma = meta.get(a.getName());
+                long[] mb = meta.get(b.getName());
+                long sa = ma == null ? 0L : ma[0], sb = mb == null ? 0L : mb[0];
+                long ta = ma == null ? 0L : ma[1], tb = mb == null ? 0L : mb[1];
                 if (sortBySize) {
-                    if (b.length() > a.length()) return 1;
-                    if (b.length() < a.length()) return -1;
+                    if (sb > sa) return 1;
+                    if (sb < sa) return -1;
                     return 0;
                 }
-                if (b.lastModified() > a.lastModified()) return 1;
-                if (b.lastModified() < a.lastModified()) return -1;
+                if (tb > ta) return 1;
+                if (tb < ta) return -1;
                 return 0;
             }
         });
@@ -230,10 +251,21 @@ public class StorageFilesActivity extends ThemedActivity {
                     public void onClick(DialogInterface d, int w) {
                         String name = input.getText().toString().trim();
                         if (TextUtils.isEmpty(name)) return;
-                        if (!name.equals(f.getName()) && !name.contains(".")) {
-                            // 扩展名决定「用什么打开」，改名时手滑删掉就没法预览了
-                            int dot = f.getName().lastIndexOf('.');
-                            if (dot > 0) name += f.getName().substring(dot);
+                        if (!name.equals(f.getName())) {
+                            // 扩展名决定「用什么打开」。旧逻辑只在「新名完全不含点」时补，
+                            // 于是把 x.png 改成「截图 v2.0」这种含点但不带扩展名的名字就漏了，
+                            // 之后「编辑」会按文本打开、保存时把原图写成乱码，不可恢复。
+                            // 判据改为「末段至少 2 个字符」才算用户自己给了扩展名。
+                            String oldName = f.getName();
+                            int oldDot = oldName.lastIndexOf('.');
+                            if (oldDot > 0) {
+                                String ext = oldName.substring(oldDot);
+                                if (!name.endsWith(ext) && !name.endsWith(ext.toUpperCase())) {
+                                    int newDot = name.lastIndexOf('.');
+                                    boolean userExt = newDot > 0 && name.length() - newDot - 1 >= 2;
+                                    if (!userExt) name += ext;
+                                }
+                            }
                         }
                         String renamed = StorageManager.getInstance(getApplicationContext())
                                 .renameExport(f.getName(), name);
@@ -294,17 +326,21 @@ public class StorageFilesActivity extends ThemedActivity {
                         .inflate(R.layout.item_storage_file, parent, false);
             }
             File f = files.get(position);
-            ((TextView) row.findViewById(R.id.file_name)).setText(f.getName());
+            String name = f.getName();
+            long[] mm = fileMeta.get(name);
+            long size = mm != null ? mm[0] : f.length();
+            long mtime = mm != null ? mm[1] : f.lastModified();
+            ((TextView) row.findViewById(R.id.file_name)).setText(name);
             String ext = "";
-            int dot = f.getName().lastIndexOf('.');
-            if (dot > 0 && dot < f.getName().length() - 1) {
-                ext = f.getName().substring(dot + 1).toUpperCase(Locale.US) + " · ";
+            int dot = name.lastIndexOf('.');
+            if (dot > 0 && dot < name.length() - 1) {
+                ext = name.substring(dot + 1).toUpperCase(Locale.US) + " · ";
             }
             ((TextView) row.findViewById(R.id.file_cat)).setText(
-                    ext + fmt.format(new Date(f.lastModified())));
-            ((TextView) row.findViewById(R.id.file_size)).setText(StorageReport.size(f.length()));
+                    ext + fmt.format(new Date(mtime)));
+            ((TextView) row.findViewById(R.id.file_size)).setText(StorageReport.size(size));
             ThemeRecolor.applyTo(row);
-            row.setBackgroundColor(f.getName().equals(highlight)
+            row.setBackgroundColor(name.equals(highlight)
                     ? ThemeRecolor.listMarkBg(row.getContext(), 0xFFE3F2FD)
                     : ThemeRecolor.listBg(row.getContext()));
             return row;

@@ -412,25 +412,25 @@ public class SettingsActivity extends ThemedActivity {
         webSearchMaxCallsEdit.setText(String.valueOf(getWebSearchMaxCallsPerRound(this)));
         // 上限与配额：全部按「实际生效值」回显，而不是回显用户上次输入的原文。
         // 上次可能填了越界值被夹住，回显原文会让人以为那个值已经生效。
-        attachMaxCharsEdit.setText(String.valueOf(prefs.getInt(
+        attachMaxCharsEdit.setText(String.valueOf(intPref(
                 KEY_ATTACH_MAX_CHARS, DEFAULT_ATTACH_MAX_CHARS)));
-        attachTotalEdit.setText(String.valueOf(prefs.getInt(
+        attachTotalEdit.setText(String.valueOf(intPref(
                 KEY_ATTACH_TOTAL_CHARS, DEFAULT_ATTACH_TOTAL_WAN)));
-        maxAttachmentsEdit.setText(String.valueOf(prefs.getInt(
+        maxAttachmentsEdit.setText(String.valueOf(intPref(
                 KEY_MAX_ATTACHMENTS, DEFAULT_MAX_ATTACHMENTS)));
-        imageMaxMbEdit.setText(String.valueOf(prefs.getInt(
+        imageMaxMbEdit.setText(String.valueOf(intPref(
                 KEY_IMAGE_MAX_MB, DEFAULT_IMAGE_MAX_MB)));
-        toolMaxKbEdit.setText(String.valueOf(prefs.getInt(
+        toolMaxKbEdit.setText(String.valueOf(intPref(
                 KEY_TOOL_MAX_KB, DEFAULT_TOOL_MAX_KB)));
-        httpTimeoutEdit.setText(String.valueOf(prefs.getInt(
+        httpTimeoutEdit.setText(String.valueOf(intPref(
                 KEY_HTTP_TIMEOUT_S, DEFAULT_HTTP_TIMEOUT_S)));
-        searchCountEdit.setText(String.valueOf(prefs.getInt(
+        searchCountEdit.setText(String.valueOf(intPref(
                 KEY_SEARCH_COUNT, DEFAULT_SEARCH_COUNT)));
-        searchSummaryEdit.setText(String.valueOf(prefs.getInt(
+        searchSummaryEdit.setText(String.valueOf(intPref(
                 KEY_SEARCH_SUMMARY_CHARS, DEFAULT_SEARCH_SUMMARY)));
-        visionMaxPxEdit.setText(String.valueOf(prefs.getInt(
+        visionMaxPxEdit.setText(String.valueOf(intPref(
                 KEY_VISION_MAX_PX, DEFAULT_VISION_MAX_PX)));
-        visionMaxImagesEdit.setText(String.valueOf(prefs.getInt(
+        visionMaxImagesEdit.setText(String.valueOf(intPref(
                 KEY_VISION_MAX_IMAGES, DEFAULT_VISION_MAX_IMAGES)));
         jsEnvPromptEdit.setText(prefs.getString(KEY_JS_ENV_PROMPT, DEFAULT_JS_ENV_PROMPT));
         logSwitch.setChecked(prefs.getBoolean(KEY_LOG_ENABLED, true));
@@ -922,6 +922,16 @@ public class SettingsActivity extends ThemedActivity {
         if (v < min) return min;
         if (v > max) return max;
         return v;
+    }
+
+    /** loadSettings 回显用：只做类型兜底、不夹取范围，键名与默认值保持原样。
+     *  旧版/外部把同一 int 键写成 String 时 getInt 会抛 ClassCastException，回退默认值。 */
+    private int intPref(String key, int def) {
+        try {
+            return prefs.getInt(key, def);
+        } catch (ClassCastException e) {
+            return def;
+        }
     }
 
     /** 输入框文本转整数并夹取范围；空/非数字一律回默认值。 */

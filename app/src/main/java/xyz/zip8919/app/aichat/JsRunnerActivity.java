@@ -246,6 +246,25 @@ public class JsRunnerActivity extends ThemedActivity {
         return wv;
     }
 
+    private boolean outputFlushPending;
+
+    /**
+     * 输出刷新合帧。
+     *
+     * <p>原来每一行 console.log 都做一次 {@code setText(整段 ≤64KB)} + 全量重排 +
+     * fullScroll：1000 行就是 1000 次全文排版，4.4 单核上能累计到数十秒。
+     * 这里只把「追加 + 截尾」留在每次调用（纯内存操作），真正的 setText 与滚动
+     * 合并到 50ms 一次，肉眼无差别。
+     */
+    private final Runnable flushOutput = new Runnable() {
+        public void run() {
+            outputFlushPending = false;
+            if (isFinishing() || isDestroyed() || outputView == null) return;
+            outputView.setText(output.toString());
+            scrollOutputToBottom();
+        }
+    };
+
     private void appendOutput(final String line) {
         if (line == null) return;
         bridgeEverCalled = true;
@@ -268,8 +287,10 @@ public class JsRunnerActivity extends ThemedActivity {
                     }
                 }
                 trimOutput();
-                outputView.setText(output.toString());
-                scrollOutputToBottom();
+                if (!outputFlushPending) {
+                    outputFlushPending = true;
+                    outputView.postDelayed(flushOutput, 50);
+                }
             }
         });
     }

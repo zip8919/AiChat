@@ -46,11 +46,16 @@ final class MarkdownPipeline {
         // Mask fenced code blocks and inline code spans first, so the math /
         // extension preprocessing below can never rewrite their contents.
         List<String> codeBlocks = new ArrayList<>();
-        text = protectCode(text, codeBlocks);
+        // 反引号与 ~ 都没有时不可能出现围栏/行内代码，整趟逐字符扫描可以跳过
+        if (text.indexOf('`') >= 0 || text.indexOf('~') >= 0) {
+            text = protectCode(text, codeBlocks);
+        }
 
         // 0. Protect raw SVG blocks from markdown parsing — commonmark doesn't treat <svg> as HTML block
         List<String> svgBlocks = new ArrayList<>();
-        text = extractAndProtectSvg(text, svgBlocks);
+        if (text.indexOf('<') >= 0) {
+            text = extractAndProtectSvg(text, svgBlocks);
+        }
 
         // 代码块与 SVG 已在上两步换成哨兵，其中的 $ / \ 不会漏进来。
         // 两者都没有时，下面三趟逐字符预处理输出恒等于输入，流式每 200ms

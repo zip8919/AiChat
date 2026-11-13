@@ -97,8 +97,7 @@ final class StorageScanner {
         // 要么索引和会话里的实际写法对不上。两种情况的界面处理必须分开——
         // 前者是正常状态，后者要明确警告，否则用户会把历史图片当垃圾清掉。
         r.indexEmpty = !r.indexIncomplete && refs.size() == 0
-                && r.count[StorageReport.CAT_ATTACHMENT] > 0
-                && r.count[StorageReport.CAT_CONVERSATION] > 0;
+                && r.count[StorageReport.CAT_ATTACHMENT] > 0;
         if (r.indexEmpty) {
             LogUtil.w(TAG, "scan: %d images but zero refs from %d conversations — "
                             + "either all orphans or format mismatch",

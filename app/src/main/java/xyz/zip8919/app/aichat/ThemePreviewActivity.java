@@ -183,6 +183,24 @@ public class ThemePreviewActivity extends ThemedActivity {
         webView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null);
     }
 
+    @Override
+    protected void onDestroy() {
+        // 预览页会被反复进出，WebView 不 destroy 会连带 Activity 一起泄漏，
+        // 4.4 低内存机上几次就 OOM。工程内其它 WebView 宿主都有这一步。
+        if (webView != null) {
+            try {
+                webView.loadUrl("about:blank");
+                webView.stopLoading();
+                webView.removeAllViews();
+                webView.destroy();
+            } catch (Throwable ignored) {
+                // 内核已崩或重复销毁：忽略，不能因为清理影响退出
+            }
+            webView = null;
+        }
+        super.onDestroy();
+    }
+
     private void toast(String s) {
         AcToast.show(this, s);
     }

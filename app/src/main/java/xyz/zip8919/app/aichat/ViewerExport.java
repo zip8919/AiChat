@@ -104,7 +104,7 @@ final class ViewerExport {
         // 先把进度画出来，再做占主线程的截图；否则点完就是一段纯卡死。
         new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
             public void run() {
-                if (a.isFinishing()) {
+                if (a.isFinishing() || a.isDestroyed()) {
                     dismissQuietly(pd);
                     return;
                 }
@@ -503,7 +503,7 @@ final class ViewerExport {
      * <p>「重命名」不走 Toast、也不要求先进小工具：在这里改完即时生效，文案原地刷新。
      */
     private static void showResult(final Activity a, final Result r) {
-        if (a.isFinishing()) {
+        if (a.isFinishing() || a.isDestroyed()) {
             if (r.thumb != null && !r.thumb.isRecycled()) r.thumb.recycle();
             return;
         }

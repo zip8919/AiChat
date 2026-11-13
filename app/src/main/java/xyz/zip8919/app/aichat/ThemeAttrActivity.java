@@ -43,6 +43,8 @@ public class ThemeAttrActivity extends ThemedActivity {
 
     /** 主题模式的目标对象。同进程静态传参，避免把整份主题塞进 Intent。 */
     static Theme sTheme;
+    /** 配置变更重建时供新实例取回的主题对象；不参与全新启动的「连点两次」判定。 */
+    private static Theme sResumeTheme;
 
     private static final String[][] LABELS = {
             {ThemeTokens.AC_PRIMARY, "主色", "顶部栏、主按钮、选中态"},
@@ -90,29 +92,51 @@ public class ThemeAttrActivity extends ThemedActivity {
     }
 
     @Override
+    @SuppressWarnings("unchecked")
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_theme_attr);
         am = AppearanceManager.getInstance(this);
-        // 静态引用读完立刻置空：Activity 被系统回收时 onDestroy 不一定会跑，
-        // 留着就是一份指向大对象的静态引用。
-        theme = sTheme;
-        sTheme = null;
-        if (getIntent().getBooleanExtra("theme_mode", false) && theme == null) {
-            // 静态引用已被上一次启动消费掉（连点两次）：不能悄悄退化成覆盖模式，
-            // 那会让用户以为在改主题，实际改的是全局覆盖。
-            finish();
-            return;
-        }
-        originDark = am.isDark();
-        editingDark = originDark;
-        snapLight = am.snapshotExplicit(false);
-        snapDark = am.snapshotExplicit(true);
-        if (theme != null) {
-            tkLight = new HashMap<String, String>(theme.lightTokens);
-            tkDark = new HashMap<String, String>(theme.darkTokens);
-            tkFontUi = theme.fontUi;
-            tkFontMono = theme.fontMono;
+        Bundle b = savedInstanceState;
+        if (b != null) {
+            // 配置变更 / 被回收后重建：必须沿用进入前的回滚基准。
+            // 若重新 snapshotExplicit()，拿到的是已被实时预览污染的值，
+            // 之后点「取消」也回滚不掉；主题模式更不能因 sTheme 已消费而直接 finish。
+            originDark = b.getBoolean("attr_origin_dark");
+            editingDark = b.getBoolean("attr_editing_dark");
+            snapLight = (Map<String, String>) b.getSerializable("attr_snap_light");
+            snapDark = (Map<String, String>) b.getSerializable("attr_snap_dark");
+            if (snapLight == null) snapLight = new HashMap<String, String>();
+            if (snapDark == null) snapDark = new HashMap<String, String>();
+            if (b.getBoolean("attr_theme_mode")) {
+                theme = sResumeTheme;
+                sResumeTheme = null;
+                tkLight = (Map<String, String>) b.getSerializable("attr_tk_light");
+                tkDark = (Map<String, String>) b.getSerializable("attr_tk_dark");
+                tkFontUi = b.getString("attr_font_ui");
+                tkFontMono = b.getString("attr_font_mono");
+                // 进程被杀后静态对象丢失：am 已从磁盘重建、预览色不残留，安全退出。
+                if (theme == null) { finish(); return; }
+            }
+        } else {
+            theme = sTheme;
+            sTheme = null;
+            if (getIntent().getBooleanExtra("theme_mode", false) && theme == null) {
+                // 静态引用已被上一次启动消费掉（连点两次）：不能悄悄退化成覆盖模式，
+                // 那会让用户以为在改主题，实际改的是全局覆盖。
+                finish();
+                return;
+            }
+            originDark = am.isDark();
+            editingDark = originDark;
+            snapLight = am.snapshotExplicit(false);
+            snapDark = am.snapshotExplicit(true);
+            if (theme != null) {
+                tkLight = new HashMap<String, String>(theme.lightTokens);
+                tkDark = new HashMap<String, String>(theme.darkTokens);
+                tkFontUi = theme.fontUi;
+                tkFontMono = theme.fontMono;
+            }
         }
 
         list = (LinearLayout) findViewById(R.id.attr_list);
@@ -131,6 +155,23 @@ public class ThemeAttrActivity extends ThemedActivity {
         wire();
         refreshModeButtons();
         refreshRows();
+    }
+
+    @Override
+    protected void onSaveInstanceState(Bundle out) {
+        super.onSaveInstanceState(out);
+        out.putBoolean("attr_origin_dark", originDark);
+        out.putBoolean("attr_editing_dark", editingDark);
+        out.putSerializable("attr_snap_light", snapLight == null ? null : new HashMap<String, String>(snapLight));
+        out.putSerializable("attr_snap_dark", snapDark == null ? null : new HashMap<String, String>(snapDark));
+        out.putBoolean("attr_theme_mode", theme != null);
+        if (theme != null) {
+            sResumeTheme = theme;
+            out.putSerializable("attr_tk_light", tkLight == null ? null : new HashMap<String, String>(tkLight));
+            out.putSerializable("attr_tk_dark", tkDark == null ? null : new HashMap<String, String>(tkDark));
+            out.putString("attr_font_ui", tkFontUi);
+            out.putString("attr_font_mono", tkFontMono);
+        }
     }
 
     @Override
@@ -456,6 +497,9 @@ public class ThemeAttrActivity extends ThemedActivity {
 
         final float[] c = {hsv[0], hsv[1], hsv[2]};
         final int[] color = {cur};
+        // 谁最后动过：滑条还是输入框。输入框里的 HEX 只在初始化时写一次、之后不再回写，
+        // 若「确定」无条件读输入框，滑条刚调好的颜色会被初始色覆盖（用户表现为滑条完全无效）。
+        final boolean[] sliderTouched = {false};
         // 预览块只建一次 drawable，之后原地改色。拖动时 onProgressChanged 每秒会来
         // 几十次，每次 new GradientDrawable 在 4.x 上就是成片的临时对象与 GC。
         final GradientDrawable previewBg = rounded(cur, 6);
@@ -472,6 +516,7 @@ public class ThemeAttrActivity extends ThemedActivity {
         SeekBar.OnSeekBarChangeListener l = new SeekBar.OnSeekBarChangeListener() {
             public void onProgressChanged(SeekBar s, int progress, boolean fromUser) {
                 if (!fromUser) return;
+                sliderTouched[0] = true;
                 if (s.getId() == 1) c[0] = progress;
                 else if (s.getId() == 2) c[1] = progress / 100f;
                 else if (s.getId() == 3) c[2] = progress / 100f;
@@ -498,6 +543,8 @@ public class ThemeAttrActivity extends ThemedActivity {
             public void afterTextChanged(Editable s) {
                 Integer v = ThemeTokens.parseColor(s.toString());
                 if (v == null) return;
+                // 用户开始手输 HEX：以输入框为准，滑条此前的调整作废
+                sliderTouched[0] = false;
                 color[0] = v.intValue();
                 Color.colorToHSV(color[0], c);
                 previewBg.setColor(color[0]);
@@ -518,8 +565,13 @@ public class ThemeAttrActivity extends ThemedActivity {
             public void onShow(DialogInterface di) {
                 d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(new View.OnClickListener() {
                     public void onClick(View v) {
-                        Integer parsed = ThemeTokens.parseColor(hex.getText().toString());
-                        setValue(token, hexOf(parsed == null ? color[0] : parsed.intValue()));
+                        if (sliderTouched[0]) {
+                            // 滑条最后动过：用滑条结果，别再被输入框里的旧 HEX 覆盖
+                            setValue(token, hexOf(color[0]));
+                        } else {
+                            Integer parsed = ThemeTokens.parseColor(hex.getText().toString());
+                            setValue(token, hexOf(parsed == null ? color[0] : parsed.intValue()));
+                        }
                         d.dismiss();
                     }
                 });

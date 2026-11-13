@@ -60,6 +60,8 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
     private boolean downloading;
     /** 切换安装包后，正在跑的测速结果作废，避免旧包延迟串到新包并自动改选镜像。 */
     private boolean probeStale;
+    /** 用户本轮测速期间是否手动点选过镜像；点过就不再被「自动选最快」覆盖。 */
+    private boolean manualPicked;
 
     // 行视图缓存：测速/选中只刷新单行文本，不重建列表
     private final List<TextView> marks = new ArrayList<TextView>();
@@ -162,6 +164,8 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
 
             row.setOnClickListener(new View.OnClickListener() {
                 public void onClick(View v) {
+                    // 用户手动点选：记下来，测速结束后不要再被「自动选最快」覆盖
+                    manualPicked = true;
                     selectMirror(idx);
                 }
             });
@@ -217,6 +221,7 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
     private void selectMirror(int i) {
         selectedIndex = i;
         UpdateManager.setSelectedTemplate(this, mirrors.get(i).template);
+        // 注意：这里不置 manualPicked —— 由用户点击行的调用方自己置，
         for (int j = 0; j < mirrors.size(); j++) refreshRow(j);
         if (!downloading) {
             progressText.setText("已选 " + mirrors.get(i).name + "，点「下载」开始");
@@ -312,12 +317,23 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
         runProbe();
     }
 
+    /**
+     * 作废正在进行的测速：镜像列表被整体替换前必须调用。
+     * 只置 stale + 取消不再需要的连接，不动 UI 之外的状态。
+     */
+    private void invalidateProbe() {
+        probeStale = true;
+        UpdateManager.cancelProbe();
+        btnProbe.setEnabled(true);
+    }
+
     private void runProbe() {
         if (asset == null || downloading) {
             AcToast.show(this, "请先检查更新成功");
             return;
         }
         probeStale = false;
+        manualPicked = false;
         for (UpdateManager.Mirror m : mirrors) m.latency = UpdateManager.NOT_TESTED;
         for (int i = 0; i < mirrors.size(); i++) refreshRow(i);
         btnProbe.setEnabled(false);
@@ -341,8 +357,14 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
             if (l >= 0 && l < min) { min = l; best = i; }
         }
         if (best >= 0) {
-            selectMirror(best);
-            progressText.setText("已选最快：" + mirrors.get(best).name + "  " + min + " ms");
+            if (manualPicked && selectedIndex >= 0 && selectedIndex < mirrors.size()) {
+                // 用户测速期间已手动点选，尊重用户选择，只用文字告知最快项
+                progressText.setText("测速完成，最快：" + mirrors.get(best).name + " " + min
+                        + " ms（保留你手动选择的 " + mirrors.get(selectedIndex).name + "）");
+            } else {
+                selectMirror(best);
+                progressText.setText("已选最快：" + mirrors.get(best).name + "  " + min + " ms");
+            }
         } else {
             progressText.setText("全部镜像不可用，可试直连或自定义后重测");
         }
@@ -490,8 +512,13 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
             InputMethodManager imm = (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
             if (imm != null) imm.hideSoftInputFromWindow(customInput.getWindowToken(), 0);
         } catch (Throwable e) {}
+        // 镜像列表即将整体替换：正在跑的测速必须立刻作废，否则旧任务按 index
+        // 回调到新列表上，会把新列表判成「全部不可用」
+        invalidateProbe();
         mirrors = UpdateManager.loadMirrors(this);
-        selectedIndex = mirrors.size() - 1;
+        // 重复添加时 addCustomMirror 不新增，最后一个未必是刚输入的这条，
+        // 必须按模板反查真实下标，否则勾选与实际下载用的镜像不一致
+        selectedIndex = indexOfTemplate(t);
         UpdateManager.setSelectedTemplate(this, t);
         buildRows();
         progressText.setText("已添加：" + t + "\n点「测速」验证可用性");
@@ -504,6 +531,7 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
                 .setMessage(m.name + "\n" + m.template)
                 .setPositiveButton("删除", new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
+                        invalidateProbe();
                         UpdateManager.removeCustomMirror(UpdateActivity.this, m.template);
                         mirrors = UpdateManager.loadMirrors(UpdateActivity.this);
                         String sel = UpdateManager.selectedTemplate(UpdateActivity.this);

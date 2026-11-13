@@ -453,7 +453,15 @@ public class CodeHighlighter {
             // operator, no identifier start, no '<' (XML tag branch).
             int runEnd = plainRunEnd(code, len, i, matchers);
             if (runEnd > i) {
-                for (int k = i; k < runEnd; k++) out.append(Html.esc(String.valueOf(code.charAt(k))));
+                // 整段转义，别再逐字符：每个 char 一个 String.valueOf 会产出
+                // 两个 char[] + StringBuilder + 结果串，4KB 代码块一帧就是上万对象
+                String run = code.substring(i, runEnd);
+                if (run.indexOf('&') < 0 && run.indexOf('<') < 0 && run.indexOf('>') < 0) {
+                    // 纯文本段最常见，连 esc 的扫描都省掉
+                    out.append(run);
+                } else {
+                    out.append(Html.esc(run));
+                }
                 i = runEnd;
                 continue;
             }

@@ -204,6 +204,10 @@ final class ChatStreamRunner {
             boolean fallbackTried = false;
             boolean includeUsage = job.includeUsage;
             boolean usageDowngraded = false;
+            // 端点是否接受思考相关参数。自建 provider 一律被写成 thinkingType=object +
+            // 参数名 thinking，严格的 OpenAI 兼容端点会直接 400，需要一次性降级。
+            boolean sendThinking = true;
+            boolean thinkingDowngraded = false;
             // 最近一次 429 的响应体。重试耗尽那一轮可能已读不到 body，用它兜底进错误卡片。
             String last429Body = "";
             /**
@@ -250,7 +254,7 @@ final class ChatStreamRunner {
 
                 JSONObject body = ChatTransport.buildRequestBody(job.modelName, job.provider,
                         job.thinkingLevel, conversation, job.streamEnabled,
-                        toolsEnabled ? toolDefs : null, includeUsage);
+                        toolsEnabled ? toolDefs : null, includeUsage, sendThinking);
                 // 统计口径：一次 open 就是一次 HTTP 请求（含工具轮、含重试）。
                 // 重试另有 retries 计数，方便区分「请求多」是工具轮还是 429。
                 UsageStats.get().onRequest(job.modelName, job.providerName);
@@ -322,6 +326,19 @@ final class ChatStreamRunner {
                         toolsEnabled = false;
                         conversation = buildConversation(job.systemPrompt);
                         ui.toast("当前模型不支持工具调用，已按普通对话发送");
+                        ChatTransport.close(conn);
+                        conn = null;
+                        session.setConnection(null);
+                        continue;
+                    }
+
+                    // 三级降级：端点不认思考参数（自建 provider 会被写成
+                    // thinkingType=object + 参数名 thinking，官方 OpenAI 这类严格端点
+                    // 直接 400）。去掉 thinking 整套字段再发一次，别让用户卡死在这里。
+                    if ((code == 400 || code == 422) && sendThinking && !thinkingDowngraded) {
+                        thinkingDowngraded = true;
+                        sendThinking = false;
+                        LogUtil.w(TAG, "endpoint rejected thinking params, retry without them");
                         ChatTransport.close(conn);
                         conn = null;
                         session.setConnection(null);

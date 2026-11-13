@@ -52,6 +52,12 @@ final class AttachmentFiles {
     private static final int VIEW_PX = 1600;
 
     /**
+     * 查看用 data URI 的原始字节上限。base64 会膨胀约 4/3，600KB 压出来是约 800K 字符，
+     * 已接近上层 {@code PREVIEW_URI_MAX_CHARS} 的预算；再大只能被丢弃。
+     */
+    private static final int VIEW_URI_MAX_BYTES = 600 * 1024;
+
+    /**
      * 发给模型的编码档位哨兵：{@code <= 0} 表示按 {@link ImageTokens#apiSide} 的像素预算
      * （约 1302²，即模型 1024 token 网格的满档）等比取档。比预算再大也会被端点缩回去，
      * 白白让请求体多出几百 KB；比预算小则模型少看细节、卡片估算还和账单对不上。
@@ -506,6 +512,24 @@ final class AttachmentFiles {
                 scaled.compress(Bitmap.CompressFormat.PNG, 100, bos);
             } else {
                 scaled.compress(Bitmap.CompressFormat.JPEG, 85, bos);
+            }
+            // PNG 透明图（截图、图标）很容易到 3~5MB，base64 后是 6~7MB 字符串，
+            // 而调用方拿到后还会因为超长整份丢弃。这里先兜底转一次 JPEG（丢透明，
+            // 但至少能看见内容），仍然超限就直接返回 null，省掉一次无用的 base64
+            // 与一个几 MB 的临时字符串。
+            if (bos.size() > VIEW_URI_MAX_BYTES) {
+                if (hasAlpha) {
+                    ByteArrayOutputStream jpg = new ByteArrayOutputStream();
+                    scaled.compress(Bitmap.CompressFormat.JPEG, 85, jpg);
+                    if (jpg.size() < bos.size()) {
+                        bos = jpg;
+                        hasAlpha = false;
+                    }
+                }
+                if (bos.size() > VIEW_URI_MAX_BYTES) {
+                    LogUtil.w(TAG, "viewDataUri: %d bytes too large, skipped", bos.size());
+                    return null;
+                }
             }
             if (scaled != bmp) scaled.recycle();
             String mime = hasAlpha ? "png" : "jpeg";

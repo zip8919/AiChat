@@ -330,21 +330,28 @@ public class ConversationManagerActivity extends ThemedActivity {
                 .show();
     }
 
-    private void deleteSelected(List<String> ids) {
+    private void deleteSelected(final List<String> ids) {
         LogUtil.i(TAG, "deleteSelected: %d ids=%s", ids.size(), ids.toString());
-        int removed = 0;
-        for (int i = 0; i < ids.size(); i++) {
-            conversationManager.deleteConversation(ids.get(i));
-            removed++;
-        }
-        // 会话文件变了，存储管理页的缓存立刻作废，否则返回后还显示旧的「已用」
-        StorageActivity.invalidateCache();
-        exitSelectionMode();
-        AcToast.show(this, "已删除 " + removed + " 个对话");
-        // 排序后 conversations 是副本，不能再靠「列表变短」判断删除是否成功；
-        // 直接按磁盘重载，顺便把体积重新算准
-        loadConversations();
-        LogUtil.i(TAG, "deleteSelected done: removed=%d", removed);
+        final int removed = ids.size();
+        // 每条删除都含「读会话文件 + 等保存队列 + 全量重写索引」，
+        // N 条放主线程最坏卡几十秒。整批挪后台，UI 只做收尾。
+        new Thread(new Runnable() {
+            public void run() {
+                for (int i = 0; i < ids.size(); i++) {
+                    conversationManager.deleteConversation(ids.get(i));
+                }
+                StorageActivity.invalidateCache();
+                runOnUiThread(new Runnable() {
+                    public void run() {
+                        if (isFinishing() || isDestroyed()) return;
+                        exitSelectionMode();
+                        AcToast.show(ConversationManagerActivity.this, "已删除 " + removed + " 个对话");
+                        loadConversations();
+                        LogUtil.i(TAG, "deleteSelected done: removed=%d", removed);
+                    }
+                });
+            }
+        }, "aichat-delete-conversations").start();
     }
 
     private void loadConversations() {
@@ -521,15 +528,24 @@ public class ConversationManagerActivity extends ThemedActivity {
             ids.add(conversations.get(i).id);
         }
         // 必须走 ConversationManager.deleteConversation：它会同步把 currentConversation 置空，
-        // 否则回主界面后任一次保存都会把被清空的对话重新写回磁盘
-        for (int i = 0; i < ids.size(); i++) {
-            conversationManager.deleteConversation(ids.get(i));
-        }
-        conversations.clear();
-        adapter.notifyDataSetChanged();
-        StorageActivity.invalidateCache();
-        LogUtil.i(TAG, "clearAllHistory done: %d remaining", conversations.size());
-        AcToast.show(this, "已清空所有历史对话");
+        // 否则回主界面后任一次保存都会把被清空的对话重新写回磁盘。
+        new Thread(new Runnable() {
+            public void run() {
+                for (int i = 0; i < ids.size(); i++) {
+                    conversationManager.deleteConversation(ids.get(i));
+                }
+                StorageActivity.invalidateCache();
+                runOnUiThread(new Runnable() {
+                    public void run() {
+                        if (isFinishing() || isDestroyed()) return;
+                        conversations.clear();
+                        adapter.notifyDataSetChanged();
+                        LogUtil.i(TAG, "clearAllHistory done: %d remaining", conversations.size());
+                        AcToast.show(ConversationManagerActivity.this, "已清空所有历史对话");
+                    }
+                });
+            }
+        }, "aichat-clear-history").start();
     }
 
     @Override

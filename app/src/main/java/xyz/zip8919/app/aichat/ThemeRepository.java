@@ -23,6 +23,10 @@ final class ThemeRepository {
     /** 目录签名：文件名 + lastModified + length；写路径置 forceCheck 强制重算。 */
     private String dirSig;
     private boolean forceCheck;
+    /** 上次 directorySignature() 的计算时刻，用于热路径节流。 */
+    private long dirSigAt;
+    /** 目录签名复用时间窗：colorSignature/整树重刷会连续调十几次 list()。 */
+    private static final long DIR_SIG_TTL_MS = 500;
 
     private ThemeRepository() {
         this.storage = StorageManager.getInstance();
@@ -42,12 +46,20 @@ final class ThemeRepository {
 
     /** 内置在前、用户主题在后；文件损坏的条目仍出现在列表里，带标记置灰。 */
     synchronized List<Theme> list() {
+        // 热路径节流：colorSignature()/整树重刷会在几十 ms 内连续调十几次 list()，
+        // 每次 listFiles + 逐文件 lastModified()/length() 在单核 A7 上都是 syscall。
+        // 窗口内直接复用缓存；应用内写路径走 invalidate()（置 forceCheck）不受影响，
+        // 外部 App 改文件最多延迟 DIR_SIG_TTL_MS 才可见。
+        long now = System.currentTimeMillis();
+        if (cache != null && !forceCheck && now - dirSigAt < DIR_SIG_TTL_MS) return cache;
+
         File dir = new File(storage.getThemesDir());
         File[] files = dir.listFiles();
         // listFiles 返回 null 是「读取失败」而非「目录为空」：保留旧缓存，
         // 否则用户主题会整批消失且长期不恢复。
         if (files == null && cache != null) return cache;
         String sig = directorySignature(files);
+        dirSigAt = now;
         if (cache != null && !forceCheck && sig.equals(dirSig)) return cache;
         forceCheck = false;
         List<Theme> out = new ArrayList<Theme>();

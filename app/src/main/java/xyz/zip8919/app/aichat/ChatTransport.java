@@ -31,6 +31,20 @@ final class ChatTransport {
      */
     static JSONObject buildRequestBody(String model, ProviderInfo provider, String thinkingLevel,
             JSONArray messages, boolean stream, JSONArray tools, boolean includeUsage) throws Exception {
+        return buildRequestBody(model, provider, thinkingLevel, messages, stream, tools,
+                includeUsage, true);
+    }
+
+    /**
+     * @param sendThinking {@code false} 表示端点明确拒绝思考相关参数（400 降级后重发）：
+     *                     {@code thinking}/{@code thinking_budget}/{@code reasoning_effort}
+     *                     一个都不下发。自建 provider 的 thinkingType 一律被写成
+     *                     {@code object}、参数名写成 {@code thinking}，而严格的 OpenAI
+     *                     兼容端点（官方等）会因此每请求都 400。
+     */
+    static JSONObject buildRequestBody(String model, ProviderInfo provider, String thinkingLevel,
+            JSONArray messages, boolean stream, JSONArray tools, boolean includeUsage,
+            boolean sendThinking) throws Exception {
         JSONObject body = new JSONObject();
         body.put("model", model);
         body.put("stream", stream);
@@ -49,20 +63,22 @@ final class ChatTransport {
             body.put("stream_options", opts);
         }
 
-        if ("boolean".equals(provider.thinkingType)) {
-            if (!"off".equals(thinkingLevel)) {
-                body.put(provider.thinkingParamName, true);
-                int budget = 4096;
-                if ("low".equals(thinkingLevel)) budget = 2048;
-                else if ("high".equals(thinkingLevel)) budget = 32768;
-                body.put("thinking_budget", budget);
-            }
-        } else {
-            JSONObject tObj = new JSONObject();
-            tObj.put("type", "off".equals(thinkingLevel) ? "disabled" : "enabled");
-            body.put(provider.thinkingParamName, tObj);
-            if (!"off".equals(thinkingLevel)) {
-                body.put("reasoning_effort", "high".equals(thinkingLevel) ? "max" : "high");
+        if (sendThinking) {
+            if ("boolean".equals(provider.thinkingType)) {
+                if (!"off".equals(thinkingLevel)) {
+                    body.put(provider.thinkingParamName, true);
+                    int budget = 4096;
+                    if ("low".equals(thinkingLevel)) budget = 2048;
+                    else if ("high".equals(thinkingLevel)) budget = 32768;
+                    body.put("thinking_budget", budget);
+                }
+            } else {
+                JSONObject tObj = new JSONObject();
+                tObj.put("type", "off".equals(thinkingLevel) ? "disabled" : "enabled");
+                body.put(provider.thinkingParamName, tObj);
+                if (!"off".equals(thinkingLevel)) {
+                    body.put("reasoning_effort", "high".equals(thinkingLevel) ? "max" : "high");
+                }
             }
         }
         return body;

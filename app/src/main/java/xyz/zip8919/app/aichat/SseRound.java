@@ -68,7 +68,36 @@ final class SseRound {
 
     static Result read(boolean stream, InputStream in, Progress progress, Abort abort)
             throws Exception {
-        return stream ? readStream(in, progress, abort) : readWhole(in);
+        Result r = stream ? readStream(in, progress, abort) : readWhole(in);
+        // tool_calls 的 arguments 是分片拼接的，流中途断开会留下半截 JSON；下游
+        // ToolExecutor.parseArgs 解析失败会静默返回空对象照常执行，等于把半截参数
+        // 当完整参数跑工具。落库/执行前统一校验，不完整整轮按错误走错误卡片链路。
+        if (r.error == null && r.toolCalls.length() > 0) validateToolArguments(r);
+        return r;
+    }
+
+    /** 每个待执行 tool_call 的 arguments 必须至少是一段语法完整的 JSON。 */
+    private static void validateToolArguments(Result r) {
+        for (int i = 0; i < r.toolCalls.length(); i++) {
+            JSONObject tc = r.toolCalls.optJSONObject(i);
+            // name 为空的调用不会被 appendAssistant / ToolExecutor 执行，无需校验
+            if (tc == null || tc.optString("name", "").length() == 0) continue;
+            String args = tc.optString("arguments", "");
+            // 与 appendAssistant / parseArgs 一致：空参等价于 {}
+            if (args.trim().length() == 0) continue;
+            try {
+                // 只拦「半截 JSON」。合法但非对象（null/[]/标量）保持原行为：下游
+                // ToolExecutor.parseArgs 解析失败会静默当 {}，不能在这里误判成整轮错误。
+                new org.json.JSONTokener(args).nextValue();
+            } catch (Exception e) {
+                LogUtil.e(TAG, "tool_call#%d arguments incomplete: %s",
+                        i, LogUtil.preview(args, 200));
+                r.error = "工具调用参数不完整";
+                r.cause = new Exception("tool_call arguments truncated: "
+                        + LogUtil.preview(args, 200));
+                return;
+            }
+        }
     }
 
     /** 非流式：整个响应就是一个 JSON 对象。 */

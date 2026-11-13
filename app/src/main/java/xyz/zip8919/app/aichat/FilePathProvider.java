@@ -3,8 +3,10 @@ package xyz.zip8919.app.aichat;
 import android.content.ContentProvider;
 import android.content.ContentValues;
 import android.database.Cursor;
+import android.database.MatrixCursor;
 import android.net.Uri;
 import android.os.ParcelFileDescriptor;
+import android.provider.OpenableColumns;
 
 import java.io.File;
 import java.io.FileNotFoundException;
@@ -88,7 +90,12 @@ public class FilePathProvider extends ContentProvider {
     @Override
     public Cursor query(Uri uri, String[] projection, String selection,
                         String[] selectionArgs, String sortOrder) {
-        return null;
+        // ContentProvider 契约：query 必须返回非 null Cursor（结果可为空）或抛异常。
+        // 本 Provider 只经 openFile 暴露文件、不提供行数据；返回空游标，避免
+        // ContentResolver 调用方对 null 做 getCount()/moveToFirst() 时 NPE。
+        String[] cols = projection != null ? projection : new String[]{
+                OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE};
+        return new MatrixCursor(cols);
     }
 
     @Override

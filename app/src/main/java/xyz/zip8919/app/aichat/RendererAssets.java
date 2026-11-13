@@ -457,10 +457,14 @@ final class RendererAssets {
             "if(bar&&bar.parentNode)bar.parentNode.removeChild(bar);" +
             "msg.__foldHidden=-1;return;}" +
             "var hidden=n-window.__toolFoldLimit;var open=!!msg.__foldOpen;" +
+            "var created=false;" +
             "if(!bar){bar=document.createElement('div');bar.className='tool-fold';" +
             "bar.setAttribute('onclick','toggleToolFold(this)');" +
-            "cards[0].parentNode.insertBefore(bar,cards[0]);}" +
-            "if(msg.__foldHidden===hidden&&msg.__foldShown===open)return;" +
+            "cards[0].parentNode.insertBefore(bar,cards[0]);created=true;}" +
+            // 新建的 bar 必须无条件重写：updateLastMsg/streamBase 用 innerHTML 重建
+            // 消息体时会把旧 bar 一起销毁，但 __foldHidden/__foldShown 还挂在 msg 上，
+            // 命中下面的 memo 就会留下一个空 bar，且前 hidden 张卡全是展开状态。
+            "if(!created&&msg.__foldHidden===hidden&&msg.__foldShown===open)return;" +
             "msg.__foldHidden=hidden;msg.__foldShown=open;" +
             // 只改需要改的那几张：几百张卡片全量写 display 会让每次追加都重排一遍
             "for(var j=0;j<hidden;j++)cards[j].style.display=open?'':'none';" +
@@ -626,6 +630,9 @@ final class RendererAssets {
             "var c=m.querySelector('.content');" +
             "if(c&&c.nextSibling)m.insertBefore(s,c.nextSibling);else m.appendChild(s);}" +
             "s.textContent=text;smartScrollToBottom();};" +
+            // clearStatus 只负责移除工具/状态节点，不碰 __retryTimer：它在流式收尾里
+            // 被调用 9 次，若顺带停表，429 等待期间任意一帧收尾都会把倒计时掐死。
+            // 定时器改为在 tick 里自检节点是否已脱离文档后自行收表（见下）。
             "window.clearStatus=function(){" +
             "var m=window.__lastAi();if(!m)return;" +
             "var s=m.querySelector('.tool-status');" +
@@ -652,6 +659,9 @@ final class RendererAssets {
             "paint();" +
             "if(window.__retryTimer)clearInterval(window.__retryTimer);" +
             "window.__retryTimer=setInterval(function(){" +
+            // 卡片被 clearStatus/hideRetryCard 移除后，闭包里的 s 已脱离文档：
+            // 自行收表，避免旧定时器每秒空转、倒计时结束还往 detached 节点写文案。
+            "if(!s.parentNode){clearInterval(window.__retryTimer);window.__retryTimer=null;return;}" +
             "left--;" +
             "var t=s.querySelector('.retry-text');" +
             "if(left<=0){clearInterval(window.__retryTimer);window.__retryTimer=null;" +

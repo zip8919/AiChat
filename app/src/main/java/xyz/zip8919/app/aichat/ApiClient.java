@@ -214,6 +214,9 @@ public class ApiClient {
             conn.setRequestMethod("POST");
             conn.setRequestProperty("Content-Type", "application/json");
             conn.setRequestProperty("Authorization", "Bearer " + apiKey);
+            // 与 queryBalance 一致：显式拒接压缩，避免 Android 4.4 部分 ROM 上
+            // 对「服务端主动 gzip」不做透明解压，拿到 gzip 二进制后解析失败
+            conn.setRequestProperty("Accept-Encoding", "identity");
             conn.setDoOutput(true);
             conn.setConnectTimeout(30000);
             conn.setReadTimeout(readTimeout);
@@ -265,8 +268,13 @@ public class ApiClient {
                 return result;
             }
 
-            BufferedReader reader = new BufferedReader(
-                    new InputStreamReader(conn.getInputStream(), "UTF-8"));
+            java.io.InputStream in = conn.getInputStream();
+            String enc = conn.getContentEncoding();
+            if (enc != null && enc.toLowerCase().contains("gzip")) {
+                LogUtil.w(TAG, "doRequestWithError body gzip-encoded, decoding manually");
+                in = new java.util.zip.GZIPInputStream(in);
+            }
+            BufferedReader reader = new BufferedReader(new InputStreamReader(in, "UTF-8"));
             StringBuilder sb = new StringBuilder();
             try {
                 String line;
@@ -281,6 +289,7 @@ public class ApiClient {
             } finally {
                 reader.close();
             }
+            // 复用 queryBalance 的清洗：BOM/NUL/零宽字符、截取首 { 到末 }
             result.response = sanitizeJson(sb.toString());
             LogUtil.d(TAG, "doRequestWithError <- %d chars in %d ms: %s", sb.length(),
                     System.currentTimeMillis() - startTs, LogUtil.preview(sb.toString(), 500));

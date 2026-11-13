@@ -229,6 +229,51 @@ public class StorageManager {
         return ok;
     }
 
+    /** 流式写 stats 的回调：实现方直接往 out 写 JSON，不要自己再攒一个大字符串。 */
+    public interface StatsWriter {
+        void write(java.io.Writer out) throws Exception;
+    }
+
+    /**
+     * 流式写 stats。
+     *
+     * <p>原来是把 2 万条事件建成一棵 JSONArray 树（约 20 万个小对象、峰值堆 8~15MB）
+     * 再 toString 复制一份整串。改成调用方直接写流，内存里只有 8KB 缓冲。
+     * 原子性仍走 {@link #renameAtomic}，与其它写路径一致。
+     */
+    public boolean writeStatsStream(StatsWriter w) {
+        File file = new File(getStatsPath());
+        File dir = file.getParentFile();
+        if (dir != null && !dir.exists() && !dir.mkdirs()) {
+            LogUtil.e(TAG, "writeStatsStream: cannot mkdir %s", dir.getAbsolutePath());
+            return false;
+        }
+        File tmp = new File(file.getAbsolutePath() + ".tmp");
+        java.io.Writer out = null;
+        boolean written = false;
+        try {
+            out = new java.io.BufferedWriter(new java.io.OutputStreamWriter(
+                    new java.io.FileOutputStream(tmp), "UTF-8"), 8192);
+            w.write(out);
+            out.flush();
+            out.close();
+            out = null;
+            written = true;
+            boolean ok = renameAtomic(tmp, file);
+            LogUtil.d(TAG, "writeStatsStream: %d bytes ok=%s", tmp.length(), ok);
+            return ok;
+        } catch (Throwable t) {
+            LogUtil.w(TAG, "writeStatsStream failed: %s", t.getMessage());
+            return false;
+        } finally {
+            if (out != null) {
+                try { out.close(); } catch (Throwable ignored) {}
+            }
+            // 写成功时 tmp 已被 rename 走；失败或中断则清掉，避免留垃圾
+            if (!written && tmp.exists()) tmp.delete();
+        }
+    }
+
     // ---- exports ----
 
     /**

@@ -462,7 +462,14 @@ final class UsageStats {
                 try {
                     StorageManager sm = StorageManager.getInstance();
                     if (sm == null) { schedule(); return; }
-                    sm.saveStats(toJson(snapshot));
+                    // 流式写：不再在内存里建 20k×11 的 JSONArray 树（峰值 8~15MB）
+                    // 再 toString 复制一份整串，直接边遍历边写文件。
+                    boolean ok = sm.writeStatsStream(new StorageManager.StatsWriter() {
+                        public void write(java.io.Writer out) throws Exception {
+                            writeEvents(out, snapshot);
+                        }
+                    });
+                    if (!ok) schedule();
                 } catch (Exception e) {
                     LogUtil.w(TAG, "flush failed: %s", e.getMessage());
                     // dirty 已在投递前清掉：写盘失败要重新排队，否则这批事件
@@ -534,33 +541,34 @@ final class UsageStats {
         return e;
     }
 
-    private String toJson(List<Ev> list) {
-        try {
-            JSONObject root = new JSONObject();
-            root.put("v", 2);
-            JSONArray arr = new JSONArray();
-            for (int i = 0; i < list.size(); i++) {
-                Ev e = list.get(i);
-                JSONArray a = new JSONArray();
-                a.put(e.ts);
-                a.put(kindCode(e.kind));
-                a.put(e.model);
-                a.put(e.provider);
-                a.put(e.name);
-                a.put(e.pt);
-                a.put(e.ct);
-                a.put(e.cached);
-                a.put(e.genMs);
-                a.put(e.est ? 1 : 0);
-                a.put(e.ok ? 1 : 0);
-                arr.put(a);
-            }
-            root.put("evs", arr);
-            return root.toString();
-        } catch (Exception e) {
-            LogUtil.w(TAG, "toJson failed: %s", e.getMessage());
-            return "{}";
+    /**
+     * 流式序列化：与旧 {@code toJson()} 输出格式完全一致（v2 + evs 紧凑数组），
+     * 只是不再经过 JSONArray 树，堆上只占一个 8KB 输出缓冲。
+     */
+    private static void writeEvents(java.io.Writer out, List<Ev> list) throws Exception {
+        android.util.JsonWriter w = new android.util.JsonWriter(out);
+        w.beginObject();
+        w.name("v").value(2);
+        w.name("evs").beginArray();
+        for (int i = 0; i < list.size(); i++) {
+            Ev e = list.get(i);
+            w.beginArray();
+            w.value(e.ts);
+            w.value(kindCode(e.kind));
+            w.value(e.model);
+            w.value(e.provider);
+            w.value(e.name);
+            w.value(e.pt);
+            w.value(e.ct);
+            w.value(e.cached);
+            w.value(e.genMs);
+            w.value(e.est ? 1 : 0);
+            w.value(e.ok ? 1 : 0);
+            w.endArray();
         }
+        w.endArray();
+        w.endObject();
+        w.flush();
     }
 
     private static int kindCode(String kind) {

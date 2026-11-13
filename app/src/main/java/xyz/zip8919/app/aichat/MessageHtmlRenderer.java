@@ -111,7 +111,11 @@ public class MessageHtmlRenderer {
                 total, start, MathRenderer.cacheSize());
 
         StringBuilder body = new StringBuilder();
-        body.append(renderMessagesHtml(messages, start, ctx));
+        // 只渲染 [start, total)：renderMessagesHtml 把第二个参数当作起始索引，
+        // 若把整个列表传进去，它会从头渲染全部消息、却把 data-idx 标成 start+i，
+        // 于是长会话（>40 条）里所有消息索引整体偏移 start —— 长按菜单、复制、
+        // 修改、删除、重试全部命中错误的那一条，上滑加载还会重复渲染已在本页的消息。
+        body.append(renderMessagesHtml(messages == null ? null : messages.subList(start, total), start, ctx));
         String page = MarkdownPipeline.buildPage(body.toString(), start);
         LogUtil.d(TAG, "buildConversationHtml done: rendered=%d, body=%d chars, page=%d chars in %d ms",
                 total - start, body.length(), page.length(), System.currentTimeMillis() - startTs);
@@ -529,38 +533,58 @@ public class MessageHtmlRenderer {
      */
     public static String contentToHtml(String text, Context ctx, boolean cacheable) {
         if (text == null || text.isEmpty()) return "";
+        AppearanceManager am = null;
+        try { am = AppearanceManager.getInstance(ctx); } catch (Throwable t) {}
+        final long revAtStart = am != null ? am.getRevision() : -1L;
         ensureCacheSig(ctx);
         final String sigAtStart = renderCacheSig;
         String cached = renderCache.get(text);
-        if (cached != null) return cached;
-        long startTs = System.currentTimeMillis();
-        boolean hasThinking = text.contains("[thinking]");
-        boolean hasTool = text.contains(WebSearchTool.TRACE_START);
-        String html = (hasThinking || hasTool)
-                ? contentWithBlocks(text, ctx)
-                : MarkdownPipeline.render(text, ctx);
-        LogUtil.v(TAG, "contentToHtml: in=%d chars -> %d chars html in %d ms (thinking=%s, tool=%s)",
-                text.length(), html.length(), System.currentTimeMillis() - startTs,
-                hasThinking, hasTool);
-        if (cacheable && html.length() <= RENDER_CACHE_MAX_HTML) {
-            synchronized (renderCache) {
-                // 后台渲染期间若换了皮肤，这次用的是旧 fgColor；签名已变，
-                // 绝不能把旧色 HTML 写回缓存（否则整页重灌永久命中旧公式）。
-                if (!sigAtStart.equals(renderCacheSig)) return html;
-                boolean present = renderCache.containsKey(text);
-                int totalBytes = html.length();
-                for (String v : renderCache.values()) totalBytes += v.length();
-                Iterator<Map.Entry<String, String>> it = renderCache.entrySet().iterator();
-                while (it.hasNext() && ((!present && renderCache.size() >= RENDER_CACHE_MAX_ENTRIES)
-                        || totalBytes > RENDER_CACHE_MAX_BYTES)) {
-                    Map.Entry<String, String> e = it.next();
-                    it.remove();
-                    totalBytes -= e.getValue().length();
-                }
-                renderCache.put(text, html);
-            }
+        if (cached != null) {
+            // 命中路径的二次校验必须零成本：开头 ensureCacheSig 已经算过一次全 token
+            // 颜色签名，这里再算一遍 colorSignature() 会拖慢流式每 200ms 的高频命中。
+            // 改用 volatile revision —— 任何外观改动都走 bump() 自增，一次 volatile 读
+            // 就能发现「ensureCacheSig 到 get 之间恰好换肤」这个并发窗口。
+            long revNow = am != null ? am.getRevision() : -1L;
+            if (revAtStart == revNow && sigAtStart.equals(renderCacheSig)) return cached;
+            ensureCacheSig(ctx);       // 清缓存并把签名推进到新值（put 分支据此不写旧色）
         }
-        return html;
+        // 流式中间帧只渲染、不写公式位图缓存：增长中的裸命令每帧 key 都不同，
+        // 写进去会把 2MB 上限挤满、淘汰稳定公式（整页重灌时全 miss）。
+        final boolean transientFrame = !cacheable;
+        boolean prevTransient = false;
+        if (transientFrame) prevTransient = MathRenderer.beginTransient();
+        try {
+            long startTs = System.currentTimeMillis();
+            boolean hasThinking = text.contains("[thinking]");
+            boolean hasTool = text.contains(WebSearchTool.TRACE_START);
+            String html = (hasThinking || hasTool)
+                    ? contentWithBlocks(text, ctx)
+                    : MarkdownPipeline.render(text, ctx);
+            LogUtil.v(TAG, "contentToHtml: in=%d chars -> %d chars html in %d ms (thinking=%s, tool=%s)",
+                    text.length(), html.length(), System.currentTimeMillis() - startTs,
+                    hasThinking, hasTool);
+            if (cacheable && html.length() <= RENDER_CACHE_MAX_HTML) {
+                synchronized (renderCache) {
+                    // 后台渲染期间若换了皮肤，这次用的是旧 fgColor；签名已变，
+                    // 绝不能把旧色 HTML 写回缓存（否则整页重灌永久命中旧公式）。
+                    if (!sigAtStart.equals(renderCacheSig)) return html;
+                    boolean present = renderCache.containsKey(text);
+                    int totalBytes = html.length();
+                    for (String v : renderCache.values()) totalBytes += v.length();
+                    Iterator<Map.Entry<String, String>> it = renderCache.entrySet().iterator();
+                    while (it.hasNext() && ((!present && renderCache.size() >= RENDER_CACHE_MAX_ENTRIES)
+                            || totalBytes > RENDER_CACHE_MAX_BYTES)) {
+                        Map.Entry<String, String> e = it.next();
+                        it.remove();
+                        totalBytes -= e.getValue().length();
+                    }
+                    renderCache.put(text, html);
+                }
+            }
+            return html;
+        } finally {
+            if (transientFrame) MathRenderer.endTransient(prevTransient);
+        }
     }
 
     private static String contentWithBlocks(String text, Context ctx) {

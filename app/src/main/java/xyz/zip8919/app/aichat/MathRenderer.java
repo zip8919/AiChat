@@ -33,6 +33,27 @@ final class MathRenderer {
     private static final Map<String, String> latexCache =
             Collections.synchronizedMap(new LinkedHashMap<String, String>());
 
+    /**
+     * 流式中间帧标记：只渲染、不写 latexCache。
+     *
+     * <p>流式每 200ms 一帧，正文里增长中的裸命令（{@code \al} → {@code \alpha}）
+     * 每帧都是一个新 key；照常写入会把 2MB 上限挤满、把稳定公式整批淘汰，
+     * 整页重灌时全部 miss。调用方用 try/finally 复位，线程池复用不会串味。
+     */
+    private static final ThreadLocal<Boolean> TRANSIENT = new ThreadLocal<Boolean>();
+
+    /** 进入流式帧；返回进入前的状态，供 {@link #endTransient(boolean)} 还原。 */
+    static boolean beginTransient() {
+        boolean prev = Boolean.TRUE.equals(TRANSIENT.get());
+        TRANSIENT.set(Boolean.TRUE);
+        return prev;
+    }
+
+    static void endTransient(boolean prev) {
+        if (prev) TRANSIENT.set(Boolean.TRUE);
+        else TRANSIENT.remove();
+    }
+
     private MathRenderer() {
     }
 
@@ -56,12 +77,15 @@ final class MathRenderer {
     // Extract \ce{...} → convert to LaTeX → render with jlatexmath → @@MATHn@@ image.
     static String extractAndRenderCe(String text, float density, List<String> mathTags) {
         StringBuilder out = new StringBuilder();
+        // 反引号计数随 out 增量维护：旧实现每处 \ce{ 都从 0 重扫 out 全长，
+        // k 处就是 O(k·n) ≈ O(n²)。这里每个字符只计一次，整体 O(n)。
+        int backticks = 0;
         int i = 0;
         while (i < text.length()) {
             if (text.charAt(i) == '\\' && i + 3 < text.length()
                     && text.charAt(i + 1) == 'c' && text.charAt(i + 2) == 'e'
                     && text.charAt(i + 3) == '{'
-                    && !insideBacktickSpan(out)) {
+                    && !insideBacktickSpan(backticks)) {
                 i += 4;
                 int depth = 1, cs = i;
                 while (i < text.length() && depth > 0) {
@@ -72,13 +96,15 @@ final class MathRenderer {
                 if (depth > 0) {
                     // 未找到配对 } (流式分片/截断)：原样输出剩余文本，避免 substring 越界
                     out.append(text, cs - 4, text.length());
+                    backticks += countBackticks(text, cs - 4, text.length());
                     break;
                 }
                 int ce = i;
                 String formula = text.substring(cs, ce - 1);
 
                 int pfx = stripMathWrapOut(text, ce, out);
-                // stripMathWrapOut already trimmed the output buffer
+                // stripMathWrapOut 只回退尾部空白与 $ / \[ / \]，不会删掉反引号，
+                // 所以 backticks 无需回退；今后若让它删别的字符，必须同步这里。
 
                 // Convert \ce content to proper LaTeX and render as image
                 String latex = ceToLatex(formula);
@@ -93,7 +119,9 @@ final class MathRenderer {
 
                 if (pfx > 0) i = skipMathSuffix(text, i, pfx);
             } else {
-                out.append(text.charAt(i));
+                char c = text.charAt(i);
+                out.append(c);
+                if (c == '`') backticks++;
                 i++;
             }
         }
@@ -501,6 +529,11 @@ final class MathRenderer {
             }
         }
 
+        if (Boolean.TRUE.equals(TRANSIENT.get())) {
+            // 流式中间帧：位图照常返回给当前显示，但不进缓存（见 TRANSIENT 注释）
+            LogUtil.v(TAG, "latex transient (skip cache): %s", LogUtil.preview(formula, 80));
+            return imgTag;
+        }
         synchronized (latexCache) {
             latexCache.put(key, imgTag);
             int totalBytes = 0;
@@ -572,13 +605,17 @@ final class MathRenderer {
         else if (prefixLen == 1 && i < text.length() && text.charAt(i)=='$') i++;
         return i;
     }
-    // Check if position pos is inside a backtick code span (odd number of ` before pos)
-    private static boolean insideBacktickSpan(StringBuilder out) {
-        int bt = 0;
-        for (int k = 0; k < out.length(); k++) {
-            if (out.charAt(k) == '`') bt++;
-        }
-        return (bt % 2) == 1;
+    // 当前位置是否落在反引号代码段内（此前反引号个数为奇数）。
+    // 旧实现每次从 0 重扫 out 全长，O(n²)；改由调用方增量维护计数，整体 O(n)。
+    private static boolean insideBacktickSpan(int backticks) {
+        return (backticks & 1) == 1;
+    }
+
+    /** 统计 [start,end) 内的反引号个数，供增量维护 insideBacktickSpan 状态。 */
+    private static int countBackticks(CharSequence s, int start, int end) {
+        int n = 0;
+        for (int k = start; k < end; k++) if (s.charAt(k) == '`') n++;
+        return n;
     }
     private static boolean isWhitespaceChar(char c) {
         return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f';

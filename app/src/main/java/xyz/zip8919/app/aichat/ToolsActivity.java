@@ -354,6 +354,10 @@ public class ToolsActivity extends ThemedActivity {
 
     private void exitSelectionMode() {
         selectionMode = false;
+        // 必须清空：refreshFiles 只在 selectionMode 为 true 时重建这个集合，
+        // 退出时不清就会留到下一次多选，把上一轮选过的文件重新勾上，
+        // 用户点删除时连带删掉本轮没选的文件（不可恢复）。
+        checkedNames.clear();
         fileList.clearChoices();
         refreshFiles();
         LogUtil.i(TAG, "exitSelectionMode");
@@ -441,6 +445,7 @@ public class ToolsActivity extends ThemedActivity {
         AcToast.show(this, "已删除 " + ok + " 个文件");
         StorageActivity.invalidateCache();
         selectionMode = false;
+        checkedNames.clear();   // 同上：不清会被下一轮多选继承，导致误删
         refreshFiles();
     }
 

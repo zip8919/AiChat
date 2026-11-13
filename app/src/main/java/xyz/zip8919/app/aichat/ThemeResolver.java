@@ -39,14 +39,22 @@ final class ThemeResolver {
 
     static Resolved resolve(AppearanceManager m, String key, boolean dark) {
         Resolved r = new Resolved();
+        // 一次解析只取一次主题 id：getThemeId() 是 volatile 快照，分两次取时
+        // 后台切主题会让 themeValue 与 themeName 落在不同主题上，取色与 UI 口径不一致。
+        String themeId = m.getThemeId();
         String explicit = m.getExplicit(key, dark);
         if (explicit != null && explicit.length() > 0) {
             r.value = explicit;
             r.source = SOURCE_EXPLICIT;
             r.overridden = true;
         }
-        r.themeValue = themeValue(m.getThemeId(), key, dark);
-        r.themeName = themeName(m.getThemeId());
+        // 只 active() 一次同时取 value/name：旧的 themeValue()/themeName() 各自
+        // 走一遍 active → find → list，热路径上等于把仓库扫描做了两遍。
+        Theme t = ThemeRepository.getInstance().active(themeId);
+        if (t != null) {
+            r.themeName = t.name;
+            if (t.hasMode(dark)) r.themeValue = t.valueFor(key, dark);
+        }
         if (r.value == null) {
             if (r.themeValue != null && r.themeValue.length() > 0) {
                 r.value = r.themeValue;

@@ -92,7 +92,9 @@ public class AppearanceActivity extends ThemedActivity {
             return;
         }
         // 从管理页返回时字体/主题可能增删，重扫目录并重建两个 Spinner。
-        ThemeRepository.getInstance().invalidate();
+        // 不再 invalidate()：save/delete/rename/copy 自己会清 cache，
+        // list() 的 500ms 目录签名也能兜住外部改动。每次返回都强制重扫，
+        // 等于主线程重新读全部主题文件 + JSON 解析 + CSS 清洗（10 个 8KB 主题几十 ms）。
         buildAdapters();
         refreshAll();
     }

@@ -98,6 +98,11 @@ public class StorageAttachmentsActivity extends ThemedActivity {
     private boolean incomplete;
     /** 索引一条都没解析出来：此时「无引用」不可信，界面上要明说。 */
     private boolean indexEmpty;
+
+    /** 索引不可信（读失败 / 有图却零引用）时一律不允许删除，避免误删在用图。 */
+    private boolean canDelete() {
+        return !incomplete && !indexEmpty;
+    }
     private boolean loading;
     /** 从「最占空间」跳进来时要定位的文件名。 */
     private String highlight;
@@ -146,7 +151,7 @@ public class StorageAttachmentsActivity extends ThemedActivity {
         });
         selectBtn.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
-                if (incomplete) {
+                if (!canDelete()) {
                     AcToast.show(StorageAttachmentsActivity.this, "部分会话无法读取，暂不能清理图片");
                     return;
                 }
@@ -301,7 +306,7 @@ public class StorageAttachmentsActivity extends ThemedActivity {
         int hi = indexOf(data, highlight);
         if (hi >= 0 && !selectionMode) list.setSelection(hi);
 
-        selectBtn.setVisibility(!selectionMode && showOrphans && data.size() > 0 && !incomplete
+        selectBtn.setVisibility(!selectionMode && showOrphans && data.size() > 0 && canDelete()
                 ? View.VISIBLE : View.GONE);
         // 全选只在多选态出现：未进多选时它顶替「多选」按钮会让人以为能一键删
         boolean canSelectAll = selectionMode && showOrphans && !orphans.isEmpty();
@@ -384,7 +389,7 @@ public class StorageAttachmentsActivity extends ThemedActivity {
         items.add("分享");
         items.add("详细信息");
         // 索引不完整时「无引用」是不可信的：可能删掉历史消息正在用的图
-        if (it.refs == 0 && !incomplete) items.add("删除");
+        if (it.refs == 0 && canDelete()) items.add("删除");
 
         AcDialog.builder(this)
                 .setTitle(it.refs > 0
@@ -455,6 +460,7 @@ public class StorageAttachmentsActivity extends ThemedActivity {
     }
 
     private void deleteSelected() {
+        if (!canDelete()) return;
         final List<String> names = new ArrayList<String>(selected);
         if (names.isEmpty()) return;
         deleteBtn.setEnabled(false);
@@ -598,35 +604,46 @@ public class StorageAttachmentsActivity extends ThemedActivity {
         return base.substring(0, 8) + "…" + ext;
     }
 
+    /** 解码中的 key：快速滑动时同一项会被反复 bind，不去重会堆出几百个重复任务。 */
+    private static final java.util.Set<String> IN_FLIGHT =
+            java.util.Collections.synchronizedSet(new java.util.HashSet<String>());
+
     private static void loadThumb(final ImageView view, final File file, final String key) {
-        THUMB_POOL.execute(new Runnable() {
-            public void run() {
-                Bitmap bmp = null;
-                try {
-                    BitmapFactory.Options bounds = new BitmapFactory.Options();
-                    bounds.inJustDecodeBounds = true;
-                    BitmapFactory.decodeFile(file.getAbsolutePath(), bounds);
-                    int sample = 1;
-                    int max = Math.max(bounds.outWidth, bounds.outHeight);
-                    // 卡片上只有 56dp，3x 屏 168px 就够；按 2 的幂采样，避免整图进内存
-                    while (max / sample > 240) sample *= 2;
-                    BitmapFactory.Options opts = new BitmapFactory.Options();
-                    opts.inSampleSize = sample;
-                    bmp = BitmapFactory.decodeFile(file.getAbsolutePath(), opts);
-                } catch (Throwable t) {
-                    LogUtil.w(TAG, "thumb failed: %s", t.getMessage());
-                }
-                if (bmp == null) return;
-                THUMBS.put(key, bmp);
-                final Bitmap result = bmp;
-                MAIN.post(new Runnable() {
-                    public void run() {
-                        if (key.equals(view.getTag())) {
-                            view.setImageBitmap(result);
-                        }
+        if (!IN_FLIGHT.add(key)) return;   // 已在队列或解码中
+        try {
+            THUMB_POOL.execute(new Runnable() {
+                public void run() {
+                    Bitmap bmp = null;
+                    try {
+                        BitmapFactory.Options bounds = new BitmapFactory.Options();
+                        bounds.inJustDecodeBounds = true;
+                        BitmapFactory.decodeFile(file.getAbsolutePath(), bounds);
+                        int sample = 1;
+                        int max = Math.max(bounds.outWidth, bounds.outHeight);
+                        // 卡片上只有 56dp，3x 屏 168px 就够；按 2 的幂采样，避免整图进内存
+                        while (max / sample > 240) sample *= 2;
+                        BitmapFactory.Options opts = new BitmapFactory.Options();
+                        opts.inSampleSize = sample;
+                        bmp = BitmapFactory.decodeFile(file.getAbsolutePath(), opts);
+                    } catch (Throwable t) {
+                        LogUtil.w(TAG, "thumb failed: %s", t.getMessage());
+                    } finally {
+                        IN_FLIGHT.remove(key);
                     }
-                });
-            }
-        });
+                    if (bmp == null) return;
+                    THUMBS.put(key, bmp);
+                    final Bitmap result = bmp;
+                    MAIN.post(new Runnable() {
+                        public void run() {
+                            if (key.equals(view.getTag())) {
+                                view.setImageBitmap(result);
+                            }
+                        }
+                    });
+                }
+            });
+        } catch (Throwable t) {
+            IN_FLIGHT.remove(key);   // 池拒绝/关闭：别让 key 永久卡在 in-flight
+        }
     }
 }

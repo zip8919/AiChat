@@ -345,23 +345,34 @@ public class FontManagerActivity extends ThemedActivity {
     protected void onActivityResult(int req, int res, Intent data) {
         super.onActivityResult(req, res, data);
         if (req != REQ_ADD || res != RESULT_OK || data == null || data.getData() == null) return;
-        Uri uri = data.getData();
+        final Uri uri = data.getData();
         final String name = displayName(uri);
         String lower = name.toLowerCase();
         if (!lower.endsWith(".ttf") && !lower.endsWith(".otf")) {
             toast(FontRepository.addErrorText(FontRepository.ADD_BAD_EXT));
             return;
         }
-        final byte[] bytes = readAll(uri);
-        if (bytes == null) {
-            toast("读取失败或文件超过 8MB");
-            return;
-        }
-        if (repo.installedIds().contains(stripExt(name))) {
-            showNameConflict(name, bytes);
-        } else {
-            doAdd(name, bytes);
-        }
+        // 读取（最多 8MB）+ 写盘 + Typeface 试加载原来全在 onActivityResult 主线程同步跑，
+        // 导入大字体时冻结 1~5s，低端机直接 ANR。整段搬后台，回调再回主线程。
+        new Thread(new Runnable() {
+            public void run() {
+                final byte[] bytes = readAll(uri);
+                runOnUiThread(new Runnable() {
+                    public void run() {
+                        if (isFinishing() || isDestroyed()) return;
+                        if (bytes == null) {
+                            toast("读取失败或文件超过 8MB");
+                            return;
+                        }
+                        if (repo.installedIds().contains(stripExt(name))) {
+                            showNameConflict(name, bytes);
+                        } else {
+                            doAdd(name, bytes);
+                        }
+                    }
+                });
+            }
+        }, "aichat-font-read").start();
     }
 
     private void showNameConflict(final String name, final byte[] bytes) {
@@ -377,14 +388,24 @@ public class FontManagerActivity extends ThemedActivity {
                 .show();
     }
 
-    private void doAdd(String name, byte[] bytes) {
-        int code = repo.add(bytes, name);
-        if (code == FontRepository.ADD_OK) {
-            load();
-            toast("已添加，默认停用；到外观页启用后即可选择");
-        } else {
-            toast(FontRepository.addErrorText(code));
-        }
+    private void doAdd(final String name, final byte[] bytes) {
+        // repo.add 内部要原子写盘 + Typeface.createFromFile 试加载，同属重 IO，一样放后台。
+        new Thread(new Runnable() {
+            public void run() {
+                final int code = repo.add(bytes, name);
+                runOnUiThread(new Runnable() {
+                    public void run() {
+                        if (isFinishing() || isDestroyed()) return;
+                        if (code == FontRepository.ADD_OK) {
+                            load();
+                            toast("已添加，默认停用；到外观页启用后即可选择");
+                        } else {
+                            toast(FontRepository.addErrorText(code));
+                        }
+                    }
+                });
+            }
+        }, "aichat-font-add").start();
     }
 
     private String uniqueName(String name) {
@@ -419,9 +440,28 @@ public class FontManagerActivity extends ThemedActivity {
         return seg == null ? "font.ttf" : seg;
     }
 
+    /** 尽量按文件大小预分配：8MB 级数组反复扩容时每次都要整段拷贝，白烧 CPU。 */
+    private int sizeHintOf(Uri uri) {
+        Cursor c = null;
+        try {
+            c = getContentResolver().query(uri, new String[]{OpenableColumns.SIZE},
+                    null, null, null);
+            if (c != null && c.moveToFirst() && !c.isNull(0)) {
+                long n = c.getLong(0);
+                if (n > 0 && n <= MAX_BYTES) return (int) n + 1;
+            }
+        } catch (Throwable ignored) {
+        } finally {
+            if (c != null) {
+                try { c.close(); } catch (Throwable ignored) {}
+            }
+        }
+        return 8192;
+    }
+
     private byte[] readAll(Uri uri) {
         InputStream in = null;
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        ByteArrayOutputStream out = new ByteArrayOutputStream(sizeHintOf(uri));
         try {
             in = getContentResolver().openInputStream(uri);
             if (in == null) return null;

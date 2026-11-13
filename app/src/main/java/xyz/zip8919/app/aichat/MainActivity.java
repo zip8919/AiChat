@@ -2844,11 +2844,28 @@ public class MainActivity extends ThemedActivity {
                 messages == null ? new ArrayList<Message>() : new ArrayList<Message>(messages);
         // 只渲染最近一批：更早的消息等用户上滑到顶部再追加
         final int from = Math.max(0, snapshot.size() - INITIAL_VISIBLE_MESSAGES);
+        // 重灌「起点」先关门：后台渲染 html 期间若 pageReady 仍为 true，appendMsg、
+        // 流式帧会直接 eval 到即将被 loadDataWithBaseURL 冲掉的旧 DOM，消息随之丢失
+        // （偶现「消息不自动渲染」）。先清掉针对旧页面排的遗留队列，再关门，
+        // 让渲染期间到达的 JS 走 pendingJs，由 onPageFinished 重放到新页。
+        pageReady = false;
+        pendingJs.clear();
         new Thread(new Runnable() {
             public void run() {
-                final String html = MessageHtmlRenderer.buildConversationHtml(snapshot, from, MainActivity.this);
-                LogUtil.d(TAG, "conversation html built: len=%d in %d ms",
-                        html == null ? -1 : html.length(), System.currentTimeMillis() - t0);
+                // 渲染线程必须有兜底：pageReady 已在上面关门，一旦这里抛异常（例如
+                // 公式提取遇到截断的 \ce{A ->[），runOnUiThread 永不执行 → pageReady
+                // 永远为 false，后续所有 JS 只会进 pendingJs（上限 300），整页空白
+                // 直到用户重进会话。宁可加载一张空骨架，也不能让页面卡死。
+                String html = null;
+                try {
+                    html = MessageHtmlRenderer.buildConversationHtml(snapshot, from, MainActivity.this);
+                    LogUtil.d(TAG, "conversation html built: len=%d in %d ms",
+                            html == null ? -1 : html.length(), System.currentTimeMillis() - t0);
+                } catch (Throwable t) {
+                    LogUtil.e(TAG, "buildConversationHtml failed, fallback to empty page: %s",
+                            String.valueOf(t));
+                }
+                final String page = html != null ? html : MarkdownPipeline.buildPage("", from);
                 runOnUiThread(new Runnable() {
                     public void run() {
                         if (renderGeneration.get() != myRenderGen) {
@@ -2862,11 +2879,9 @@ public class MainActivity extends ThemedActivity {
                         // 整页重建，DOM 里不存在上一次流式留下的 base 骨架，
                         // 「已推送基准」必须作废，否则下一次 trace 渲染会误走增量
                         lastStreamTrace = "";
-                        // 新页面 = 新的 DOM：旧队列是针对旧页面排的，重放会重复追加。
-                        // 先关门清队，onPageFinished 再开。
-                        pageReady = false;
-                        pendingJs.clear();
-                        conversationWebView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null);
+                        // pageReady 已在重灌起点关门、遗留队列也已清掉；
+                        // 加载期间新到的 JS 继续排队，onPageFinished 统一开门重放。
+                        conversationWebView.loadDataWithBaseURL(null, page, "text/html", "UTF-8", null);
                         // 新 DOM 的 style 节点已重建，清掉 CSS 相等短路，
                         // 否则下一次外观变更会跳过注入、样式停在初始值。
                         if (webRefresher != null) webRefresher.reset();
@@ -3893,8 +3908,23 @@ public class MainActivity extends ThemedActivity {
                 .show();
     }
 
+    /**
+     * 生成中禁止结构性改动 messages。
+     *
+     * <p>流式线程按 aiIndex 往 messages 里写，删除/回溯一旦截断列表，
+     * 写入就落到越界位置：setContent 丢弃、本轮回复不落盘，finalizeLast 还会
+     * 往不存在的 data-idx 上写。这些操作本身只需用户先点一下「停止」，不值得
+     * 为它们再写一套打断-等待-续做的状态机，直接拒绝最省事也最安全。
+     */
+    private boolean rejectWhileStreaming(String action) {
+        if (!isRequestInProgress.get()) return false;
+        AcToast.show(this, "回复生成中，请先点「停止」再" + action);
+        return true;
+    }
+
     // 4. 删除
     private void deleteMessage(final int pos) {
+        if (rejectWhileStreaming("删除消息")) return;
         if (pos < 0 || pos >= messages.size()) {
             LogUtil.w(TAG, "deleteMessage ignored: pos=%d size=%d", pos, messages.size());
             return;
@@ -4198,6 +4228,7 @@ public class MainActivity extends ThemedActivity {
 
     // 6. 回溯到此处
     private void rollbackTo(int pos) {
+        if (rejectWhileStreaming("回溯")) return;
         if (pos >= messages.size() - 1) {
             LogUtil.d(TAG, "rollbackTo: already latest (pos=%d, size=%d)", pos, messages.size());
             AcToast.show(this, "已在最新位置");

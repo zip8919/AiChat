@@ -79,6 +79,8 @@ final class ViewerController {
     /** 完整正文：预览/运行永远用完整版，截断只影响「源码」这一屏。 */
     private String docCode;
     private boolean docSourceMode;
+    /** 文档 HTML 构建代际：后台构建完成时若已被更新的请求取代，直接丢弃。 */
+    private int docLoadSeq;
     private Button docPreviewBtn;
 
     ViewerController(Activity activity) {
@@ -804,22 +806,48 @@ final class ViewerController {
         int boxH = docWebView.getHeight();
         if (boxW <= 0) boxW = activity.getResources().getDisplayMetrics().widthPixels;
         if (boxH <= 0) boxH = activity.getResources().getDisplayMetrics().heightPixels;
-        String rotateCss = rotateTransformWrap(docRotation, boxW, boxH);
-        boolean sideways = (docRotation == 90 || docRotation == 270);
-
-        String html;
-        if (docSourceMode) {
-            html = buildSourceHtml(docLang, docCode, rotateCss);
-        } else if (FileKinds.isMarkdown(docName)) {
-            html = buildMarkdownHtml(rotateCss);
-        } else {
-            String trimmed = docCode.trim().toLowerCase();
-            boolean isFullDoc = "html".equals(docLang)
-                    && (trimmed.startsWith("<!doctype") || trimmed.startsWith("<html"));
-            html = buildCodePreviewHtml(docCode, docLang, ViewerBg.hex(bgColor),
-                    rotateCss, isFullDoc, sideways ? boxH : 0);
-        }
-        docWebView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null);
+        final String rotateCss = rotateTransformWrap(docRotation, boxW, boxH);
+        final boolean sideways = (docRotation == 90 || docRotation == 270);
+        // 构建 HTML 会跑 MarkdownPipeline 五六道正则、CodeHighlighter 逐字符匹配：
+        // 40 万字符在 4.4 单核上要数百 ms 到 2s，主线程直接 ANR（每次旋转都会重跑）。
+        // 输入全部快照后丢后台，构建完回主线程 load；用代际号丢弃过期结果。
+        final String code = docCode;
+        final String lang = docLang;
+        final String name = docName;
+        final boolean sourceMode = docSourceMode;
+        final String bgHex = ViewerBg.hex(bgColor);
+        final int seq = ++docLoadSeq;
+        final int h = boxH;
+        new Thread(new Runnable() {
+            public void run() {
+                String html;
+                try {
+                    if (sourceMode) {
+                        html = SourcePage.build(lang, code, rotateCss, TOOLBAR_INSET_PX, bgHex);
+                    } else if (FileKinds.isMarkdown(name)) {
+                        html = buildMarkdownHtml(code, rotateCss, bgHex);
+                    } else {
+                        String trimmed = code.trim().toLowerCase();
+                        boolean isFullDoc = "html".equals(lang)
+                                && (trimmed.startsWith("<!doctype") || trimmed.startsWith("<html"));
+                        html = buildCodePreviewHtml(code, lang, bgHex, rotateCss,
+                                isFullDoc, sideways ? h : 0);
+                    }
+                } catch (Throwable t) {
+                    LogUtil.w(TAG, "loadDocument build failed: %s", t.getMessage());
+                    return;
+                }
+                final String out = html;
+                activity.runOnUiThread(new Runnable() {
+                    public void run() {
+                        if (seq != docLoadSeq) return;
+                        if (activity.isFinishing() || activity.isDestroyed()) return;
+                        if (docWebView == null) return;
+                        docWebView.loadDataWithBaseURL(null, out, "text/html", "UTF-8", null);
+                    }
+                });
+            }
+        }, "aichat-doc-html").start();
     }
 
     /** 源码页由 {@link SourcePage} 生成（纯字符串逻辑，可单测）。 */
@@ -836,14 +864,12 @@ final class ViewerController {
      * <p>顺序不能反。{@code MarkdownPipeline} 里有代码保护、公式、脚注、上下标
      * 五六道正则，十万字符跑下来在 API 18 上要好几秒，主线程直接 ANR。
      */
-    private String buildMarkdownHtml(String rotateCss) {
-        String md = docCode == null ? "" : docCode;
+    private String buildMarkdownHtml(String md, String rotateCss, String bgHex) {
         String shown = md.length() > MarkdownPage.MAX_CHARS
                 ? md.substring(0, MarkdownPage.MAX_CHARS) : md;
         long t0 = System.currentTimeMillis();
         String body = MarkdownPipeline.render(shown, activity);
-        String html = MarkdownPage.build(body, md.length(), rotateCss, TOOLBAR_INSET_PX,
-                ViewerBg.hex(bgColor));
+        String html = MarkdownPage.build(body, md.length(), rotateCss, TOOLBAR_INSET_PX, bgHex);
         LogUtil.d(TAG, "buildMarkdownHtml: chars=%d -> %d in %dms",
                 shown.length(), html.length(), System.currentTimeMillis() - t0);
         return html;

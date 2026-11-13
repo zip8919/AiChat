@@ -46,6 +46,8 @@ final class FontRepository {
 
     private final StorageManager storage;
     private final Map<String, Meta> metas = new LinkedHashMap<String, Meta>();
+    /** id → 文件绝对路径。getTypeface 每个 TextView 调一次，绝不能每次都 listFiles。 */
+    private final Map<String, String> pathById = new LinkedHashMap<String, String>();
     private LruCache<String, Typeface> typefaceCache;
 
     private static final class Meta {
@@ -136,6 +138,7 @@ final class FontRepository {
 
     synchronized List<FontItem> list() {
         List<FontItem> out = new ArrayList<FontItem>();
+        pathById.clear();
         File dir = new File(fontsDir());
         File[] files = dir.listFiles();
         if (files != null) {
@@ -150,6 +153,7 @@ final class FontRepository {
                 it.id = id;
                 it.fileName = f.getName();
                 it.path = f.getAbsolutePath();
+                pathById.put(id, it.path);
                 it.sizeBytes = f.length();
                 it.name = (m != null && m.name.length() > 0) ? m.name : id;
                 it.enabled = m != null && m.enabled;
@@ -180,42 +184,52 @@ final class FontRepository {
     /** 加载失败回退系统默认：返回 null 表示调用方应使用默认字体。 */
     Typeface getTypeface(String id) {
         if (id == null || "system".equals(id) || id.length() == 0) return null;
-        File dir = new File(fontsDir());
-        File found = null;
-        File[] files = dir.listFiles();
-        if (files != null) {
-            for (int i = 0; i < files.length; i++) {
-                if (stripExt(files[i].getName()).equals(id)) { found = files[i]; break; }
-            }
-        }
-        if (found == null || !found.isFile()) return null;
-        String key = found.getAbsolutePath();
-        Typeface cached = cache().get(key);
+        String path = pathOf(id);
+        if (path == null) return null;
+        Typeface cached = cache().get(path);
         if (cached != null) return cached;
         Typeface tf;
         try {
-            tf = Typeface.createFromFile(found);
+            tf = Typeface.createFromFile(path);
         } catch (Throwable t) {
             tf = null;
         }
         if (tf == null) {
+            // 文件被外部删掉时不能误标 loadFailed：清掉索引，下次按目录重建
+            if (!new File(path).isFile()) {
+                pathById.remove(id);
+                return null;
+            }
             markLoadFailed(id);
             return null;
         }
-        cache().put(key, tf);
+        cache().put(path, tf);
         return tf;
     }
 
     /** 字体 id → 实际文件绝对路径；找不到返回 null。@font-face 必须用绝对路径。 */
     synchronized String fontFilePath(String id) {
         if (id == null || "system".equals(id)) return null;
+        return pathOf(id);
+    }
+
+    /** 查 id 对应路径：命中时零磁盘 IO；未命中才重建一次索引。 */
+    private synchronized String pathOf(String id) {
+        String p = pathById.get(id);
+        if (p != null) return p;
+        rebuildPathIndex();
+        return pathById.get(id);
+    }
+
+    private void rebuildPathIndex() {
+        pathById.clear();
         File dir = new File(fontsDir());
         File[] files = dir.listFiles();
-        if (files == null) return null;
+        if (files == null) return;
         for (int i = 0; i < files.length; i++) {
-            if (stripExt(files[i].getName()).equals(id)) return files[i].getAbsolutePath();
+            File f = files[i];
+            if (f.isFile()) pathById.put(stripExt(f.getName()), f.getAbsolutePath());
         }
-        return null;
     }
 
     private synchronized void markLoadFailed(String id) {
@@ -272,6 +286,7 @@ final class FontRepository {
         m.name = stripExt(fileName);
         m.enabled = false;
         metas.put(id, m);
+        pathById.put(id, path);
         saveMetas();
         cache().evictAll();
         LogUtil.i(TAG, "add: %s (%d bytes) -> %s", id, bytes.length, path);
@@ -304,6 +319,7 @@ final class FontRepository {
             }
         }
         metas.remove(id);
+        pathById.remove(id);
         cache().evictAll();   // key 是绝对路径，无法按 id 精确移除，整体清空最稳
         saveMetas();
         return ok;

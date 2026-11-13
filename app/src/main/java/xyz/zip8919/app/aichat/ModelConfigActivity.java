@@ -186,6 +186,8 @@ public class ModelConfigActivity extends ThemedActivity {
                             }
                         }
                         ProviderInfo info = isEdit ? p : new ProviderInfo();
+                        // 记录旧名：ModelInfo.provider 以名字引用，改名后必须同步
+                        String oldName = isEdit ? info.name : null;
                         info.name = name;
                         info.apiUrl = url;
                         info.chatPath = path.isEmpty() ? "/chat/completions" : path;
@@ -194,6 +196,18 @@ public class ModelConfigActivity extends ThemedActivity {
                         if (info.thinkingType == null || info.thinkingType.isEmpty()) info.thinkingType = "object";
                         if (info.thinkingParamName == null || info.thinkingParamName.isEmpty()) info.thinkingParamName = "thinking";
                         if (!isEdit) providers.add(info);
+                        if (isEdit && oldName != null && !oldName.equals(name)) {
+                            // 引用该 provider 的模型仍存旧名，改名后会按名找不到
+                            // provider，变成无法发送的孤儿模型；同步更新引用
+                            for (int i = 0; i < models.size(); i++) {
+                                ModelInfo mi = models.get(i);
+                                if (oldName.equals(mi.provider)) mi.provider = name;
+                            }
+                            configManager.setModels(models);
+                            refreshModelList();
+                            LogUtil.i(TAG, "provider renamed '%s' -> '%s', model refs synced",
+                                    oldName, name);
+                        }
                         configManager.setProviders(providers);
                         configManager.save();
                         refreshProviderList();
@@ -311,7 +325,20 @@ public class ModelConfigActivity extends ThemedActivity {
                             AcToast.show(ModelConfigActivity.this, "提供商不存在: " + prov);
                             return;
                         }
+                        // 模型名是全局唯一 key：ConfigManager.getModel(name) 只返回第一个，
+                        // 重名时实际请求可能用的是另一条的 provider/apiKey/supportsVision，
+                        // 表现成静默 401 或图片不生效。与 provider 的重名校验保持一致。
+                        for (int i = 0; i < models.size(); i++) {
+                            ModelInfo o = models.get(i);
+                            if (o != m && name.equals(o.name)) {
+                                LogUtil.w(TAG, "model save rejected: duplicate name '%s'", name);
+                                AcToast.show(ModelConfigActivity.this, "模型名已存在: " + name);
+                                return;
+                            }
+                        }
                         ModelInfo info = isEdit ? m : new ModelInfo();
+                        // 记录旧名：默认模型按模型名引用，改名后要同步，否则选中态丢失
+                        String oldName = isEdit ? info.name : null;
                         info.name = name;
                         info.provider = prov;
                         // 编辑时保留原有能力位：这里原来硬编码 true，改个名字就把
@@ -320,6 +347,11 @@ public class ModelConfigActivity extends ThemedActivity {
                         info.supportsVision = visionCb.isChecked();
                         if (!isEdit) models.add(info);
                         configManager.setModels(models);
+                        if (isEdit && oldName != null && !oldName.equals(name)
+                                && oldName.equals(configManager.getDefaultModel())) {
+                            configManager.setDefaultModel(name);
+                            LogUtil.i(TAG, "default model renamed: '%s' -> '%s'", oldName, name);
+                        }
                         configManager.save();
                         refreshModelList();
                         LogUtil.i(TAG, "model saved: name=%s provider=%s (isEdit=%s), total=%d",
@@ -337,6 +369,12 @@ public class ModelConfigActivity extends ThemedActivity {
                     public void onClick(DialogInterface d, int w) {
                         LogUtil.i(TAG, "model delete confirmed: pos=%d name=%s provider=%s", pos, m.name, m.provider);
                         models.remove(pos);
+                        // 默认模型被删时回退，避免指向不存在的模型（与删除 provider 一致）
+                        if (m.name.equals(configManager.getDefaultModel())) {
+                            String fallback = models.isEmpty() ? "" : models.get(0).name;
+                            configManager.setDefaultModel(fallback);
+                            LogUtil.i(TAG, "default model '%s' deleted, fallback to '%s'", m.name, fallback);
+                        }
                         configManager.setModels(models);
                         configManager.save();
                         refreshModelList();

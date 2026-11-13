@@ -215,6 +215,37 @@ final class FileActions {
                 || m.equals("application/vnd.android.package-archive");
     }
 
+    /**
+     * 文件头兜底判定：扩展名可能被改名改掉（例如把 {@code x.png} 改成「截图 v2.0」），
+     * 只靠名字判二进制就会漏，随后按 UTF-8 读出乱码再写回，等于把原图永久写坏。
+     *
+     * <p>只看前 512 字节：出现 NUL 直接判二进制；C0 控制字符（\t \n \r 之外）占比超过
+     * 10% 也判二进制。多字节 UTF-8（中文）高位字节不受影响。
+     */
+    private static boolean looksBinary(File f) {
+        java.io.FileInputStream in = null;
+        try {
+            in = new java.io.FileInputStream(f);
+            byte[] buf = new byte[512];
+            int n = in.read(buf);
+            if (n <= 0) return false;   // 空文件按文本处理
+            int bad = 0;
+            for (int i = 0; i < n; i++) {
+                int b = buf[i] & 0xFF;
+                if (b == 0) return true;
+                if (b < 0x09 || (b > 0x0D && b < 0x20)) bad++;
+            }
+            return bad * 100 / n > 10;
+        } catch (Throwable t) {
+            // 读不出来就别让用户编辑：写坏的比例远高于「确实是文本但读不了」
+            return true;
+        } finally {
+            if (in != null) {
+                try { in.close(); } catch (Throwable ignored) {}
+            }
+        }
+    }
+
     /** 编辑文本并覆盖保存。{@code onSaved} 用于让调用页刷新列表，可为 null。 */
     static void editText(final Activity a, final File f, final Runnable onSaved) {
         if (a == null || f == null || !f.isFile()) return;
@@ -228,6 +259,15 @@ final class FileActions {
         }
         new Thread(new Runnable() {
             public void run() {
+                if (looksBinary(f)) {
+                    a.runOnUiThread(new Runnable() {
+                        public void run() {
+                            if (a.isFinishing() || a.isDestroyed()) return;
+                            AcToast.show(a, "该文件不是文本，不能编辑");
+                        }
+                    });
+                    return;
+                }
                 final String content = StorageManager.getInstance(a.getApplicationContext())
                         .readFile(f.getAbsolutePath());
                 a.runOnUiThread(new Runnable() {

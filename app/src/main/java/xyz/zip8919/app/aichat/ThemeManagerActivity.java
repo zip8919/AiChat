@@ -72,8 +72,8 @@ public class ThemeManagerActivity extends ThemedActivity {
             firstResume = false;
             return;
         }
-        // 从编辑页 / 预览页返回时主题可能新增或改名，重扫目录
-        repo.invalidate();
+        // 从编辑页 / 预览页返回时：save/delete/rename/copy 已经清过 cache，
+        // list() 的目录签名也能发现外部改动，不必再强制重扫一遍磁盘。
         load();
     }
 
@@ -282,8 +282,8 @@ public class ThemeManagerActivity extends ThemedActivity {
                 .setPositiveButton("删除", new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         if (t.id.equals(am.getThemeId())) {
-                            am.setThemeId("");
-                            am.applyPermanent();   // 避免磁盘里留着已删主题的 id
+                            // 只解绑 themeId：applyPermanent 会把「临时生效」的改动一起写盘
+                            am.detachTheme(t.id);
                         }
                         boolean ok = repo.delete(t.id);
                         load();
@@ -327,8 +327,7 @@ public class ThemeManagerActivity extends ThemedActivity {
                 .setPositiveButton("删除", new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         if (hit) {
-                            am.setThemeId("");
-                            am.applyPermanent();
+                            for (String id : deletable) am.detachTheme(id);
                         }
                         for (String id : deletable) repo.delete(id);
                         selectionMode = false;

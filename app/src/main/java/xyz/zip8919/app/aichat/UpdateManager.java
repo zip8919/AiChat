@@ -84,7 +84,8 @@ public final class UpdateManager {
     private static volatile HttpURLConnection active;       // 查询/下载连接，cancel() 用
     private static volatile HttpURLConnection probeActive;  // 测速连接，cancelProbe() 用
     private static volatile boolean cancelled;
-    private static volatile boolean probeCancelled;
+    /** 测速代际：probeAll()/cancelProbe() 递增（均在主线程），回调只认当前代。 */
+    private static volatile int probeSeq;
 
     private UpdateManager() {}
 
@@ -170,7 +171,7 @@ public final class UpdateManager {
             pair.put(hostOf(t));
             pair.put(t);
             arr.put(pair);
-            sp.edit().putString(KEY_CUSTOM, arr.toString()).commit();
+            sp.edit().putString(KEY_CUSTOM, arr.toString()).apply();
             LogUtil.i(TAG, "addCustomMirror: " + t);
             return t;
         } catch (Exception e) {
@@ -189,9 +190,9 @@ public final class UpdateManager {
                 JSONArray p = arr.getJSONArray(i);
                 if (!template.equals(p.getString(1))) out.put(p);
             }
-            sp.edit().putString(KEY_CUSTOM, out.toString()).commit();
+            sp.edit().putString(KEY_CUSTOM, out.toString()).apply();
             if (template.equals(selectedTemplate(ctx))) {
-                sp.edit().putString(KEY_SELECTED, "").commit(); // 选中项被删，回退直连
+                sp.edit().putString(KEY_SELECTED, "").apply(); // 选中项被删，回退直连
             }
         } catch (Exception e) {
             LogUtil.w(TAG, "removeCustomMirror failed: " + e.getMessage());
@@ -216,7 +217,7 @@ public final class UpdateManager {
 
     public static void setSelectedTemplate(Context ctx, String template) {
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                .edit().putString(KEY_SELECTED, template == null ? "" : template).commit();
+                .edit().putString(KEY_SELECTED, template == null ? "" : template).apply();
     }
 
     /** 模板含 {url} 就替换，否则当作前缀。空模板 = 直连。 */
@@ -354,25 +355,30 @@ public final class UpdateManager {
 
     // ==================== 镜像测速 ====================
 
-    /** 串行逐项测，回调逐项刷新 UI。cancelProbe() 后剩余项直接跳过。 */
+    /** 串行逐项测，回调逐项刷新 UI。每次发起递增 {@link #probeSeq}：
+     *  结果与回调只认当前代际，cancelProbe() 或新一次 probeAll() 都让旧代作废，
+     *  避免快速连点/退出重进时旧任务回调覆盖新任务结果。 */
     public static void probeAll(final List<Mirror> mirrors, final String assetUrl,
                                 final Callback cb) {
-        probeCancelled = false;
+        final int seq = ++probeSeq;
         PROBE_POOL.execute(new Runnable() {
             public void run() {
                 for (int i = 0; i < mirrors.size(); i++) {
-                    if (probeCancelled) break;
+                    if (seq != probeSeq) break;   // 已被取消或被新一次测速取代
                     final int idx = i;
                     final int ms = probe(applyMirror(mirrors.get(i), assetUrl));
+                    if (seq != probeSeq) break;   // 探测期间换代：本项结果作废，不写共享 latency
                     mirrors.get(i).latency = ms;
                     MAIN.post(new Runnable() {
                         public void run() {
+                            if (seq != probeSeq) return;   // 入队后才换代：丢弃旧代回调
                             if (cb != null) cb.onProbeDone(idx, ms);
                         }
                     });
                 }
                 MAIN.post(new Runnable() {
                     public void run() {
+                        if (seq != probeSeq) return;
                         if (cb != null) cb.onProbeFinished();
                     }
                 });
@@ -528,11 +534,12 @@ public final class UpdateManager {
 
     /**
      * 让在跑的测速尽快退出：点「下载」/切换安装包/页面销毁时调用。
-     * 不复用 cancelled，因为 startDownload() 会 resetCancel()，会把测速的取消
-     * 标志一并清掉；两者也各有独立的活动连接要断开。
+     * 递增 {@link #probeSeq} 让当前代失效——排队/在跑的旧任务及其回调全部作废，
+     * 不受 resetCancel()（只清 cancelled）影响，也能与新一次 probeAll() 区分代际。
+     * 同时断开测速活动连接。
      */
     public static void cancelProbe() {
-        probeCancelled = true;
+        ++probeSeq;
         HttpURLConnection c = probeActive;
         if (c != null) {
             try { c.disconnect(); } catch (Throwable t) {}

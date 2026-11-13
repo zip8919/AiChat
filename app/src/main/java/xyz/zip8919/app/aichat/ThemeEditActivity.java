@@ -187,18 +187,19 @@ public class ThemeEditActivity extends ThemedActivity {
 
     // ---- 保存 / 另存为 ----
 
-    private void save() {
+    private boolean save() {
         collect();
         String n = t.name == null ? "" : t.name.trim();
-        if (n.length() == 0) { toast("名称不能为空"); return; }
+        if (n.length() == 0) { toast("名称不能为空"); return false; }
         t.name = n.length() > 32 ? n.substring(0, 32) : n;
         String id = repo.save(t);
-        if (id == null) { toast("保存失败：存储不可写"); return; }
+        if (id == null) { toast("保存失败：存储不可写"); return false; }
         t.id = id;
         repo.invalidate();
         snapshot();
         refreshFields();
         toast("已保存主题「" + t.name + "」");
+        return true;
     }
 
     private void saveAs() {
@@ -496,8 +497,7 @@ public class ThemeEditActivity extends ThemedActivity {
                             public void onClick(DialogInterface d, int w) {
                                 if (w == 0) finish();
                                 else if (w == 1) {
-                                    save();
-                                    finish();
+                                    if (save()) finish();   // 保存失败时保留页面，避免编辑内容丢失
                                 }
                             }
                         })

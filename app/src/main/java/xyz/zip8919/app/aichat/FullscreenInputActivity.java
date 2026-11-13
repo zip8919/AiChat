@@ -103,16 +103,38 @@ public class FullscreenInputActivity extends ThemedActivity {
                 initial == null ? 0 : initial.length());
     }
 
-    private void updateCounter(int len) {
-        if (counter != null) {
-            // 与消息底部同一套估算规则（中英分别计权、代理对算一个宽字符），
-            // 长文输入时先看到大概要花多少，不用发出去再看回执
-            int tokens = MessageHtmlRenderer.estimateTokens(edit.getText());
-            counter.setText(len + " 字 · ~"
-                    + MessageHtmlRenderer.formatTokens(tokens) + " tokens");
-        }
+    /** 只用来做 token 估算的防抖；静态避免每实例建 Handler。 */
+    private static final android.os.Handler COUNTER =
+            new android.os.Handler(android.os.Looper.getMainLooper());
+    private Runnable pendingCount;
+
+    private void updateCounter(final int len) {
         if (clear != null) {
             clear.setVisibility(len > 0 ? View.VISIBLE : View.GONE);
         }
+        if (counter == null) return;
+        // estimateTokens 对全串 O(n)。短文本同步算（计数不滞后），长文本防抖 150ms：
+        // 2 万字时每键 1~3ms、粘贴 5 万字 5~10ms，连续输入会明显跟不上手。
+        if (len <= 2000) {
+            if (pendingCount != null) COUNTER.removeCallbacks(pendingCount);
+            pendingCount = null;
+            int tokens = MessageHtmlRenderer.estimateTokens(edit.getText());
+            counter.setText(len + " 字 · ~"
+                    + MessageHtmlRenderer.formatTokens(tokens) + " tokens");
+            return;
+        }
+        if (pendingCount != null) COUNTER.removeCallbacks(pendingCount);
+        pendingCount = new Runnable() {
+            public void run() {
+                if (isFinishing() || isDestroyed()) return;
+                if (counter == null) return;
+                // 与消息底部同一套估算规则（中英分别计权、代理对算一个宽字符），
+                // 长文输入时先看到大概要花多少，不用发出去再看回执
+                int tokens = MessageHtmlRenderer.estimateTokens(edit.getText());
+                counter.setText(len + " 字 · ~"
+                        + MessageHtmlRenderer.formatTokens(tokens) + " tokens");
+            }
+        };
+        COUNTER.postDelayed(pendingCount, 150);
     }
 }

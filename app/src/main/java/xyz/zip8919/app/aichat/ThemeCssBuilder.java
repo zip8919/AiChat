@@ -141,10 +141,12 @@ final class ThemeCssBuilder {
         s.append(".attach-cut{color:").append(danger).append(";}");
 
         // --- 重试 / 错误按钮 ---
-        // 重试按钮底色跟随主色；文字保持白色（主色在明暗两套里都是深色系，可读）。
+        // 重试按钮底色跟随主色，字色按主色亮度选黑/白：内置「高对比」主题的
+        // ac_primary 是 #FFFFFF，写死 #fff 就是白底白字，按钮直接消失。
         // 注意不要把 .err-btn.retry 的文字也刷白：它的底色是 surface，浅色模式下
         // surface 是白色，白字会完全看不见。
-        s.append(".retry-btn{background:").append(primary).append(";color:#fff;}");
+        s.append(".retry-btn{background:").append(primary)
+         .append(";color:").append(contrastText(primary)).append(";}");
         s.append(".retry-btn:active{background:").append(primary).append(";}");
         s.append(".err-title{color:").append(danger).append(";}");
         s.append(".err-btn.retry{background:").append(surface).append(";border-color:")
@@ -183,9 +185,34 @@ final class ThemeCssBuilder {
         return hexOf(m.getEffectiveColor(token, dark));
     }
 
-    /** int color → #RRGGBB（丢掉 alpha，CSS 里用不透明色最稳）。 */
+    /**
+     * 给定底色选一个能看清的字色（#000000 / #FFFFFF）。
+     *
+     * <p>用 sRGB 通道加权亮度而非 HSL 的 L：同样 L=50% 时纯黄与纯蓝的观感亮度差一大截，
+     * 按通道加权才和肉眼一致。解析失败按深底处理（白字），与历史行为一致。
+     */
+    static String contrastText(String hex) {
+        Integer v = ThemeTokens.parseColor(hex);
+        if (v == null) return "#FFFFFF";
+        int c = v.intValue();
+        int r = (c >> 16) & 0xFF;
+        int g = (c >> 8) & 0xFF;
+        int b = c & 0xFF;
+        int lum = (r * 299 + g * 587 + b * 114) / 1000;
+        return lum >= 160 ? "#000000" : "#FFFFFF";
+    }
+
+    /** int color → #RRGGBB（丢掉 alpha，CSS 里用不透明色最稳）。
+     *  手写而非 String.format：一次主题刷新要拼 15+ 次，Android 4.4 上
+     *  Formatter 的构造与解析开销明显，属于热路径上的无谓分配。 */
     static String hexOf(int color) {
-        return String.format("#%06X", color & 0x00FFFFFF);
+        char[] buf = new char[7];
+        buf[0] = '#';
+        for (int i = 0; i < 6; i++) {
+            int v = (color >> (20 - i * 4)) & 0x0F;
+            buf[i + 1] = (char) (v < 10 ? '0' + v : 'A' + v - 10);
+        }
+        return new String(buf);
     }
 
     /**

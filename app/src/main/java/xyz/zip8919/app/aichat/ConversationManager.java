@@ -163,7 +163,8 @@ public class ConversationManager {
      * 会把刚删掉的文件又写回来。
      */
     public void flushSaves() {
-        if (Looper.myLooper() != Looper.getMainLooper()) return;
+        // 批量删除放到后台线程后也必须排空队列：若这里直接返回，
+        // 已过 deletedIds 检查、正在写盘的保存任务会把刚删的文件写回来。
         try {
             // 1.5s：够写完一个中等会话，又不至于让主线程卡到接近 ANR 阈值（5s）。
             // 超时不再是致命的——deleteConversation 已用 deletedIds 拦住迟到的写。

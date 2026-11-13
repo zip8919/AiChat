@@ -208,6 +208,9 @@ final class MessageQueue {
                         LogUtil.i(TAG, "queue: clear all (%d)", pending.size());
                         pending.clear();
                         updateBar();
+                        // 列表已空，旧 items 快照不能再留着；与 clearAll() 一样收掉弹窗，
+                        // 顺手把 managerDialog 字段置空，别挂着一个已关闭的引用。
+                        dismissManager();
                     }
                 })
                 .show();

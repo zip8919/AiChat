@@ -392,6 +392,26 @@ public final class AppearanceManager {
         LogUtil.i(TAG, "applyPermanent: saved to disk");
     }
 
+    /**
+     * 只解绑一个已被删除的主题 id，其它状态一概不动。
+     *
+     * <p>删除当前主题时不能用 {@code setThemeId("") + applyPermanent()}：
+     * {@code applyPermanent()} 会把整个 working 拷成 committed 并写盘，等于把用户
+     * 之前「临时生效」（预期重启回滚）的改动一起永久化，语义被悄悄改掉。
+     * 这里只清 themeId 这一个字段，落盘的仍是上次永久保存的其余配置。
+     */
+    public void detachTheme(String id) {
+        String v = id == null ? "" : id;
+        if (v.length() == 0) return;
+        boolean changed = false;
+        if (v.equals(working.themeId)) { working.themeId = ""; changed = true; }
+        if (v.equals(committed.themeId)) { committed.themeId = ""; changed = true; }
+        if (!changed) return;
+        AppearanceStore.getInstance().save(committed);
+        bump();
+        LogUtil.i(TAG, "detachTheme: %s unbound", v);
+    }
+
     /** 放弃改动，回到上次永久保存的值。 */
     public void discard() {
         working = committed.copy();
