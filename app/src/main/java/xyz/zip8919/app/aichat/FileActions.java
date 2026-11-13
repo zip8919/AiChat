@@ -246,6 +246,35 @@ final class FileActions {
         }
     }
 
+    /**
+     * 非 UTF-8 文本兜底：{@code readFile} 按 UTF-8 解码，非法字节会被替换成 U+FFFD，
+     * 保存时再原路写回，整篇中文就永久变成「�」。Windows 记事本产出的 GBK 文本很常见，
+     * 只读前 8KB 做一次严格解码即可判定（endOfInput=false，允许末尾多字节被截断）。
+     */
+    private static boolean looksNonUtf8(File f) {
+        java.io.FileInputStream in = null;
+        try {
+            in = new java.io.FileInputStream(f);
+            byte[] buf = new byte[8192];
+            int n = in.read(buf);
+            if (n <= 0) return false;
+            java.nio.charset.CharsetDecoder dec = java.nio.charset.Charset.forName("UTF-8")
+                    .newDecoder()
+                    .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT);
+            java.nio.ByteBuffer bb = java.nio.ByteBuffer.wrap(buf, 0, n);
+            java.nio.charset.CoderResult r =
+                    dec.decode(bb, java.nio.CharBuffer.allocate(n + 8), false);
+            return r.isError();
+        } catch (Throwable t) {
+            return false;   // 读失败交给后面的 readFile 报「读取失败」，这里不拦
+        } finally {
+            if (in != null) {
+                try { in.close(); } catch (Throwable ignored) {}
+            }
+        }
+    }
+
     /** 编辑文本并覆盖保存。{@code onSaved} 用于让调用页刷新列表，可为 null。 */
     static void editText(final Activity a, final File f, final Runnable onSaved) {
         if (a == null || f == null || !f.isFile()) return;
@@ -264,6 +293,16 @@ final class FileActions {
                         public void run() {
                             if (a.isFinishing() || a.isDestroyed()) return;
                             AcToast.show(a, "该文件不是文本，不能编辑");
+                        }
+                    });
+                    return;
+                }
+                if (looksNonUtf8(f)) {
+                    // 按 UTF-8 读出来就已经是 U+FFFD 了，保存回去必然把原文写坏
+                    a.runOnUiThread(new Runnable() {
+                        public void run() {
+                            if (a.isFinishing() || a.isDestroyed()) return;
+                            AcToast.show(a, "该文件不是 UTF-8 文本，编辑后会乱码，已取消");
                         }
                     });
                     return;

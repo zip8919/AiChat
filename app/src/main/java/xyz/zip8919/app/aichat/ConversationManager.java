@@ -258,13 +258,33 @@ public class ConversationManager {
     }
 
     public void deleteConversation(String conversationId) {
-        LogUtil.i(TAG, "deleteConversation: id=%s, before=%d", conversationId, this.conversations.size());
-        // 附件文件名必须在删文件之前取：删完就无从知道这条会话引用过哪些图。
-        // 只读一个会话文件，和下面 flushSaves 的落盘开销同量级，不会额外拖慢主线程。
-        java.util.Set<String> ownAttachments =
-                StorageCleaner.attachmentNames(storageManager, conversationId);
         // 先落盘队列里的写：否则删完文件后，队列里排着的保存会把它重新写回来
         flushSaves();
+        deleteOne(conversationId);
+        saveIndexOnce();
+    }
+
+    /**
+     * 批量删除：索引只重写一次。
+     *
+     * <p>原来 N 条删除会触发 N 次索引全量序列化（O(N×M)，M 为索引条数），
+     * 删几十条等于把同一份文件白写几十遍。调用方需在后台线程执行（含磁盘 IO）。
+     */
+    public void deleteConversations(java.util.List<String> ids) {
+        if (ids == null || ids.isEmpty()) return;
+        flushSaves();
+        for (int i = 0; i < ids.size(); i++) {
+            deleteOne(ids.get(i));
+        }
+        saveIndexOnce();
+    }
+
+    /** 删单条：不 flush 保存队列、不写索引，由调用方统一收口。 */
+    private void deleteOne(String conversationId) {
+        LogUtil.i(TAG, "deleteConversation: id=%s, before=%d", conversationId, this.conversations.size());
+        // 附件文件名必须在删文件之前取：删完就无从知道这条会话引用过哪些图
+        java.util.Set<String> ownAttachments =
+                StorageCleaner.attachmentNames(storageManager, conversationId);
         // flush 可能超时（大会话序列化慢），残余任务靠这里兜底拦掉
         deletedIds.add(conversationId);
         if (this.currentConversation != null && this.currentConversation.id.equals(conversationId)) {
@@ -278,20 +298,27 @@ public class ConversationManager {
                 break;
             }
         }
-        boolean ok = storageManager.deleteConversation(conversationId);
         // 索引里同步剔除，否则下次进列表这条会以「文件已不存在」的形式再被清一次，
-        // 白跑一趟 retainOnly
+        // 白跑一趟 retainOnly。落盘统一在 saveIndexOnce()。
         java.io.File dir = new java.io.File(storageManager.getConversationsPath());
         ConversationIndex idx = indexFor(dir);
         synchronized (indexLock) {
             idx.remove(conversationId);
-            if (idx.isDirty()) idx.save(dir);
         }
+        boolean ok = storageManager.deleteConversation(conversationId);
         // 回收只被这条会话引用的图片。异步执行、失败静默：
         // 删会话本身已经成功，回收失败最多是留几张孤儿图，不影响用户操作
         StorageCleaner.recycleAsync(storageManager, ownAttachments);
         LogUtil.d(TAG, "deleteConversation: file deleted=%s, remaining=%d, attachments=%d",
                 ok, this.conversations.size(), ownAttachments.size());
+    }
+
+    private void saveIndexOnce() {
+        java.io.File dir = new java.io.File(storageManager.getConversationsPath());
+        ConversationIndex idx = indexFor(dir);
+        synchronized (indexLock) {
+            if (idx.isDirty()) idx.save(dir);
+        }
     }
 
     public List<Conversation> loadConversations() {

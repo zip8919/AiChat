@@ -337,9 +337,8 @@ public class ConversationManagerActivity extends ThemedActivity {
         // N 条放主线程最坏卡几十秒。整批挪后台，UI 只做收尾。
         new Thread(new Runnable() {
             public void run() {
-                for (int i = 0; i < ids.size(); i++) {
-                    conversationManager.deleteConversation(ids.get(i));
-                }
+                // 批量接口：索引只重写一次，不再 N 条删 N 次全量序列化
+                conversationManager.deleteConversations(ids);
                 StorageActivity.invalidateCache();
                 runOnUiThread(new Runnable() {
                     public void run() {
@@ -508,12 +507,30 @@ public class ConversationManagerActivity extends ThemedActivity {
                 .setPositiveButton("删除", new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface dialog, int which) {
                         LogUtil.i(TAG, "delete confirmed: id=%s title=%s", conv.id, conv.title);
-                        conversationManager.deleteConversation(conv.id);
-                        conversations.remove(conv);
-                        adapter.notifyDataSetChanged();
-                        StorageActivity.invalidateCache();
-                        LogUtil.d(TAG, "delete done: remaining=%d", conversations.size());
-                        AcToast.show(ConversationManagerActivity.this, "已删除");
+                        // 单条删除同样是重活：attachmentNames 要读整个会话 json（含 base64
+                        // 图片，可达数 MB）、flushSaves 最长等 1.5s、再删文件 + 重写索引。
+                        // 4.4 老机上放主线程就是几百 ms 到数秒的卡顿，批量删除早已挪后台。
+                        new Thread(new Runnable() {
+                            public void run() {
+                                conversationManager.deleteConversation(conv.id);
+                                StorageActivity.invalidateCache();
+                                runOnUiThread(new Runnable() {
+                                    public void run() {
+                                        if (isFinishing() || isDestroyed()) return;
+                                        // 期间列表可能已重载，按 id 移除才能保证移的是同一条
+                                        for (int i = 0; i < conversations.size(); i++) {
+                                            if (conv.id.equals(conversations.get(i).id)) {
+                                                conversations.remove(i);
+                                                break;
+                                            }
+                                        }
+                                        if (adapter != null) adapter.notifyDataSetChanged();
+                                        LogUtil.d(TAG, "delete done: remaining=%d", conversations.size());
+                                        AcToast.show(ConversationManagerActivity.this, "已删除");
+                                    }
+                                });
+                            }
+                        }, "aichat-delete-one").start();
                     }
                 })
                 .setNegativeButton("取消", null)
@@ -531,9 +548,8 @@ public class ConversationManagerActivity extends ThemedActivity {
         // 否则回主界面后任一次保存都会把被清空的对话重新写回磁盘。
         new Thread(new Runnable() {
             public void run() {
-                for (int i = 0; i < ids.size(); i++) {
-                    conversationManager.deleteConversation(ids.get(i));
-                }
+                // 批量接口：索引只重写一次，不再 N 条删 N 次全量序列化
+                conversationManager.deleteConversations(ids);
                 StorageActivity.invalidateCache();
                 runOnUiThread(new Runnable() {
                     public void run() {

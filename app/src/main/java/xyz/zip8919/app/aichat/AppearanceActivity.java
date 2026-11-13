@@ -571,7 +571,9 @@ public class AppearanceActivity extends ThemedActivity {
         solid.setColor(primary);
         solid.setCornerRadius(dp(2));
         btnPermanent.setBackgroundDrawable(solid);
-        btnPermanent.setTextColor(0xFFFFFFFF);
+        // 字色按主色亮度取黑/白：内置「高对比」主题的主色是 #FFFFFF，
+        // 写死白字就是白底白字，「永久保存」直接看不见。
+        btnPermanent.setTextColor(ThemeCssBuilder.contrastColor(primary));
 
         GradientDrawable soft = new GradientDrawable();
         soft.setColor(0x00000000);

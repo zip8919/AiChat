@@ -94,8 +94,16 @@ public class ThemeEditActivity extends ThemedActivity {
         t.author = authorEdit.getText().toString();
         t.description = descEdit.getText().toString();
         String css = cssEdit.getText().toString();
-        if (darkMode) t.darkCss = css;
-        else t.lightCss = css;
+        // hasDark / hasLight 必须跟着置位：Theme.toJson() 是按这两个标志决定要不
+        // 要输出对应分组的。导入一个只有浅色的主题、在编辑页切到深色并保存，
+        // 若这里只赋 darkCss 不置 hasDark，刚写的一整套深色样式会被静默丢掉。
+        if (darkMode) {
+            t.darkCss = css;
+            if (css != null && css.trim().length() > 0) t.hasDark = true;
+        } else {
+            t.lightCss = css;
+            if (css != null && css.trim().length() > 0) t.hasLight = true;
+        }
     }
 
     private void snapshot() {

@@ -65,7 +65,12 @@ final class ChatTransport {
 
         if (sendThinking) {
             if ("boolean".equals(provider.thinkingType)) {
-                if (!"off".equals(thinkingLevel)) {
+                if ("off".equals(thinkingLevel)) {
+                    // 关思考必须显式下发 false。原来 off 时一个字段都不发，端点保持默认
+                    // （多数是「开」），用户以为开关坏了，实际还在思考、白烧 token。
+                    // 少数端点不认这个字段会 400，由 ChatStreamRunner 的 thinking 降级兜底。
+                    body.put(provider.thinkingParamName, false);
+                } else {
                     body.put(provider.thinkingParamName, true);
                     int budget = 4096;
                     if ("low".equals(thinkingLevel)) budget = 2048;

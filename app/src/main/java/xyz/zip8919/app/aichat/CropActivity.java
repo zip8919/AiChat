@@ -270,7 +270,10 @@ public class CropActivity extends ThemedActivity {
                 } catch (OutOfMemoryError e) {
                     err = "内存不足，请换一张小一点的图";
                 } finally {
-                    if (cropped != null) cropped.recycle();
+                    // 选框拖到四边（等于不裁）时 createBitmap 会直接把 source 原样返回，
+                    // 这里若无条件 recycle，就把 CropView 正在画的那张图回收了，
+                    // 主线程下一次重绘直接 "trying to use a recycled bitmap" 崩溃。
+                    if (cropped != null && cropped != source) cropped.recycle();
                 }
                 final String path = outPath;
                 final String error = err;

@@ -754,6 +754,10 @@ final class RendererAssets {
             // 骨架不存在时（收尾后 updateLastMsg 平铺、续跑的历史消息）必须现建：
             // 直接 return 会让 Java 侧以为 base 已推送，续跑时工具卡片永远不出现。
             "window.streamCommitTail=function(){" +
+            // commit 已把本轮 tail 整体搬进 base，hold 期间缓存的那一帧也在其中。
+            // 不清掉的话，抬手后 __flushPending 会把旧 tail 再写回新 tail，正文重复一遍。
+            "window.__pendingTailHtml=null;window.__pendingTailText=null;window.__pendingBaseHtml=null;" +
+            "window.__endHold();" +
             "var ms=document.querySelectorAll('.msg.ai .content');" +
             "if(ms.length===0)return;" +
             "var c=ms[ms.length-1];" +

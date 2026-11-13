@@ -27,6 +27,7 @@ public class ThemePreviewActivity extends ThemedActivity {
     private String themeId;
     private boolean darkMode;
     private boolean useTheme = true;
+    private int percent = 100;
 
     private View root;
     private ScrollView scroll;
@@ -52,6 +53,7 @@ public class ThemePreviewActivity extends ThemedActivity {
                 android.R.layout.simple_spinner_item,
                 new String[]{"Spinner 选中态"}));
         int percent = getIntent().getIntExtra("percent", 100);
+        this.percent = percent;
         if (percent != 100) {
             title.setText("主题预览 · 显示 " + percent + "%");
         }
@@ -148,7 +150,7 @@ public class ThemePreviewActivity extends ThemedActivity {
         btnNormal.setBackgroundColor(surface);
         btnNormal.setTextColor(text);
         btnPrimary.setBackgroundColor(primary);
-        btnPrimary.setTextColor(0xFFFFFFFF);
+        btnPrimary.setTextColor(ThemeCssBuilder.contrastColor(primary));
         input.setBackgroundColor(surface);
         input.setTextColor(text);
         spinner.setBackgroundColor(surface);
@@ -162,6 +164,23 @@ public class ThemePreviewActivity extends ThemedActivity {
         info.setTextColor(text2);
 
         renderWebView(bg, text, userBubble, codeBg, codeText, link);
+        applyScale();
+    }
+
+    /**
+     * 按显示百分比缩放样例文字。
+     *
+     * <p>整块样例打了 {@code ac_no_recolor}，Applier 不会对它做整树缩放；不手动应用的话，
+     * 「预览缩放效果」只改了标题，250% 的溢出根本看不到——而防溢出正是这个入口的唯一用途。
+     * 基准值取布局里的初始 textSize，乘完即止（每次 render 都从基准重算，不会累积）。
+     */
+    private void applyScale() {
+        float s = Math.max(0.5f, Math.min(2.5f, percent / 100f));
+        TextView[] vs = {cardTitle, cardText, bubbleUser, bubbleAi, code, info};
+        float[] base = {15f, 13f, 13f, 13f, 12f, 12f};
+        for (int i = 0; i < vs.length; i++) {
+            if (vs[i] != null) vs[i].setTextSize(base[i] * s);
+        }
     }
 
     private void renderWebView(int bg, int text, int bubble, int codeBg, int codeText, int link) {

@@ -306,20 +306,12 @@ final class ChatStreamRunner {
                     String errBody = ChatTransport.readErrorBody(conn);
                     LogUtil.e(TAG, "request failed: HTTP %d, body=%s", code, LogUtil.preview(errBody, 800));
 
-                    // 一级降级：端点不认 stream_options（严格校验参数的网关会直接 400）。
-                    // 去掉它重发，并让宿主记住，避免每次对话都白吃一个 400。
-                    if ((code == 400 || code == 422) && includeUsage && !usageDowngraded) {
-                        usageDowngraded = true;
-                        includeUsage = false;
-                        LogUtil.w(TAG, "endpoint rejected stream_options, retry without usage");
-                        ui.onUsageUnsupported();
-                        ChatTransport.close(conn);
-                        conn = null;
-                        session.setConnection(null);
-                        continue;
-                    }
-
-                    // 二级降级：部分 OpenAI 兼容端点不认识 tools 参数。首轮 400 时去掉工具与搜索
+                    // 降级顺序很关键：usage 排在最后。
+                    // onUsageUnsupported() 会把这个 provider「不支持 stream_options」永久写进
+                    // prefs，之后再也不会请求 usage（token/缓存命中统计永久丢失且不自愈）。
+                    // 而 tools / thinking 被拒是最常见的 400 原因，若先试 usage 降级，
+                    // 就会把「不支持 tools」误记成「不支持 usage」。
+                    // 一级降级：端点不认识 tools 参数。首轮 400 时去掉工具与搜索
                     // 系统提示重试一次，保证原有普通对话不受联网开关影响。
                     if ((code == 400 || code == 422) && toolsEnabled && round == 0 && !fallbackTried) {
                         fallbackTried = true;
@@ -332,13 +324,26 @@ final class ChatStreamRunner {
                         continue;
                     }
 
-                    // 三级降级：端点不认思考参数（自建 provider 会被写成
+                    // 二级降级：端点不认思考参数（自建 provider 会被写成
                     // thinkingType=object + 参数名 thinking，官方 OpenAI 这类严格端点
                     // 直接 400）。去掉 thinking 整套字段再发一次，别让用户卡死在这里。
                     if ((code == 400 || code == 422) && sendThinking && !thinkingDowngraded) {
                         thinkingDowngraded = true;
                         sendThinking = false;
                         LogUtil.w(TAG, "endpoint rejected thinking params, retry without them");
+                        ChatTransport.close(conn);
+                        conn = null;
+                        session.setConnection(null);
+                        continue;
+                    }
+
+                    // 三级降级（最后）：端点不认 stream_options。严格校验参数的网关会直接 400。
+                    // 去掉它重发，并让宿主记住，避免每次对话都白吃一个 400。
+                    if ((code == 400 || code == 422) && includeUsage && !usageDowngraded) {
+                        usageDowngraded = true;
+                        includeUsage = false;
+                        LogUtil.w(TAG, "endpoint rejected stream_options, retry without usage");
+                        ui.onUsageUnsupported();
                         ChatTransport.close(conn);
                         conn = null;
                         session.setConnection(null);

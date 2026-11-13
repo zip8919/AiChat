@@ -231,20 +231,44 @@ final class MarkdownPipeline {
                     && text.regionMatches(true, i, "<svg", 0, 4)
                     && (i + 4 >= len || isTagBoundary(text.charAt(i + 4)))) {
                 int start = i;
-                i += 4;
+                int k = i + 4;
                 int depth = 1;
-                while (i < len && depth > 0) {
-                    if (text.regionMatches(true, i, "<svg", 0, 4)
-                            && (i + 4 >= len || isTagBoundary(text.charAt(i + 4)))) {
+                while (k < len && depth > 0) {
+                    if (text.regionMatches(true, k, "<svg", 0, 4)
+                            && (k + 4 >= len || isTagBoundary(text.charAt(k + 4)))) {
                         depth++;
-                    } else if (text.regionMatches(true, i, "</svg>", 0, 6)) {
-                        depth--;
-                        if (depth == 0) { i += 6; break; }
+                        k += 4;
+                        continue;
                     }
-                    i++;
+                    // 闭合标签允许中间有空白（</svg >、</svg\n>）：原来只认严格的
+                    // "</svg>"，遇到带空白的写法就一路扫到文末。
+                    if (text.regionMatches(true, k, "</svg", 0, 5)) {
+                        int gt = k + 5;
+                        while (gt < len) {
+                            char gc = text.charAt(gt);
+                            if (gc == ' ' || gc == '\t' || gc == '\r' || gc == '\n') { gt++; continue; }
+                            break;
+                        }
+                        if (gt < len && text.charAt(gt) == '>') {
+                            depth--;
+                            k = gt + 1;
+                            if (depth == 0) break;
+                            continue;
+                        }
+                    }
+                    k++;
                 }
-                svgBlocks.add(text.substring(start, i));
-                out.append("@@SVG").append(svgBlocks.size() - 1).append("@@");
+                if (depth > 0) {
+                    // 未闭合：原文照抄。若像原来那样整段塞进 svgBlocks，后面的正文会被
+                    // 当成裸 HTML 注入，markdown 不再解析；更糟的是 protectCode 换出的
+                    // 代码块哨兵也一起被埋掉，那段代码内容永久丢失。
+                    out.append(text, start, Math.min(k, len));
+                    i = Math.min(k, len);
+                } else {
+                    svgBlocks.add(text.substring(start, k));
+                    out.append("@@SVG").append(svgBlocks.size() - 1).append("@@");
+                    i = k;
+                }
             } else {
                 out.append(c);
                 i++;

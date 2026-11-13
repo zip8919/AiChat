@@ -194,12 +194,16 @@ final class ThemeCssBuilder {
     static String contrastText(String hex) {
         Integer v = ThemeTokens.parseColor(hex);
         if (v == null) return "#FFFFFF";
-        int c = v.intValue();
-        int r = (c >> 16) & 0xFF;
-        int g = (c >> 8) & 0xFF;
-        int b = c & 0xFF;
+        return contrastColor(v.intValue()) == 0xFF000000 ? "#000000" : "#FFFFFF";
+    }
+
+    /** 同上，给原生控件用（int 形式）。 */
+    static int contrastColor(int bg) {
+        int r = (bg >> 16) & 0xFF;
+        int g = (bg >> 8) & 0xFF;
+        int b = bg & 0xFF;
         int lum = (r * 299 + g * 587 + b * 114) / 1000;
-        return lum >= 160 ? "#000000" : "#FFFFFF";
+        return lum >= 160 ? 0xFF000000 : 0xFFFFFFFF;
     }
 
     /** int color → #RRGGBB（丢掉 alpha，CSS 里用不透明色最稳）。
