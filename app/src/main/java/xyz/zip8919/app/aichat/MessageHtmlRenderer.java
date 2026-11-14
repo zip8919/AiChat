@@ -614,8 +614,8 @@ public class MessageHtmlRenderer {
         int start = 0;
         int blocks = 0;
         while (start < text.length()) {
-            int ts = indexOfOutsideCode(text, "[thinking]", start);
-            int gs = indexOfOutsideCode(text, WebSearchTool.TRACE_START, start);
+            int ts = indexOfMarker(text, "[thinking]", start);
+            int gs = indexOfMarker(text, WebSearchTool.TRACE_START, start);
             boolean thinkingNext = ts != -1 && (gs == -1 || ts < gs);
             if (ts == -1 && gs == -1) {
                 html.append(MarkdownPipeline.render(text.substring(start), ctx));
@@ -623,7 +623,7 @@ public class MessageHtmlRenderer {
             }
             if (thinkingNext) {
                 if (ts > start) html.append(MarkdownPipeline.render(text.substring(start, ts), ctx));
-                int te = indexOfOutsideCode(text, "[/thinking]", ts + 10);
+                int te = indexOfMarker(text, "[/thinking]", ts + 10);
                 if (te == -1) {
                     // Streaming: thinking not yet closed
                     LogUtil.v(TAG, "thinking block UNCLOSED at %d, tail=%d chars", ts, text.length() - ts - 10);
@@ -676,8 +676,9 @@ public class MessageHtmlRenderer {
                     // 原来这里直接 break，`[tool]` 之后的整段回答永久消失（定稿走同一条
                     // 路径，重进会话也不恢复），而复制/编辑走的是 plainTextOf、尾部还在，
                     // 用户复制出来的内容和屏幕上看到的对不上。
-                    // 两条现实触发路径：模型在正文里原样写出 "[tool]"；或工具 payload 里
-                    // 反引号计数不配对，findToolBlockEnd 的代码态机再也找不到 [/tool]。
+                    // 走到这里的现实原因只剩「数据本身残缺」：正文里原样写出了 "[tool]"
+                    // 却永远等不到 [/tool]；或落盘时被截断，payload 不是完整 JSON。
+                    // （payload 里的反引号不再能把代码态机锁死，见 findToolBlockEnd。）
                     // 与上面 [thinking] 分支保持一致：把剩余内容当普通 markdown 渲染。
                     LogUtil.w(TAG, "tool trace block UNCLOSED at %d, render tail as text", gs);
                     String tail = text.substring(gs + WebSearchTool.TRACE_START.length());
@@ -770,11 +771,36 @@ public class MessageHtmlRenderer {
     }
 
     /**
+     * 查展示标记：先用「跳过代码块与行内代码」的扫描，扫不到再退回纯文本查找。
+     *
+     * <p>为什么必须退回：{@code [tool]} 的 payload 是工具原始输出，可能是二进制 PDF、
+     * 压缩包、HTML。这类数据里经常出现<b>奇数个</b>孤立反引号（PDF 的 Flate 流被
+     * JSON 转义后就是一堆乱码字符）。{@link #indexOfOutsideCode} 会把第 1 个反引号
+     * 当成行内代码开始、第 2 个当结束，奇偶不配时就永远停在「在行内代码里」，
+     * 后面所有 {@code [/tool]} 全部看不见 —— 整块被判「未闭合」，几万字的工具内容
+     * 被当成正文渲染（用户看到的就是「工具内容出现在正文」，而真正的回答消失）。
+     *
+     * <p>跳过代码块只是「别把代码示例里的标记当真」的启发式，代价不能是吞掉正文，
+     * 所以扫不到时必须退回纯文本查找。代码块内的假标记最多多出一张卡片，
+     * 比整段回答消失轻得多。
+     */
+    private static int indexOfMarker(String text, String needle, int from) {
+        int p = indexOfOutsideCode(text, needle, from);
+        if (p >= 0) return p;
+        return text.indexOf(needle, Math.max(0, from));
+    }
+
+    /**
      * 从 {@code from} 开始找工具块的结束标记。工具结果的正文里可能带 {@code [/tool]}
      * 字样（旧版本数据），取到的是假的结束位置时 payload 不是合法 JSON，继续往后找。
+     *
+     * <p><b>这里不做代码态判断</b>：块内是要被原样消费的数据，不是 markdown。
+     * payload 里出现反引号、围栏、{@code [/tool]} 都属正常（PDF/HTML/代码抓取），
+     * 用 markdown 的代码态去扫只会把自己锁死。误判由「payload 必须是合法 JSON」
+     * 兜住：假结束位置切出来的前缀一定解析失败，继续往后找即可。
      */
     private static int findToolBlockEnd(String text, int from) {
-        int ge = indexOfOutsideCode(text, WebSearchTool.TRACE_END, from);
+        int ge = text.indexOf(WebSearchTool.TRACE_END, from);
         while (ge != -1) {
             String payload = text.substring(from, ge).trim();
             if (payload.length() == 0) return ge;
@@ -786,7 +812,7 @@ public class MessageHtmlRenderer {
                     // 不是完整 JSON：多半是正文里出现了 [/tool]，继续找下一个
                 }
             }
-            ge = indexOfOutsideCode(text, WebSearchTool.TRACE_END,
+            ge = text.indexOf(WebSearchTool.TRACE_END,
                     ge + WebSearchTool.TRACE_END.length());
         }
         return -1;
@@ -803,8 +829,8 @@ public class MessageHtmlRenderer {
         StringBuilder out = new StringBuilder(content.length());
         int start = 0;
         while (start < content.length()) {
-            int ts = indexOfOutsideCode(content, "[thinking]", start);
-            int gs = indexOfOutsideCode(content, WebSearchTool.TRACE_START, start);
+            int ts = indexOfMarker(content, "[thinking]", start);
+            int gs = indexOfMarker(content, WebSearchTool.TRACE_START, start);
             boolean thinkingNext = ts != -1 && (gs == -1 || ts < gs);
             if (ts == -1 && gs == -1) {
                 out.append(content, start, content.length());
@@ -813,7 +839,7 @@ public class MessageHtmlRenderer {
             int at = thinkingNext ? ts : gs;
             if (at > start) out.append(content, start, at);
             if (thinkingNext) {
-                int te = indexOfOutsideCode(content, "[/thinking]", at + 10);
+                int te = indexOfMarker(content, "[/thinking]", at + 10);
                 if (te == -1) {
                     // 未闭合（手动打断、或模型没写结束标记）：只丢掉开标签，保留后面的
                     // 正文。原来这里直接 break，等于把「复制 / 选择文本 / 编辑」拿到的

@@ -1,21 +1,25 @@
-AiChat v1.14.22 —— 测速过程边测边排（实时跟随最快源）
+AiChat v1.14.23 —— 修复单源测速抹掉其他源记录、工具结果漏进正文
 
-测速不再等全部跑完才排序。每有一个加速源出结果，列表立刻按延迟重排一次；判成不可用的当场沉到末尾，测出更快的当场跟着改选。测速过程中就能看着列表收敛，不用盯着进度条干等。
+═══ 修复 1：单测一个源，其他源的测速记录全消失 ═══
+长按某一加速源选「测速此源」，列表里其他几十个源已经测出的 ms 会当场变回「—」，退出页面重进也恢复不了（latency 只活在内存对象里、不落盘，抹掉即永久丢失）。
 
-═══ 改动 ═══
-- 排序时机从 onProbeFinished 一次性重排，改成 onProbeDone 每收到一项结果就重排：可用按延迟升序、未测居中、FAILED 垫底；Collections.sort 稳定排序，同延迟保持原顺序
-- 回调契约改为传 Mirror 对象而不是列表下标：probeAll 提交任务时捕获对象引用，列表实时重排后下标必然失效，继续用 index 会把结果刷到别的行上
-- 选中项实时跟随当前最快：每出现更快的源就改选并写偏好；只在真正换源时才写盘，避免 80+ 次回调逐次落盘
-- 手动点选优先：测速期间用户点过某个源就停止自动跟随，结束时只文字告知最快项，不覆盖用户选择
-- 对话框保护：长按菜单 / 编辑地址 / 移除确认都把行下标捕获进点击回调，列表一跳就会操作错源。用 openDialogs 计数器在对话框打开期间暂停重排，只刷新单行数值；全部关闭后补排一次。用计数器而非布尔值，兼容「菜单里再点编辑」的嵌套弹窗
-- 单源测速仍不重排：其余源此刻都是「未测」，重排没有信息量
-- Mirror.latency 改 volatile：后台测速线程写、主线程排序读，明确跨线程可见性
-- 进度文案收短为「边测边排」，常驻提示补充实时排序与跟随最快说明，避免 258dp 窄屏截断；修正页面类注释里过时的「7~9 项 / LinearLayout」描述
+- probeSingle() 里「for (Mirror m : mirrors) m.latency = NOT_TESTED」这句是给全量测速用的，单源测速套用时会把整表清零；现在只重置目标源这一条，且只刷新那一行
+- 目标源改为持有 Mirror 引用而不是列表下标：列表重排后下标会指到别的源上
+- 单源测速结束时不重排列表，只更新该行数值，其余源保留各自上次的结果
+- invalidateProbe() 仍会中断可能正在跑的全量测速，但只断开连接、不再抹掉已测出的数值
+
+═══ 修复 2：工具结果 JSON 漏进正文，真正的回答消失 ═══
+部分会话里，一段数万字的工具原始输出（网页 HTML / PDF 抓取结果）被当成正文整段渲染，那一轮的分析文字一个字都不显示。
+
+- 根因：findToolBlockEnd() 用「跳过代码块与行内代码」的扫描去找 [/tool]。工具 payload 是原始数据，里面经常出现奇数个孤立反引号（PDF 的 Flate 流经 JSON 转义后就是一串乱码字符），扫描器把第一个当成行内代码起点，就再也看不见后面的 [/tool]，整块被判「未闭合」，payload 被全部当正文渲染
+- 找块结束标记不再做代码态判断：块内是被原样消费的数据，不是 markdown；误判由「payload 必须是合法 JSON」兜住
+- 块起始标记新增 indexOfMarker()：先按代码态扫描，扫不到再退回纯文本查找。跳过代码块只是启发式，代价不能是吞掉正文
+- 未闭合分支保留 payload 作为正文（原来直接 break，尾部内容在定稿与重进会话后永久消失，而复制/编辑走的 plainTextOf 还能拿到，屏幕与剪贴板对不上）
 
 ═══ 验证 ═══
-- ./gradlew compileDebugJavaWithJavac / assembleDebug / assembleRelease：BUILD SUCCESSFUL；debug 与 release 均用项目正式签名（mc.jks / alias mc）
-- 兼容性基线不变：minSdk 18 / targetSdk 18 / compileSdk 34，258dp 窄屏与 API 18/19 TLS 兼容层未改动
-- 发布产物：armeabi-v7a / arm64-v8a / x86 / x86_64 / universal 五 ABI + speedtest.txt（魔数 AICHAT_SPEEDTEST_V1）
+- 用用户提供的真实会话（1794652519454.json）离线复算三条含工具调用的助手消息：13 / 8 / 7 张工具卡全部正确闭合，正文分别 856 / 1868 / 0 字，无未闭合块，payload 不再进入正文
+- ./gradlew assembleDebug：BUILD SUCCESSFUL，五 ABI 产物齐备，debug 用项目正式签名（mc.jks / alias mc）
+- 兼容性基线不变：minSdk 18 / targetSdk 18 / compileSdk 34
 
 ---
-**Full Changelog**: https://github.com/zip8919/AiChat/compare/v1.14.21...v1.14.22
+**Full Changelog**: https://github.com/zip8919/AiChat/compare/v1.14.22...v1.14.23

@@ -84,7 +84,8 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
     private boolean manualPicked;
     /** 本轮只测某一个源：结束时不做「自动选最快」。 */
     private boolean probeSingleMode;
-    private int probeSingleIndex = -1;
+    /** 单源测速的目标对象。持有引用而不是下标：列表一旦重排，下标就指到别的源上。 */
+    private UpdateManager.Mirror probeSingleMirror;
     /** 本轮已完成测速的源数，用于显示 x/N 进度。 */
     private int probeDone;
     /** 本轮是否正在跑全量测速（单源测速不算）；作废时同步置 false。 */
@@ -531,6 +532,7 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
         probeStale = false;
         probing = true;
         probeSingleMode = false;
+        probeSingleMirror = null;
         probeDone = 0;
         manualPicked = false;
         resortDirty = false;
@@ -550,24 +552,31 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
             AcToast.show(this, "请先检查更新成功，再测速");
             return;
         }
-        invalidateProbe();          // 作废可能正在跑的全量测速
+        final UpdateManager.Mirror target = mirrors.get(i);
+        invalidateProbe();          // 作废可能正在跑的全量测速（只断连接，不动已测出的结果）
         probeStale = false;          // 本轮自身是有效的
         probing = false;             // 单源测速不参与全量排序
         probeModeLabel = "单源";
         probeSingleMode = true;
-        probeSingleIndex = i;
+        probeSingleMirror = target;
         probeDone = 0;
-        for (UpdateManager.Mirror m : mirrors) m.latency = UpdateManager.NOT_TESTED;
-        refreshAllRows();
+        // 只清目标源自己那一条延迟。原来这里是「for (Mirror m : mirrors) m.latency =
+        // NOT_TESTED」——整表清零，用户测一个源，其它几十个源已测出的 ms 全变成「—」。
+        // latency 只活在内存对象里、不落盘，抹掉就再也回不来（重进页面同样是「—」），
+        // 看起来就是「测速记录消失了」。全量测速才会整表重测，单源只该动一行。
+        target.latency = UpdateManager.NOT_TESTED;
+        int row = mirrors.indexOf(target);
+        if (row >= 0) refreshRow(row);
         btnProbe.setEnabled(false);
-        progressText.setText("正在测速 " + mirrors.get(i).name + "…");
-        UpdateManager.probeOne(mirrors.get(i), asset.url, testUrl(), this);
+        progressText.setText("正在测速 " + target.name + "…");
+        UpdateManager.probeOne(target, asset.url, testUrl(), this);
     }
 
     @Override
     public void onProbeDone(UpdateManager.Mirror m, int latencyMs) {
         if (destroyed || probeStale) return;
-        // 单源测速不重排：其余全是「未测」，重排只会把列表打乱，没有信息量
+        // 单源测速不重排：只刷新这一行的数值，其它源保留各自上次的结果，
+        // 列表顺序也保持不动（重排只会让用户找不到刚才那一行）。
         if (probeSingleMode) {
             int i = mirrors.indexOf(m);
             if (i >= 0) refreshRow(i);
@@ -595,13 +604,13 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
         btnProbe.setEnabled(true);
         if (probeSingleMode) {
             probeSingleMode = false;
-            int i = probeSingleIndex;
-            if (i >= 0 && i < mirrors.size()) {
-                int l = mirrors.get(i).latency;
-                progressText.setText(mirrors.get(i).name + " 测速："
+            UpdateManager.Mirror m = probeSingleMirror;
+            probeSingleMirror = null;
+            if (m != null) {
+                int l = m.latency;
+                progressText.setText(m.name + " 测速："
                         + (l == UpdateManager.FAILED ? "不可用（未通过文件校验）" : l + " ms"));
             }
-            probeSingleIndex = -1;
             return;
         }
         // 过程中已逐项排好；这里只在没有对话框压着时补一次兜底，
