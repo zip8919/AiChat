@@ -37,6 +37,31 @@ final class StreamJob {
         }
     }
 
+    /**
+     * 中断后「继续生成」的续写状态。
+     *
+     * <p>{@code displayBase} 是界面上已经有的正文（含 [thinking] 等标记），作为流式
+     * 渲染的 base；{@code prefixText} 是剥掉标记后的干净正文，作为发给模型的
+     * assistant 前缀。两者不能混：拿带标记的文本当 prefix，模型会把 [thinking]
+     * 当成自己的输出接着写下去。
+     *
+     * <p>{@code officialPrefix} 为真表示走 DeepSeek 官方 {@code /beta} 前缀续写；
+     * 为假则把已生成内容当上下文、补一条续写指令重新请求。
+     */
+    static final class Continue {
+        final int aiIndex;
+        final String displayBase;
+        final String prefixText;
+        final boolean officialPrefix;
+
+        Continue(int aiIndex, String displayBase, String prefixText, boolean officialPrefix) {
+            this.aiIndex = aiIndex;
+            this.displayBase = displayBase == null ? "" : displayBase;
+            this.prefixText = prefixText == null ? "" : prefixText;
+            this.officialPrefix = officialPrefix;
+        }
+    }
+
     final ProviderInfo provider;
     final String modelName;
     final String thinkingLevel;
@@ -80,6 +105,8 @@ final class StreamJob {
     final String tavilyKey;
 
     final Resume resume;
+    /** 中断后续写状态；非 null 表示这次请求是「继续生成」而不是一轮新回复。 */
+    final Continue cont;
     /** 429 重试策略，随请求固化，避免跑到一半参数被改。 */
     final RetryPolicy retryPolicy;
 
@@ -109,6 +136,7 @@ final class StreamJob {
         this.searchProvider = b.searchProvider;
         this.tavilyKey = b.tavilyKey;
         this.resume = b.resume;
+        this.cont = b.cont;
         this.retryPolicy = b.retryPolicy == null
                 ? new RetryPolicy(false, 0, 2000L, true, 30000L) : b.retryPolicy;
     }
@@ -116,6 +144,11 @@ final class StreamJob {
     /** 续跑时沿用原来的消息与轮次，否则从头开始。 */
     boolean isResume() {
         return resume != null;
+    }
+
+    /** 是否为「继续生成」：复用已有 AI 消息，把新内容追加到已生成正文之后。 */
+    boolean isContinue() {
+        return cont != null;
     }
 
     List<String[]> initialSources() {
@@ -152,6 +185,7 @@ final class StreamJob {
         ProviderInfo searchProvider;
         String tavilyKey;
         Resume resume;
+        Continue cont;
         RetryPolicy retryPolicy;
 
         Builder provider(ProviderInfo v) { provider = v; return this; }
@@ -179,6 +213,7 @@ final class StreamJob {
         Builder searchProvider(ProviderInfo v) { searchProvider = v; return this; }
         Builder tavilyKey(String v) { tavilyKey = v; return this; }
         Builder resume(Resume v) { resume = v; return this; }
+        Builder cont(Continue v) { cont = v; return this; }
         Builder retryPolicy(RetryPolicy v) { retryPolicy = v; return this; }
 
         StreamJob build() {

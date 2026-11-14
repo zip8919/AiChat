@@ -21,4 +21,6 @@
     <item name="ac_base_style" type="id"/>
     <!-- 纯展示色块（色板、取色预览）：禁止参与运行时重着色，否则取色结果会被改掉 -->
     <item name="ac_no_recolor" type="id"/>
+    <!-- 文件列表行当前绑定的缩略图 key：异步解码回来时校验行是否被复用 -->
+    <item name="file_icon_path_tag" type="id"/>
 </resources>

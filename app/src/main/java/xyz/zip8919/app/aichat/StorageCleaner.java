@@ -13,8 +13,9 @@ import java.util.Set;
  *       界面上的「无引用」是十秒前的快照；拿旧快照删等于删掉正在用的文件。</li>
  *   <li><b>索引不可信就不删</b>。任何一个会话读不出来，{@link StorageRefs#incomplete}
  *       为真，此时直接返回 0，由界面提示「部分会话无法解析，暂不能清理」。</li>
- *   <li><b>只删自己确认过的对象</b>。临时文件按「目录 + 前缀 + 年龄」三重限定，
- *       不出现「遍历某个目录全删」这种写法——那是误删的标准化路径。</li>
+ *   <li><b>只删自己确认过的对象</b>。临时文件按「目录 + 前缀 + 写入窗口」限定，
+ *       不出现「遍历某个目录全删」这种写法——那是误删的标准化路径。
+ *       长期保护期已移除，只跳过 {@link StorageScanner#WRITE_GRACE_MS} 内刚写入的文件。</li>
  * </ul>
  *
  * <p>全部方法都需要在后台线程调用。
@@ -45,14 +46,14 @@ final class StorageCleaner {
                 for (int i = 0; i < files.length; i++) {
                     File f = files[i];
                     if (f.isFile() && f.getName().startsWith("tmp-")
-                            && now - f.lastModified() >= StorageScanner.DAY) {
+                            && now - f.lastModified() >= StorageScanner.WRITE_GRACE_MS) {
                         delete(f, res);
                     }
                 }
             }
         }
 
-        // 写文件时先落 .tmp 再改名，进程被杀会留下 .tmp；1 小时内可能是正在写的，跳过
+        // 写文件时先落 .tmp 再改名，进程被杀会留下 .tmp；刚写入的那份跳过
         deleteTmpIn(new File(sm.getConversationsPath()), now, res);
         deleteTmpIn(new File(sm.getExportsDir()), now, res);
 
@@ -174,7 +175,7 @@ final class StorageCleaner {
         for (int i = 0; i < files.length; i++) {
             File f = files[i];
             if (f.isFile() && f.getName().endsWith(".tmp")
-                    && now - f.lastModified() >= StorageScanner.HOUR) {
+                    && now - f.lastModified() >= StorageScanner.WRITE_GRACE_MS) {
                 delete(f, res);
             }
         }
@@ -184,13 +185,12 @@ final class StorageCleaner {
         if (depth > 12) return;
         File[] files = dir.listFiles();
         if (files == null) return;
-        boolean camera = "camera".equals(dir.getName());
-        long threshold = camera ? 7 * StorageScanner.DAY : StorageScanner.DAY;
         for (int i = 0; i < files.length; i++) {
             File f = files[i];
             if (f.isDirectory()) {
                 cleanCache(f, now, depth + 1, res);
-            } else if (f.isFile() && now - f.lastModified() >= threshold) {
+            } else if (f.isFile()
+                    && now - f.lastModified() >= StorageScanner.WRITE_GRACE_MS) {
                 delete(f, res);
             }
         }

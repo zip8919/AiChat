@@ -14,10 +14,15 @@ import android.text.TextUtils;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
+import android.view.ViewGroup;
+import android.view.LayoutInflater;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.widget.ListView;
+import android.widget.AdapterView;
+import android.widget.BaseAdapter;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -47,7 +52,9 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
     private ProgressBar progress;
     private Button btnRefresh, btnNotes, btnSwitchAsset, btnProbe, btnAdd;
     private Button btnCustomOk, btnAction;
-    private LinearLayout mirrorList, customBox;
+    private ListView mirrorList;
+    private LinearLayout customBox;
+    private MirrorAdapter mirrorAdapter;
     private EditText customInput;
 
     private List<UpdateManager.Mirror> mirrors;
@@ -64,11 +71,12 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
     private boolean probeStale;
     /** 用户本轮测速期间是否手动点选过镜像；点过就不再被「自动选最快」覆盖。 */
     private boolean manualPicked;
+    /** 本轮只测某一个源：结束时不做「自动选最快」。 */
+    private boolean probeSingleMode;
+    private int probeSingleIndex = -1;
+    /** 本轮已完成测速的源数，用于显示 x/N 进度。 */
+    private int probeDone;
 
-    // 行视图缓存：测速/选中只刷新单行文本，不重建列表
-    private final List<TextView> marks = new ArrayList<TextView>();
-    private final List<TextView> nameViews = new ArrayList<TextView>();
-    private final List<TextView> latencyViews = new ArrayList<TextView>();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -86,13 +94,13 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
         btnAdd = (Button) findViewById(R.id.btn_add);
         btnCustomOk = (Button) findViewById(R.id.btn_custom_ok);
         btnAction = (Button) findViewById(R.id.btn_action);
-        mirrorList = (LinearLayout) findViewById(R.id.mirror_list);
+        mirrorList = (ListView) findViewById(R.id.mirror_list);
         customBox = (LinearLayout) findViewById(R.id.custom_box);
         customInput = (EditText) findViewById(R.id.custom_input);
 
         mirrors = UpdateManager.loadMirrors(this);
         selectedIndex = indexOfTemplate(UpdateManager.selectedTemplate(this));
-        buildRows();
+        setupMirrorList();
         bindActions();
         check();
         LogUtil.d(TAG, "onCreate: mirrors=%d selected=%d", mirrors.size(), selectedIndex);
@@ -107,89 +115,44 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
         return 0; // 默认直连
     }
 
-    private void buildRows() {
-        mirrorList.removeAllViews();
-        marks.clear();
-        nameViews.clear();
-        latencyViews.clear();
-        TypedValue tv = new TypedValue();
-        getTheme().resolveAttribute(android.R.attr.selectableItemBackground, tv, true);
-
-        for (int i = 0; i < mirrors.size(); i++) {
-            final int idx = i;
-            final UpdateManager.Mirror m = mirrors.get(i);
-
-            LinearLayout row = new LinearLayout(this);
-            row.setOrientation(LinearLayout.HORIZONTAL);
-            row.setMinimumHeight(dp(48));
-            row.setGravity(Gravity.CENTER_VERTICAL);
-            row.setPadding(dp(4), dp(4), dp(4), dp(4));
-            if (tv.resourceId != 0) row.setBackgroundResource(tv.resourceId);
-
-            TextView mark = new TextView(this);
-            mark.setTextSize(14);
-            mark.setWidth(dp(22));
-            row.addView(mark);
-            marks.add(mark);
-
-            LinearLayout col = new LinearLayout(this);
-            col.setOrientation(LinearLayout.VERTICAL);
-            col.setLayoutParams(new LinearLayout.LayoutParams(0,
-                    LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-
-            TextView name = new TextView(this);
-            name.setText(m.name);
-            name.setTextSize(13);
-            name.setSingleLine(true);
-            name.setEllipsize(TextUtils.TruncateAt.END);
-            col.addView(name);
-            nameViews.add(name);
-
-            if (m.custom) {
-                TextView sub = new TextView(this);
-                sub.setText(m.template);
-                sub.setTextSize(10);
-                sub.setTextColor(ThemeTokens.get(this, ThemeTokens.AC_TEXT_SECONDARY));
-                sub.setSingleLine(true);
-                sub.setEllipsize(TextUtils.TruncateAt.MIDDLE);
-                col.addView(sub);
+    private void setupMirrorList() {
+        mirrorAdapter = new MirrorAdapter();
+        mirrorList.setAdapter(mirrorAdapter);
+        mirrorList.setOnItemClickListener(new AdapterView.OnItemClickListener() {
+            public void onItemClick(AdapterView<?> p, View v, int pos, long id) {
+                manualPicked = true;
+                selectMirror(pos);
             }
-            row.addView(col);
-
-            TextView latency = new TextView(this);
-            latency.setTextSize(11);
-            latency.setWidth(dp(64));
-            latency.setGravity(Gravity.RIGHT);
-            latency.setSingleLine(true);
-            row.addView(latency);
-            latencyViews.add(latency);
-
-            row.setOnClickListener(new View.OnClickListener() {
-                public void onClick(View v) {
-                    // 用户手动点选：记下来，测速结束后不要再被「自动选最快」覆盖
-                    manualPicked = true;
-                    selectMirror(idx);
-                }
-            });
-            if (m.custom) {
-                row.setOnLongClickListener(new View.OnLongClickListener() {
-                    public boolean onLongClick(View v) {
-                        confirmRemove(m);
-                        return true;
-                    }
-                });
+        });
+        mirrorList.setOnItemLongClickListener(new AdapterView.OnItemLongClickListener() {
+            public boolean onItemLongClick(AdapterView<?> p, View v, int pos, long id) {
+                showMirrorMenu(pos);
+                return true;
             }
-            mirrorList.addView(row);
-        }
-        for (int i = 0; i < mirrors.size(); i++) refreshRow(i);
+        });
     }
 
+    /** 只刷新可见行：测速每完成一项调一次，84 项全表 notify 会让列表一直重排。 */
     private void refreshRow(int i) {
-        if (i < 0 || i >= mirrors.size() || i >= marks.size()) return;
+        if (mirrorList == null || i < 0 || i >= mirrors.size()) return;
+        int first = mirrorList.getFirstVisiblePosition();
+        View row = mirrorList.getChildAt(i - first);
+        if (row != null) bindRow(row, i);
+    }
+
+    private void refreshAllRows() {
+        if (mirrorList == null) return;
+        int first = mirrorList.getFirstVisiblePosition();
+        int last = mirrorList.getLastVisiblePosition();
+        for (int i = first; i <= last; i++) {
+            if (i >= 0 && i < mirrors.size()) refreshRow(i);
+        }
+    }
+
+    private void bindRow(View row, int i) {
+        if (row == null || i < 0 || i >= mirrors.size()) return;
         UpdateManager.Mirror m = mirrors.get(i);
         boolean sel = (i == selectedIndex);
-        // 原来取的是资源色 R.color.text_primary(#333)，深色底上等于黑字黑底，
-        // 正是「镜像源字体看不清」的原因。改为按当前外观取值。
         AppearanceManager am = AppearanceManager.getInstance(this);
         boolean cDef = am.isColorDefault();
         boolean cDark = am.isDark();
@@ -202,16 +165,26 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
         int danger = cDef ? getResources().getColor(R.color.danger)
                 : am.getEffectiveColor(ThemeTokens.AC_DANGER, cDark);
 
-        marks.get(i).setText(sel ? "●" : "○");
-        marks.get(i).setTextColor(sel ? primary : secondary);
-        nameViews.get(i).setTextColor(sel ? primary : textPrimary);
-        nameViews.get(i).setTypeface(null, sel ? Typeface.BOLD : Typeface.NORMAL);
-
+        TextView mark = (TextView) row.findViewById(R.id.mirror_mark);
+        TextView name = (TextView) row.findViewById(R.id.mirror_name);
+        TextView sub = (TextView) row.findViewById(R.id.mirror_sub);
+        TextView latency = (TextView) row.findViewById(R.id.mirror_latency);
+        mark.setText(sel ? "●" : "○");
+        mark.setTextColor(sel ? primary : secondary);
+        name.setText(m.name);
+        name.setTextColor(sel ? primary : textPrimary);
+        name.setTypeface(null, sel ? Typeface.BOLD : Typeface.NORMAL);
+        if (m.template.length() > 0) {
+            sub.setText(m.template);
+            sub.setTextColor(secondary);
+            sub.setVisibility(View.VISIBLE);
+        } else {
+            sub.setVisibility(View.GONE);
+        }
         int l = m.latency;
-        latencyViews.get(i).setText(latencyText(l));
-        latencyViews.get(i).setTextColor(
-                l == UpdateManager.FAILED ? danger
-                        : (l >= 0 ? primary : secondary));
+        latency.setText(latencyText(l));
+        latency.setTextColor(l == UpdateManager.FAILED ? danger
+                : (l >= 0 ? primary : secondary));
     }
 
     private static String latencyText(int ms) {
@@ -223,10 +196,37 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
     private void selectMirror(int i) {
         selectedIndex = i;
         UpdateManager.setSelectedTemplate(this, mirrors.get(i).template);
-        // 注意：这里不置 manualPicked —— 由用户点击行的调用方自己置，
-        for (int j = 0; j < mirrors.size(); j++) refreshRow(j);
+        refreshAllRows();
         if (!downloading) {
             progressText.setText("已选 " + mirrors.get(i).name + "，点「下载」开始");
+        }
+    }
+
+    /** 列表整体变更后重建数据，并按模板重新定位选中项。 */
+    private void reloadMirrors(String selectTemplate) {
+        invalidateProbe();
+        mirrors = UpdateManager.loadMirrors(this);
+        String sel = selectTemplate != null ? selectTemplate : UpdateManager.selectedTemplate(this);
+        selectedIndex = indexOfTemplate(sel);
+        if (mirrorAdapter != null) mirrorAdapter.notifyDataSetChanged();
+    }
+
+    private String testUrl() {
+        return release != null ? release.speedTestUrl : "";
+    }
+
+    private final class MirrorAdapter extends BaseAdapter {
+        public int getCount() { return mirrors.size(); }
+        public Object getItem(int position) { return mirrors.get(position); }
+        public long getItemId(int position) { return position; }
+        public View getView(int position, View convertView, ViewGroup parent) {
+            View row = convertView;
+            if (row == null) {
+                row = LayoutInflater.from(UpdateActivity.this)
+                        .inflate(R.layout.item_update_mirror, parent, false);
+            }
+            bindRow(row, position);
+            return row;
         }
     }
 
@@ -320,9 +320,11 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
         btnAction.setEnabled(asset != null);
         assetView.setText(asset == null ? "无可用安装包"
                 : "将下载：" + asset.name + "  " + formatSize(asset.size));
-        // 没有安装包就别测速：runProbe 会弹「请先检查更新成功」，
-        // 用户刚看到「已是最新版」，下一句却是这个提示，像是检查失败了。
-        if (asset != null) runProbe();
+        // 内置源已扩到 80+ 项：不再进页面就自动跑一次全量测速。
+        // 那是分钟级长任务，还会把用户上次选中的源悄悄换成某个陌生域名。
+        // 改成明确提示，测速由用户点按钮或长按单个源触发。
+        progressText.setText(asset == null ? "无可用安装包"
+                : "点「测速」验证 " + mirrors.size() + " 个加速源，或长按单独测");
     }
 
     /**
@@ -341,24 +343,61 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
             return;
         }
         probeStale = false;
+        probeSingleMode = false;
+        probeDone = 0;
         manualPicked = false;
         for (UpdateManager.Mirror m : mirrors) m.latency = UpdateManager.NOT_TESTED;
-        for (int i = 0; i < mirrors.size(); i++) refreshRow(i);
+        refreshAllRows();
         btnProbe.setEnabled(false);
-        progressText.setText("正在逐项测速…（HTTP 首字节）");
-        UpdateManager.probeAll(mirrors, asset.url, this);
+        progressText.setText("正在测速 0/" + mirrors.size()
+                + "…（下载并校验测速文件）");
+        UpdateManager.probeAll(mirrors, asset.url, testUrl(), this);
+    }
+
+    /** 长按菜单里的「测速此源」：只跑一个，结束时不动选中项。 */
+    private void probeSingle(final int i) {
+        if (asset == null || release == null) {
+            AcToast.show(this, "请先检查更新成功，再测速");
+            return;
+        }
+        invalidateProbe();          // 作废可能正在跑的全量测速
+        probeStale = false;          // 本轮自身是有效的
+        probeSingleMode = true;
+        probeSingleIndex = i;
+        probeDone = 0;
+        for (UpdateManager.Mirror m : mirrors) m.latency = UpdateManager.NOT_TESTED;
+        refreshAllRows();
+        btnProbe.setEnabled(false);
+        progressText.setText("正在测速 " + mirrors.get(i).name + "…");
+        UpdateManager.probeOne(mirrors.get(i), i, asset.url, testUrl(), this);
     }
 
     @Override
     public void onProbeDone(int index, int latencyMs) {
         if (destroyed || probeStale) return;
         refreshRow(index);
+        if (!probeSingleMode) {
+            probeDone++;
+            progressText.setText("正在测速 " + probeDone + "/" + mirrors.size()
+                    + "…（下载并校验测速文件）");
+        }
     }
 
     @Override
     public void onProbeFinished() {
         if (destroyed || probeStale) return;
         btnProbe.setEnabled(true);
+        if (probeSingleMode) {
+            probeSingleMode = false;
+            int i = probeSingleIndex;
+            if (i >= 0 && i < mirrors.size()) {
+                int l = mirrors.get(i).latency;
+                progressText.setText(mirrors.get(i).name + " 测速："
+                        + (l == UpdateManager.FAILED ? "不可用（未通过文件校验）" : l + " ms"));
+            }
+            probeSingleIndex = -1;
+            return;
+        }
         int best = -1, min = Integer.MAX_VALUE;
         for (int i = 0; i < mirrors.size(); i++) {
             int l = mirrors.get(i).latency;
@@ -568,36 +607,124 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
             InputMethodManager imm = (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
             if (imm != null) imm.hideSoftInputFromWindow(customInput.getWindowToken(), 0);
         } catch (Throwable e) {}
-        // 镜像列表即将整体替换：正在跑的测速必须立刻作废，否则旧任务按 index
-        // 回调到新列表上，会把新列表判成「全部不可用」
-        invalidateProbe();
-        mirrors = UpdateManager.loadMirrors(this);
-        // 重复添加时 addCustomMirror 不新增，最后一个未必是刚输入的这条，
-        // 必须按模板反查真实下标，否则勾选与实际下载用的镜像不一致
-        selectedIndex = indexOfTemplate(t);
+        // 列表整体替换，reloadMirrors 内部会先作废旧测速
         UpdateManager.setSelectedTemplate(this, t);
-        buildRows();
+        reloadMirrors(t);
         progressText.setText("已添加：" + t + "\n点「测速」验证可用性");
         LogUtil.i(TAG, "addCustom: selected=%d", selectedIndex);
     }
 
-    private void confirmRemove(final UpdateManager.Mirror m) {
+    // ---- 每个加速源的操作入口（长按）----
+    //
+    // 原来的列表只有「单击选中」，且仅自定义源能长按删除；内置源常年不可用
+    // 却删不掉、改不了，也没法单独测一下，等于摆设。这里把操作补齐到所有源：
+    // 内置源不允许直接改常量，编辑结果会另存为自定义源并隐藏原项。
+
+    private void showMirrorMenu(final int i) {
+        if (i < 0 || i >= mirrors.size()) return;
+        final UpdateManager.Mirror m = mirrors.get(i);
+        final boolean direct = m.template.length() == 0;   // 直连是兜底，不可移除
+        final java.util.List<String> items = new ArrayList<String>();
+        items.add("测速此源");
+        items.add("编辑地址");
+        items.add("复制地址");
+        if (!direct) items.add(m.custom ? "删除此源" : "移除此源");
+        items.add("恢复全部内置源");
         AcDialog.builder(this)
-                .setTitle("删除自定义镜像")
-                .setMessage(m.name + "\n" + m.template)
-                .setPositiveButton("删除", new DialogInterface.OnClickListener() {
+                .setTitle(m.name)
+                .setItems(items.toArray(new String[items.size()]),
+                        new DialogInterface.OnClickListener() {
+                            public void onClick(DialogInterface d, int w) {
+                                String action = items.get(w);
+                                if ("测速此源".equals(action)) probeSingle(i);
+                                else if ("编辑地址".equals(action)) editMirror(i);
+                                else if ("复制地址".equals(action)) copyMirror(m);
+                                else if ("删除此源".equals(action) || "移除此源".equals(action))
+                                    confirmRemoveAt(i);
+                                else restoreDefaults();
+                            }
+                        })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void editMirror(final int i) {
+        final UpdateManager.Mirror m = mirrors.get(i);
+        final EditText input = new EditText(this);
+        input.setText(m.template);
+        input.setHint("https://域名/{url}");
+        input.setSingleLine(true);
+        input.setInputType(android.text.InputType.TYPE_TEXT_VARIATION_URI);
+        AcDialog.builder(this)
+                .setTitle("编辑加速源")
+                .setView(input)
+                .setPositiveButton("保存", new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
-                        invalidateProbe();
-                        UpdateManager.removeCustomMirror(UpdateActivity.this, m.template);
-                        mirrors = UpdateManager.loadMirrors(UpdateActivity.this);
-                        String sel = UpdateManager.selectedTemplate(UpdateActivity.this);
-                        selectedIndex = indexOfTemplate(sel);
-                        buildRows();
-                        progressText.setText("已删除 " + m.name);
+                        String raw = input.getText().toString();
+                        if (raw.trim().length() == 0) {
+                            AcToast.show(UpdateActivity.this, "地址不能为空");
+                            return;
+                        }
+                        String t;
+                        if (m.custom) {
+                            t = UpdateManager.updateCustomMirror(
+                                    UpdateActivity.this, m.template, raw);
+                        } else {
+                            t = UpdateManager.addCustomMirror(UpdateActivity.this, raw);
+                            if (t != null) {
+                                UpdateManager.hideBuiltin(UpdateActivity.this, m.template);
+                            }
+                        }
+                        if (t == null) {
+                            AcToast.show(UpdateActivity.this, "地址无效");
+                            return;
+                        }
+                        UpdateManager.setSelectedTemplate(UpdateActivity.this, t);
+                        reloadMirrors(t);
+                        progressText.setText("已保存 " + t + "\n建议点「测速」验证");
                     }
                 })
                 .setNegativeButton("取消", null)
                 .show();
+    }
+
+    private void copyMirror(UpdateManager.Mirror m) {
+        String text = m.template.length() > 0 ? m.template : "直连 github.com";
+        try {
+            android.content.ClipboardManager cm = (android.content.ClipboardManager)
+                    getSystemService(CLIPBOARD_SERVICE);
+            cm.setPrimaryClip(android.content.ClipData.newPlainText("mirror", text));
+            AcToast.show(this, "已复制");
+        } catch (Throwable t) {
+            AcToast.show(this, "复制失败");
+        }
+    }
+
+    private void confirmRemoveAt(final int i) {
+        final UpdateManager.Mirror m = mirrors.get(i);
+        AcDialog.builder(this)
+                .setTitle("移除加速源")
+                .setMessage(m.name + "\n" + m.template
+                        + "\n\n内置源可通过「恢复全部内置源」找回。")
+                .setPositiveButton("移除", new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface d, int w) {
+                        if (m.custom) {
+                            UpdateManager.removeCustomMirror(UpdateActivity.this, m.template);
+                        } else {
+                            UpdateManager.hideBuiltin(UpdateActivity.this, m.template);
+                        }
+                        reloadMirrors(null);
+                        progressText.setText("已移除 " + m.name);
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void restoreDefaults() {
+        UpdateManager.restoreBuiltins(this);
+        reloadMirrors(null);
+        AcToast.show(this, "已恢复全部内置加速源");
     }
 
     private void showNotes() {
@@ -638,7 +765,7 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
                         for (UpdateManager.Mirror m : mirrors) {
                             m.latency = UpdateManager.NOT_TESTED;
                         }
-                        for (int i = 0; i < mirrors.size(); i++) refreshRow(i);
+                        refreshAllRows();
                     }
                 })
                 .show();

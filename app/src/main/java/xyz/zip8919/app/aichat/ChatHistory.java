@@ -116,6 +116,35 @@ final class ChatHistory {
     }
 
     /**
+     * 中断后「继续生成」：把已生成的正文作为最后一条 assistant 前缀接回请求。
+     *
+     * <p>DeepSeek 官方走 Chat Prefix Completion（{@code base_url} 加 {@code /beta}），
+     * 要求 messages 最后一条是 assistant 且带 {@code "prefix": true}。
+     *
+     * <p>其他服务商不认这个字段，降级为「assistant 回放已生成内容 + 一条 user
+     * 续写指令」。补 user 是必须的：严格的 OpenAI 兼容端点要求 messages 以 user
+     * 结尾，只放 assistant 会直接 400；带上明确指令至少能续上，不会点了没反应。
+     * 这条 user 只存在于本次请求体，不写进本地会话，也不会污染后续历史。
+     */
+    static JSONArray appendPrefix(JSONArray msgs, String prefixText, boolean official)
+            throws Exception {
+        if (msgs == null) msgs = new JSONArray();
+        JSONObject a = new JSONObject();
+        a.put("role", "assistant");
+        a.put("content", prefixText == null ? "" : prefixText);
+        if (official) a.put("prefix", true);
+        msgs.put(a);
+        if (!official) {
+            JSONObject u = new JSONObject();
+            u.put("role", "user");
+            u.put("content", "请接着上面已经生成的内容末尾继续输出，直接给出后续正文，"
+                    + "不要重复已生成的部分，也不要添加解释、总结或开场白。");
+            msgs.put(u);
+        }
+        return msgs;
+    }
+
+    /**
      * 保证 messages 里每个 assistant(tool_calls) 后面都紧跟齐全的 tool 响应。
      *
      * <p>为什么必须在<b>出口</b>再做一次，而不是只信 {@link #appendToolHistory}：

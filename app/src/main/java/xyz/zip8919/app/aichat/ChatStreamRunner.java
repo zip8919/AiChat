@@ -195,8 +195,13 @@ final class ChatStreamRunner {
     };
 
     private JSONArray buildConversation(String sysPrompt) throws Exception {
-        return ChatHistory.build(job.snapshot, job.aiMessage, sysPrompt,
+        JSONArray msgs = ChatHistory.build(job.snapshot, job.aiMessage, sysPrompt,
                 job.vision, VISION_IMAGES);
+        // 继续生成：build() 已经 skip 掉本轮 AI 占位，这里把「已生成的那半截」
+        // 接成最后一条 assistant 前缀，模型才能从断点继续而不是重新回答。
+        return job.isContinue()
+                ? ChatHistory.appendPrefix(msgs, job.cont.prefixText, job.cont.officialPrefix)
+                : msgs;
     }
 
     /** 阻塞执行，由调用方放进请求线程。 */
@@ -214,13 +219,17 @@ final class ChatStreamRunner {
                     : buildConversation(job.effectiveSystemPrompt);
             JSONArray toolDefs = WebSearchTool.buildToolDefinitions(
                     job.webSearchEnabled, job.httpToolEnabled);
-            boolean toolsEnabled = true;
+            // 继续生成不带 tools：官方 /beta 前缀续写要求最后一条就是 assistant，
+            // 挂上 tool_calls 会让端点改写这一轮；降级路径的续写指令也不该被工具调用打断。
+            boolean toolsEnabled = !job.isContinue();
             boolean fallbackTried = false;
             boolean includeUsage = job.includeUsage;
             boolean usageDowngraded = false;
             // 端点是否接受思考相关参数。自建 provider 一律被写成 thinkingType=object +
             // 参数名 thinking，严格的 OpenAI 兼容端点会直接 400，需要一次性降级。
-            boolean sendThinking = true;
+            // 官方 /beta 前缀续写不认本项目的 thinking / thinking_budget 参数，
+            // 直接不下发，省掉一次必然的 400 降级请求。
+            boolean sendThinking = !(job.isContinue() && job.cont.officialPrefix);
             boolean thinkingDowngraded = false;
             // 最近一次 429 的响应体。重试耗尽那一轮可能已读不到 body，用它兜底进错误卡片。
             String last429Body = "";
@@ -242,7 +251,9 @@ final class ChatStreamRunner {
             // 恒真 → 点「从出错处重试」后先发一次 HTTP、跑一轮工具就立刻失败，
             // 无限重试且永远拿不到最终回答（还重复记账）。
             int usedRounds = 0;
-            if (job.isResume() && st.trace.length() > 0) {
+            if (job.isContinue()) {
+                ui.showStatus("正在继续生成...", job.generation, st.trace.toString(), job.aiIndex);
+            } else if (job.isResume() && st.trace.length() > 0) {
                 ui.showStatus("正在重新生成...", job.generation, st.trace.toString(), job.aiIndex);
             }
 
@@ -278,7 +289,8 @@ final class ChatStreamRunner {
                 // 重试另有 retries 计数，方便区分「请求多」是工具轮还是 429。
                 UsageStats.get().onRequest(job.modelName, job.providerName);
                 final long roundStartMs = System.currentTimeMillis();
-                conn = ChatTransport.open(job.provider);
+                conn = ChatTransport.open(job.provider,
+                        job.isContinue() && job.cont.officialPrefix);
                 session.setConnection(conn);
                 writeBody(conn, body.toString());
 
@@ -499,7 +511,9 @@ final class ChatStreamRunner {
 
                 st.trace.append(rr.display);
                 if (TraceKit.cap(st.trace)) ui.onTraceTrimmed();
-                st.apiText = rr.content.toString();
+                st.apiText = job.isContinue()
+                        ? job.cont.prefixText + rr.content.toString()
+                        : rr.content.toString();
                 break;
             }
 
@@ -605,7 +619,9 @@ final class ChatStreamRunner {
                         e.getClass().getSimpleName(), r.display.length());
             }
             if (r != null && r.content.length() > 0) {
-                st.apiText = r.content.toString();
+                st.apiText = job.isContinue()
+                        ? job.cont.prefixText + r.content.toString()
+                        : r.content.toString();
             }
             throw e;
         }
@@ -747,11 +763,18 @@ final class ChatStreamRunner {
         }
 
         State(StreamJob job) {
-            this.trace = new StringBuilder(
-                    job.isResume() && job.resume.trace != null ? job.resume.trace : "");
+            // 继续生成：trace 从已有正文起步，流式分片才能接在它后面，
+            // 而不是把屏幕上已经有的半截回答整体覆盖掉。
+            String base = job.isContinue() ? job.cont.displayBase
+                    : (job.isResume() && job.resume.trace != null ? job.resume.trace : "");
+            this.trace = new StringBuilder(base);
             this.sources = job.initialSources();
             this.round = job.isResume() ? job.resume.round : 0;
-            if (job.isResume() && job.resume.apiText != null) {
+            if (job.isContinue()) {
+                // apiText 是下次进历史的干净正文，必须带上已生成的前缀；
+                // 结算时若只写本轮新内容，这条回答在历史里就只剩后半截。
+                this.apiText = job.cont.prefixText;
+            } else if (job.isResume() && job.resume.apiText != null) {
                 this.apiText = job.resume.apiText;
             }
             if (job.isResume() && job.resume.toolHistoryJson != null

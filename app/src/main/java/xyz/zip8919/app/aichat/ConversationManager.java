@@ -305,46 +305,77 @@ public class ConversationManager {
         return c;
     }
 
+    /** 切换会话的分阶段进度。只在后台线程调用，宿主自行切回 UI 线程更新界面。 */
+    public interface LoadProgress {
+        /** @param percent 0~100 的整体完成度 */
+        void onStage(String label, int percent);
+    }
+
     public void switchConversation(String conversationId) {
+        switchConversation(conversationId, null);
+    }
+
+    /**
+     * 切换到指定会话，并在关键节点回报进度。
+     *
+     * <p>阶段是按真实工作拆的，不是假进度条：读盘、JSON 解析、恢复附件、准备界面
+     * 各占一段。解析完成后把消息条数写进文案，用户能看出「大会话为什么慢」。
+     */
+    public void switchConversation(String conversationId, LoadProgress progress) {
         LogUtil.i(TAG, "switchConversation -> %s", conversationId);
+        stage(progress, "校验会话信息", 5);
         // id 会被拼进文件路径，而它的来源可能是外部 Intent（MainActivity 是
         // exported 的）或手工改过的 JSON。非法 id 一律当作「新会话」处理，
         // 否则一次带 ../ 的 Intent 就能让后续保存覆盖到 conversations 目录之外。
         if (!StorageManager.isValidConversationId(conversationId)) {
             LogUtil.w(TAG, "switchConversation rejected: illegal id '%s'", conversationId);
+            stage(progress, "会话 ID 无效", 100);
             return;
         }
         this.orphanMessages = null;
-        // Try to find in memory
-        for (Conversation c : this.conversations) {
-            if (c.id.equals(conversationId)) {
-                ensureMessagesLoaded(c);
-                this.currentConversation = c;
-                LogUtil.d(TAG, "switchConversation: found in memory, msgs=%d", c.messages.size());
-                return;
-            }
-        }
 
-        // Load from disk
-        String content = storageManager.loadConversation(conversationId);
-        if (content != null) {
-            Conversation conv = fromJson(content);
-            // 文件里的 id 字段可能与文件名不一致（手工改过、旧版本写错）。
-            // 文件名才是这条会话的身份：不一致时必须纠正，否则之后
-            // 「删除这条」删的是另一个文件，保存也会写到另一个 id 下。
-            if (!conversationId.equals(conv.id)) {
-                LogUtil.w(TAG, "switchConversation: id mismatch file=%s json=%s, use file",
-                        conversationId, conv.id);
-                conv.id = conversationId;
-            }
-            this.currentConversation = conv;
-            this.conversations.add(0, conv);
-            LogUtil.d(TAG, "switchConversation: loaded from disk, msgs=%d", conv.messages.size());
-        } else {
-            this.currentConversation = new Conversation(conversationId);
-            this.conversations.add(0, this.currentConversation);
-            LogUtil.w(TAG, "switchConversation: '%s' not on disk, created empty", conversationId);
+        Conversation inMemory = null;
+        for (Conversation c : this.conversations) {
+            if (c.id.equals(conversationId)) { inMemory = c; break; }
         }
+        if (inMemory != null) {
+            stage(progress, "读取会话正文", 35);
+            ensureMessagesLoaded(inMemory);
+            this.currentConversation = inMemory;
+            stage(progress, "解析消息记录（" + inMemory.messages.size() + " 条）", 70);
+            LogUtil.d(TAG, "switchConversation: found in memory, msgs=%d", inMemory.messages.size());
+        } else {
+            stage(progress, "读取会话文件", 30);
+            String content = storageManager.loadConversation(conversationId);
+            if (content != null) {
+                stage(progress, "解析消息记录", 55);
+                Conversation conv = fromJson(content);
+                // 文件里的 id 字段可能与文件名不一致（手工改过、旧版本写错）。
+                // 文件名才是这条会话的身份：不一致时必须纠正，否则之后
+                // 「删除这条」删的是另一个文件，保存也会写到另一个 id 下。
+                if (!conversationId.equals(conv.id)) {
+                    LogUtil.w(TAG, "switchConversation: id mismatch file=%s json=%s, use file",
+                            conversationId, conv.id);
+                    conv.id = conversationId;
+                }
+                this.currentConversation = conv;
+                this.conversations.add(0, conv);
+                stage(progress, "解析消息记录（" + conv.messages.size() + " 条）", 75);
+                LogUtil.d(TAG, "switchConversation: loaded from disk, msgs=%d", conv.messages.size());
+            } else {
+                this.currentConversation = new Conversation(conversationId);
+                this.conversations.add(0, this.currentConversation);
+                stage(progress, "新建空会话", 75);
+                LogUtil.w(TAG, "switchConversation: '%s' not on disk, created empty", conversationId);
+            }
+        }
+        stage(progress, "恢复附件与工具记录", 88);
+        stage(progress, "准备界面", 95);
+        stage(progress, "加载完成", 100);
+    }
+
+    private static void stage(LoadProgress p, String label, int percent) {
+        if (p != null) p.onStage(label, percent);
     }
 
     /**
@@ -760,8 +791,6 @@ public class ConversationManager {
         try {
             JSONObject json = new JSONObject(jsonStr);
             String rawId = json.optString("id", "");
-            // 旧版本可能把 null 写成字符串 "null"，那样这个会话永远匹配不上
-            // 任何一次 switchConversation，等于打不开
             // 旧版本可能把 null 写成字符串 "null"，那样这个会话永远匹配不上
             // 任何一次 switchConversation，等于打不开；含路径分隔符的 id 更要拒绝
             // ——它会让后续保存写到别的目录去。

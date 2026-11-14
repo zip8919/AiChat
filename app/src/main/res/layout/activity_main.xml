@@ -20,6 +20,15 @@
     </LinearLayout>
     <FrameLayout android:id="@+id/scroll_to_bottom_bar" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1">
         <WebView android:id="@+id/message_webview" android:layout_width="match_parent" android:layout_height="match_parent" />
+        <!-- 切换会话时的加载遮罩：盖在消息区上，输入栏与顶部按钮仍可见。
+             clickable 拦住点击，避免加载中误触到底下的旧消息链接。 -->
+        <LinearLayout android:id="@+id/conversation_loading_overlay" android:orientation="vertical" android:gravity="center" android:clickable="true" android:visibility="gone" android:background="#E6FFFFFF" android:padding="20dp" android:layout_width="match_parent" android:layout_height="match_parent">
+            <ProgressBar android:id="@+id/loading_spinner" style="?android:attr/progressBarStyleLarge" android:layout_width="wrap_content" android:layout_height="wrap_content" />
+            <TextView android:id="@+id/loading_title" android:textSize="14sp" android:textStyle="bold" android:textColor="@color/text_primary" android:layout_marginTop="12dp" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="正在切换会话" />
+            <TextView android:id="@+id/loading_detail" android:textSize="12sp" android:textColor="@color/text_secondary" android:gravity="center" android:layout_marginTop="6dp" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="准备中…" />
+            <ProgressBar android:id="@+id/loading_progress" style="?android:attr/progressBarStyleHorizontal" android:max="100" android:layout_marginTop="12dp" android:layout_width="match_parent" android:layout_height="wrap_content" />
+            <TextView android:id="@+id/loading_percent" android:textSize="11sp" android:textColor="@color/text_secondary" android:layout_marginTop="4dp" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="0%" />
+        </LinearLayout>
         <TextView android:id="@+id/scroll_to_bottom_button" android:textSize="15sp" android:textStyle="bold" android:textColor="#FFFFFF" android:background="@drawable/bg_scroll_bubble" android:gravity="center" android:includeFontPadding="false" android:layout_gravity="end|bottom" android:layout_marginRight="14dp" android:layout_marginBottom="10dp" android:visibility="gone" android:layout_width="38dp" android:layout_height="38dp" android:text="↓" />
     </FrameLayout>
     <LinearLayout android:id="@+id/queue_bar" android:gravity="center_vertical" android:orientation="horizontal" android:background="#FFF8E1" android:padding="4dp" android:visibility="gone" android:layout_width="match_parent" android:layout_height="wrap_content">

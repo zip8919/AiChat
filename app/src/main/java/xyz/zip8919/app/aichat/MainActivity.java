@@ -213,6 +213,12 @@ public class MainActivity extends ThemedActivity {
     private Thread currentRequestThread;
     private Handler handler = new Handler();
 
+    /** 会话切换进行中：遮罩显示期间不允许再来一次切换，避免两次加载互相覆盖。 */
+    private boolean switchingConversation;
+    private View loadingOverlay;
+    private TextView loadingDetail, loadingPercent;
+    private android.widget.ProgressBar loadingProgress;
+
     // 全屏预览器（图片 / 表格 / HTML·SVG 代码），自持 dialog 与 WebView 生命周期
     private ViewerController viewer;
 
@@ -1783,6 +1789,78 @@ public class MainActivity extends ThemedActivity {
         }
     }
 
+    /**
+     * 「继续生成」的落点：DeepSeek 官方走 /beta 前缀续写，其他服务商把已生成内容
+     * 当上下文重新请求。复用同一条 AI 消息，新内容追加在已生成正文之后。
+     *
+     * <p>只支持最后一条 AI 消息：所有流式 DOM 函数都作用于「最后一个 AI 气泡」，
+     * 若中断后用户又继续提问，往旧气泡写会把内容灌进新回复里。那种情况让用户
+     * 走错误卡片上的「重新回复」。
+     */
+    private void doContinueGeneration(final int pos) {
+        if (isRequestInProgress.get()) {
+            AcToast.show(this, "当前回复仍在进行，请先停止");
+            return;
+        }
+        if (pos < 0 || pos >= messages.size()) return;
+        final Message am = messages.get(pos);
+        if (am == null || !am.isAssistant()) return;
+        if (pos != messages.size() - 1) {
+            AcToast.show(this, "这条回复之后已有新消息，请用「重新回复」");
+            return;
+        }
+        final String displayBase = stripInterruptedSuffix(am.content);
+        final String prefixText = prefixTextOf(am, displayBase);
+        if (prefixText.length() == 0) {
+            // 一个字都没生成，没有可续的前缀，退回从用户消息重发
+            int userIdx = lastUserIndexBefore(pos);
+            if (userIdx >= 0) resendUserAt(userIdx);
+            else AcToast.show(this, "没有可继续的内容，请重新发送");
+            return;
+        }
+        loadSystemPrompt();
+        int selPos = modelSpinner.getSelectedItemPosition();
+        if (selPos < 0 || availableModels == null || selPos >= availableModels.size()) {
+            AcToast.show(this, "未选择模型");
+            return;
+        }
+        ProviderInfo provider = configManager.getProvider(availableModels.get(selPos).provider);
+        if (provider == null) {
+            AcToast.show(this, "未选择模型");
+            return;
+        }
+        final boolean official = ChatTransport.isOfficialDeepSeek(provider);
+        // 复用同一条消息：清掉「已打断」标记与失败状态，正文回到干净的已生成部分。
+        // DOM 的重画交给 sendStreamingRequest，避免这里和它各排一次渲染。
+        am.content = displayBase;
+        am.apiText = prefixText;
+        am.sendFailed = false;
+        am.interrupted = false;
+        am.errorDetail = "";
+        conversationManager.saveCurrentConversation();
+        String thinkingLevel = configManager.getThinkingLevel();
+        if (!configManager.isThinkingEnabled()) thinkingLevel = "off";
+        int gen = requestGeneration.incrementAndGet();
+        LogUtil.i(TAG, "continue generation: idx=%d prefix=%d display=%d official=%s url=%s",
+                pos, prefixText.length(), displayBase.length(), official, provider.apiUrl);
+        sendStreamingRequest(provider, thinkingLevel, gen, null,
+                new StreamJob.Continue(pos, displayBase, prefixText, official));
+    }
+
+    /** 去掉 {@code interruptRequest} 追加的「 (已打断)」尾巴。 */
+    private static String stripInterruptedSuffix(String content) {
+        if (content == null) return "";
+        final String suffix = " (已打断)";
+        return content.endsWith(suffix)
+                ? content.substring(0, content.length() - suffix.length()) : content;
+    }
+
+    /** 发给模型的 assistant 前缀：优先流式留下的 apiText，否则从正文剥掉标记。 */
+    private static String prefixTextOf(Message m, String displayBase) {
+        if (m.apiText != null && m.apiText.trim().length() > 0) return m.apiText.trim();
+        return MessageHtmlRenderer.plainTextOf(displayBase).trim();
+    }
+
     private void openSettings() {
         LogUtil.d(TAG, "openSettings -> SettingsActivity");
         startActivity(new Intent(this, SettingsActivity.class));
@@ -1826,11 +1904,19 @@ public class MainActivity extends ThemedActivity {
      *
      * <p>已经是当前会话就直接返回：重复走一遍会中断正在进行的请求、
      * 丢掉排队消息，用户只是点了「查看」，不该付出这个代价。
+     *
+     * <p>加载在后台线程做，进度通过 {@link ConversationManager.LoadProgress} 回报，
+     * 统一 post 回主线程更新遮罩。大会话读盘 + JSON 解析可能几百毫秒，
+     * 没有遮罩时用户会以为点错了又点一次，于是两次切换互相覆盖。
      */
     private void switchToConversation(final String conversationId) {
         Conversation cur = conversationManager.getCurrentConversation();
         if (cur != null && conversationId.equals(cur.id)) {
             LogUtil.i(TAG, "switchToConversation: already current %s", conversationId);
+            return;
+        }
+        if (switchingConversation) {
+            LogUtil.w(TAG, "switchToConversation ignored: another switch is loading");
             return;
         }
         LogUtil.i(TAG, "switching to conversation: %s", conversationId);
@@ -1840,23 +1926,84 @@ public class MainActivity extends ThemedActivity {
         if (isRequestInProgress.get()) interruptRequest();
         dropTrailingEmptyAssistant();
         conversationManager.saveCurrentConversation();
+
+        switchingConversation = true;
+        showConversationLoading();
+        final ConversationManager.LoadProgress progress = new ConversationManager.LoadProgress() {
+            public void onStage(String label, int percent) {
+                updateConversationLoading(label, percent);
+            }
+        };
         new Thread(new Runnable() {
-            @Override
             public void run() {
-                conversationManager.switchConversation(conversationId);
+                try {
+                    conversationManager.switchConversation(conversationId, progress);
+                } catch (Throwable t) {
+                    LogUtil.e(TAG, "switchConversation failed", t);
+                }
                 runOnUiThread(new Runnable() {
-                    @Override
                     public void run() {
-                        Conversation conv = conversationManager.getCurrentConversation();
+                        if (isFinishing()) {
+                            hideConversationLoading();
+                            return;
+                        }
+                        final Conversation conv = conversationManager.getCurrentConversation();
                         messages = conv.messages;
+                        updateConversationLoading("渲染消息页面", 96);
+                        refreshWebView();
                         LogUtil.i(TAG, "switched: id=%s title=%s messages=%d",
                                 conv.id, conv.title, messages.size());
-                        refreshWebView();
-                        AcToast.show(MainActivity.this, "已切换到: " + conv.title);
+                        // 让 100% 停留一帧再收起，否则用户只看到「一闪」
+                        handler.postDelayed(new Runnable() {
+                            public void run() {
+                                if (isFinishing()) return;
+                                updateConversationLoading("加载完成", 100);
+                                hideConversationLoading();
+                                AcToast.show(MainActivity.this, "已切换到: " + conv.title);
+                            }
+                        }, 260);
                     }
                 });
             }
         }, "aichat-switch-conversation").start();
+    }
+
+    private void showConversationLoading() {
+        if (loadingOverlay == null) {
+            loadingOverlay = findViewById(R.id.conversation_loading_overlay);
+            loadingDetail = (TextView) findViewById(R.id.loading_detail);
+            loadingPercent = (TextView) findViewById(R.id.loading_percent);
+            loadingProgress = (android.widget.ProgressBar) findViewById(R.id.loading_progress);
+        }
+        // 遮罩是半透明覆盖层，颜色必须按当前外观取，否则深色下白底配白字看不见进度
+        boolean dark = AppearanceManager.getInstance(this).isDark();
+        int secondary = dark ? 0xFFB0BEC5 : getResources().getColor(R.color.text_secondary);
+        loadingOverlay.setBackgroundColor(dark ? 0xE6202020 : 0xE6FFFFFF);
+        ((TextView) findViewById(R.id.loading_title))
+                .setTextColor(dark ? 0xFFEEEEEE : getResources().getColor(R.color.text_primary));
+        loadingDetail.setTextColor(secondary);
+        loadingPercent.setTextColor(secondary);
+        loadingProgress.setProgress(0);
+        loadingOverlay.setVisibility(View.VISIBLE);
+        updateConversationLoading("保存当前会话", 8);
+    }
+
+    /** 后台线程也能调：统一 post 回主线程，避免加载线程直接碰 View。 */
+    private void updateConversationLoading(final String label, final int percent) {
+        runOnUiThread(new Runnable() {
+            public void run() {
+                if (loadingOverlay == null || loadingDetail == null
+                        || loadingOverlay.getVisibility() != View.VISIBLE) return;
+                loadingDetail.setText(label);
+                loadingProgress.setProgress(percent);
+                loadingPercent.setText(percent + "%");
+            }
+        });
+    }
+
+    private void hideConversationLoading() {
+        if (loadingOverlay != null) loadingOverlay.setVisibility(View.GONE);
+        switchingConversation = false;
     }
 
     @Override
@@ -2282,6 +2429,12 @@ public class MainActivity extends ThemedActivity {
 
     private void sendStreamingRequest(ProviderInfo provider, String thinkingLevel,
             int generation, StreamJob.Resume resume) {
+        sendStreamingRequest(provider, thinkingLevel, generation, resume, null);
+    }
+
+    /** 带续写状态的重载：cont 非 null 表示复用已有 AI 消息「继续生成」。 */
+    private void sendStreamingRequest(ProviderInfo provider, String thinkingLevel,
+            int generation, StreamJob.Resume resume, final StreamJob.Continue cont) {
         final boolean webSearchEnabled = SettingsActivity.isWebSearchEnabled(this);
         final boolean useTavily = SettingsActivity.isTavilySearch(this);
         final String tavilyKey = SettingsActivity.getTavilyKey(this);
@@ -2290,8 +2443,11 @@ public class MainActivity extends ThemedActivity {
                 ? WebSearchTool.resolveProvider(configManager, provider) : null;
         final boolean searchReady = webSearchEnabled
                 && (useTavily ? TavilyTool.hasApiKey(tavilyKey) : searchProvider != null);
-        final String effectiveSystemPrompt =
-                WebSearchTool.appendToSystemPrompt(systemPrompt, webSearchEnabled)
+        // 继续生成不发 tools，系统提示也不要带工具说明，否则模型会照着提示
+        // 输出 [tool] 文本卡片，把续写正文搅乱。
+        final String effectiveSystemPrompt = cont != null
+                ? (systemPrompt == null ? "" : systemPrompt) + conversationTimeSuffix()
+                : WebSearchTool.appendToSystemPrompt(systemPrompt, webSearchEnabled)
                         + conversationTimeSuffix();
         final boolean streamEnabled = SettingsActivity.isStreamEnabled(this);
         // 模型是否支持图片输入：只有用户勾过才发 image_url 块，否则图片只写一行说明
@@ -2310,6 +2466,13 @@ public class MainActivity extends ThemedActivity {
             aiIndex = resume.aiIndex;
             LogUtil.i(TAG, "resume request: aiIndex=%d round=%d traceLen=%d",
                     aiIndex, resume.round, resume.trace == null ? 0 : resume.trace.length());
+        } else if (cont != null) {
+            // 继续生成：复用被中断的那条 AI 消息，正文保留已生成部分，
+            // 新分片追加在后面；不新增气泡、不重置 DOM 里的 data-idx。
+            aiMsg = messages.get(cont.aiIndex);
+            aiIndex = cont.aiIndex;
+            LogUtil.i(TAG, "continue request: aiIndex=%d prefixLen=%d official=%s",
+                    aiIndex, cont.prefixText.length(), cont.officialPrefix);
         } else {
             aiMsg = new Message(Message.ROLE_ASSISTANT, "");
             messages.add(aiMsg);
@@ -2321,16 +2484,24 @@ public class MainActivity extends ThemedActivity {
 
         final int placeholderIndex = aiIndex;
         final boolean isResume = resume != null;
+        final boolean isContinue = cont != null;
         // base 层的内容基准：新请求从空白开始，续跑从上次的 trace 开始。
         // 不清会把上一条消息的 trace 当成「已推送」，导致工具卡片永远不出现。
+        // 继续生成这里刻意留空：让第一帧走 streamBase 重建骨架，顺带把已有正文
+        // 渲染进 base，后续分片只追加 tail，不会把旧内容盖掉。
         lastStreamTrace = isResume && resume.trace != null ? resume.trace : "";
         // DOM 内容基准同理：续跑时界面上已经有上次的正文，新请求从空白开始
-        lastPushedContent = isResume && resume.trace != null ? resume.trace : "";
+        lastPushedContent = lastStreamTrace;
         runOnUiThread(new Runnable() {
             public void run() {
-                webViewEvalJs(isResume
-                        ? "clearAssistantFailed(" + placeholderIndex + ")"
-                        : "appendAiDiv()");
+                if (isContinue) {
+                    webViewEvalJs("clearAssistantFailed(" + placeholderIndex + ")");
+                    updateAiContent(cont.displayBase);
+                } else {
+                    webViewEvalJs(isResume
+                            ? "clearAssistantFailed(" + placeholderIndex + ")"
+                            : "appendAiDiv()");
+                }
             }
         });
 
@@ -2366,6 +2537,7 @@ public class MainActivity extends ThemedActivity {
                 .tavilyKey(tavilyKey)
                 .retryPolicy(RetryPolicy.from(this))
                 .resume(resume)
+                .cont(cont)
                 .build();
 
         final ChatStreamRunner runner =
@@ -3256,6 +3428,24 @@ public class MainActivity extends ThemedActivity {
                         }
                     } catch (Exception e) {
                         LogUtil.w(TAG, "retryFailedUserMessage failed: %s", e.getMessage());
+                    }
+                }
+            });
+        }
+
+        /**
+         * 中断后继续生成：保留已生成的正文，从断点接着往下写。
+         * 官方 DeepSeek 走 /beta 前缀续写，其余服务商降级为上下文续写。
+         */
+        @JavascriptInterface
+        public void continueGeneration(final String idx) {
+            LogUtil.d(TAG, "JsBridge.continueGeneration: idx=%s", idx);
+            handler.post(new Runnable() {
+                public void run() {
+                    try {
+                        doContinueGeneration(Integer.parseInt(idx));
+                    } catch (Exception e) {
+                        LogUtil.w(TAG, "continueGeneration failed: %s", e.getMessage());
                     }
                 }
             });

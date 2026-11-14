@@ -37,11 +37,22 @@ jobs:
             -PkeystorePassword="${{ secrets.KEYSTORE_PASSWORD }}" \
             -PkeyAlias="${{ secrets.KEY_ALIAS }}"
 
+      - name: 生成加速源测速文件
+        # 每个 release 内置一个小测速文件。App 测速时会经各镜像下载它并校验首行魔数，
+        # 只发 Range 看首字节会把「返回 HTML 错误页但 HTTP 200」的失效镜像误判成可用。
+        # 内容必须与 UpdateManager.SPEEDTEST_MAGIC 一致。
+        run: |
+          printf 'AICHAT_SPEEDTEST_V1\n%s\n' "${{ github.ref_name }}" > app/build/outputs/apk/release/speedtest.txt
+          ls -l app/build/outputs/apk/release/speedtest.txt
+
       - name: Upload APK to Release
         uses: softprops/action-gh-release@v2
         with:
           # ABI 分包：app-arm64-v8a / app-armeabi-v7a / app-x86 / app-x86_64 / app-universal
-          files: app/build/outputs/apk/release/*.apk
+          # 外加测速文件 speedtest.txt（App 测速校验用，pickAsset 会把它从安装包列表里排除）
+          files: |
+            app/build/outputs/apk/release/*.apk
+            app/build/outputs/apk/release/speedtest.txt
           name: AiChat ${{ github.ref_name }}
           # 发布说明随代码进仓库：每版打 tag 前更新 .github/RELEASE_NOTES.md，
           # CI 直接读它当 Release body，不再被自动生成的单行 changelog 覆盖。

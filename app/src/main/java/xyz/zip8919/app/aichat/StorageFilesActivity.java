@@ -404,7 +404,10 @@ public class StorageFilesActivity extends ThemedActivity {
             ((TextView) row.findViewById(R.id.file_cat)).setText(
                     ext + fmt.format(new Date(mtime)));
             ((TextView) row.findViewById(R.id.file_size)).setText(StorageReport.size(size));
+            // 放在 ThemeRecolor 之前会被整树着色扫到，图标色块会被换底；
+            // 放在其后，图标保持固定的识别色。
             ThemeRecolor.applyTo(row);
+            FileIconBinder.bind((android.widget.ImageView) row.findViewById(R.id.file_icon), f);
             row.setBackgroundColor(name.equals(highlight)
                     ? ThemeRecolor.listMarkBg(row.getContext(), 0xFFE3F2FD)
                     : ThemeRecolor.listBg(row.getContext()));

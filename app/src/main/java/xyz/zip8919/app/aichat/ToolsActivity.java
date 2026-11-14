@@ -349,9 +349,10 @@ public class ToolsActivity extends ThemedActivity {
         if (!sameList) {
             fileList.setChoiceMode(selectionMode
                     ? ListView.CHOICE_MODE_MULTIPLE : ListView.CHOICE_MODE_NONE);
-            int itemLayout = selectionMode
-                    ? R.layout.item_tools_file_sel : android.R.layout.simple_list_item_1;
-            fileList.setAdapter(new ArrayAdapter<String>(this, itemLayout, labels));
+            // 两种模式共用同一个布局：图标是左侧 compound drawable，勾选框仍由
+            // CheckedTextView 自己管，ListView 的 CHOICE_MODE_MULTIPLE 才能正常工作。
+            // 换成 LinearLayout 当根会丢掉 Checkable，多选会整体失效。
+            fileList.setAdapter(new FileListAdapter(labels));
             fileList.clearChoices();
             if (selectionMode) {
                 for (int i = 0; i < files.size(); i++) {
@@ -362,6 +363,31 @@ public class ToolsActivity extends ThemedActivity {
             }
         }
         updateSelectionBar();
+    }
+
+    /**
+     * 代码库列表：文字仍由 ArrayAdapter 填，左侧图标与缩略图在 getView 里补。
+     *
+     * <p>用 compound drawable 而不是自定义行布局，是为了保留 {@link android.widget.CheckedTextView}
+     * 的 {@link android.widget.Checkable} ——ListView 的多选状态靠根 View 实现它才生效，
+     * 换成普通 LinearLayout 会让「全选 / 反选 / 删除选中」全部失灵。
+     */
+    private final class FileListAdapter extends ArrayAdapter<String> {
+        FileListAdapter(List<String> labels) {
+            super(ToolsActivity.this, R.layout.item_tools_file_sel, labels);
+        }
+
+        @Override
+        public View getView(int position, View convertView, ViewGroup parent) {
+            android.widget.CheckedTextView tv =
+                    (android.widget.CheckedTextView) super.getView(position, convertView, parent);
+            File f = position >= 0 && position < files.size() ? files.get(position) : null;
+            FileIconBinder.bindCompound(tv, f);
+            // 非多选态把勾选框摘掉：布局里写死的是多选指示器，不摘会出现
+            // 「普通浏览模式每行右边都有一个空方框」。
+            if (!selectionMode) tv.setCheckMarkDrawable((android.graphics.drawable.Drawable) null);
+            return tv;
+        }
     }
 
     // ---------- multi-select ----------

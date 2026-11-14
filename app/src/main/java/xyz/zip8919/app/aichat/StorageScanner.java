@@ -11,22 +11,23 @@ import java.io.File;
  * <p>只在后台线程调用。整个扫描是串行的：外部存储上的并发 {@code listFiles}
  * 在低端机上比串行还慢，而且这里的瓶颈是磁盘 IO 不是 CPU。
  *
- * <p>时间阈值集中在这里，别的地方不要再写一套：
- * <ul>
- *   <li>导入残留 {@code tmp-*}：24 小时（与 {@code AttachmentFiles.sweepTempFiles} 一致）</li>
- *   <li>拍照/裁剪缓存：7 天（原图要么已进附件目录，要么用户不再需要）</li>
- *   <li>其他缓存与 {@code *.tmp}：1 天 / 1 小时</li>
- * </ul>
+ * <p>临时文件<b>没有长期保护期</b>：缓存、导入残留、写入中转都是可再生的中间产物，
+ * 等 7 天 / 1 天 / 24 小时才能清理没有任何收益，只会让「一键清理」看起来没生效。
+ * 现在只保留一个 {@link #WRITE_GRACE_MS} 的极短写入窗口，唯一目的是避开
+ * 「文件刚创建、进程还在往里写」的那几秒——删掉它才会真的把导入或落盘搞坏。
  *
- * <p>附件本身<b>没有</b>保护期：导入是同步完成的（文件写完立刻写消息），
+ * <p>附件本身也<b>没有</b>保护期：导入是同步完成的（文件写完立刻写消息），
  * 曾经那层「1 小时保护期」只会让刚删掉的会话图片赖在「使用中」一小时。
  */
 final class StorageScanner {
 
     private static final String TAG = "StorageScanner";
 
-    static final long HOUR = 60L * 60L * 1000L;
-    static final long DAY = 24L * HOUR;
+    /**
+     * 唯一保留的时间阈值：正在写入的文件保护窗口（2 分钟）。
+     * 只用来挡「刚创建还没写完」的 .tmp / 相机缓存，不再按目录或文件类型分档。
+     */
+    static final long WRITE_GRACE_MS = 2L * 60L * 1000L;
 
     /** 递归深度上限。防软链接成环把扫描卡死，正常目录不会超过 4 层。 */
     private static final int MAX_DEPTH = 12;
@@ -60,7 +61,7 @@ final class StorageScanner {
                 if (name.endsWith(".json")) {
                     r.addFile(f, StorageReport.CAT_CONVERSATION);
                 } else if (name.endsWith(".tmp")) {
-                    r.addTempFile(f, now - f.lastModified() >= HOUR);
+                    r.addTempFile(f, now - f.lastModified() >= WRITE_GRACE_MS);
                 }
             }
         }
@@ -84,7 +85,7 @@ final class StorageScanner {
                 File f = attFiles[i];
                 if (!f.isFile()) continue;
                 if (f.getName().startsWith("tmp-")) {
-                    r.addTempFile(f, now - f.lastModified() >= DAY);
+                    r.addTempFile(f, now - f.lastModified() >= WRITE_GRACE_MS);
                     continue;
                 }
                 r.addFile(f, StorageReport.CAT_ATTACHMENT);
@@ -125,7 +126,7 @@ final class StorageScanner {
                 File f = exportFiles[i];
                 if (!f.isFile()) continue;
                 if (f.getName().endsWith(".tmp")) {
-                    r.addTempFile(f, now - f.lastModified() >= HOUR);
+                    r.addTempFile(f, now - f.lastModified() >= WRITE_GRACE_MS);
                 } else {
                     r.addFile(f, StorageReport.CAT_EXPORT);
                 }
@@ -170,22 +171,19 @@ final class StorageScanner {
     /**
      * 递归统计缓存目录。
      *
-     * <p>camera 子目录放的是拍照/裁剪中间产物（原图已经导入附件目录），
-     * 给 7 天缓冲；其余缓存给 1 天。刚写入的文件（< 1 天）不参与清理，
-     * 避免把正在用的 WebView 缓存或正在导出的文件删掉。
+     * <p>长期保护期已移除：缓存目录里的文件随时可以清理，Webview 缓存删了会自己重建。
+     * 只跳过 {@link #WRITE_GRACE_MS} 内刚写入的文件，避免删到正在写的中间产物。
      */
     private static void scanCache(StorageReport r, File dir, long now, int depth) {
         if (depth > MAX_DEPTH) return;
         File[] files = dir.listFiles();
         if (files == null) return;
-        boolean camera = "camera".equals(dir.getName());
-        long threshold = camera ? 7 * DAY : DAY;
         for (int i = 0; i < files.length; i++) {
             File f = files[i];
             if (f.isDirectory()) {
                 scanCache(r, f, now, depth + 1);
             } else if (f.isFile()) {
-                r.addTempFile(f, now - f.lastModified() >= threshold);
+                r.addTempFile(f, now - f.lastModified() >= WRITE_GRACE_MS);
             }
         }
     }

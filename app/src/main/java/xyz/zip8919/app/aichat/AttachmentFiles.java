@@ -431,13 +431,13 @@ final class AttachmentFiles {
      * 清掉上一次失败留下的临时文件。
      *
      * <p>拷 20 MB 的图时用户切走、进程被杀，{@code tmp-*} 就会留在目录里。
-     * 只删一天前的：正在写的那份时间戳是新的，误删会直接把导入搞坏。
+     * 不再等 24 小时：只跳过 2 分钟内刚写入的那份（可能还在写），其余一律清掉。
      */
     private static void sweepTempFiles(File dir) {
         try {
             File[] files = dir.listFiles();
             if (files == null) return;
-            long cutoff = System.currentTimeMillis() - 24L * 60 * 60 * 1000;
+            long cutoff = System.currentTimeMillis() - StorageScanner.WRITE_GRACE_MS;
             for (File f : files) {
                 if (f.getName().startsWith("tmp-") && f.lastModified() < cutoff) {
                     if (f.delete()) LogUtil.d(TAG, "swept stale temp: %s", f.getName());

@@ -285,10 +285,9 @@ public class StorageActivity extends ThemedActivity {
         if (report == null) return;
         String msg = "缓存与中间文件共 " + StorageReport.size(report.size[StorageReport.CAT_TEMP])
                 + "，其中 " + StorageReport.size(report.cleanableTempSize)
-                + " 已过保护期，可以清理。\n\n"
-                + "包括：拍照与裁剪的中间图（7 天）、网页缓存与临时文件（1 天）、"
-                + "导入残留与写入中转（24 小时 / 1 小时）。\n\n"
-                + "正在使用的文件不会被动到。";
+                + " 可以清理。\n\n"
+                + "包括：拍照与裁剪的中间图、网页缓存、导入残留与写入中转。\n\n"
+                + "这些都是可再生的中间产物，刚写入还在用的文件会自动跳过。";
         AcDialog.builder(this)
                 .setTitle("临时文件")
                 .setMessage(msg)
@@ -441,6 +440,7 @@ public class StorageActivity extends ThemedActivity {
                             + (e.category == StorageReport.CAT_CONVERSATION ? " · 单个会话" : ""));
             ((TextView) row.findViewById(R.id.file_size)).setText(
                     StorageReport.size(e.bytes) + "  ›");
+            FileIconBinder.bind((android.widget.ImageView) row.findViewById(R.id.file_icon), e.file);
             row.setOnClickListener(new View.OnClickListener() {
                 public void onClick(View v) {
                     openTopFile(e);

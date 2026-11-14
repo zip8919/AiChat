@@ -485,17 +485,23 @@ public class MessageHtmlRenderer {
                "</div></div>";
     }
 
-    /** 工具轮次中途失败时，挂在 AI 气泡下方的错误卡片（可保留上下文继续重试）。 */
+    /** 工具轮次中途失败 / 手动中断时，挂在 AI 气泡下方的错误卡片。 */
     public static String renderAssistantErrorCard(Message msg, int index) {
         if (msg == null || !msg.sendFailed) return "";
         String idx = String.valueOf(index);
         boolean canResume = msg.toolHistory != null && msg.toolHistory.length() > 2;
+        // 中断消息一律给「继续生成」：DeepSeek 官方走 /beta 前缀续写，
+        // 其他服务商把已生成内容当上下文重新请求。原来的两个重试入口保留，
+        // 续写效果不理想或端点不支持时，用户还能从头重来。
+        String continueBtn = "<button class=\"err-btn retry\" onclick=\"if(window.Android)Android.continueGeneration('"
+                + idx + "');event.stopPropagation();return false;\">继续生成</button>";
         return "<div class=\"error-card inline\">" +
                "<div class=\"err-title\">回复中断</div>" +
                "<div class=\"err-summary\">" + esc(errorSummary(msg.errorDetail)) + "</div>" +
                "<div class=\"err-actions\">" +
                "<button class=\"err-btn\" onclick=\"if(window.Android)Android.showErrorDetail('" + idx +
                "');event.stopPropagation();return false;\">查看详情</button>" +
+               continueBtn +
                (canResume
                    ? "<button class=\"err-btn retry\" onclick=\"if(window.Android)Android.retryFailedAssistant('"
                      + idx + "');event.stopPropagation();return false;\">从出错处重试</button>"

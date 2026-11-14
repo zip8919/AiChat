@@ -55,15 +55,31 @@ public final class UpdateManager {
     private static final String PREFS = "aichat_update";
     private static final String KEY_CUSTOM = "custom_mirrors";
     private static final String KEY_SELECTED = "selected_mirror";
+    /** 被用户「移除」的内置源模板，持久化后不出现在列表里；「恢复默认」清空它。 */
+    private static final String KEY_HIDDEN = "hidden_builtin";
+
+    /** 每个 release 内置的测速文件名与内容魔数：测速必须真的下到这个文件才算可用。 */
+    public static final String SPEEDTEST_ASSET = "speedtest.txt";
+    public static final String SPEEDTEST_MAGIC = "AICHAT_SPEEDTEST_V1";
 
     /** -1 未测，-2 不可用，>=0 为毫秒。 */
     public static final int NOT_TESTED = -1;
     public static final int FAILED = -2;
 
     /**
-     * 内置镜像。前 5 个在本机（2026-11-08）用真实的 v1.13.2 asset URL 实测可通，
-     * 后 2 个为常见备选但本机超时——镜像可用性随时间与网络环境变化，
-     * **真机以 App 内测速结果为准**，这里只提供候选，不做「一定可用」的承诺。
+     * 内置加速源。
+     *
+     * <p>前 7 项是本项目原有的候选（保留模板字符串，避免老用户已保存的选中项失效），
+     * 其余来自 <a href="https://github.akams.cn">github.akams.cn</a> 节点列表
+     * （2026-11-14 抓取，贡献 + 测绘两类共 83 个域名，去重后固化）。
+     *
+     * <p>为什么不运行时去拉：该站点是 Next.js 应用，节点列表内嵌在约 800KB 的 JS
+     * bundle 里、没有公开 JSON 接口。API 18 的词典笔为了几十行配置去下载并解析
+     * 一个前端 bundle，既慢又随时会因为站点改版失效。固化后 App 零额外联网，
+     * 站点新增节点由后续版本更新；用户自己发现的源仍可用「自定义」添加。
+     *
+     * <p><b>不承诺可用</b>：镜像可用性随网络环境变化，一律以 App 内测速结果为准。
+     * 测速会实际下载 release 内置的测速文件并校验内容，返回错误页的源会被判为不可用。
      * 模板含 {url} 时替换，否则当作前缀直接拼接。
      */
     private static final String[][] BUILTIN = {
@@ -74,15 +90,102 @@ public final class UpdateManager {
             {"ghproxy.net", "https://ghproxy.net/{url}"},
             {"mirror.ghproxy.com", "https://mirror.ghproxy.com/{url}"},
             {"hub.gitmirror.com", "https://hub.gitmirror.com/{url}"},
+            {"777.z321.cc.cd", "https://777.z321.cc.cd/{url}"},
+            {"cdn.akaere.online", "https://cdn.akaere.online/{url}"},
+            {"cdn.gh-proxy.com", "https://cdn.gh-proxy.com/{url}"},
+            {"cfgh.ikgy.top", "https://cfgh.ikgy.top/{url}"},
+            {"down.mxw.qzz.io", "https://down.mxw.qzz.io/{url}"},
+            {"down.mxw.xx.kg", "https://down.mxw.xx.kg/{url}"},
+            {"eogh.719831.xyz", "https://eogh.719831.xyz/{url}"},
+            {"g.z321.cc.cd", "https://g.z321.cc.cd/{url}"},
+            {"gap.andyjin.website", "https://gap.andyjin.website/{url}"},
+            {"gg.z321.cc.cd", "https://gg.z321.cc.cd/{url}"},
+            {"gh.07150721.xyz", "https://gh.07150721.xyz/{url}"},
+            {"gh.927223.xyz", "https://gh.927223.xyz/{url}"},
+            {"gh.acmsz.top", "https://gh.acmsz.top/{url}"},
+            {"gh.beimengvv.xyz", "https://gh.beimengvv.xyz/{url}"},
+            {"gh.bugdey.us.kg", "https://gh.bugdey.us.kg/{url}"},
+            {"gh.catmak.name", "https://gh.catmak.name/{url}"},
+            {"gh.dpik.top", "https://gh.dpik.top/{url}"},
+            {"gh.felicity.ac.cn", "https://gh.felicity.ac.cn/{url}"},
+            {"gh.inkchills.cn", "https://gh.inkchills.cn/{url}"},
+            {"gh.jjj.gv.uy", "https://gh.jjj.gv.uy/{url}"},
+            {"gh.meali.top", "https://gh.meali.top/{url}"},
+            {"gh.my-website.ccwu.cc", "https://gh.my-website.ccwu.cc/{url}"},
+            {"gh.qfmc0721.cc.cd", "https://gh.qfmc0721.cc.cd/{url}"},
+            {"gh.ruan.dpdns.org", "https://gh.ruan.dpdns.org/{url}"},
+            {"gh.zhai.edu.pl", "https://gh.zhai.edu.pl/{url}"},
+            {"ghfile.geekertao.top", "https://ghfile.geekertao.top/{url}"},
+            {"ghgo.de5.net", "https://ghgo.de5.net/{url}"},
+            {"ghm.078465.xyz", "https://ghm.078465.xyz/{url}"},
+            {"ghproxy.felicity.land", "https://ghproxy.felicity.land/{url}"},
+            {"ghproxy.icu", "https://ghproxy.icu/{url}"},
+            {"git.yylx.win", "https://git.yylx.win/{url}"},
+            {"github-cf.947563.xyz", "https://github-cf.947563.xyz/{url}"},
+            {"github-proxy.memory-echoes.cn", "https://github-proxy.memory-echoes.cn/{url}"},
+            {"github.dpik.top", "https://github.dpik.top/{url}"},
+            {"github.gohj99.site", "https://github.gohj99.site/{url}"},
+            {"github.ikgy.top", "https://github.ikgy.top/{url}"},
+            {"github.mxw.qzz.io", "https://github.mxw.qzz.io/{url}"},
+            {"github.nswrz.cn", "https://github.nswrz.cn/{url}"},
+            {"github.starrlzy.cn", "https://github.starrlzy.cn/{url}"},
+            {"github.tbap.top", "https://github.tbap.top/{url}"},
+            {"githubdog.com", "https://githubdog.com/{url}"},
+            {"githubproxy.gohj99.site", "https://githubproxy.gohj99.site/{url}"},
+            {"gitproxy.127731.xyz", "https://gitproxy.127731.xyz/{url}"},
+            {"j.1lin.dpdns.org", "https://j.1lin.dpdns.org/{url}"},
+            {"j.1win.ggff.net", "https://j.1win.ggff.net/{url}"},
+            {"jiashu.1win.eu.org", "https://jiashu.1win.eu.org/{url}"},
+            {"js.jiangss.shop", "https://js.jiangss.shop/{url}"},
+            {"tvv.tw", "https://tvv.tw/{url}"},
+            {"xsadwsd.kdns.fr", "https://xsadwsd.kdns.fr/{url}"},
+            {"fastgit.cc", "https://fastgit.cc/{url}"},
+            {"free.cn.eu.org", "https://free.cn.eu.org/{url}"},
+            {"g.blfrp.cn", "https://g.blfrp.cn/{url}"},
+            {"gh.chjina.com", "https://gh.chjina.com/{url}"},
+            {"gh.ddlc.top", "https://gh.ddlc.top/{url}"},
+            {"gh.idayer.com", "https://gh.idayer.com/{url}"},
+            {"gh.jasonzeng.dev", "https://gh.jasonzeng.dev/{url}"},
+            {"gh.monlor.com", "https://gh.monlor.com/{url}"},
+            {"gh.noki.icu", "https://gh.noki.icu/{url}"},
+            {"gh.sixyin.com", "https://gh.sixyin.com/{url}"},
+            {"gh.tryxd.cn", "https://gh.tryxd.cn/{url}"},
+            {"ghp.arslantu.xyz", "https://ghp.arslantu.xyz/{url}"},
+            {"ghp.keleyaa.com", "https://ghp.keleyaa.com/{url}"},
+            {"ghpr.cc", "https://ghpr.cc/{url}"},
+            {"ghproxy.1888866.xyz", "https://ghproxy.1888866.xyz/{url}"},
+            {"ghproxy.cxkpro.top", "https://ghproxy.cxkpro.top/{url}"},
+            {"ghproxy.monkeyray.net", "https://ghproxy.monkeyray.net/{url}"},
+            {"ghpxy.hwinzniej.top", "https://ghpxy.hwinzniej.top/{url}"},
+            {"git.669966.xyz", "https://git.669966.xyz/{url}"},
+            {"github.chenc.dev", "https://github.chenc.dev/{url}"},
+            {"github.ednovas.xyz", "https://github.ednovas.xyz/{url}"},
+            {"github.geekery.cn", "https://github.geekery.cn/{url}"},
+            {"github.tmby.shop", "https://github.tmby.shop/{url}"},
+            {"github.xxlab.tech", "https://github.xxlab.tech/{url}"},
+            {"gitproxy.click", "https://gitproxy.click/{url}"},
+            {"gitproxy.mrhjx.cn", "https://gitproxy.mrhjx.cn/{url}"},
+            {"gp.zkitefly.eu.org", "https://gp.zkitefly.eu.org/{url}"},
+            {"proxy.yaoyaoling.net", "https://proxy.yaoyaoling.net/{url}"},
+            {"slink.ltd", "https://slink.ltd/{url}"},
     };
+
 
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
     /** 版本查询 + 下载：两者先后发生，共用一个线程即可。 */
     private static final ExecutorService POOL = Executors.newSingleThreadExecutor();
-    /** 测速专用：自动测速是长任务，不能占住下载线程导致点「下载」排队。 */
-    private static final ExecutorService PROBE_POOL = Executors.newSingleThreadExecutor();
+    /**
+     * 测速专用：内置源已扩到 80+ 项，串行探测要跑几分钟，用户等不了。
+     * 固定 3 线程是老设备（Cortex-A7 / 66MB 堆）能扛的并发 TLS 连接上限：
+     * 再多会同时握 4+ 个连接，内存和 CPU 都吃不消；单线程又太慢。
+     * 与查询/下载线程池分开，测速期间点「下载」仍然立即开始。
+     */
+    private static final ExecutorService PROBE_POOL = Executors.newFixedThreadPool(3);
     private static volatile HttpURLConnection active;       // 查询/下载连接，cancel() 用
-    private static volatile HttpURLConnection probeActive;  // 测速连接，cancelProbe() 用
+    /** 并发测速时要能一次断掉全部连接，单个 volatile 只记得住最后一个。 */
+    private static final java.util.Set<HttpURLConnection> probeActive =
+            java.util.Collections.newSetFromMap(
+                    new java.util.concurrent.ConcurrentHashMap<HttpURLConnection, Boolean>());
     private static volatile boolean cancelled;
     /** 测速代际：probeAll()/cancelProbe() 递增（均在主线程），回调只认当前代。 */
     private static volatile int probeSeq;
@@ -102,6 +205,8 @@ public final class UpdateManager {
         public String name = "";
         public String body = "";
         public String htmlUrl = "";
+        /** release 内置的测速文件下载地址；空串表示旧版本 release 没有这个文件。 */
+        public String speedTestUrl = "";
         public final List<Asset> assets = new ArrayList<Asset>();
     }
 
@@ -134,8 +239,10 @@ public final class UpdateManager {
 
     public static List<Mirror> loadMirrors(Context ctx) {
         List<Mirror> list = new ArrayList<Mirror>();
+        java.util.Set<String> hidden = hiddenBuiltins(ctx);
         for (String[] b : BUILTIN) {
-            list.add(new Mirror(b[0], b[1], false));
+            // 内置源也能被「移除」：用户不想要的、常年不可用的源不该一直占着列表
+            if (!hidden.contains(b[1])) list.add(new Mirror(b[0], b[1], false));
         }
         SharedPreferences sp = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         String raw = sp.getString(KEY_CUSTOM, "");
@@ -155,11 +262,8 @@ public final class UpdateManager {
 
     /** 返回规范化后的模板（自动补 https://），名称从 host 提取，窄屏上少输一个字段。 */
     public static String addCustomMirror(Context ctx, String input) {
-        String t = input == null ? "" : input.trim();
-        if (t.length() == 0) return null;
-        if (!t.startsWith("http://") && !t.startsWith("https://")) {
-            t = "https://" + t;
-        }
+        String t = normalize(input);
+        if (t == null) return null;
         SharedPreferences sp = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         String raw = sp.getString(KEY_CUSTOM, "");
         try {
@@ -184,7 +288,7 @@ public final class UpdateManager {
         SharedPreferences sp = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         String raw = sp.getString(KEY_CUSTOM, "");
         try {
-            JSONArray arr = new JSONArray(raw);
+            JSONArray arr = raw.length() > 0 ? new JSONArray(raw) : new JSONArray();
             JSONArray out = new JSONArray();
             for (int i = 0; i < arr.length(); i++) {
                 JSONArray p = arr.getJSONArray(i);
@@ -197,6 +301,84 @@ public final class UpdateManager {
         } catch (Exception e) {
             LogUtil.w(TAG, "removeCustomMirror failed: " + e.getMessage());
         }
+    }
+
+    /** 用户移除过的内置源模板集合。解析失败返回空集合（安全方向：不隐藏任何源）。 */
+    private static java.util.Set<String> hiddenBuiltins(Context ctx) {
+        java.util.Set<String> out = new java.util.HashSet<String>();
+        String raw = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getString(KEY_HIDDEN, "");
+        if (raw.length() == 0) return out;
+        try {
+            JSONArray arr = new JSONArray(raw);
+            for (int i = 0; i < arr.length(); i++) out.add(arr.optString(i, ""));
+        } catch (Exception e) {
+            LogUtil.w(TAG, "hiddenBuiltins: bad list: " + e.getMessage());
+        }
+        return out;
+    }
+
+    /** 移除一个内置源；直连不允许移除——去掉它就没有兜底通道了。 */
+    public static boolean hideBuiltin(Context ctx, String template) {
+        if (template == null || template.length() == 0) return false;
+        java.util.Set<String> set = hiddenBuiltins(ctx);
+        set.add(template);
+        JSONArray arr = new JSONArray();
+        for (String s : set) arr.put(s);
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .edit().putString(KEY_HIDDEN, arr.toString()).apply();
+        if (template.equals(selectedTemplate(ctx))) setSelectedTemplate(ctx, "");
+        return true;
+    }
+
+    /** 「恢复默认」：把所有被移除的内置源放回来。 */
+    public static void restoreBuiltins(Context ctx) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .edit().remove(KEY_HIDDEN).apply();
+    }
+
+    public static int hiddenBuiltinCount(Context ctx) {
+        return hiddenBuiltins(ctx).size();
+    }
+
+    /**
+     * 改一个已有源的地址。内置源不直接改（BUILTIN 是常量），由界面把编辑结果
+     * 另存为自定义源并隐藏原项；这里处理自定义源的原地替换。
+     */
+    public static String updateCustomMirror(Context ctx, String oldTemplate, String input) {
+        String t = normalize(input);
+        if (t == null) return null;
+        SharedPreferences sp = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        try {
+            JSONArray arr = new JSONArray(sp.getString(KEY_CUSTOM, ""));
+            JSONArray out = new JSONArray();
+            for (int i = 0; i < arr.length(); i++) {
+                JSONArray p = arr.getJSONArray(i);
+                if (!oldTemplate.equals(p.getString(1))) {
+                    out.put(p);
+                    continue;
+                }
+                JSONArray np = new JSONArray();
+                np.put(hostOf(t));
+                np.put(t);
+                out.put(np);
+            }
+            sp.edit().putString(KEY_CUSTOM, out.toString()).apply();
+            if (oldTemplate.equals(selectedTemplate(ctx))) setSelectedTemplate(ctx, t);
+            LogUtil.i(TAG, "updateCustomMirror: %s -> %s", oldTemplate, t);
+            return t;
+        } catch (Exception e) {
+            LogUtil.w(TAG, "updateCustomMirror failed: " + e.getMessage());
+            return null;
+        }
+    }
+
+    /** 地址规范化：统一补 https://，空串返回 null。添加与编辑共用，避免两处规则漂移。 */
+    private static String normalize(String input) {
+        String t = input == null ? "" : input.trim();
+        if (t.length() == 0) return null;
+        if (!t.startsWith("http://") && !t.startsWith("https://")) t = "https://" + t;
+        return t;
     }
 
     private static String hostOf(String template) {
@@ -291,11 +473,20 @@ public final class UpdateManager {
         if (arr != null) {
             for (int i = 0; i < arr.length(); i++) {
                 JSONObject a = arr.getJSONObject(i);
+                String name = a.optString("name", "");
+                String url = a.optString("browser_download_url", "");
+                if (name.length() == 0 || url.length() == 0) continue;
+                // 测速文件不是安装包：单独记住地址，不进「切换包」列表，
+                // 否则 pickAsset 兜底时可能把它当 APK 下载下来。
+                if (SPEEDTEST_ASSET.equals(name)) {
+                    r.speedTestUrl = url;
+                    continue;
+                }
                 Asset as = new Asset();
-                as.name = a.optString("name", "");
-                as.url = a.optString("browser_download_url", "");
+                as.name = name;
+                as.url = url;
                 as.size = a.optLong("size", 0);
-                if (as.name.length() > 0 && as.url.length() > 0) r.assets.add(as);
+                r.assets.add(as);
             }
         }
         return r;
@@ -355,54 +546,102 @@ public final class UpdateManager {
 
     // ==================== 镜像测速 ====================
 
-    /** 串行逐项测，回调逐项刷新 UI。每次发起递增 {@link #probeSeq}：
-     *  结果与回调只认当前代际，cancelProbe() 或新一次 probeAll() 都让旧代作废，
-     *  避免快速连点/退出重进时旧任务回调覆盖新任务结果。 */
+    /**
+     * 并发逐项测，回调逐项刷新 UI。
+     *
+     * <p>内置源扩到 80+ 后串行探测要跑几分钟，改成线程池并发 3 路。
+     * 每次发起递增 {@link #probeSeq}：结果与回调只认当前代际，
+     * cancelProbe() 或新一次 probeAll() 都让旧代作废。
+     *
+     * @param testUrl release 内置测速文件的地址；为空时退回旧的 APK Range 探测
+     *                （兼容没有测速文件的历史 release）。
+     */
     public static void probeAll(final List<Mirror> mirrors, final String assetUrl,
-                                final Callback cb) {
+                                final String testUrl, final Callback cb) {
+        final int seq = ++probeSeq;
+        if (mirrors.isEmpty()) {
+            MAIN.post(new Runnable() {
+                public void run() {
+                    if (seq == probeSeq && cb != null) cb.onProbeFinished();
+                }
+            });
+            return;
+        }
+        final java.util.concurrent.atomic.AtomicInteger left =
+                new java.util.concurrent.atomic.AtomicInteger(mirrors.size());
+        for (int i = 0; i < mirrors.size(); i++) {
+            final int idx = i;
+            final Mirror m = mirrors.get(i);
+            PROBE_POOL.execute(new Runnable() {
+                public void run() {
+                    int ms = FAILED;
+                    if (seq == probeSeq) ms = probe(m, assetUrl, testUrl);
+                    if (seq == probeSeq) m.latency = ms;
+                    final int result = ms;
+                    MAIN.post(new Runnable() {
+                        public void run() {
+                            if (seq == probeSeq && cb != null) cb.onProbeDone(idx, result);
+                        }
+                    });
+                    if (left.decrementAndGet() == 0) {
+                        MAIN.post(new Runnable() {
+                            public void run() {
+                                if (seq == probeSeq && cb != null) cb.onProbeFinished();
+                            }
+                        });
+                    }
+                }
+            });
+        }
+    }
+
+    /** 只测一个源（长按菜单里的「测速此源」），不触发全量测速的自动选最快。 */
+    public static void probeOne(final Mirror m, final int index, final String assetUrl,
+                                final String testUrl, final Callback cb) {
         final int seq = ++probeSeq;
         PROBE_POOL.execute(new Runnable() {
             public void run() {
-                for (int i = 0; i < mirrors.size(); i++) {
-                    if (seq != probeSeq) break;   // 已被取消或被新一次测速取代
-                    final int idx = i;
-                    final int ms = probe(applyMirror(mirrors.get(i), assetUrl));
-                    if (seq != probeSeq) break;   // 探测期间换代：本项结果作废，不写共享 latency
-                    mirrors.get(i).latency = ms;
-                    MAIN.post(new Runnable() {
-                        public void run() {
-                            if (seq != probeSeq) return;   // 入队后才换代：丢弃旧代回调
-                            if (cb != null) cb.onProbeDone(idx, ms);
-                        }
-                    });
-                }
+                final int ms = probe(m, assetUrl, testUrl);
+                m.latency = ms;
                 MAIN.post(new Runnable() {
                     public void run() {
-                        if (seq != probeSeq) return;
-                        if (cb != null) cb.onProbeFinished();
+                        if (seq != probeSeq || cb == null) return;
+                        cb.onProbeDone(index, ms);
+                        cb.onProbeFinished();
                     }
                 });
             }
         });
     }
 
-    private static int probe(String url) {
+    /**
+     * 探测一个镜像：优先下载 release 内置的测速文件并<b>校验内容</b>。
+     *
+     * <p>只发 Range 看首字节不够——很多失效镜像会返回一个 HTTP 200 的
+     * HTML 错误页 / 跳转登录页，TTFB 很好看，真下载 APK 时却是坏文件。
+     * 校验魔数后，这类「假可用」会直接被判 FAILED。
+     */
+    private static int probe(Mirror m, String assetUrl, String testUrl) {
+        boolean verify = testUrl != null && testUrl.length() > 0;
+        String url = applyMirror(m, verify ? testUrl : assetUrl);
         HttpURLConnection c = null;
         try {
             c = open(url, true);
             c.setRequestMethod("GET");
-            c.setRequestProperty("Range", "bytes=0-1023");
-            c.setConnectTimeout(4000);
-            c.setReadTimeout(6000);
+            if (!verify) c.setRequestProperty("Range", "bytes=0-1023");
+            c.setConnectTimeout(3000);
+            c.setReadTimeout(5000);
             long t0 = System.nanoTime();
             int code = c.getResponseCode();
             if (code != 200 && code != 206) return FAILED;
-            // 握手成功不等于能传数据：实际读 1KB，卡住的代理在这里超时。
             InputStream in = c.getInputStream();
-            byte[] buf = new byte[1024];
-            int n = in.read(buf);
-            try { in.close(); } catch (Throwable t) {}
-            if (n < 0) return FAILED;
+            String body = readAll(in, 4096);
+            try { in.close(); } catch (Throwable ignored) {}
+            if (verify) {
+                if (!body.startsWith(SPEEDTEST_MAGIC)) return FAILED;
+            } else if (body.length() == 0) {
+                return FAILED;
+            }
             long ms = (System.nanoTime() - t0) / 1000000L;
             return (int) Math.min(ms, 9999L);
         } catch (Throwable t) {
@@ -540,8 +779,8 @@ public final class UpdateManager {
      */
     public static void cancelProbe() {
         ++probeSeq;
-        HttpURLConnection c = probeActive;
-        if (c != null) {
+        // 并发测速可能同时挂着 3 个连接，逐个断开才能让在跑的任务立刻抛异常退出
+        for (HttpURLConnection c : new ArrayList<HttpURLConnection>(probeActive)) {
             try { c.disconnect(); } catch (Throwable t) {}
         }
     }
@@ -555,7 +794,7 @@ public final class UpdateManager {
         }
         c.setRequestProperty("User-Agent", UA); // GitHub API 不带 UA 会 403
         c.setInstanceFollowRedirects(true);
-        if (isProbe) probeActive = c; else active = c;
+        if (isProbe) probeActive.add(c); else active = c;
         return c;
     }
 
@@ -564,7 +803,7 @@ public final class UpdateManager {
             try { c.disconnect(); } catch (Throwable t) {}
         }
         if (c == active) active = null;
-        if (c == probeActive) probeActive = null;
+        probeActive.remove(c);
     }
 
     private static String readAll(InputStream in, int limit) throws Exception {

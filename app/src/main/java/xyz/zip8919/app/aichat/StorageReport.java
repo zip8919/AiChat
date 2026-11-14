@@ -30,7 +30,7 @@ final class StorageReport {
     int orphanCount;
     final List<File> orphans = new ArrayList<File>();
 
-    /** 临时文件里可安全释放的部分（与 size[CAT_TEMP] 的差值是「未到期的」）。 */
+    /** 临时文件里可安全释放的部分（与 size[CAT_TEMP] 的差值只来自「正在写入」的短暂窗口）。 */
     long cleanableTempSize;
 
     /** App 数据所在分区的可用空间。 */
@@ -85,7 +85,7 @@ final class StorageReport {
     }
 
     /**
-     * 安全清理能释放的量：到期临时文件 + 无引用图片。
+     * 安全清理能释放的量：可清理临时文件 + 无引用图片。
      *
      * <p>索引不可信、或索引为空但图很多时只算临时文件：这两种情况下「无引用」的判定
      * 没有把握，一键清理的破坏半径太大。用户仍可以在图片页逐张确认后删除。
@@ -106,7 +106,7 @@ final class StorageReport {
         pushTop(f, category, bytes);
     }
 
-    /** 临时文件：除了归类与进榜，还要记住它是否已过保护期、能不能被安全清理。 */
+    /** 临时文件：除了归类与进榜，还要记住它是否已过「正在写入」窗口、能不能被安全清理。 */
     void addTempFile(File f, boolean cleanable) {
         long bytes = f.length();
         size[CAT_TEMP] += bytes;

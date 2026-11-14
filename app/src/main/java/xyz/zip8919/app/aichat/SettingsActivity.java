@@ -155,6 +155,28 @@ public class SettingsActivity extends ThemedActivity {
 
     private void initViews() {
         systemPromptEdit = (EditText) findViewById(R.id.system_prompt_edit);
+        // 清空只动输入框，不写 SharedPreferences：与页面其它设置一样，统一由「保存」落盘。
+        // 二次确认不能省——这里常常是几百字，误触一下就没了，且没有撤销。
+        findViewById(R.id.clear_system_prompt_button).setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                if (systemPromptEdit.getText().length() == 0) {
+                    AcToast.show(SettingsActivity.this, "系统提示词已为空");
+                    return;
+                }
+                final int len = systemPromptEdit.getText().length();
+                AcDialog.builder(SettingsActivity.this)
+                        .setTitle("清空系统提示词")
+                        .setMessage("将清空全部 " + len + " 字。清空后无法撤销，需点「保存」才会写盘。")
+                        .setPositiveButton("清空", new DialogInterface.OnClickListener() {
+                            public void onClick(DialogInterface d, int w) {
+                                systemPromptEdit.setText("");
+                                AcToast.show(SettingsActivity.this, "已清空，点保存生效");
+                            }
+                        })
+                        .setNegativeButton("取消", null)
+                        .show();
+            }
+        });
         titlePromptEdit = (EditText) findViewById(R.id.title_prompt_edit);
         autoTitleSwitch = (Switch) findViewById(R.id.auto_title_switch);
         quickScanSwitch = (Switch) findViewById(R.id.quick_scan_switch);

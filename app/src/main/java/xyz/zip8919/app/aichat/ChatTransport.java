@@ -121,9 +121,36 @@ final class ChatTransport {
         }
     }
 
+    /**
+     * 是否官方 DeepSeek 端点。只有它支持 Chat Prefix Completion（{@code /beta}），
+     * 中转站、自建网关虽然也挂着 deepseek 模型名，但地址不是官方域名，
+     * 强行加 {@code prefix} 字段只会得到 400，所以一律走降级路径。
+     */
+    static boolean isOfficialDeepSeek(ProviderInfo provider) {
+        if (provider == null || provider.apiUrl == null) return false;
+        String u = provider.apiUrl.trim().toLowerCase(java.util.Locale.US);
+        while (u.endsWith("/")) u = u.substring(0, u.length() - 1);
+        return "https://api.deepseek.com".equals(u)
+                || "https://api.deepseek.com/beta".equals(u);
+    }
+
+    /** {@code https://api.deepseek.com} → {@code https://api.deepseek.com/beta}。 */
+    private static String betaBase(String apiUrl) {
+        String base = apiUrl == null ? "" : apiUrl.trim();
+        while (base.endsWith("/")) base = base.substring(0, base.length() - 1);
+        if (base.endsWith("/beta")) return base;
+        return base + "/beta";
+    }
+
     static HttpURLConnection open(ProviderInfo provider) throws Exception {
-        String endpoint = provider.apiUrl + provider.chatPath;
-        LogUtil.d(TAG, "open: %s", endpoint);
+        return open(provider, false);
+    }
+
+    /** @param beta 走官方前缀续写端点，仅 {@link #isOfficialDeepSeek} 为真时传 true。 */
+    static HttpURLConnection open(ProviderInfo provider, boolean beta) throws Exception {
+        String endpoint = (beta ? betaBase(provider.apiUrl) : provider.apiUrl)
+                + provider.chatPath;
+        LogUtil.d(TAG, "open: %s%s", endpoint, beta ? " (beta prefix)" : "");
         HttpURLConnection conn = (HttpURLConnection) new URL(endpoint).openConnection();
         conn.setRequestMethod("POST");
         conn.setRequestProperty("Content-Type", "application/json");

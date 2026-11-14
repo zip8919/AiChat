@@ -127,7 +127,7 @@
     </LinearLayout>
 
     <TextView
-        android:text="测速为 HTTP 首字节探测（非 ICMP）；自定义镜像长按可删"
+        android:text="测速会下载并校验 release 内的测速文件；长按任一加速源可单独测速 / 编辑 / 移除"
         android:textSize="10sp"
         android:textColor="@color/text_secondary"
         android:paddingLeft="12dp"
@@ -168,20 +168,19 @@
             android:layout_height="wrap_content"/>
     </LinearLayout>
 
-    <ScrollView
+    <!-- 内置加速源已扩到 80+ 项：必须用 ListView 复用行。
+         原来动态 addView 到 LinearLayout 的前提是「只有 7~9 项」，
+         80 行一次性 inflate + 测量在 4.4 上是肉眼可见的卡顿。 -->
+    <ListView
+        android:id="@+id/mirror_list"
+        android:divider="#e0e0e0"
+        android:dividerHeight="1dp"
+        android:cacheColorHint="@android:color/transparent"
+        android:paddingLeft="12dp"
+        android:paddingRight="12dp"
         android:layout_weight="1"
-        android:fillViewport="true"
         android:layout_width="match_parent"
-        android:layout_height="0dp">
-
-        <LinearLayout
-            android:id="@+id/mirror_list"
-            android:orientation="vertical"
-            android:paddingLeft="12dp"
-            android:paddingRight="12dp"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"/>
-    </ScrollView>
+        android:layout_height="0dp"/>
 
     <LinearLayout
         android:orientation="vertical"
