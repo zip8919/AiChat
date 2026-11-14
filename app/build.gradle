@@ -19,8 +19,8 @@ android {
         applicationId 'xyz.zip8919.app.aichat'
         minSdk 18
         targetSdk 18
-        versionCode 80
-        versionName "1.14.19"
+        versionCode 81
+        versionName "1.14.20"
 
         // 默认不内置任何 API Key；商汤日日新的 key 可在构建时用 -PsensenovaKey=... 注入
         buildConfigField "String", "SENSENOVA_KEY", "\"${project.findProperty('sensenovaKey') ?: ''}\""
@@ -38,6 +38,12 @@ android {
     }
 
     buildTypes {
+        debug {
+            // 项目要求：debug 包同样用正式签名。词典笔上装的是正式包，
+            // 调试包若用默认 debug.keystore 会因签名不一致无法覆盖安装。
+            // 口令仍走 -PkeystorePassword / -PkeyAlias 注入，不写进仓库。
+            signingConfig signingConfigs.release
+        }
         release {
             signingConfig signingConfigs.release
             minifyEnabled false

@@ -219,6 +219,42 @@ public class MainActivity extends ThemedActivity {
     private TextView loadingDetail, loadingPercent;
     private android.widget.ProgressBar loadingProgress;
 
+    /**
+     * 切会话渲染状态机：0=空闲，1=等后台拼整页 HTML，2=等 WebView onPageFinished。
+     *
+     * <p>数据读完不代表页面能看 —— 长会话最耗时的恰恰是整页 HTML 拼接、Markdown
+     * 渲染与 WebView 排版。v1.14.19 在 refreshWebView() 后固定等 260ms 就收遮罩，
+     * 于是「加载完成」一闪而过，剩下几秒白屏期间既没有进度也没有动画。
+     * 现在遮罩的收起权交给 onPageFinished，并配超时兜底与渲染期进度脉冲。
+     */
+    private volatile int conversationRenderState;
+    private volatile int conversationRenderGen;
+    private volatile String conversationRenderTitle = "";
+    private volatile int conversationRenderTickPercent;
+    /** 任一阶段卡死（渲染线程异常 / WebView 不回调）都强制收起遮罩，绝不把用户锁死。 */
+    private final Runnable conversationRenderTimeout = new Runnable() {
+        public void run() {
+            if (conversationRenderState == 0) return;
+            LogUtil.w(TAG, "conversation render timeout: state=%d gen=%d, force dismiss",
+                    conversationRenderState, conversationRenderGen);
+            if (conversationRenderState == 1) conversationRenderState = 2;
+            finishConversationRender(true);
+        }
+    };
+    /** 渲染阶段没有天然的中间刻度，用缓慢推进的脉冲证明「还活着」，避免进度条僵在 85%。 */
+    private final Runnable conversationRenderTick = new Runnable() {
+        public void run() {
+            if (conversationRenderState != 2) return;
+            if (conversationRenderTickPercent < 98) {
+                conversationRenderTickPercent++;
+                updateConversationLoading("渲染消息页面…", conversationRenderTickPercent);
+            }
+            handler.postDelayed(this, 240);
+        }
+    };
+    /** 100% 停留后的延迟收起；新一轮切换开始前必须能取消，否则会误关新遮罩。 */
+    private Runnable pendingRenderHide;
+
     // 全屏预览器（图片 / 表格 / HTML·SVG 代码），自持 dialog 与 WebView 生命周期
     private ViewerController viewer;
 
@@ -368,6 +404,9 @@ public class MainActivity extends ThemedActivity {
         LogUtil.i(TAG, "onDestroy: cleaning up handler / connection / webview");
         // 清空主线程消息队列里挂起的回调（消息菜单、长按等），避免销毁后弹窗
         handler.removeCallbacksAndMessages(null);
+        // 切会话遮罩的超时 / 脉冲回调随页面一起作废，避免销毁后还碰 View
+        cancelConversationRenderTimers();
+        conversationRenderState = 0;
         // 解绑外观刷新监听：它是单例上的回调，持有本 Activity 引用，不解会泄漏
         if (webTintListener != null) {
             AppearanceManager.getInstance(this).removeChangeListener(webTintListener);
@@ -489,6 +528,8 @@ public class MainActivity extends ThemedActivity {
                 // 「有时候消息不会自动渲染」，重新进会话才正常。
                 pageReady = true;
                 flushPendingJs();
+                // 页面真正可交互了才收切会话遮罩；构建 HTML 期间它一直盖着并有进度。
+                finishConversationRender(false);
             }
 
             @Override
@@ -499,6 +540,8 @@ public class MainActivity extends ThemedActivity {
                 LogUtil.w(TAG, "webview error: %d %s url=%s", errorCode, description, failingUrl);
                 pageReady = true;
                 flushPendingJs();
+                // 出错也放行遮罩：宁可显示空页，也不能把用户锁在「正在切换会话」里。
+                finishConversationRender(false);
             }
         });
 
@@ -1916,8 +1959,14 @@ public class MainActivity extends ThemedActivity {
             return;
         }
         if (switchingConversation) {
-            LogUtil.w(TAG, "switchToConversation ignored: another switch is loading");
-            return;
+            if (conversationRenderState != 0) {
+                LogUtil.w(TAG, "switchToConversation ignored: another switch is loading");
+                return;
+            }
+            // 上一轮渲染其实已结束，只差 180ms 的「100% 停留」回调：直接接管，
+            // 别把用户紧接着的下一次点击吞掉。
+            cancelConversationRenderTimers();
+            hideConversationLoading();
         }
         LogUtil.i(TAG, "switching to conversation: %s", conversationId);
         // 排队消息属于旧会话：在 interruptRequest 派发的 drain 之前丢弃，避免发进新会话
@@ -1929,9 +1978,12 @@ public class MainActivity extends ThemedActivity {
 
         switchingConversation = true;
         showConversationLoading();
+        beginConversationRender();
+        // 数据阶段只占整体 0~60%：剩下 40% 是整页 HTML 构建 + WebView 渲染。
+        // 旧实现在这里就报 100%，用户看到「加载完成」却还要白屏很久。
         final ConversationManager.LoadProgress progress = new ConversationManager.LoadProgress() {
             public void onStage(String label, int percent) {
-                updateConversationLoading(label, percent);
+                updateConversationLoading(label, 8 + percent * 52 / 100);
             }
         };
         new Thread(new Runnable() {
@@ -1944,24 +1996,21 @@ public class MainActivity extends ThemedActivity {
                 runOnUiThread(new Runnable() {
                     public void run() {
                         if (isFinishing()) {
+                            cancelConversationRenderTimers();
+                            conversationRenderState = 0;
                             hideConversationLoading();
                             return;
                         }
                         final Conversation conv = conversationManager.getCurrentConversation();
                         messages = conv.messages;
-                        updateConversationLoading("渲染消息页面", 96);
+                        conversationRenderTitle = conv.title == null ? "" : conv.title;
+                        int count = messages == null ? 0 : messages.size();
+                        updateConversationLoading("准备消息渲染（" + count + " 条）", 62);
                         refreshWebView();
                         LogUtil.i(TAG, "switched: id=%s title=%s messages=%d",
-                                conv.id, conv.title, messages.size());
-                        // 让 100% 停留一帧再收起，否则用户只看到「一闪」
-                        handler.postDelayed(new Runnable() {
-                            public void run() {
-                                if (isFinishing()) return;
-                                updateConversationLoading("加载完成", 100);
-                                hideConversationLoading();
-                                AcToast.show(MainActivity.this, "已切换到: " + conv.title);
-                            }
-                        }, 260);
+                                conv.id, conv.title, count);
+                        // 不再固定延时收遮罩：由 onPageFinished / onReceivedError 收起，
+                        // 超时兜底负责「两个回调都不来」的极端情况。
                     }
                 });
             }
@@ -2004,6 +2053,71 @@ public class MainActivity extends ThemedActivity {
     private void hideConversationLoading() {
         if (loadingOverlay != null) loadingOverlay.setVisibility(View.GONE);
         switchingConversation = false;
+    }
+
+    /** 进入一次切会话：起状态机并挂总超时，任何阶段卡死都能放用户出来。 */
+    private void beginConversationRender() {
+        conversationRenderTitle = "";
+        conversationRenderState = 1;
+        conversationRenderGen = renderGeneration.get();
+        cancelConversationRenderTimers();
+        handler.postDelayed(conversationRenderTimeout, 12000);
+    }
+
+    private void cancelConversationRenderTimers() {
+        handler.removeCallbacks(conversationRenderTimeout);
+        handler.removeCallbacks(conversationRenderTick);
+        if (pendingRenderHide != null) {
+            handler.removeCallbacks(pendingRenderHide);
+            pendingRenderHide = null;
+        }
+        conversationRenderTickPercent = 85;
+    }
+
+    /** 渲染线程（后台）也能调：updateConversationLoading 内部编组回主线程。 */
+    private void reportConversationRenderStage(String label, int percent) {
+        if (conversationRenderState == 0) return;
+        updateConversationLoading(label, percent);
+    }
+
+    /** loadDataWithBaseURL 之后调用：从此刻起只等 onPageFinished / onReceivedError。 */
+    private void awaitConversationPageFinish(int gen) {
+        if (conversationRenderState == 0 || conversationRenderGen != gen) return;
+        conversationRenderState = 2;
+        updateConversationLoading("渲染消息页面…", 85);
+        // 从真正开始灌页重新计时：整页渲染慢不等于卡死，但必须有上限。
+        handler.removeCallbacks(conversationRenderTimeout);
+        handler.postDelayed(conversationRenderTimeout, 10000);
+        handler.postDelayed(conversationRenderTick, 240);
+    }
+
+    /**
+     * 收起遮罩的唯一出口。只认 state==2：HTML 还没拼完时迟到的旧页
+     * onPageFinished 不能提前把遮罩关掉。
+     */
+    private void finishConversationRender(final boolean timedOut) {
+        if (conversationRenderState != 2) return;
+        conversationRenderState = 0;
+        cancelConversationRenderTimers();
+        if (isFinishing()) {
+            hideConversationLoading();
+            return;
+        }
+        updateConversationLoading(timedOut ? "页面已显示（未收到渲染回调）" : "加载完成", 100);
+        final String title = conversationRenderTitle;
+        // 这个延迟收起必须可取消：180ms 内用户又切一次会话时，旧回调不能把新遮罩关掉
+        pendingRenderHide = new Runnable() {
+            public void run() {
+                pendingRenderHide = null;
+                // 新一轮切换已开始（state!=0）就别插手它的遮罩
+                if (isFinishing() || conversationRenderState != 0) return;
+                hideConversationLoading();
+                AcToast.show(MainActivity.this, timedOut
+                        ? "已切换到: " + title + "（渲染超时，内容可能不完整）"
+                        : "已切换到: " + title);
+            }
+        };
+        handler.postDelayed(pendingRenderHide, 180);
     }
 
     @Override
@@ -3067,6 +3181,10 @@ public class MainActivity extends ThemedActivity {
         // 渲染代数守卫 + 列表快照：两次刷新可能乱序落地，且渲染线程不能直接遍历
         // 可能被 UI 线程结构性修改的 messages
         final int myRenderGen = renderGeneration.incrementAndGet();
+        // 切会话遮罩还开着时，把「等待的渲染」迁移到最新一代：期间若因主题变化、
+        // 上滑加载等又触发一次重灌，应等最后一次页面就绪再收遮罩，既不能被旧回调
+        // 提前关掉，也不能因为旧渲染被丢弃而永远不收。
+        if (conversationRenderState != 0) conversationRenderGen = myRenderGen;
         final List<Message> snapshot =
                 messages == null ? new ArrayList<Message>() : new ArrayList<Message>(messages);
         // 只渲染最近一批：更早的消息等用户上滑到顶部再追加
@@ -3079,6 +3197,10 @@ public class MainActivity extends ThemedActivity {
         pendingJs.clear();
         new Thread(new Runnable() {
             public void run() {
+                if (conversationRenderState != 0 && conversationRenderGen == myRenderGen) {
+                    reportConversationRenderStage(
+                            "构建消息页面（" + (snapshot.size() - from) + " 条）", 68);
+                }
                 // 渲染线程必须有兜底：pageReady 已在上面关门，一旦这里抛异常（例如
                 // 公式提取遇到截断的 \ce{A ->[），runOnUiThread 永不执行 → pageReady
                 // 永远为 false，后续所有 JS 只会进 pendingJs（上限 300），整页空白
@@ -3109,6 +3231,9 @@ public class MainActivity extends ThemedActivity {
                         // pageReady 已在重灌起点关门、遗留队列也已清掉；
                         // 加载期间新到的 JS 继续排队，onPageFinished 统一开门重放。
                         conversationWebView.loadDataWithBaseURL(null, page, "text/html", "UTF-8", null);
+                        // 灌页之后把遮罩的收起权交给 WebView 回调（或超时兜底），
+                        // 不再像旧版那样固定等 260ms —— 那会儿页面往往还没画完。
+                        awaitConversationPageFinish(myRenderGen);
                         // 新 DOM 的 style 节点已重建，清掉 CSS 相等短路，
                         // 否则下一次外观变更会跳过注入、样式停在初始值。
                         if (webRefresher != null) webRefresher.reset();

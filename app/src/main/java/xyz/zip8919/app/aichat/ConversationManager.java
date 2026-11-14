@@ -305,9 +305,15 @@ public class ConversationManager {
         return c;
     }
 
-    /** 切换会话的分阶段进度。只在后台线程调用，宿主自行切回 UI 线程更新界面。 */
+    /**
+     * 切换会话的「数据加载」分阶段进度。只在后台线程调用，宿主自行切回 UI 线程更新界面。
+     *
+     * <p>percent 的 0~100 只覆盖读盘 / 解析 / 恢复附件这一段，<b>不含 WebView 整页渲染</b>：
+     * 宿主把它映射到整体进度的 0~60%，剩下 40% 由 HTML 构建与 onPageFinished 推进。
+     * 否则数据报 100% 时进度条就到头了，页面却还要白屏很久 —— 正是 v1.14.19 的毛病。
+     */
     public interface LoadProgress {
-        /** @param percent 0~100 的整体完成度 */
+        /** @param percent 数据阶段 0~100 的完成度（不是整页加载完成度） */
         void onStage(String label, int percent);
     }
 
@@ -371,7 +377,8 @@ public class ConversationManager {
         }
         stage(progress, "恢复附件与工具记录", 88);
         stage(progress, "准备界面", 95);
-        stage(progress, "加载完成", 100);
+        // 这里只代表「数据已就绪」，不是整页加载完成；宿主还要接着跑渲染阶段。
+        stage(progress, "会话数据已就绪", 100);
     }
 
     private static void stage(LoadProgress p, String label, int percent) {

@@ -126,8 +126,41 @@
             android:layout_height="wrap_content"/>
     </LinearLayout>
 
+    <!-- 并行测速：默认开，并发数 1~64 可自定义。窄屏上只占一行，
+         设置入口做成按钮弹输入框，不再往标题栏里塞第三个控件。 -->
+    <LinearLayout
+        android:id="@+id/probe_option_row"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingLeft="12dp"
+        android:paddingRight="12dp"
+        android:paddingBottom="2dp"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
+
+        <CheckBox
+            android:id="@+id/probe_parallel_check"
+            android:text="并行测速"
+            android:textSize="11sp"
+            android:textColor="@color/text_secondary"
+            android:checked="true"
+            android:layout_weight="1"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"/>
+
+        <Button
+            android:id="@+id/btn_probe_concurrency"
+            android:text="并发 6"
+            android:textSize="11sp"
+            android:minHeight="32dp"
+            android:paddingLeft="8dp"
+            android:paddingRight="8dp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"/>
+    </LinearLayout>
+
     <TextView
-        android:text="测速会下载并校验 release 内的测速文件；长按任一加速源可单独测速 / 编辑 / 移除"
+        android:text="测速会下载并校验 release 内的测速文件；并行测速默认开，可设 1～64 并发；长按任一加速源可单独测速 / 编辑 / 移除"
         android:textSize="10sp"
         android:textColor="@color/text_secondary"
         android:paddingLeft="12dp"

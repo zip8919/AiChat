@@ -18,6 +18,8 @@ import android.view.ViewGroup;
 import android.view.LayoutInflater;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
+import android.widget.CheckBox;
+import android.widget.CompoundButton;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ListView;
@@ -56,6 +58,10 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
     private LinearLayout customBox;
     private MirrorAdapter mirrorAdapter;
     private EditText customInput;
+    private CheckBox probeParallelCheck;
+    private Button btnConcurrency;
+    /** 本轮测速的模式文案，进度里复用，避免每个回调都去读一次偏好。 */
+    private String probeModeLabel = "";
 
     private List<UpdateManager.Mirror> mirrors;
     private UpdateManager.Release release;
@@ -97,10 +103,13 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
         mirrorList = (ListView) findViewById(R.id.mirror_list);
         customBox = (LinearLayout) findViewById(R.id.custom_box);
         customInput = (EditText) findViewById(R.id.custom_input);
+        probeParallelCheck = (CheckBox) findViewById(R.id.probe_parallel_check);
+        btnConcurrency = (Button) findViewById(R.id.btn_probe_concurrency);
 
         mirrors = UpdateManager.loadMirrors(this);
         selectedIndex = indexOfTemplate(UpdateManager.selectedTemplate(this));
         setupMirrorList();
+        setupProbeOptions();
         bindActions();
         check();
         LogUtil.d(TAG, "onCreate: mirrors=%d selected=%d", mirrors.size(), selectedIndex);
@@ -130,6 +139,73 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
                 return true;
             }
         });
+    }
+
+    // ==================== 并行测速设置 ====================
+
+    private void setupProbeOptions() {
+        final boolean parallel = UpdateManager.isParallelProbe(this);
+        // 先置空监听再 setChecked：避免初始化时误触发一次 onCheckedChanged 弹 Toast
+        probeParallelCheck.setOnCheckedChangeListener(null);
+        probeParallelCheck.setChecked(parallel);
+        btnConcurrency.setEnabled(parallel);
+        refreshProbeOptionText();
+        probeParallelCheck.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+            public void onCheckedChanged(CompoundButton b, boolean on) {
+                UpdateManager.setParallelProbe(UpdateActivity.this, on);
+                btnConcurrency.setEnabled(on);
+                refreshProbeOptionText();
+                AcToast.show(UpdateActivity.this, on
+                        ? "并行测速已开启（下次测速生效），点「并发」可改路数"
+                        : "已改为串行测速（下次测速生效，省内存但 80+ 源会慢很多）");
+            }
+        });
+        btnConcurrency.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { editProbeConcurrency(); }
+        });
+    }
+
+    private void refreshProbeOptionText() {
+        boolean parallel = UpdateManager.isParallelProbe(this);
+        btnConcurrency.setText(parallel
+                ? "并发 " + UpdateManager.probeConcurrency(this) : "并发（关）");
+    }
+
+    /** 并发数 1~64，越界直接拒绝；老设备内存有限，文案里把风险说清楚。 */
+    private void editProbeConcurrency() {
+        final EditText input = new EditText(this);
+        input.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+        input.setSingleLine(true);
+        input.setText(String.valueOf(UpdateManager.probeConcurrency(this)));
+        input.setSelection(input.getText().length());
+        final String range = UpdateManager.MIN_CONCURRENCY + "～" + UpdateManager.MAX_CONCURRENCY;
+        AcDialog.builder(this)
+                .setTitle("并行测速并发数")
+                .setMessage("范围 " + range + "，默认 " + UpdateManager.DEFAULT_CONCURRENCY
+                        + "。并发越高越快，但同时挂起的 TLS 连接越多；"
+                        + "老设备（内存 66MB 级）建议不超过 8。关闭并行测速后此值不生效。")
+                .setView(input)
+                .setPositiveButton("保存", new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface d, int w) {
+                        int n;
+                        try {
+                            n = Integer.parseInt(input.getText().toString().trim());
+                        } catch (Throwable t) {
+                            AcToast.show(UpdateActivity.this, "请输入 " + range + " 的整数");
+                            return;
+                        }
+                        if (n < UpdateManager.MIN_CONCURRENCY || n > UpdateManager.MAX_CONCURRENCY) {
+                            AcToast.show(UpdateActivity.this, "请输入 " + range + " 的整数");
+                            return;
+                        }
+                        UpdateManager.setProbeConcurrency(UpdateActivity.this, n);
+                        refreshProbeOptionText();
+                        AcToast.show(UpdateActivity.this,
+                                "并发数已设为 " + n + "（下次测速生效）");
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
     }
 
     /** 只刷新可见行：测速每完成一项调一次，84 项全表 notify 会让列表一直重排。 */
@@ -342,6 +418,12 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
             AcToast.show(this, "请先检查更新成功");
             return;
         }
+        // 先断开上一轮可能还在跑的连接：否则改了并发数立刻重测时，旧任务仍占着
+        // 连接，新池的并发上限形同虚设。cancelProbe 会让旧代回调全部作废。
+        UpdateManager.cancelProbe();
+        final boolean parallel = UpdateManager.isParallelProbe(this);
+        final int concurrency = UpdateManager.probeConcurrency(this);
+        probeModeLabel = parallel ? "并行 " + concurrency + " 路" : "串行";
         probeStale = false;
         probeSingleMode = false;
         probeDone = 0;
@@ -350,8 +432,9 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
         refreshAllRows();
         btnProbe.setEnabled(false);
         progressText.setText("正在测速 0/" + mirrors.size()
-                + "…（下载并校验测速文件）");
-        UpdateManager.probeAll(mirrors, asset.url, testUrl(), this);
+                + "…（" + probeModeLabel + "，下载并校验测速文件）");
+        UpdateManager.probeAll(mirrors, asset.url, testUrl(),
+                parallel, concurrency, this);
     }
 
     /** 长按菜单里的「测速此源」：只跑一个，结束时不动选中项。 */
@@ -362,6 +445,7 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
         }
         invalidateProbe();          // 作废可能正在跑的全量测速
         probeStale = false;          // 本轮自身是有效的
+        probeModeLabel = "单源";
         probeSingleMode = true;
         probeSingleIndex = i;
         probeDone = 0;
@@ -379,7 +463,7 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
         if (!probeSingleMode) {
             probeDone++;
             progressText.setText("正在测速 " + probeDone + "/" + mirrors.size()
-                    + "…（下载并校验测速文件）");
+                    + "…（" + probeModeLabel + "，下载并校验测速文件）");
         }
     }
 
@@ -403,14 +487,17 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
             int l = mirrors.get(i).latency;
             if (l >= 0 && l < min) { min = l; best = i; }
         }
+        String modeSuffix = probeModeLabel.length() > 0 ? "（" + probeModeLabel + "）" : "";
         if (best >= 0) {
             if (manualPicked && selectedIndex >= 0 && selectedIndex < mirrors.size()) {
                 // 用户测速期间已手动点选，尊重用户选择，只用文字告知最快项
                 progressText.setText("测速完成，最快：" + mirrors.get(best).name + " " + min
-                        + " ms（保留你手动选择的 " + mirrors.get(selectedIndex).name + "）");
+                        + " ms" + modeSuffix + "（保留你手动选择的 "
+                        + mirrors.get(selectedIndex).name + "）");
             } else {
                 selectMirror(best);
-                progressText.setText("已选最快：" + mirrors.get(best).name + "  " + min + " ms");
+                progressText.setText("已选最快：" + mirrors.get(best).name + "  " + min
+                        + " ms" + modeSuffix);
             }
         } else {
             progressText.setText("全部镜像不可用，可试直连或自定义后重测");

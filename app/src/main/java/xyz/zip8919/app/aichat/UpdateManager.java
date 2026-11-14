@@ -20,6 +20,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -28,21 +29,21 @@ import javax.net.ssl.HttpsURLConnection;
 /**
  * 版本更新：GitHub Release 查询、镜像测速、APK 下载。
  *
- * <p><b>两条设计约束</b>
+ * <p><b>三条设计约束</b>
  * <ol>
  * <li><b>API 查询直连，不走镜像。</b>加速镜像代理的是 {@code github.com/.../releases/download/}
  *     这类下载链接，不代理 {@code api.github.com}；而且 API 响应只有几 KB，直连最稳。
  *     镜像只用于改写 {@code browser_download_url}。</li>
- * <li><b>「测速」是 HTTP 首字节探测，不是 ICMP ping。</b>Android 上
- *     {@code InetAddress.isReachable} 走 ICMP，移动网络/防火墙普遍丢弃，测出的数字
- *     与实际下载无关。这里对每个镜像发 {@code Range: bytes=0-1023}，记录 TTFB
- *     并实际读 1KB，既验证可用性又贴近真实下载链路。</li>
+ * <li><b>「测速」是真实下载校验，不是 ICMP ping。</b>{@code InetAddress.isReachable} 走 ICMP，
+ *     移动网络普遍丢弃；只发 {@code Range} 看首字节又会被返回 HTML 错误页的失效镜像骗过。
+ *     现在优先下载 release 内置的 speedtest.txt 并校验魔数，历史 release 才退回 Range 探测。</li>
+ * <li><b>并行度交给用户。</b>内置源 80+ 项，串行要跑几分钟；默认并行 6 路、可设 1~64，
+ *     也可一键关掉改回串行（老设备省内存）。并发 TLS 连接数与内存占用成正比，
+ *     所以上限写死 64 并在界面提示老设备别超过 8。</li>
  * </ol>
  *
- * <p>网络分两个单线程 Executor：版本查询与下载共用一个（本就先后发生），测速单独
- * 一个。测速是 7 个镜像串行探测的长任务，若与下载共用线程，点「下载」会一直排队
- * 到测速跑完才真正开始。拆开后最多同时 2 个 TLS 连接，老设备 Cortex-A7 + 66MB
- * 内存仍可控（真正要避免的是 7 个并发握手）。回调统一 post 回主线程。
+ * <p>网络线程池分两类：版本查询与下载共用一个单线程池（本就先后发生），测速单独
+ * 一个按并发数动态建的池。拆开后测速期间点「下载」仍立即开始；回调统一 post 回主线程。
  */
 public final class UpdateManager {
 
@@ -57,6 +58,12 @@ public final class UpdateManager {
     private static final String KEY_SELECTED = "selected_mirror";
     /** 被用户「移除」的内置源模板，持久化后不出现在列表里；「恢复默认」清空它。 */
     private static final String KEY_HIDDEN = "hidden_builtin";
+    /** 并行测速开关（默认开）与并发路数（默认 6，上限 64）。 */
+    private static final String KEY_PARALLEL = "probe_parallel";
+    private static final String KEY_CONCURRENCY = "probe_concurrency";
+    public static final int MIN_CONCURRENCY = 1;
+    public static final int MAX_CONCURRENCY = 64;
+    public static final int DEFAULT_CONCURRENCY = 6;
 
     /** 每个 release 内置的测速文件名与内容魔数：测速必须真的下到这个文件才算可用。 */
     public static final String SPEEDTEST_ASSET = "speedtest.txt";
@@ -175,12 +182,40 @@ public final class UpdateManager {
     /** 版本查询 + 下载：两者先后发生，共用一个线程即可。 */
     private static final ExecutorService POOL = Executors.newSingleThreadExecutor();
     /**
-     * 测速专用：内置源已扩到 80+ 项，串行探测要跑几分钟，用户等不了。
-     * 固定 3 线程是老设备（Cortex-A7 / 66MB 堆）能扛的并发 TLS 连接上限：
-     * 再多会同时握 4+ 个连接，内存和 CPU 都吃不消；单线程又太慢。
-     * 与查询/下载线程池分开，测速期间点「下载」仍然立即开始。
+     * 测速专用线程池，按用户设置的并发路数<b>按需重建</b>。
+     *
+     * <p>原来是固定 {@code newFixedThreadPool(3)}：80+ 个源要排 27 批，且没法调。
+     * 现在并行开关关闭时走 1 线程池（严格按提交顺序串行），开启时按 1~64 建池。
+     * 并发数变化时旧池 shutdownNow —— 旧代任务本来也已因 probeSeq 递增而作废，
+     * 不会被用户看到。与查询/下载线程池分开，测速期间点「下载」仍然立即开始。
+     *
+     * <p>线程降一档优先级：并发拉到 64 时不至于把主线程饿着。
      */
-    private static final ExecutorService PROBE_POOL = Executors.newFixedThreadPool(3);
+    private static final Object PROBE_POOL_LOCK = new Object();
+    private static volatile ExecutorService probePool;
+    private static volatile int probePoolSize = -1;
+    private static final ThreadFactory PROBE_THREADS = new ThreadFactory() {
+        private final java.util.concurrent.atomic.AtomicInteger seq =
+                new java.util.concurrent.atomic.AtomicInteger();
+        public Thread newThread(Runnable r) {
+            Thread t = new Thread(r, "aichat-probe-" + seq.incrementAndGet());
+            t.setPriority(Thread.MIN_PRIORITY + 1);
+            return t;
+        }
+    };
+
+    private static ExecutorService probePool(int concurrency) {
+        int n = clampConcurrency(concurrency);
+        synchronized (PROBE_POOL_LOCK) {
+            if (probePool == null || probePool.isShutdown() || probePoolSize != n) {
+                if (probePool != null) probePool.shutdownNow();
+                probePool = Executors.newFixedThreadPool(n, PROBE_THREADS);
+                probePoolSize = n;
+                LogUtil.i(TAG, "probe pool: %d threads", n);
+            }
+            return probePool;
+        }
+    }
     private static volatile HttpURLConnection active;       // 查询/下载连接，cancel() 用
     /** 并发测速时要能一次断掉全部连接，单个 volatile 只记得住最后一个。 */
     private static final java.util.Set<HttpURLConnection> probeActive =
@@ -392,6 +427,33 @@ public final class UpdateManager {
         }
     }
 
+    /** 并行测速开关，默认开。关掉后逐个串行探测：更省内存，但 80+ 源会慢很多。 */
+    public static boolean isParallelProbe(Context ctx) {
+        return ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getBoolean(KEY_PARALLEL, true);
+    }
+
+    public static void setParallelProbe(Context ctx, boolean on) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .edit().putBoolean(KEY_PARALLEL, on).apply();
+    }
+
+    public static int probeConcurrency(Context ctx) {
+        return clampConcurrency(ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getInt(KEY_CONCURRENCY, DEFAULT_CONCURRENCY));
+    }
+
+    public static void setProbeConcurrency(Context ctx, int n) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .edit().putInt(KEY_CONCURRENCY, clampConcurrency(n)).apply();
+    }
+
+    /** 越界值一律收敛到 1~64，避免手改 SharedPreferences 把线程池撑爆。 */
+    public static int clampConcurrency(int n) {
+        if (n < MIN_CONCURRENCY) return MIN_CONCURRENCY;
+        return n > MAX_CONCURRENCY ? MAX_CONCURRENCY : n;
+    }
+
     public static String selectedTemplate(Context ctx) {
         return ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                 .getString(KEY_SELECTED, "");
@@ -546,18 +608,25 @@ public final class UpdateManager {
 
     // ==================== 镜像测速 ====================
 
-    /**
-     * 并发逐项测，回调逐项刷新 UI。
-     *
-     * <p>内置源扩到 80+ 后串行探测要跑几分钟，改成线程池并发 3 路。
-     * 每次发起递增 {@link #probeSeq}：结果与回调只认当前代际，
-     * cancelProbe() 或新一次 probeAll() 都让旧代作废。
-     *
-     * @param testUrl release 内置测速文件的地址；为空时退回旧的 APK Range 探测
-     *                （兼容没有测速文件的历史 release）。
-     */
+    /** 兼容旧调用：默认并行 6 路。 */
     public static void probeAll(final List<Mirror> mirrors, final String assetUrl,
                                 final String testUrl, final Callback cb) {
+        probeAll(mirrors, assetUrl, testUrl, true, DEFAULT_CONCURRENCY, cb);
+    }
+
+    /**
+     * 逐项测速，回调逐项刷新 UI。
+     *
+     * <p>每次发起递增 {@link #probeSeq}：结果与回调只认当前代际，
+     * cancelProbe() 或新一次 probeAll() 都让旧代作废。
+     *
+     * @param parallel    true=按 concurrency 并发；false=串行（单线程池按提交顺序执行）
+     * @param concurrency 并发路数，收敛到 1~64；parallel=false 时忽略
+     * @param testUrl     release 内置测速文件地址；为空退回旧的 APK Range 探测
+     */
+    public static void probeAll(final List<Mirror> mirrors, final String assetUrl,
+                                final String testUrl, final boolean parallel,
+                                final int concurrency, final Callback cb) {
         final int seq = ++probeSeq;
         if (mirrors.isEmpty()) {
             MAIN.post(new Runnable() {
@@ -567,28 +636,37 @@ public final class UpdateManager {
             });
             return;
         }
+        final int n = parallel ? clampConcurrency(concurrency) : 1;
+        final ExecutorService pool = probePool(n);
+        LogUtil.i(TAG, "probeAll: mirrors=%d parallel=%s concurrency=%d",
+                mirrors.size(), parallel, n);
         final java.util.concurrent.atomic.AtomicInteger left =
                 new java.util.concurrent.atomic.AtomicInteger(mirrors.size());
         for (int i = 0; i < mirrors.size(); i++) {
             final int idx = i;
             final Mirror m = mirrors.get(i);
-            PROBE_POOL.execute(new Runnable() {
+            pool.execute(new Runnable() {
                 public void run() {
-                    int ms = FAILED;
-                    if (seq == probeSeq) ms = probe(m, assetUrl, testUrl);
-                    if (seq == probeSeq) m.latency = ms;
-                    final int result = ms;
-                    MAIN.post(new Runnable() {
-                        public void run() {
-                            if (seq == probeSeq && cb != null) cb.onProbeDone(idx, result);
-                        }
-                    });
-                    if (left.decrementAndGet() == 0) {
+                    try {
+                        int ms = FAILED;
+                        if (seq == probeSeq) ms = probe(m, assetUrl, testUrl);
+                        if (seq == probeSeq) m.latency = ms;
+                        final int result = ms;
                         MAIN.post(new Runnable() {
                             public void run() {
-                                if (seq == probeSeq && cb != null) cb.onProbeFinished();
+                                if (seq == probeSeq && cb != null) cb.onProbeDone(idx, result);
                             }
                         });
+                    } finally {
+                        // 放进 finally：单项任务若抛出未预期异常，left 也必须归零，
+                        // 否则 onProbeFinished 永远不来，「测速」按钮一直灰着。
+                        if (left.decrementAndGet() == 0) {
+                            MAIN.post(new Runnable() {
+                                public void run() {
+                                    if (seq == probeSeq && cb != null) cb.onProbeFinished();
+                                }
+                            });
+                        }
                     }
                 }
             });
@@ -599,7 +677,8 @@ public final class UpdateManager {
     public static void probeOne(final Mirror m, final int index, final String assetUrl,
                                 final String testUrl, final Callback cb) {
         final int seq = ++probeSeq;
-        PROBE_POOL.execute(new Runnable() {
+        // 单源测速复用当前并发配置的池，不为了一个请求去重建线程池
+        probePool(probePoolSize > 0 ? probePoolSize : DEFAULT_CONCURRENCY).execute(new Runnable() {
             public void run() {
                 final int ms = probe(m, assetUrl, testUrl);
                 m.latency = ms;
@@ -779,7 +858,7 @@ public final class UpdateManager {
      */
     public static void cancelProbe() {
         ++probeSeq;
-        // 并发测速可能同时挂着 3 个连接，逐个断开才能让在跑的任务立刻抛异常退出
+        // 并行测速可能同时挂着最多 64 个连接，逐个断开才能让在跑的任务立刻抛异常退出
         for (HttpURLConnection c : new ArrayList<HttpURLConnection>(probeActive)) {
             try { c.disconnect(); } catch (Throwable t) {}
         }
