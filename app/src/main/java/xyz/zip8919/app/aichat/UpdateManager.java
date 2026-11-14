@@ -249,7 +249,8 @@ public final class UpdateManager {
         public final String name;
         public final String template;
         public final boolean custom;
-        public int latency = NOT_TESTED;
+        /** 后台测速线程写、主线程排序读；volatile 明确保证跨线程可见。 */
+        public volatile int latency = NOT_TESTED;
 
         Mirror(String name, String template, boolean custom) {
             this.name = name;
@@ -261,8 +262,14 @@ public final class UpdateManager {
     public interface Callback {
         /** err 为 null 表示成功。 */
         void onRelease(Release r, String err);
-        /** latencyMs 为 {@link #FAILED} 表示不可用。 */
-        void onProbeDone(int index, int latencyMs);
+        /**
+         * 单项测速完成，传 Mirror 对象而不是列表下标。
+         *
+         * <p>列表在测速过程中会实时重排，任何基于位置的下标在回调到达时都可能已经
+         * 指向另一个源；对象引用在提交任务时捕获，全程稳定。latencyMs 为
+         * {@link #FAILED} 表示不可用，此时 {@code m.latency} 已写好。
+         */
+        void onProbeDone(Mirror m, int latencyMs);
         /** 全部测完（或被取消提前结束），用于恢复按钮与自动选最快。 */
         void onProbeFinished();
         void onProgress(long done, long total);
@@ -615,7 +622,10 @@ public final class UpdateManager {
     }
 
     /**
-     * 逐项测速，回调逐项刷新 UI。
+     * 逐项测速，每项完成即回调（宿主据此边测边排序）。
+     *
+     * <p>回调一律 post 回主线程，且传 Mirror 对象而不是下标——宿主会在回调里
+     * 实时重排 mirrors，提交任务时记下的下标不可靠。
      *
      * <p>每次发起递增 {@link #probeSeq}：结果与回调只认当前代际，
      * cancelProbe() 或新一次 probeAll() 都让旧代作废。
@@ -643,7 +653,8 @@ public final class UpdateManager {
         final java.util.concurrent.atomic.AtomicInteger left =
                 new java.util.concurrent.atomic.AtomicInteger(mirrors.size());
         for (int i = 0; i < mirrors.size(); i++) {
-            final int idx = i;
+            // 只捕获对象引用：宿主会在 onProbeDone 里实时重排 mirrors，
+            // 提交时记下的下标 i 在回调到达时早已失效。
             final Mirror m = mirrors.get(i);
             pool.execute(new Runnable() {
                 public void run() {
@@ -654,7 +665,7 @@ public final class UpdateManager {
                         final int result = ms;
                         MAIN.post(new Runnable() {
                             public void run() {
-                                if (seq == probeSeq && cb != null) cb.onProbeDone(idx, result);
+                                if (seq == probeSeq && cb != null) cb.onProbeDone(m, result);
                             }
                         });
                     } finally {
@@ -674,7 +685,7 @@ public final class UpdateManager {
     }
 
     /** 只测一个源（长按菜单里的「测速此源」），不触发全量测速的自动选最快。 */
-    public static void probeOne(final Mirror m, final int index, final String assetUrl,
+    public static void probeOne(final Mirror m, final String assetUrl,
                                 final String testUrl, final Callback cb) {
         final int seq = ++probeSeq;
         // 单源测速复用当前并发配置的池，不为了一个请求去重建线程池
@@ -685,7 +696,7 @@ public final class UpdateManager {
                 MAIN.post(new Runnable() {
                     public void run() {
                         if (seq != probeSeq || cb == null) return;
-                        cb.onProbeDone(index, ms);
+                        cb.onProbeDone(m, ms);
                         cb.onProbeFinished();
                     }
                 });

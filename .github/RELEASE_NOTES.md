@@ -1,15 +1,16 @@
-AiChat v1.14.21 —— 测速结果按延迟排序（不可用垫底）
+AiChat v1.14.22 —— 测速过程边测边排（实时跟随最快源）
 
-测速完成后，加速源列表自动按实测延迟从低到高重排，下载失败 / 校验不过的镜像统一排到末尾，不用再自己翻列表找最快的那个。
+测速不再等全部跑完才排序。每有一个加速源出结果，列表立刻按延迟重排一次；判成不可用的当场沉到末尾，测出更快的当场跟着改选。测速过程中就能看着列表收敛，不用盯着进度条干等。
 
 ═══ 改动 ═══
-- 排序键：可用（latency >= 0）按毫秒升序；未测（NOT_TESTED）次之；不可用（FAILED，含 HTTP 200 但返回 HTML 错误页的失效镜像）垫底
-- 用 rank 而不是直接比 latency：NOT_TESTED(-1) 与 FAILED(-2) 都是负数，直接升序会把「不可用」顶到列表最前面
-- Collections.sort 是稳定排序，延迟相同的源保持原顺序，直连与内置源的相对位置不乱
-- 排序放在全部测速回调结束之后（onProbeFinished），不干扰 onProbeDone 按索引刷新行；随后 notifyDataSetChanged 整表刷新
-- 选中项按对象引用重新定位，不再依赖下标：保留「测速期间手动点选就不改选」的既有语义；未手动点选时仍自动选中最快的那个
-- 单源测速（长按「测速此源」）不重排：其余源此刻都是「未测」，重排只会把列表打乱，没有信息量
-- 更新页常驻提示补充排序说明，进度条文案保持简短，避免 258dp 窄屏被截断
+- 排序时机从 onProbeFinished 一次性重排，改成 onProbeDone 每收到一项结果就重排：可用按延迟升序、未测居中、FAILED 垫底；Collections.sort 稳定排序，同延迟保持原顺序
+- 回调契约改为传 Mirror 对象而不是列表下标：probeAll 提交任务时捕获对象引用，列表实时重排后下标必然失效，继续用 index 会把结果刷到别的行上
+- 选中项实时跟随当前最快：每出现更快的源就改选并写偏好；只在真正换源时才写盘，避免 80+ 次回调逐次落盘
+- 手动点选优先：测速期间用户点过某个源就停止自动跟随，结束时只文字告知最快项，不覆盖用户选择
+- 对话框保护：长按菜单 / 编辑地址 / 移除确认都把行下标捕获进点击回调，列表一跳就会操作错源。用 openDialogs 计数器在对话框打开期间暂停重排，只刷新单行数值；全部关闭后补排一次。用计数器而非布尔值，兼容「菜单里再点编辑」的嵌套弹窗
+- 单源测速仍不重排：其余源此刻都是「未测」，重排没有信息量
+- Mirror.latency 改 volatile：后台测速线程写、主线程排序读，明确跨线程可见性
+- 进度文案收短为「边测边排」，常驻提示补充实时排序与跟随最快说明，避免 258dp 窄屏截断；修正页面类注释里过时的「7~9 项 / LinearLayout」描述
 
 ═══ 验证 ═══
 - ./gradlew compileDebugJavaWithJavac / assembleDebug / assembleRelease：BUILD SUCCESSFUL；debug 与 release 均用项目正式签名（mc.jks / alias mc）
@@ -17,4 +18,4 @@ AiChat v1.14.21 —— 测速结果按延迟排序（不可用垫底）
 - 发布产物：armeabi-v7a / arm64-v8a / x86 / x86_64 / universal 五 ABI + speedtest.txt（魔数 AICHAT_SPEEDTEST_V1）
 
 ---
-**Full Changelog**: https://github.com/zip8919/AiChat/compare/v1.14.20...v1.14.21
+**Full Changelog**: https://github.com/zip8919/AiChat/compare/v1.14.21...v1.14.22

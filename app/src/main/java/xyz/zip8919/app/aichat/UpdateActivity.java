@@ -44,9 +44,12 @@ import java.util.Locale;
 /**
  * 版本更新页：GitHub 最新 Release + 加速镜像测速 + 下载安装。
  *
- * <p>258dp 窄屏约束：顶部信息固定、镜像列表滚动、底部操作栏固定；
- * 镜像只有 7~9 项且不会无限增长，用动态 LinearLayout 行而非 ListView——
- * 省掉一层 Adapter，也避免选中/测速刷新时整表重建导致的滚动跳动。
+ * <p>258dp 窄屏约束：顶部信息固定、镜像列表滚动、底部操作栏固定。
+ * 内置源已扩到 80+ 项，用 ListView + Adapter 复用行，不能再用动态 LinearLayout。
+ *
+ * <p>全量测速是「边测边排」：每项结果回来就按延迟重排一次，所以回调传 Mirror
+ * 对象而不是列表下标；对话框打开期间用 openDialogs 计数暂停重排，避免菜单里
+ * 捕获的行下标指错源。
  */
 public class UpdateActivity extends ThemedActivity implements UpdateManager.Callback {
 
@@ -84,6 +87,12 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
     private int probeSingleIndex = -1;
     /** 本轮已完成测速的源数，用于显示 x/N 进度。 */
     private int probeDone;
+    /** 本轮是否正在跑全量测速（单源测速不算）；作废时同步置 false。 */
+    private boolean probing;
+    /** 打开的对话框计数：>0 时暂停实时重排，菜单/编辑框捕获的行下标才不会失效。 */
+    private int openDialogs;
+    /** 暂停期间有新结果到达：对话框全部关闭后补排一次。 */
+    private boolean resortDirty;
 
 
     @Override
@@ -181,7 +190,7 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
         input.setText(String.valueOf(UpdateManager.probeConcurrency(this)));
         input.setSelection(input.getText().length());
         final String range = UpdateManager.MIN_CONCURRENCY + "～" + UpdateManager.MAX_CONCURRENCY;
-        AcDialog.builder(this)
+        showPaused(AcDialog.builder(this)
                 .setTitle("并行测速并发数")
                 .setMessage("范围 " + range + "，默认 " + UpdateManager.DEFAULT_CONCURRENCY
                         + "。并发越高越快，但同时挂起的 TLS 连接越多；"
@@ -207,7 +216,7 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
                     }
                 })
                 .setNegativeButton("取消", null)
-                .show();
+                );
     }
 
     /** 只刷新可见行：测速每完成一项调一次，84 项全表 notify 会让列表一直重排。 */
@@ -272,10 +281,11 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
     }
 
     /**
-     * 测速结果排序键：可用按延迟升序，未测次之，不可用垫底。
+     * 排序键：可用按延迟升序，未测次之，不可用垫底。
      *
-     * <p>不能直接比 latency —— NOT_TESTED(-1) 与 FAILED(-2) 都是负数，
-     * 直接升序会把「不可用」顶到列表最前面，正好和用户要的相反。
+     * <p>每收到一项测速结果就用它重排一次（边测边排）：一个源从「未测」变成
+     * 可用会往前提，判成 FAILED 会沉到底。不能直接比 latency ——
+     * NOT_TESTED(-1) 与 FAILED(-2) 都是负数，直接升序会把「不可用」顶到最前面。
      */
     private static int latencyRank(int ms) {
         if (ms >= 0) return ms;                            // 0 ~ 9999，越小越快
@@ -290,6 +300,75 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
                     return ra < rb ? -1 : (ra == rb ? 0 : 1);
                 }
             };
+
+    // ==================== 边测边排 ====================
+
+    /**
+     * 弹对话框期间暂停实时重排。
+     *
+     * <p>长按菜单、编辑框、移除确认都把行下标捕获进点击回调；列表一重排，
+     * 「编辑地址」「移除此源」就会落到另一个源上。用计数器而不是布尔值：
+     * 菜单里再点「编辑地址」会嵌套弹第二个 dialog，外层 dismiss 不能提前恢复。
+     */
+    private AlertDialog showPaused(AlertDialog.Builder b) {
+        final AlertDialog d = b.show();
+        if (d != null) {
+            openDialogs++;
+            d.setOnDismissListener(new DialogInterface.OnDismissListener() {
+                public void onDismiss(DialogInterface dlg) {
+                    if (openDialogs > 0) openDialogs--;
+                    if (openDialogs == 0) flushResort();
+                }
+            });
+        }
+        return d;
+    }
+
+    /** 对话框全部关闭后，把暂停期间累积的结果一次性排进去。 */
+    private void flushResort() {
+        if (!resortDirty) return;
+        resortDirty = false;
+        // 不检查 probing：测速刚结束、对话框还开着时也要补这最后一次（幂等）
+        if (destroyed || probeStale || probeSingleMode) return;
+        resortMirrors(true);
+    }
+
+    /**
+     * 按当前 latency 重排整个列表，并按对象引用重新定位选中项。
+     *
+     * <p>测速回调已由 UpdateManager post 回主线程，这里只跑在主线程；
+     * 后台任务持有的是 Mirror 对象引用，不再读 mirrors 列表，排序不会与它们打架。
+     * 80+ 项排序加上只重绘可见行，老设备开销可忽略，所以不做延迟合并——
+     * 合并成下一帧反而可能与 onProbeFinished 抢顺序。
+     */
+    private void resortMirrors(boolean autoPick) {
+        UpdateManager.Mirror keep = (selectedIndex >= 0 && selectedIndex < mirrors.size())
+                ? mirrors.get(selectedIndex) : null;
+        if (autoPick && !manualPicked) {
+            UpdateManager.Mirror fastest = fastestMirror();
+            if (fastest != null) {
+                keep = fastest;
+                // 只有真正换源才写偏好：80+ 次回调逐次落盘没必要
+                if (!fastest.template.equals(UpdateManager.selectedTemplate(this))) {
+                    UpdateManager.setSelectedTemplate(this, fastest.template);
+                }
+            }
+        }
+        Collections.sort(mirrors, LATENCY_ORDER);
+        selectedIndex = keep == null ? 0 : mirrors.indexOf(keep);
+        if (selectedIndex < 0) selectedIndex = 0;
+        if (mirrorAdapter != null) mirrorAdapter.notifyDataSetChanged();
+    }
+
+    /** 当前已出结果里延迟最小的源；没有可用源时返回 null。 */
+    private UpdateManager.Mirror fastestMirror() {
+        int min = Integer.MAX_VALUE;
+        UpdateManager.Mirror best = null;
+        for (UpdateManager.Mirror m : mirrors) {
+            if (m.latency >= 0 && m.latency < min) { min = m.latency; best = m; }
+        }
+        return best;
+    }
 
     private void selectMirror(int i) {
         selectedIndex = i;
@@ -431,6 +510,9 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
      */
     private void invalidateProbe() {
         probeStale = true;
+        // 作废后不能再补排：否则对话框关闭时 flushResort 会把旧代结果排进新列表
+        probing = false;
+        resortDirty = false;
         UpdateManager.cancelProbe();
         btnProbe.setEnabled(true);
     }
@@ -447,14 +529,17 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
         final int concurrency = UpdateManager.probeConcurrency(this);
         probeModeLabel = parallel ? "并行 " + concurrency + " 路" : "串行";
         probeStale = false;
+        probing = true;
         probeSingleMode = false;
         probeDone = 0;
         manualPicked = false;
+        resortDirty = false;
         for (UpdateManager.Mirror m : mirrors) m.latency = UpdateManager.NOT_TESTED;
         refreshAllRows();
         btnProbe.setEnabled(false);
+        // 窄屏只放得下模式 + 排序状态；「下载并校验测速文件」写在常驻提示里
         progressText.setText("正在测速 0/" + mirrors.size()
-                + "…（" + probeModeLabel + "，下载并校验测速文件）");
+                + "…（" + probeModeLabel + "，边测边排）");
         UpdateManager.probeAll(mirrors, asset.url, testUrl(),
                 parallel, concurrency, this);
     }
@@ -467,6 +552,7 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
         }
         invalidateProbe();          // 作废可能正在跑的全量测速
         probeStale = false;          // 本轮自身是有效的
+        probing = false;             // 单源测速不参与全量排序
         probeModeLabel = "单源";
         probeSingleMode = true;
         probeSingleIndex = i;
@@ -475,23 +561,37 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
         refreshAllRows();
         btnProbe.setEnabled(false);
         progressText.setText("正在测速 " + mirrors.get(i).name + "…");
-        UpdateManager.probeOne(mirrors.get(i), i, asset.url, testUrl(), this);
+        UpdateManager.probeOne(mirrors.get(i), asset.url, testUrl(), this);
     }
 
     @Override
-    public void onProbeDone(int index, int latencyMs) {
+    public void onProbeDone(UpdateManager.Mirror m, int latencyMs) {
         if (destroyed || probeStale) return;
-        refreshRow(index);
-        if (!probeSingleMode) {
-            probeDone++;
-            progressText.setText("正在测速 " + probeDone + "/" + mirrors.size()
-                    + "…（" + probeModeLabel + "，下载并校验测速文件）");
+        // 单源测速不重排：其余全是「未测」，重排只会把列表打乱，没有信息量
+        if (probeSingleMode) {
+            int i = mirrors.indexOf(m);
+            if (i >= 0) refreshRow(i);
+            return;
         }
+        if (!probing) return;      // 全量测速已结束的迟到回调，不再动列表
+        probeDone++;
+        progressText.setText("正在测速 " + probeDone + "/" + mirrors.size()
+                + "…（" + probeModeLabel + "，边测边排）");
+        if (openDialogs > 0) {
+            // 菜单/编辑框开着时列表必须停住，否则里面捕获的行下标会指错源。
+            // 只刷这一行的数值，重排推迟到对话框全部关闭后 flushResort 补一次。
+            resortDirty = true;
+            int i = mirrors.indexOf(m);
+            if (i >= 0) refreshRow(i);
+            return;
+        }
+        resortMirrors(true);
     }
 
     @Override
     public void onProbeFinished() {
         if (destroyed || probeStale) return;
+        probing = false;
         btnProbe.setEnabled(true);
         if (probeSingleMode) {
             probeSingleMode = false;
@@ -502,38 +602,30 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
                         + (l == UpdateManager.FAILED ? "不可用（未通过文件校验）" : l + " ms"));
             }
             probeSingleIndex = -1;
-            // 只测一个源时其余都是「未测」，重排只会把列表打乱，没有信息量
             return;
         }
-        // 下面要重排整个列表，所有下标都会失效：先用对象引用记住选中项与最快项
-        UpdateManager.Mirror keep = (selectedIndex >= 0 && selectedIndex < mirrors.size())
-                ? mirrors.get(selectedIndex) : null;
-        int min = Integer.MAX_VALUE;
-        UpdateManager.Mirror fastest = null;
-        for (UpdateManager.Mirror m : mirrors) {
-            if (m.latency >= 0 && m.latency < min) { min = m.latency; fastest = m; }
+        // 过程中已逐项排好；这里只在没有对话框压着时补一次兜底，
+        // 若对话框还开着，交给它关闭时的 flushResort 处理。
+        if (openDialogs == 0) {
+            resortDirty = false;
+            resortMirrors(true);
+        } else {
+            resortDirty = true;
         }
-        boolean autoPick = !manualPicked;
-        if (fastest != null && autoPick) {
-            keep = fastest;
-            UpdateManager.setSelectedTemplate(this, fastest.template);
-        }
-        // 延迟低→高、不可用垫底；稳定排序让同延迟的源保持原顺序
-        Collections.sort(mirrors, LATENCY_ORDER);
-        selectedIndex = keep == null ? 0 : mirrors.indexOf(keep);
-        if (selectedIndex < 0) selectedIndex = 0;
-        if (mirrorAdapter != null) mirrorAdapter.notifyDataSetChanged();
 
+        UpdateManager.Mirror fastest = fastestMirror();
         String modeSuffix = probeModeLabel.length() > 0 ? "（" + probeModeLabel + "）" : "";
         if (fastest != null) {
-            if (!autoPick) {
-                // 用户测速期间已手动点选，尊重用户选择，只用文字告知最快项
-                progressText.setText("测速完成，最快：" + fastest.name + " " + min
-                        + " ms" + modeSuffix + "（保留你手动选择的 "
+            if (manualPicked) {
+                // 用户测速期间手动点过源：自动跟随让位于手动选择，只文字告知最快项
+                UpdateManager.Mirror keep = (selectedIndex >= 0 && selectedIndex < mirrors.size())
+                        ? mirrors.get(selectedIndex) : null;
+                progressText.setText("测速完成，最快：" + fastest.name + " "
+                        + fastest.latency + " ms" + modeSuffix + "（保留你手动选择的 "
                         + (keep == null ? "—" : keep.name) + "）");
             } else {
-                progressText.setText("已选最快：" + fastest.name + "  " + min
-                        + " ms" + modeSuffix);
+                progressText.setText("已选最快：" + fastest.name + "  "
+                        + fastest.latency + " ms" + modeSuffix);
             }
         } else {
             progressText.setText("全部镜像不可用，可试直连或自定义后重测");
@@ -555,6 +647,8 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
         // 测速与下载已分属不同线程，点下载即开始。把在跑的测速作废：
         // 不再占连接，也不会在结束后自动改选镜像、覆盖本次下载正在用的那个。
         probeStale = true;
+        probing = false;
+        resortDirty = false;
         UpdateManager.cancelProbe();
         btnAction.setText("取消下载");
         btnRefresh.setEnabled(false);
@@ -753,7 +847,7 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
         items.add("复制地址");
         if (!direct) items.add(m.custom ? "删除此源" : "移除此源");
         items.add("恢复全部内置源");
-        AcDialog.builder(this)
+        showPaused(AcDialog.builder(this)
                 .setTitle(m.name)
                 .setItems(items.toArray(new String[items.size()]),
                         new DialogInterface.OnClickListener() {
@@ -768,7 +862,7 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
                             }
                         })
                 .setNegativeButton("取消", null)
-                .show();
+                );
     }
 
     private void editMirror(final int i) {
@@ -778,7 +872,7 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
         input.setHint("https://域名/{url}");
         input.setSingleLine(true);
         input.setInputType(android.text.InputType.TYPE_TEXT_VARIATION_URI);
-        AcDialog.builder(this)
+        showPaused(AcDialog.builder(this)
                 .setTitle("编辑加速源")
                 .setView(input)
                 .setPositiveButton("保存", new DialogInterface.OnClickListener() {
@@ -808,7 +902,7 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
                     }
                 })
                 .setNegativeButton("取消", null)
-                .show();
+                );
     }
 
     private void copyMirror(UpdateManager.Mirror m) {
@@ -825,7 +919,7 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
 
     private void confirmRemoveAt(final int i) {
         final UpdateManager.Mirror m = mirrors.get(i);
-        AcDialog.builder(this)
+        showPaused(AcDialog.builder(this)
                 .setTitle("移除加速源")
                 .setMessage(m.name + "\n" + m.template
                         + "\n\n内置源可通过「恢复全部内置源」找回。")
@@ -841,7 +935,7 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
                     }
                 })
                 .setNegativeButton("取消", null)
-                .show();
+                );
     }
 
     private void restoreDefaults() {
@@ -854,11 +948,11 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
         if (release == null) return;
         String body = release.body;
         if (body.length() > 4000) body = TextKit.cut(body, 4000) + "\n…（完整说明见 GitHub）";
-        AcDialog.builder(this)
+        showPaused(AcDialog.builder(this)
                 .setTitle(release.name.length() > 0 ? release.name : release.tag)
                 .setMessage(body)
                 .setPositiveButton("关闭", null)
-                .show();
+                );
     }
 
     private void chooseAsset() {
@@ -868,11 +962,13 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
         for (int i = 0; i < list.size(); i++) {
             names[i] = shortName(list.get(i).name) + "  " + formatSize(list.get(i).size);
         }
-        AcDialog.builder(this)
+        showPaused(AcDialog.builder(this)
                 .setTitle("选择安装包")
                 .setItems(names, new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         probeStale = true;
+                        probing = false;
+                        resortDirty = false;
                         UpdateManager.cancelProbe();
                         UpdateManager.cancel();
                         btnProbe.setEnabled(true);
@@ -891,7 +987,7 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
                         refreshAllRows();
                     }
                 })
-                .show();
+                );
     }
 
     // ==================== 工具 ====================
