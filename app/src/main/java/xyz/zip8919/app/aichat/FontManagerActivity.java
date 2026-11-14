@@ -255,7 +255,8 @@ public class FontManagerActivity extends ThemedActivity {
                         new DialogInterface.OnClickListener() {
                             public void onClick(DialogInterface d, int w) {
                                 repo.replaceReferences(am, f.id, ids.get(w));
-                                am.applyPermanent();
+                                // 只提交字体引用改写，不要把「临时生效」的其它改动一并永久化
+                                am.commitFontReferences();
                                 repo.delete(f.id);
                                 load();
                                 toast("引用已改写并保存");
@@ -316,7 +317,7 @@ public class FontManagerActivity extends ThemedActivity {
                             repo.replaceReferences(am, id, "system");
                             changed = true;
                         }
-                        if (changed) am.applyPermanent();
+                        if (changed) am.commitFontReferences();
                         // 目录只列一次、元数据只写一次，不再逐项 delete（每项一次全表重扫）
                         repo.deleteAll(keys);
                         selectionMode = false;

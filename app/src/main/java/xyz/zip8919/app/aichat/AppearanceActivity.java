@@ -259,14 +259,18 @@ public class AppearanceActivity extends ThemedActivity {
         sigb.append("f:");
         for (int i = 0; i < fonts.size(); i++) {
             FontRepository.FontItem f = fonts.get(i);
+            // 副标题取自 fileName + sizeBytes，必须进签名：否则同名文件被替换成
+            // 不同大小后签名不变、走短路只补选中项，下拉里的副标题停在旧值。
             sigb.append(f.id).append(f.enabled ? '1' : '0')
-                    .append(f.loadFailed ? '1' : '0').append(f.name).append('|');
+                    .append(f.loadFailed ? '1' : '0').append(f.name)
+                    .append(f.fileName).append(f.sizeBytes).append('|');
         }
         sigb.append("t:");
         for (int i = 0; i < allThemes.size(); i++) {
             Theme t = allThemes.get(i);
+            // themeEntry 的副标题取自 author，只改作者时也必须重建适配器。
             sigb.append(t.id).append(t.name)
-                    .append(t.fileMissing ? '1' : '0')
+                    .append(t.author).append(t.fileMissing ? '1' : '0')
                     .append(t.versionIncompatible ? '1' : '0').append('|');
         }
         String sig = sigb.toString();

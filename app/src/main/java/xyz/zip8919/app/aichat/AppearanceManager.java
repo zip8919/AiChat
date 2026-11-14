@@ -450,6 +450,40 @@ public final class AppearanceManager {
         LogUtil.i(TAG, "detachTheme: %s unbound", v);
     }
 
+    /**
+     * 只把 FONT_UI / FONT_MONO 两项从 working 同步进 committed 并落盘，
+     * 其它状态（含用户「临时生效」、尚未保存的改动）一概不动。
+     *
+     * <p>删除被引用字体时不能用 {@link #applyPermanent()}：它会把整个 working
+     * 拷成 committed 并写盘，等于把用户「临时生效」（预期重启回滚）的其它改动
+     * 悄悄永久化。ThemeManagerActivity 删主题用 {@link #detachTheme(String)}
+     * 规避了同一个陷阱，字体路径此前漏了。
+     *
+     * <p>调用方（FontRepository.replaceReferences）已经改好 working 并 bump 过，
+     * 这里只补落盘，不再 bump，避免 4.x 老机上多一次整树重刷。
+     */
+    public void commitFontReferences() {
+        String[] keys = {ThemeTokens.FONT_UI, ThemeTokens.FONT_MONO};
+        boolean changed = false;
+        for (int k = 0; k < keys.length; k++) {
+            for (int d = 0; d < 2; d++) {
+                boolean dark = d == 1;
+                java.util.Map<String, String> w = working.explicitFor(dark);
+                java.util.Map<String, String> c = committed.explicitFor(dark);
+                String v = w.get(keys[k]);
+                if (v == null) {
+                    if (c.remove(keys[k]) != null) changed = true;
+                } else if (!v.equals(c.get(keys[k]))) {
+                    c.put(keys[k], v);
+                    changed = true;
+                }
+            }
+        }
+        if (!changed) return;
+        AppearanceStore.getInstance().save(committed);
+        LogUtil.i(TAG, "commitFontReferences: font refs committed only");
+    }
+
     /** 放弃改动，回到上次永久保存的值。 */
     public void discard() {
         working = committed.copy();
