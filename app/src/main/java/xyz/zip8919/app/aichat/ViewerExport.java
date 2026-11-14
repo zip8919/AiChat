@@ -52,7 +52,15 @@ final class ViewerExport {
 
     private static final String TAG = "ViewerExport";
     private static final int MAX_SIDE = 4096;
-    private static final long MAX_PIXELS = 16L * 1024 * 1024;
+    /**
+     * 导出位图的像素上限（4M px ≈ 16 MB ARGB_8888）。
+     *
+     * <p>原来是 16M px（64 MB）——单张就顶满 4.4 老机的 dalvik 堆上限（常见 48~64 MB），
+     * 而这条路径上至少同时存在两张全尺寸位图（原图 + 裁剪/flatten 的副本），
+     * 于是「导出长文档」在最需要它的老设备上必然 OOM。
+     * 4M px 够 1080 宽 × 3700 高，文字依然清晰，两张同时在场也只有 32 MB。
+     */
+    private static final long MAX_PIXELS = 4L * 1024 * 1024;
     /** 背景判定容差：同色像素会有 1~3 的抗锯齿抖动，12 足够稳。 */
     private static final int BG_TOL = 12;
     /** 裁完保留的边距，避免内容贴边。 */
@@ -189,12 +197,17 @@ final class ViewerExport {
                 }
                 Bitmap bmp = trimBorder(captured, bg);
                 trimmed = (bmp != captured);
+                // 裁剪出新图后立刻放掉原图：4M px 的 ARGB_8888 一张就是 16MB，
+                // 而 compress 这一步还会再多一张（JPEG 要 flatten 铺底）。
+                // 三张同时在场的峰值在老机器上直接越过堆上限，用户只看到「导出失败」。
+                if (bmp != captured && !captured.isRecycled()) captured.recycle();
                 Bitmap flat = (jpeg && bmp.hasAlpha()) ? flatten(bmp, bg) : bmp;
+                // flatten 完成后被铺底的那张就没用了，压之前先放掉
+                if (flat != bmp && !bmp.isRecycled()) bmp.recycle();
                 out = compress(flat, jpeg);
                 w = flat.getWidth();
                 h = flat.getHeight();
-                if (flat != bmp && !bmp.isRecycled()) bmp.recycle();
-                if (bmp != captured && !bmp.isRecycled()) bmp.recycle();
+                if (!flat.isRecycled()) flat.recycle();
             }
 
             if (out == null || out.length == 0) {
@@ -209,7 +222,9 @@ final class ViewerExport {
                 r.error = "保存失败：exports 目录不可写。\n请检查存储权限，或到「小工具」确认根目录。";
                 return r;
             }
-            r.data = out;
+            // 只记体积，不留字节：结果框存活期间常驻 5~15 MB 的编码后数据，
+            // 而这些字节除了显示一个 KB 数字之外没有任何用处（文件已经落盘）。
+            r.bytes = out.length;
             r.width = w;
             r.height = h;
             r.trimmed = trimmed;
@@ -591,7 +606,7 @@ final class ViewerExport {
     private static String buildInfo(Result r) {
         String mode = r.direct ? "原图直出（无背景）"
                 : (r.trimmed ? "已裁掉周围背景" : "当前可见区域");
-        int kb = r.data == null ? 0 : r.data.length / 1024;
+        int kb = r.bytes / 1024;
         return "已保存  " + r.name + "\n"
                 + "尺寸  " + r.width + "×" + r.height + "   格式  " + (r.jpeg ? "JPEG" : "PNG")
                 + "   体积  " + kb + " KB\n"
@@ -743,7 +758,10 @@ final class ViewerExport {
     }
 
     private static String stamp() {
-        return new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date());
+        // 秒级精度下同秒内同格式二次导出会生成完全同名的文件，renameAtomic
+        // 目标存在时直接覆盖、不提示重名，前一张静默丢失（原图直出零编码，
+        // 两次必然落在同一秒）。加毫秒后实际不会再撞。
+        return new SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(new Date());
     }
 
     private static final class Result {
@@ -751,7 +769,8 @@ final class ViewerExport {
         String error;
         String name;
         String path;
-        byte[] data;
+        /** 落盘后的字节数，仅用于结果框显示体积。不留 byte[]，见 exportInBackground。 */
+        int bytes;
         Bitmap thumb;
         int width, height;
         boolean jpeg;

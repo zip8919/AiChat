@@ -36,6 +36,17 @@ final class ChatStreamRunner {
 
     private static final String TAG = "StreamRunner";
 
+    /**
+     * 一条回复最多允许连续几轮工具调用。
+     *
+     * <p>必须有硬上限：模型每轮都回一个 tool_call 时，下面的 {@code while (true)}
+     * 唯一的自然出口（本轮没有 tool_calls）永远不出现。搜索类工具尤其容易触发
+     * 「再查一下」的循环，代价不是卡一下而是双向爆炸——conversation 与
+     * st.toolHistory 每轮追加一份工具正文，下一轮再整串序列化上传。
+     * 8 轮足够覆盖正常的多步检索，超限后保留已渲染内容挂错误卡片，可续跑。
+     */
+    private static final int MAX_TOOL_ROUNDS = 8;
+
     /** 视图侧能力。继承 {@link StreamRenderer.Ui}，渲染器直接用同一个实现。 */
     interface Ui extends StreamRenderer.Ui {
         void toast(String msg);
@@ -120,11 +131,13 @@ final class ChatStreamRunner {
         /** 命中前缀缓存的 token 数，口径见 {@link Message#cachedTokens}。 */
         final int cachedTokens;
         final long finishedAt;
+        /** 断流补进 trace 的半截正文起点，-1 表示没有；见 {@link State#partialStart}。 */
+        final int partialStart;
 
         Settled(boolean failed, int aiIndex, int generation, int round, int httpCode,
                 String errorDetail, String trace, String toolHistory, String apiText, String content,
                 int promptTokens, int completionTokens, int totalTokens, int cachedTokens,
-                long finishedAt) {
+                long finishedAt, int partialStart) {
             this.failed = failed;
             this.aiIndex = aiIndex;
             this.generation = generation;
@@ -140,6 +153,7 @@ final class ChatStreamRunner {
             this.totalTokens = totalTokens;
             this.cachedTokens = cachedTokens;
             this.finishedAt = finishedAt;
+            this.partialStart = partialStart;
         }
     }
 
@@ -223,6 +237,11 @@ final class ChatStreamRunner {
             int retryRound = -1;
             int retryCount = 0;
             int round = job.isResume() ? job.resume.round : 0;
+            // 上限按「本次 execute 实际跑的工具轮数」算，不能用绝对 round：
+            // 续跑的 round 起点是上次累计轮数（可能已是 8），round+1>=MAX 会
+            // 恒真 → 点「从出错处重试」后先发一次 HTTP、跑一轮工具就立刻失败，
+            // 无限重试且永远拿不到最终回答（还重复记账）。
+            int usedRounds = 0;
             if (job.isResume() && st.trace.length() > 0) {
                 ui.showStatus("正在重新生成...", job.generation, st.trace.toString(), job.aiIndex);
             }
@@ -399,6 +418,10 @@ final class ChatStreamRunner {
                     st.failed = true;
                     // 本轮流式已经吐出来的内容不能丢：错误卡片要挂在这段内容之下，
                     // 否则用户看到的是「回答突然没了，只剩一张报错卡」
+                    // 与「断流 catch」一致记下截断点：SseRound 正常返回 r.error
+                    // （协议层错误）不走 catch，原来 partialStart 恒为 -1，续跑
+                    // 就不截断这半截内容，模型重写本轮 → 界面与落盘各两份。
+                    st.partialStart = st.trace.length();
                     st.trace.append(rr.display);
                     if (TraceKit.cap(st.trace)) ui.onTraceTrimmed();
                     st.errorDetail = ErrorReport.build(job.providerName, job.modelName,
@@ -413,6 +436,7 @@ final class ChatStreamRunner {
 
                 if (rr.toolCalls.length() > 0 && ToolCalls.hasUsable(rr.toolCalls)) {
                     // 本轮思考/半截回答保留在界面上，不要被下一轮覆盖
+                    String baseBefore = st.trace.toString();
                     st.trace.append(rr.display);
                     if (TraceKit.cap(st.trace)) ui.onTraceTrimmed();
                     // 插入工具卡片前必须先把本轮 tail 并进 base。
@@ -427,6 +451,17 @@ final class ChatStreamRunner {
                     //   3) 下一轮 commitTail 再把 tail 那份搬进 base。
                     // 先 commit 一次：tail 归位、lastStreamTrace 推进到含 display，
                     // 后续 renderTraceAsync 的 part 就只剩工具卡片，各一份且不乱序。
+                    // 先把本轮的最后一帧强制落地，再搬 tail。
+                    //
+                    // 每一帧都受 200/120ms 节流，而分片通常 20~50ms 一片，于是本轮
+                    // 最后一个分片几乎必然还在节流窗口里没推下去。只 commitTail 的话，
+                    // 它会把 DOM 现有的 tail 搬进 base、并把 baseRendered 记账成
+                    // 「已等于完整文本」——那一截正文永久缺失（屏幕上句子断在工具卡片处），
+                    // 而落盘的 content 是完整的，切走再回来又对得上，极难排查。
+                    // base 必须是不含本轮正文的 trace（与 onProgress 契约一致）：
+                    // 传 append 后的 trace 会让同一段正文既进 streamBase 又进
+                    // streamTailHtml，commitTail 搬完 tail 后屏幕上出现两份。
+                    renderer.flushAndWait(baseBefore, rr.display.toString(), 2500L);
                     renderer.commitTail(st.trace.toString());
                     // 注意：不把 rr.content 累进 apiText——工具轮次的正文已经作为
                     // assistant(tool_calls).content 存在于 toolHistory 里，再拼一次会让模型看到重复内容
@@ -437,6 +472,25 @@ final class ChatStreamRunner {
                             st.sources, job.question, toolHost);
                     if (outcome.aborted) {
                         LogUtil.i(TAG, "tool loop aborted at round %d", round);
+                        return;
+                    }
+                    // 轮次硬上限。模型的 tool_calls 可以无限循环（尤其搜索类工具：
+                    // 每轮都「再查一下」），而这个 while 的唯一出口是「本轮没有
+                    // tool_calls」。没有上限时的真实代价不是卡一下：
+                    // conversation 每轮追加 assistant+tool（工具结果是全量正文，
+                    // 可达 MB 级），下一轮把整串重新序列化上传 —— 第 n 轮上传量
+                    // 约等于 n 倍单轮体积，同时 st.toolHistory 同步膨胀并最终落盘。
+                    // TraceKit.cap 只保护 trace，保护不了这两处。
+                    usedRounds++;
+                    if (usedRounds >= MAX_TOOL_ROUNDS) {
+                        st.failed = true;
+                        st.errorDetail = ErrorReport.build(job.providerName, job.modelName,
+                                job.chatEndpoint, round, -1, "",
+                                new Exception("工具调用连续 " + MAX_TOOL_ROUNDS + " 轮未结束，已停止"));
+                        LogUtil.w(TAG, "tool round limit %d reached, stop looping", MAX_TOOL_ROUNDS);
+                        if (session.isCurrent(job.generation)) {
+                            ui.toast("工具调用轮次过多，已停止（已保留已有内容）");
+                        }
                         return;
                     }
                     round++;
@@ -515,17 +569,46 @@ final class ChatStreamRunner {
 
     private SseRound.Result readRound(HttpURLConnection conn, final State st,
             final StreamRenderer renderer) throws Exception {
-        return SseRound.read(job.streamEnabled, conn.getInputStream(),
-                new SseRound.Progress() {
-                    public void onProgress(String display, String content) {
-                        renderer.onProgress(st.trace.toString(), display);
-                    }
-                },
-                new SseRound.Abort() {
-                    public boolean isAborted() {
-                        return !session.isAlive(job.generation);
-                    }
-                });
+        // 半成品出口：流式读到一半断流时，本轮已经推到屏幕上的文本在 Result 里，
+        // 不接住就会随异常一起丢掉（见下面的 catch）。
+        SseRound.Result[] partial = new SseRound.Result[1];
+        // 节流点从 SseRound 挪到这里，是为了让「复制 StringBuilder」只在真要渲染时发生。
+        // 间隔与 StreamRenderer 的 INTERVAL_HTML/TEXT_MS 对齐：比它更密只会被下游丢掉，
+        // 而那些被丢掉的帧，上游照样为 toString 付了全串复制的钱。
+        final long interval = job.realtimeRender ? 200 : 120;
+        final long[] lastPush = new long[] { 0 };
+        try {
+            return SseRound.read(job.streamEnabled, conn.getInputStream(),
+                    new SseRound.Progress() {
+                        public void onProgress(CharSequence display) {
+                            long now = System.currentTimeMillis();
+                            if (now - lastPush[0] < interval) return;
+                            lastPush[0] = now;
+                            renderer.onProgress(st.trace.toString(), display.toString());
+                        }
+                    },
+                    new SseRound.Abort() {
+                        public boolean isAborted() {
+                            return !session.isAlive(job.generation);
+                        }
+                    }, partial);
+        } catch (Exception e) {
+            // 断流（读超时、连接重置、TLS 中断）不是「什么都没发生」：调用方会走失败
+            // 链路，用 st.trace 重写气泡并落盘。这里不把半截 display 补进 trace，
+            // 用户已经看到的那段回答就会被抹掉，写进会话文件的内容也少一截。
+            SseRound.Result r = partial[0];
+            if (r != null && r.display.length() > 0) {
+                st.partialStart = st.trace.length();
+                st.trace.append(r.display);
+                if (TraceKit.cap(st.trace)) ui.onTraceTrimmed();
+                LogUtil.i(TAG, "partial round kept after %s: display=%d",
+                        e.getClass().getSimpleName(), r.display.length());
+            }
+            if (r != null && r.content.length() > 0) {
+                st.apiText = r.content.toString();
+            }
+            throw e;
+        }
     }
 
     private static void writeBody(HttpURLConnection conn, String payload) throws Exception {
@@ -620,6 +703,13 @@ final class ChatStreamRunner {
         int cachedTokens;
         /** 收尾时刻，用于算端到端生成速度。 */
         long finishedAt;
+        /**
+         * 断流时补进 trace 的那段「半截正文」的起点（-1 表示没有）。
+         *
+         * <p>续跑要从 conversation 重建请求，模型会重写整轮，所以那段半截文本
+         * 必须能从续跑基准里截掉，否则新旧两份回答会连在一起。
+         */
+        int partialStart = -1;
 
         /**
          * 累加一轮的 usage。工具轮次会发多次请求，逐轮相加才是这条消息的真实消耗；
@@ -680,7 +770,8 @@ final class ChatStreamRunner {
         Settled toSettled(StreamJob job) {
             return new Settled(failed, job.aiIndex, job.generation, round, httpCode,
                     errorDetail, trace.toString(), toolHistory.toString(), apiText, content,
-                    promptTokens, completionTokens, totalTokens, cachedTokens, finishedAt);
+                    promptTokens, completionTokens, totalTokens, cachedTokens, finishedAt,
+                    partialStart);
         }
     }
 

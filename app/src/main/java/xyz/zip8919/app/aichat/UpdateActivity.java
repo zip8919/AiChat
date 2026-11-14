@@ -55,6 +55,8 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
     private UpdateManager.Asset asset;
     private int selectedIndex;
     private File apkFile;
+    /** 4.4 安装准备（拷 APK 到公共目录）是否在进行；切换包/重新检查时置 false，防止弹出切换前旧包的安装器。 */
+    private volatile boolean installPending;
 
     private boolean destroyed;
     private boolean downloading;
@@ -275,6 +277,10 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
 
     private void check() {
         if (downloading) return;
+        // 作废在跑的测速：否则旧代 onProbeFinished 会把进度文案改成「已选最快」
+        // 并自动改选镜像、覆盖用户此前选择，与本次检查（可能失败）的状态自相矛盾。
+        invalidateProbe();
+        installPending = false;
         apkFile = null;
         release = null;
         asset = null;
@@ -314,7 +320,9 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
         btnAction.setEnabled(asset != null);
         assetView.setText(asset == null ? "无可用安装包"
                 : "将下载：" + asset.name + "  " + formatSize(asset.size));
-        runProbe();
+        // 没有安装包就别测速：runProbe 会弹「请先检查更新成功」，
+        // 用户刚看到「已是最新版」，下一句却是这个提示，像是检查失败了。
+        if (asset != null) runProbe();
     }
 
     /**
@@ -427,6 +435,7 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
             progressText.setText("下载失败：" + err + "（换个镜像或直连再试）");
             return;
         }
+        installPending = false;
         apkFile = f;
         btnAction.setText("安装");
         progressText.setText("下载完成 " + formatSize(f.length()) + "，点「安装」");
@@ -437,6 +446,48 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
             AcToast.show(this, "安装包不存在");
             return;
         }
+        final File src = apkFile;
+        // N+ 用 FileProvider 的 content://，本身就能授权读内部私有目录，不需要任何拷贝。
+        // 只有 4.4（<24）只认 file://、且安装器以别的 uid 读不到 /data/data 时，
+        // 才需要把 5MB APK 拷到公共 Download —— 那是 4.4 老机 + 慢卡上 0.5~1.5s 的同步 IO，
+        // 原来在点击回调里直接跑，用户点「安装」界面先僵住，现在放后台。
+        if (Build.VERSION.SDK_INT >= 24) {
+            launchInstaller(src);
+            return;
+        }
+        installPending = true;
+        btnAction.setEnabled(false);
+        new Thread(new Runnable() {
+            public void run() {
+                File ready = null;
+                try {
+                    ready = worldReadable(src);
+                } catch (Throwable t) {
+                    // 后台线程未捕获异常会被 CrashCatcher 交给系统默认 handler killProcess，
+                    // 整个 App 闪退；这里兜住，转成界面上的明确提示。
+                    LogUtil.w(TAG, "apk prepare failed: " + t.getMessage());
+                }
+                final File result = ready;
+                runOnUiThread(new Runnable() {
+                    public void run() {
+                        if (isFinishing() || isDestroyed()) return;
+                        btnAction.setEnabled(true);
+                        if (!installPending) return;   // 期间切换了安装包/重新检查：作废，别弹旧包
+                        installPending = false;
+                        if (result == null) {
+                            AcToast.showLong(UpdateActivity.this,
+                                    "无法准备安装包，请到「已保存文件」手动打开，或检查存储后重试");
+                            return;
+                        }
+                        launchInstaller(result);
+                    }
+                });
+            }
+        }, "apk-install").start();
+    }
+
+    /** 在 UI 线程调起系统安装器。 */
+    private void launchInstaller(File apkFile) {
         try {
             // 4.4 的 PackageInstaller intent-filter 只声明 file scheme，不认 content://，
             // 用 content:// 会直接 ActivityNotFoundException。targetSdk 18 也不会触发
@@ -446,7 +497,8 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
             if (Build.VERSION.SDK_INT >= 24) {
                 uri = FileActions.uriOf(apkFile);          // APK 在 exports，provider 能解析
             } else {
-                uri = Uri.fromFile(worldReadable(apkFile));
+                // 传进来的已经是 worldReadable() 的产物，这里不能再拷一次
+                uri = Uri.fromFile(apkFile);
             }
             Intent i = new Intent(Intent.ACTION_VIEW);
             i.setDataAndType(uri, "application/vnd.android.package-archive");
@@ -473,14 +525,14 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
     private File worldReadable(File src) {
         String internal = getFilesDir().getAbsolutePath();
         if (!src.getAbsolutePath().startsWith(internal)) return src;
-
-        File dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
-        if (dir == null) return src;
-        if (!dir.isDirectory() && !dir.mkdirs()) return src;
-        File dst = new File(dir, src.getName());
+        File dst = null;
         InputStream in = null;
         OutputStream out = null;
         try {
+            File dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+            if (dir == null) return null;
+            if (!dir.isDirectory() && !dir.mkdirs()) return null;
+            dst = new File(dir, src.getName());
             in = new FileInputStream(src);
             out = new FileOutputStream(dst);
             byte[] buf = new byte[8192];
@@ -489,9 +541,13 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
             out.flush();
             LogUtil.i(TAG, "worldReadable: copied to %s", dst.getAbsolutePath());
             return dst;
-        } catch (IOException e) {
-            LogUtil.w(TAG, "worldReadable copy failed: %s", e.getMessage());
-            return src;
+        } catch (Throwable t) {
+            // 不只 IOException：SELinux 拒绝写公共目录、SecurityException、OOM 都会走到这里。
+            // 任何失败都不能返回内部私有目录的 src —— 4.4 安装器以别的 uid 读不到
+            // /data/data，会静默「解析包错误」而界面毫无提示。
+            LogUtil.w(TAG, "worldReadable copy failed: %s", t.getMessage());
+            if (dst != null) { try { if (dst.exists()) dst.delete(); } catch (Throwable ignored) {} }
+            return null;
         } finally {
             try { if (in != null) in.close(); } catch (Throwable t) {}
             try { if (out != null) out.close(); } catch (Throwable t) {}
@@ -572,6 +628,10 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
                         btnProbe.setEnabled(true);
                         asset = list.get(w);
                         apkFile = null;
+                        // 切换安装包时作废正在进行的旧包安装准备，并恢复按钮：
+                        // 否则 install 的后台线程回来会弹出切换前那个包的安装器。
+                        installPending = false;
+                        btnAction.setEnabled(true);
                         assetView.setText("将下载：" + asset.name + "  " + formatSize(asset.size));
                         btnAction.setText("下载");
                         progressText.setText("已切换，建议重新测速");

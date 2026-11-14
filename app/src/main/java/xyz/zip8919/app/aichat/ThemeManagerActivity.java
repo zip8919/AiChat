@@ -329,7 +329,8 @@ public class ThemeManagerActivity extends ThemedActivity {
                         if (hit) {
                             for (String id : deletable) am.detachTheme(id);
                         }
-                        for (String id : deletable) repo.delete(id);
+                        // 整批只读一次表：逐项 delete 会「删一个 → 签名失效 → 把剩下的全部重解析」
+                        repo.deleteAll(deletable);
                         selectionMode = false;
                         adapter.setSelectionMode(false);
                         btnMulti.setText("批量管理");

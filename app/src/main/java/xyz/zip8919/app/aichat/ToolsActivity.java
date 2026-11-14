@@ -198,9 +198,19 @@ public class ToolsActivity extends ThemedActivity {
         // 环境提示词的三个动作在 tools_env_entry 的弹层里，不再是一排并列按钮
     }
 
+    /** 停在运行器分段时没扫目录，切回代码库分段要补扫一次。 */
+    private boolean filesDirty;
+
     @Override
     protected void onResume() {
         super.onResume();
+        // 运行器分段下 libraryPanel 是 GONE：这里扫目录 + 建 label + 重建 adapter
+        // （300 个文件约 20~40ms，还要全部重新 inflate 可见行）全是白做，
+        // 而「在小工具页里切来切去」是这条页面上最频繁的动作。
+        if (runnerTab) {
+            filesDirty = true;
+            return;
+        }
         refreshFiles();
     }
 
@@ -219,6 +229,10 @@ public class ToolsActivity extends ThemedActivity {
         if (runner) {
             selectionFooter.setVisibility(View.GONE);
         } else {
+            if (filesDirty) {
+                filesDirty = false;
+                refreshFiles();     // 见 onResume：运行器分段期间没扫过目录
+            }
             updateSelectionBar();
         }
     }
@@ -272,6 +286,9 @@ public class ToolsActivity extends ThemedActivity {
         return new File(StorageManager.getInstance(getApplicationContext()).getBasePath(), "exports");
     }
 
+    /** 上次列表内容签名；一致时只保住选择态，不重建适配器。 */
+    private String filesSig;
+
     private void refreshFiles() {
         // 重建 adapter 前先按文件名记录勾选，否则 onResume 会丢掉用户已选中的项
         if (selectionMode) {
@@ -285,41 +302,62 @@ public class ToolsActivity extends ThemedActivity {
         files.clear();
         File dir = exportsDir();
         File[] list = dir.listFiles();
+        // 每个文件只 stat 一次。
+        //
+        // 原实现把 lastModified() 写在比较器里：300 个文件约 2465 次比较 × 2 次
+        // stat = 近 5000 次 syscall，紧接着 labels 里每个文件又 length() 一次。
+        // exports 目录在外置存储上，单次 stat 20~50µs，等于每次 onResume 卡
+        // 100~250ms —— 而它就在「从别处返回小工具页」这条最常走的路径上。
+        List<Entry> entries = new ArrayList<Entry>();
         if (list != null) {
             for (File f : list) {
-                if (f.isFile()) {
-                    files.add(f);
-                }
+                if (f.isFile()) entries.add(new Entry(f));
             }
         }
-        Collections.sort(files, new Comparator<File>() {
-            public int compare(File a, File b) {
-                long x = b.lastModified();
-                long y = a.lastModified();
-                return (x < y) ? -1 : ((x == y) ? 0 : 1);
+        Collections.sort(entries, new Comparator<Entry>() {
+            public int compare(Entry a, Entry b) {
+                return (a.mtime == b.mtime) ? 0 : (b.mtime > a.mtime ? 1 : -1);
             }
         });
-        LogUtil.i(TAG, "refreshFiles: dir=%s count=%d", dir.getAbsolutePath(), files.size());
-
         List<String> labels = new ArrayList<String>();
-        for (File f : files) {
-            labels.add(f.getName() + "\n" + f.length() + " B"
-                    + (isImageFile(f) ? "  [图片]" : ""));
+        for (int i = 0; i < entries.size(); i++) {
+            Entry e = entries.get(i);
+            files.add(e.f);
+            labels.add(e.label);
         }
+        // 内容签名：文件名 + mtime + 长度 + 是否多选。一致说明列表完全没变
+        // （从别处返回本页的常态），此时重建适配器只会让 ListView 把所有可见行
+        // 重新 inflate 一遍，换来的是一模一样的画面。
+        StringBuilder sigb = new StringBuilder(64);
+        sigb.append(selectionMode ? '1' : '0').append('|');
+        for (int i = 0; i < entries.size(); i++) {
+            Entry e = entries.get(i);
+            sigb.append(e.f.getName()).append(':').append(e.mtime)
+                    .append(':').append(e.len).append('|');
+        }
+        String sig = sigb.toString();
+        boolean sameList = sig.equals(filesSig);
+        filesSig = sig;
+        LogUtil.i(TAG, "refreshFiles: dir=%s count=%d same=%s",
+                dir.getAbsolutePath(), files.size(), sameList);
         // 空态不再用一行「（暂无已保存文件）」占位，改为说明 + 3 个模板（见 layout 的 tools_empty）
         boolean empty = labels.isEmpty();
         fileList.setVisibility(empty && !selectionMode ? View.GONE : View.VISIBLE);
         emptyView.setVisibility(empty && !selectionMode ? View.VISIBLE : View.GONE);
-        fileList.setChoiceMode(selectionMode
-                ? ListView.CHOICE_MODE_MULTIPLE : ListView.CHOICE_MODE_NONE);
-        int itemLayout = selectionMode
-                ? R.layout.item_tools_file_sel : android.R.layout.simple_list_item_1;
-        fileList.setAdapter(new ArrayAdapter<String>(this, itemLayout, labels));
-        fileList.clearChoices();
-        if (selectionMode) {
-            for (int i = 0; i < files.size(); i++) {
-                if (checkedNames.contains(files.get(i).getName())) {
-                    fileList.setItemChecked(i, true);
+        // 列表内容与选择模式都没变：不重建适配器（ListView 会把可见行全部重新 inflate），
+        // 只补一次底部选择栏
+        if (!sameList) {
+            fileList.setChoiceMode(selectionMode
+                    ? ListView.CHOICE_MODE_MULTIPLE : ListView.CHOICE_MODE_NONE);
+            int itemLayout = selectionMode
+                    ? R.layout.item_tools_file_sel : android.R.layout.simple_list_item_1;
+            fileList.setAdapter(new ArrayAdapter<String>(this, itemLayout, labels));
+            fileList.clearChoices();
+            if (selectionMode) {
+                for (int i = 0; i < files.size(); i++) {
+                    if (checkedNames.contains(files.get(i).getName())) {
+                        fileList.setItemChecked(i, true);
+                    }
                 }
             }
         }
@@ -499,6 +537,22 @@ public class ToolsActivity extends ThemedActivity {
     }
 
     /** 查看器导出的 PNG/JPEG，以及用户自己放进 exports 的位图。 */
+    /** 列表项：文件名与大小在构造时一次性取好，排序与渲染都只读内存。 */
+    private static final class Entry {
+        final File f;
+        final long mtime;
+        final long len;
+        final String label;
+
+        Entry(File f) {
+            this.f = f;
+            this.mtime = f.lastModified();
+            this.len = f.length();
+            this.label = f.getName() + "\n" + len + " B"
+                    + (isImageFile(f) ? "  [图片]" : "");
+        }
+    }
+
     static boolean isImageFile(File f) {
         return FileActions.isImage(f.getName());
     }

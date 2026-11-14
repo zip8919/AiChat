@@ -140,6 +140,10 @@ final class AttachmentFiles {
             throw new Exception("保存图片失败");
         }
 
+        // 文件已经落在 attachments 里，但消息还没产生引用：登记成草稿，
+        // 免得存储页把它当孤儿清掉（见 PENDING 的说明）。
+        markPending(target.getAbsolutePath());
+
         BitmapFactory.Options bounds = new BitmapFactory.Options();
         bounds.inJustDecodeBounds = true;
         BitmapFactory.decodeFile(target.getAbsolutePath(), bounds);
@@ -550,9 +554,69 @@ final class AttachmentFiles {
      * <p>比查看器那份更省：这是发给模型的，模型只用 1302² 以内的像素，
      * 多发的像素纯属浪费流量。
      */
-    static String apiDataUri(String path) {
-        return encodeToDataUri(path, API_BUDGET, 82);
+    /**
+     * 已导入、但还没被任何消息引用的附件（也就是输入框里的草稿）。
+     *
+     * <p>为什么必须有这张表：图片在「选图」那一刻就已经写到 attachments 目录，
+     * 而会话 JSON 要等用户点发送才产生引用。这中间的时间里，它在存储页看来
+     * 就是一个「无引用、可安全删除」的孤儿——用户点一次「一键清理」，选好的图
+     * 就永久消失，而缩略图还在内存里，界面看起来一切正常，直到发送时像素被
+     * 静默丢掉。进程退出即失效（草稿本来也只存在内存里），不会长期占着不放。
+     */
+    private static final java.util.Set<String> PENDING =
+            java.util.Collections.synchronizedSet(new java.util.HashSet<String>());
+
+    /** 附件已进入草稿：在它被消息引用之前，不允许当作孤儿回收。 */
+    static void markPending(String path) {
+        String name = StorageRefs.fileNameOf(path);
+        if (name.length() > 0) PENDING.add(name);
     }
+
+    /** 附件已离开草稿（发送、或用户从输入框移除）。 */
+    static void unmarkPending(String path) {
+        String name = StorageRefs.fileNameOf(path);
+        if (name.length() > 0) PENDING.remove(name);
+    }
+
+    /** 该文件名是否仍挂在草稿里（按文件名判，见 {@link #PENDING}）。 */
+    static boolean isPendingName(String fileName) {
+        return fileName != null && PENDING.contains(fileName);
+    }
+
+    static String apiDataUri(String path) {
+        String p = resolve(path);
+        if (p == null) return null;
+        // 附件按内容 SHA-1 命名，同一张图的内容永不变，缓存命中率接近 100%。
+        //
+        // 不加缓存时，每次发送前 ChatHistory.multimodalContent 会把整段历史的图
+        // 全部重新解码（bounds + 实图两次读盘）+ 缩放 + JPEG 压缩 + Base64。
+        // 10 条含图消息 × 3 张 ≈ 30 张 × 30~80ms = 1~2.4 秒纯 CPU，用户体感就是
+        // 「点了发送，要转好几秒才开始出字」，期间还有几十 MB 临时对象。
+        File f = new File(p);
+        String key = p + '|' + f.length() + '|' + f.lastModified();
+        String hit = API_URI_CACHE.get(key);
+        if (hit != null) return hit;
+        String uri = encodeToDataUri(p, API_BUDGET, 82);
+        if (uri != null) API_URI_CACHE.put(key, uri);
+        return uri;
+    }
+
+    /**
+     * 多模态 data URI 缓存，按字符数计费，上限 2M 字符（≈4MB 堆）。
+     *
+     * <p>原来只留 4 条：而一条消息最多 3 张图，也就是「最近一条多图消息」就填满了。
+     * 于是每个新消息进来都会把上一条的图挤出去，而 ChatHistory.multimodalContent
+     * 每次发送都要遍历**整段历史**——15 张图只留 4 张，等于每次发送有 11 张要
+     * 重新解码 + 缩放 + JPEG + Base64（约 30~80ms/张）。按字符计费后，
+     * 2M 字符大约能装 15~20 张（API_BUDGET 下单张 base64 约 10~15 万字符），
+     * 正好覆盖一次发送要用的全部图片，且总量有硬上限，不会随会话变长而膨胀。
+     */
+    private static final android.util.LruCache<String, String> API_URI_CACHE =
+            new android.util.LruCache<String, String>(2 * 1024 * 1024) {
+                protected int sizeOf(String k, String v) {
+                    return v == null ? 0 : v.length();
+                }
+            };
 
     /**
      * 远程图片 → data URI（图片搜索卡片查看、视觉注入）。

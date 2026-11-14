@@ -64,7 +64,12 @@ final class StorageScanner {
                 }
             }
         }
-        StorageRefs refs = StorageRefs.scan(convDir);
+        // 复用上面已经列好的目录项：再调一次 StorageRefs.scan(convDir) 会重复
+        // 一次 listFiles（每个目录项一次 stat），而这里紧接着就要用同一批文件。
+        // convFiles == null 说明目录列不出来，仍走原路径让它标 incomplete。
+        StorageRefs refs = convFiles != null
+                ? StorageRefs.scanListed(convFiles)
+                : StorageRefs.scan(convDir);
         r.indexIncomplete = refs.incomplete;
         r.unreadableConversations = refs.unreadable;
         LogUtil.i(TAG, "scan: %d conversations, refs=%d matched=%d incomplete=%s sample=%s",
@@ -85,6 +90,8 @@ final class StorageScanner {
                 r.addFile(f, StorageReport.CAT_ATTACHMENT);
                 // 索引不可信时一律按「使用中」处理：宁可不清理，不可错删
                 if (r.indexIncomplete) continue;
+                // 草稿里的图（选好了还没发）也没有引用，但删掉就是用户发出去时静默丢图
+                if (AttachmentFiles.isPendingName(f.getName())) continue;
                 if (!refs.has(f.getName())) {
                     r.orphanSize += f.length();
                     r.orphanCount++;
@@ -96,7 +103,12 @@ final class StorageScanner {
         // 有图、有会话，却一条引用都没解析出来：要么用户把所有用图的会话都删了，
         // 要么索引和会话里的实际写法对不上。两种情况的界面处理必须分开——
         // 前者是正常状态，后者要明确警告，否则用户会把历史图片当垃圾清掉。
+        // 「索引为空」只有在「确实扫到了会话文件」时才可疑（可能是格式对不上，要警告）。
+        // 会话全被删光时索引为空是**确定事实**，这时候若仍判 indexEmpty，
+        // 图片页会永久禁止删除、「一键清理」也直接跳过——用户看着「无引用 N 张」
+        // 却一张都删不掉，而那个目录普通用户根本进不去，等于死路。
         r.indexEmpty = !r.indexIncomplete && refs.size() == 0
+                && refs.scanned > 0
                 && r.count[StorageReport.CAT_ATTACHMENT] > 0;
         if (r.indexEmpty) {
             LogUtil.w(TAG, "scan: %d images but zero refs from %d conversations — "

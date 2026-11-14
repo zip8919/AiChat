@@ -19,7 +19,8 @@ final class RendererAssets {
             "-webkit-text-size-adjust:100%;}" +
             ".msg{margin:8px 0;}" +
             ".msg.user{text-align:right;}" +
-            ".msg.user .bubble{display:inline-block;background:#E3F2FD;" +
+            ".msg.user .bubble{white-space:pre-wrap;word-wrap:break-word;" +
+            "display:inline-block;background:#E3F2FD;" +
             "padding:8px 12px;border-radius:12px;max-width:85%;text-align:left;}" +
             ".msg.ai{border-top:1px solid #e0e0e0;padding-top:12px;margin-top:8px;}" +
             ".msg.ai .content{max-width:100%;}" +
@@ -216,6 +217,9 @@ final class RendererAssets {
             ".stream-tail{word-wrap:break-word;}" +
             ".stream-tail.plain{white-space:pre-wrap;}" +
             ".stream-tail.plain::after{content:'▍';color:#90a4ae;}" +
+            // 关掉实时渲染时，每一轮的纯文本并进 base 后要包一层：base 本身不保留
+            // 换行（里面放的是 HTML 卡片），裸文本节点落进去会被塌成一行。
+            ".stream-plain{white-space:pre-wrap;word-wrap:break-word;}" +
             ".error-card.inline{display:block;margin:8px 0;max-width:100%;}" +
             "#older-hint{padding:10px 8px;text-align:center;color:#90a4ae;font-size:12px;" +
             "border-bottom:1px dashed #e0e0e0;margin-bottom:6px;" +
@@ -769,6 +773,15 @@ final class RendererAssets {
             "c.innerHTML='<div class=\"stream-base\"></div><div class=\"stream-tail\"></div>';" +
             "b=c.querySelector('.stream-base');t=c.querySelector('.stream-tail');" +
             "if(keep){b.innerHTML=keep;window.applyThinkingStates(b);}return;}" +
+            // 纯文本 tail 不能直接搬文本节点：base 里装的是 HTML 卡片，没有
+            // pre-wrap，裸文本落进去会被塌成一行 —— 关掉实时渲染时，回答一
+            // 结束整条就变成一坨未渲染的原文，必须重进会话才恢复。
+            // 包一层 .stream-plain 再搬，换行与缩进都能保住。
+            "if((''+t.className).indexOf('plain')>=0){" +
+            "var tx=t.textContent;" +
+            "if(tx&&tx.length){var pw=document.createElement('div');" +
+            "pw.className='stream-plain';pw.textContent=tx;b.appendChild(pw);}" +
+            "t.innerHTML='';}" +
             "while(t.firstChild)b.appendChild(t.firstChild);" +
             "t.className='stream-tail';t.innerHTML='';" +
             // 搬进来的 tail 节点按其 key 恢复展开状态（状态存在 __thinkOpen 里）

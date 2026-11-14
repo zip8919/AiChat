@@ -3,6 +3,7 @@ package xyz.zip8919.app.aichat;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
@@ -282,6 +283,70 @@ public class CodeHighlighter {
 
     public static String highlight(String code, String lang) {
         if (code == null || lang == null) return Html.esc(code);
+        String key = lang.trim().toLowerCase();
+        // 流式输出每 200ms 重渲染一次，一条含代码块的回答要跑几百次 highlight；
+        // 而每次真正的高亮过程（buildMatchers + 逐 token 扫描 + 逐段转义）是纯函数，
+        // 同样的 lang+code 输出一定相同。这里做一层 LRU 记忆化，命中直接返回。
+        //
+        // 只用 lang+code 做 key 是安全的：高亮结果里没有任何颜色，颜色全由 CSS 决定，
+        // 所以换主题不需要失效缓存。
+        String memo = memoGet(key, code);
+        if (memo != null) return memo;
+        String out = highlight0(code, key);
+        memoPut(key, code, out);
+        return out;
+    }
+
+    // ---- highlight 记忆化 ----
+    //
+    // 上限同时按「条数」和「总字符数」两维约束：
+    // - 条数 64：一屏消息里的代码块通常远少于 64 个；
+    // - 总字符 256K：单个超大代码块（>64KB）直接不进缓存，避免一条消息吃掉全部预算。
+    //   key 里还存了一份 code，所以实际占用约为预算的 2 倍（UTF-16 再 ×2），
+    //   256K 预算对应实存 ≈1MB，对 Android 4.4 那批 48~64MB 堆的机器是安全线。
+    private static final int MEMO_MAX_ENTRIES = 64;
+    private static final int MEMO_MAX_CHARS = 256 * 1024;
+    private static final int MEMO_MAX_CODE_LEN = 64 * 1024;
+
+    private static final LinkedHashMap<String, String> MEMO =
+            new LinkedHashMap<String, String>(16, 0.75f, true);
+    private static int memoChars = 0;
+
+    private static String memoGet(String lang, String code) {
+        if (code.length() > MEMO_MAX_CODE_LEN) return null;
+        String k = lang + '\u0000' + code;
+        synchronized (MEMO) {
+            return MEMO.get(k);
+        }
+    }
+
+    private static void memoPut(String lang, String code, String out) {
+        if (code.length() > MEMO_MAX_CODE_LEN) return;
+        String k = lang + '\u0000' + code;
+        synchronized (MEMO) {
+            String old = MEMO.put(k, out);
+            if (old != null) memoChars -= old.length();
+            memoChars += out.length();
+            while (MEMO.size() > MEMO_MAX_ENTRIES || memoChars > MEMO_MAX_CHARS) {
+                java.util.Iterator<Map.Entry<String, String>> it = MEMO.entrySet().iterator();
+                if (!it.hasNext()) break;
+                Map.Entry<String, String> e = it.next();
+                memoChars -= e.getValue().length();
+                it.remove();
+            }
+        }
+    }
+
+    /** 清空记忆化缓存（主题切换不需要，仅测试与内存紧张时使用）。 */
+    public static void clearMemo() {
+        synchronized (MEMO) {
+            MEMO.clear();
+            memoChars = 0;
+        }
+    }
+
+    private static String highlight0(String code, String lang) {
+        if (code == null || lang == null) return Html.esc(code);
         lang = lang.trim().toLowerCase();
         if (!SUPPORTED.contains(lang)) {
             LogUtil.v(TAG, "highlight: lang '%s' not supported -> plain esc (%d chars)",
@@ -299,14 +364,30 @@ public class CodeHighlighter {
         int i = 0;
         int len = code.length();
 
+        // 每条规则的「此后不可能再匹配」标记。
+        //
+        // find(i) 是「从 i 往后找第一个匹配」，返回 false 就说明 [i,len) 里再也没有
+        // 该规则的匹配；而 i 只增不减，所以之后每个位置还会再调一次 find(i)、
+        // 再从头扫到串尾。注释规则在代码里常常整块不出现，于是每个 token 位置都要
+        // 白扫两遍全文（主循环一遍、plainRunEnd 再来一遍）。4KB 代码块实测 60~77ms、
+        // 16KB 超过 1 秒——而流式输出每 200ms 就重渲染一帧，等于长代码回答直接假死。
+        boolean[] dead = matchers == null ? new boolean[0] : new boolean[matchers.length];
         while (i < len) {
             boolean matched = false;
+            // 本轮所有规则里最靠前的匹配起点，供纯文本段一次算完（原来要在
+            // plainRunEnd 里把同样几条规则再 find 一遍）
+            int nextMatch = Integer.MAX_VALUE;
 
             // 1. Try rules (comments, strings, numbers)
             if (matchers != null) {
                 for (int rIdx = 0; rIdx < matchers.length; rIdx++) {
+                    if (dead[rIdx]) continue;
                     Matcher m = matchers[rIdx];
-                    if (m.find(i) && m.start() == i) {
+                    if (!m.find(i)) {
+                        dead[rIdx] = true;
+                        continue;
+                    }
+                    if (m.start() == i) {
                         out.append("<span class=\"tk-").append(rules[rIdx].type).append("\">");
                         out.append(Html.esc(m.group()));
                         out.append("</span>");
@@ -314,6 +395,7 @@ public class CodeHighlighter {
                         matched = true;
                         break;
                     }
+                    if (m.start() < nextMatch) nextMatch = m.start();
                 }
             }
             if (matched) continue;
@@ -451,7 +533,7 @@ public class CodeHighlighter {
             // 5. Plain text — batch a maximal run of characters that would each
             // reach this same branch: no rule match starts inside it, no
             // operator, no identifier start, no '<' (XML tag branch).
-            int runEnd = plainRunEnd(code, len, i, matchers);
+            int runEnd = plainRunEnd(code, len, i, nextMatch);
             if (runEnd > i) {
                 // 整段转义，别再逐字符：每个 char 一个 String.valueOf 会产出
                 // 两个 char[] + StringBuilder + 结果串，4KB 代码块一帧就是上万对象
@@ -489,17 +571,8 @@ public class CodeHighlighter {
      * one by one: scanning stops before the first position that a rule could
      * match, the first operator, the first identifier start, or '<'.
      */
-    private static int plainRunEnd(String code, int len, int i, Matcher[] matchers) {
+    private static int plainRunEnd(String code, int len, int i, int nextMatch) {
         int plainEnd = i + 1;
-        int nextMatch = Integer.MAX_VALUE;
-        if (matchers != null) {
-            for (int rIdx = 0; rIdx < matchers.length; rIdx++) {
-                if (matchers[rIdx].find(i)) {
-                    int start = matchers[rIdx].start();
-                    if (start < nextMatch) nextMatch = start;
-                }
-            }
-        }
         while (plainEnd < len) {
             char c = code.charAt(plainEnd);
             if (Character.isJavaIdentifierStart(c)

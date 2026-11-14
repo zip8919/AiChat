@@ -150,6 +150,9 @@ public class StatsActivity extends ThemedActivity {
      * 不显式 setSelection 回去的话，页面会卡在一个既不是今日也不是自定义的中间态。
      */
     private void pickDate(final boolean isFrom, long initial, final boolean chainNext) {
+        // 这个方法会被 periodSpinner.post(...) 延迟调用：用户在选完「自定义」的
+        // 同一帧按返回，就会在已结束的 Activity 上 show 对话框 → BadTokenException。
+        if (isFinishing() || isDestroyed()) return;
         Calendar c = Calendar.getInstance();
         c.setTimeInMillis(initial);
         // DatePickerDialog 是独立 Window，windowBackground 与内部文字都由构造它的

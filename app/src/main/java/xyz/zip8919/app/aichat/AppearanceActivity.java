@@ -164,6 +164,11 @@ public class AppearanceActivity extends ThemedActivity {
         }
     }
 
+    /** 色块的 drawable 与颜色只建一次；之后只改「选中态变了的那一格」的描边。 */
+    private GradientDrawable[] swatchGd;
+    private int[] swatchColor;
+    private int lastSwatch = -2;
+
     private void refreshSwatches() {
         ThemeResolver.Resolved r = am.resolve(ThemeTokens.AC_PRIMARY, am.isDark());
         int selected = -1;
@@ -175,21 +180,36 @@ public class AppearanceActivity extends ThemedActivity {
                 }
             }
         }
-        for (int i = 0; i < swatches.size(); i++) {
-            View sw = swatches.get(i);
-            int color = Color.parseColor(PALETTE[i][1]);
-            GradientDrawable gd = new GradientDrawable();
-            gd.setColor(color);
-            gd.setCornerRadius(dp(4));
+        if (swatchGd == null || swatchGd.length != swatches.size()) {
+            // 颜色底只建一次：原来每次控件改动都 new 13 个 GradientDrawable 再
+            // setBackgroundDrawable(13 次 requestLayout)，拖字号滑条 5 档就是 65 次重排。
+            // 色块本身的颜色来自 PALETTE 常量，唯一会变的是选中描边。
+            swatchGd = new GradientDrawable[swatches.size()];
+            swatchColor = new int[swatches.size()];
+            for (int i = 0; i < swatches.size(); i++) {
+                int color = Color.parseColor(PALETTE[i][1]);
+                swatchColor[i] = color;
+                GradientDrawable gd = new GradientDrawable();
+                gd.setColor(color);
+                gd.setCornerRadius(dp(4));
+                swatchGd[i] = gd;
+                swatches.get(i).setBackgroundDrawable(gd);
+            }
+            lastSwatch = -2;   // 强制走一遍描边设置
+        }
+        if (selected == lastSwatch) return;
+        for (int i = 0; i < swatchGd.length; i++) {
             if (i == selected) {
                 // 3dp inset 描边：GradientDrawable 的 stroke 画在 bounds 内，不外扩撑破 222dp
-                gd.setStroke(dp(3), contrastStroke(color));
+                swatchGd[i].setStroke(dp(3), contrastStroke(swatchColor[i]));
             } else if (PAPER_WHITE.equalsIgnoreCase(PALETTE[i][1])) {
-                // 纸白在白底上必须带 1dp 边才可见
-                gd.setStroke(dp(1), 0xFFBDBDBD);
+                // 纸白在白底上必须带 1dp 边才可见（取消选中后要还原，所以放在 else 里）
+                swatchGd[i].setStroke(dp(1), 0xFFBDBDBD);
+            } else {
+                swatchGd[i].setStroke(0, 0);
             }
-            sw.setBackgroundDrawable(gd);
         }
+        lastSwatch = selected;
     }
 
     private int contrastStroke(int color) {
@@ -223,13 +243,46 @@ public class AppearanceActivity extends ThemedActivity {
 
     // ---- Spinner 数据 ----
 
+    /** 上次构建 Spinner 时字体/主题列表的签名；一致就不重建适配器。 */
+    private String adapterSig;
+
     private void buildAdapters() {
         suppress = true;
+
+        List<FontRepository.FontItem> fonts = FontRepository.getInstance().list();
+        List<Theme> allThemes = ThemeRepository.getInstance().list();
+        // 签名短路：从管理页返回本页是最常走的路径（改字体/主题必经过一次），
+        // 而多数时候字体和主题一个都没变。重建适配器的代价是 new 两个适配器 +
+        // 两次 setAdapter（ListView/Spinner 会重新 measure 并 inflate 选中项）
+        // + 两次 setSelection，全部是主线程重排；换来的是完全相同的列表内容。
+        StringBuilder sigb = new StringBuilder(128);
+        sigb.append("f:");
+        for (int i = 0; i < fonts.size(); i++) {
+            FontRepository.FontItem f = fonts.get(i);
+            sigb.append(f.id).append(f.enabled ? '1' : '0')
+                    .append(f.loadFailed ? '1' : '0').append(f.name).append('|');
+        }
+        sigb.append("t:");
+        for (int i = 0; i < allThemes.size(); i++) {
+            Theme t = allThemes.get(i);
+            sigb.append(t.id).append(t.name)
+                    .append(t.fileMissing ? '1' : '0')
+                    .append(t.versionIncompatible ? '1' : '0').append('|');
+        }
+        String sig = sigb.toString();
+        if (sig.equals(adapterSig) && fontAdapter != null && themeAdapter != null) {
+            // 列表没变，但当前选中的字体/主题可能被管理页改过，补一次选中项即可
+            selectIfChanged(fontSpinner, indexOfValue(fontAdapter,
+                    am.getEffective(ThemeTokens.FONT_UI)));
+            selectIfChanged(themeSpinner, indexOfValue(themeAdapter, am.getThemeId()));
+            postSuppressClear();
+            return;
+        }
+        adapterSig = sig;
 
         List<AppearanceSpinnerAdapter.Entry> fe =
                 new ArrayList<AppearanceSpinnerAdapter.Entry>();
         fe.add(new AppearanceSpinnerAdapter.Entry("系统默认", "使用系统 Roboto 字体", "system", false));
-        List<FontRepository.FontItem> fonts = FontRepository.getInstance().list();
         for (int i = 0; i < fonts.size(); i++) {
             FontRepository.FontItem f = fonts.get(i);
             if (!f.enabled || f.loadFailed) continue;
@@ -245,7 +298,7 @@ public class AppearanceActivity extends ThemedActivity {
         te.add(new AppearanceSpinnerAdapter.Entry(
                 "不使用自定义主题", "使用内置默认外观", "", false));
         te.add(new AppearanceSpinnerAdapter.Entry("内置主题", "", null, true));
-        List<Theme> all = ThemeRepository.getInstance().list();
+        List<Theme> all = allThemes;
         boolean userHeaderAdded = false;
         for (int i = 0; i < all.size(); i++) {
             Theme t = all.get(i);
@@ -260,6 +313,12 @@ public class AppearanceActivity extends ThemedActivity {
         themeSpinner.setSelection(indexOfValue(themeAdapter, am.getThemeId()), false);
 
         postSuppressClear();
+    }
+
+    /** 只在选中项真的变了才 setSelection：setSelection 即使选同一项也会触发重排。 */
+    private static void selectIfChanged(Spinner sp, int index) {
+        if (sp == null || index < 0) return;
+        if (sp.getSelectedItemPosition() != index) sp.setSelection(index, false);
     }
 
     private AppearanceSpinnerAdapter.Entry themeEntry(Theme t) {
@@ -471,14 +530,24 @@ public class AppearanceActivity extends ThemedActivity {
 
     private void applyExplicitColor(String hex) {
         boolean dark = am.isDark();
-        am.setExplicit(ThemeTokens.AC_PRIMARY, hex, dark);
-        am.setExplicit(ThemeTokens.AC_ACCENT, hex, dark);
+        // 两个 token 一次性写入：逐条 setExplicit 会 bump 两次，
+        // 而一次 bump 就是所有存活页面各整树重刷一遍（主线程 10~30ms）
+        java.util.HashMap<String, String> kv = new java.util.HashMap<String, String>(4);
+        kv.put(ThemeTokens.AC_PRIMARY, hex);
+        kv.put(ThemeTokens.AC_ACCENT, hex);
+        am.setExplicitAll(kv, dark);
         onUserChange();
     }
 
-    /** 任一控件改动：先刷原生当前页，再刷新页内派生状态；WebView 侧由 ChangeListener 自动换样式。 */
+    /**
+     * 任一控件改动：刷新页内派生状态。
+     *
+     * <p>不再在这里调 {@code forceApplyAppearance()}：{@code am.setXxx()} 内部已经
+     * bump() 同步回调了本页的 pageListener（见 ThemedActivity.onCreate），那条路径
+     * 已经做过一次整树重刷。原来这里再刷一次，等于每次改动（含拖动滑条的每一档）
+     * 都白跑一整遍树。WebView 侧的换样式由 ChangeListener 独立完成，与此无关。
+     */
     private void onUserChange() {
-        forceApplyAppearance();
         refreshDerived();
     }
 
@@ -542,6 +611,13 @@ public class AppearanceActivity extends ThemedActivity {
         if (t.versionIncompatible) s.append(" [版本不兼容]");
         themeMetaTv.setText(s.toString());
 
+        // 主题只引用系统字体时（绝大多数内置主题）不必去扫字体目录：
+        // installedIds() 内部是 listFiles + 逐文件 stat，而 refreshThemeMeta 挂在
+        // 每次控件改动都会走的 refreshDerived 上，拖动滑条时就是几十次无用扫描。
+        if (isSystemRef(t.fontUi) && isSystemRef(t.fontMono)) {
+            themeFontMissingTv.setVisibility(View.GONE);
+            return;
+        }
         Set<String> installed = FontRepository.getInstance().installedIds();
         StringBuilder miss = new StringBuilder();
         if (!isSystemRef(t.fontUi) && !installed.contains(t.fontUi)) {

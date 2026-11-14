@@ -9,11 +9,26 @@ final class Html {
     private Html() {
     }
 
-    /** 文本节点转义：&amp; &lt; &gt; &quot;。 */
+    /**
+     * 文本节点转义：&amp; &lt; &gt; &quot;。
+     *
+     * <p>先扫一遍找第一个需要转义的字符，没有就原样返回（String 不可变，直接复用）。
+     * 代码高亮里每个标识符、每个纯文本段都要过这里，一个 4KB 代码块约 1000 次调用，
+     * 其中绝大多数不含特殊字符——原来每次都要分配一个 StringBuilder + 一个结果串。
+     */
     static String esc(String s) {
         if (s == null) return "";
-        StringBuilder sb = new StringBuilder(s.length() + 16);
-        for (int i = 0; i < s.length(); i++) {
+        int n = s.length();
+        int i = 0;
+        while (i < n) {
+            char c = s.charAt(i);
+            if (c == '&' || c == '<' || c == '>' || c == '"') break;
+            i++;
+        }
+        if (i == n) return s;
+        StringBuilder sb = new StringBuilder(n + 16);
+        sb.append(s, 0, i);
+        for (; i < n; i++) {
             char c = s.charAt(i);
             switch (c) {
                 case '&': sb.append("&amp;"); break;
@@ -29,8 +44,17 @@ final class Html {
     /** 单引号包裹的属性值也要转义 {@code '}，否则属性会被提前闭合。 */
     static String escAttr(String s) {
         if (s == null) return "";
-        StringBuilder sb = new StringBuilder(s.length() + 16);
-        for (int i = 0; i < s.length(); i++) {
+        int n = s.length();
+        int i = 0;
+        while (i < n) {
+            char c = s.charAt(i);
+            if (c == '&' || c == '<' || c == '>' || c == '"' || c == '\'') break;
+            i++;
+        }
+        if (i == n) return s;
+        StringBuilder sb = new StringBuilder(n + 16);
+        sb.append(s, 0, i);
+        for (; i < n; i++) {
             char c = s.charAt(i);
             switch (c) {
                 case '&': sb.append("&amp;"); break;

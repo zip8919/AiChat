@@ -249,6 +249,29 @@ public final class AppearanceManager {
         bump();
     }
 
+    /**
+     * 一次写入多个显式覆盖，只在真有变化时 bump 一次。
+     *
+     * <p>主色与强调色要一起改（换主色时强调色跟着走），逐条 {@link #setExplicit}
+     * 会 bump 两次，而一次 bump = 所有存活页面各整树重刷一次。4.x 老机上
+     * 一次整树（含 9x9 位图采样）就是 10~30ms，白刷一遍肉眼可见地卡一下。
+     */
+    public void setExplicitAll(java.util.Map<String, String> values, boolean dark) {
+        if (values == null || values.isEmpty()) return;
+        java.util.Map<String, String> m = working.explicitFor(dark);
+        boolean changed = false;
+        for (java.util.Map.Entry<String, String> e : values.entrySet()) {
+            String k = e.getKey();
+            String v = e.getValue();
+            if (k == null || v == null) continue;
+            if (!v.equals(m.get(k))) {
+                m.put(k, v);
+                changed = true;
+            }
+        }
+        if (changed) bump();
+    }
+
     public void clearExplicit(String key, boolean dark) {
         if (key == null) return;
         java.util.Map<String, String> m = working.explicitFor(dark);
@@ -300,9 +323,24 @@ public final class AppearanceManager {
     }
 
     public int getEffectiveColor(String token, boolean dark) {
-        String v = getEffective(token, dark);
-        Integer c = ThemeTokens.parseColor(v);
-        return c == null ? ThemeTokens.defaultColor(token, dark) : c.intValue();
+        // 刻意不走 getEffective()：那条路径最终返回 builtinValue() 的
+        // "#RRGGBB" 字符串，再被这里 parseColor 解析回 int —— 一来一回是
+        // 一次 String.format（已缓存）+ substring + parseInt + 装箱。
+        // 而整树刷新一次要调 300~400 次（ThemeRecolor 每 View 数次、
+        // ThemeApplier 每 TextView 一次），且绝大多数落到内置默认。
+        // 直接按三层取 int，语义与原来逐字等价：
+        //   显式覆盖非空但解析失败 -> 内置默认（与 getEffective 返回该串再解析失败一致）
+        String explicit = getExplicit(token, dark);
+        if (explicit != null && explicit.length() > 0) {
+            Integer c = ThemeTokens.parseColor(explicit);
+            return c == null ? ThemeTokens.defaultColor(token, dark) : c.intValue();
+        }
+        String theme = themeValue(token, dark);
+        if (theme != null && theme.length() > 0) {
+            Integer c = ThemeTokens.parseColor(theme);
+            return c == null ? ThemeTokens.defaultColor(token, dark) : c.intValue();
+        }
+        return ThemeTokens.defaultColor(token, dark);
     }
 
     public int getEffectiveColor(String token) {

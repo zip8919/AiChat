@@ -42,6 +42,22 @@ final class MathRenderer {
      */
     private static final ThreadLocal<Boolean> TRANSIENT = new ThreadLocal<Boolean>();
 
+    /**
+     * 流式帧专用小缓存。
+     *
+     * <p>TRANSIENT 期间「不写 latexCache」是为了不让半截公式挤掉稳定缓存，但代价是
+     * 同一帧里重复出现的公式、以及相邻两帧之间没变化的公式，全都要重画位图。
+     * 一条含 5 个行内公式的回答按 5 tick/s 输出，就是每秒 25 次 jlatexmath 排版 +
+     * 25 次 Bitmap 绘制 + 25 次 base64 编码，主线程明显掉帧。
+     *
+     * <p>这里给中间帧一个独立的小 LRU（16 条 / 256K 字符），它不参与 latexCache 的
+     * 2MB 预算，因此既不会挤掉稳定公式，也不会被稳定公式挤掉。清主题时两者一起清。
+     */
+    private static final int FRAME_CACHE_MAX_ENTRIES = 16;
+    private static final int FRAME_CACHE_MAX_CHARS = 256 * 1024;
+    private static final Map<String, String> frameCache =
+            Collections.synchronizedMap(new LinkedHashMap<String, String>());
+
     /** 进入流式帧；返回进入前的状态，供 {@link #endTransient(boolean)} 还原。 */
     static boolean beginTransient() {
         boolean prev = Boolean.TRUE.equals(TRANSIENT.get());
@@ -72,6 +88,25 @@ final class MathRenderer {
     static void clearCache() {
         synchronized (latexCache) {
             latexCache.clear();
+        }
+        synchronized (frameCache) {
+            frameCache.clear();
+        }
+    }
+
+    /** 往流式帧缓存里放一条（超限按插入顺序淘汰最旧的）。 */
+    private static void putFrame(String key, String imgTag) {
+        synchronized (frameCache) {
+            frameCache.put(key, imgTag);
+            int total = 0;
+            for (String v : frameCache.values()) total += v.length();
+            java.util.Iterator<Map.Entry<String, String>> it = frameCache.entrySet().iterator();
+            while ((frameCache.size() > FRAME_CACHE_MAX_ENTRIES || total > FRAME_CACHE_MAX_CHARS)
+                    && it.hasNext()) {
+                Map.Entry<String, String> e = it.next();
+                total -= e.getValue().length();
+                it.remove();
+            }
         }
     }
     // Extract \ce{...} → convert to LaTeX → render with jlatexmath → @@MATHn@@ image.
@@ -158,7 +193,10 @@ final class MathRenderer {
                         else if (formula.charAt(i) == '}') bd--;
                         i++;
                     }
-                    String arg = formula.substring(bs, i - 1);
+                    // 未闭合时 i 停在 len，i-1 可能小于 bs（`\text{` 正好在串尾），
+                    // substring 起止颠倒会抛 StringIndexOutOfBounds。截断到 bs 更安全
+                    // —— 模型输出的半截公式不应该让渲染线程崩掉进程。
+                    String arg = formula.substring(bs, Math.max(bs, i - 1));
                     if (cmd.equals("\\text")) {
                         out.append("\\text{").append(arg).append("}");
                     } else {
@@ -204,13 +242,15 @@ final class MathRenderer {
                 i += arrowLen;
                 String above = null, below = null;
                 if (i < len && formula.charAt(i) == '[') {
+                    int end = bracketEnd(formula, i);
                     above = extractBracketArg(formula, i);
-                    i += above.length() + 2;
+                    i = end;
                     if (above.contains("\\")) above = ceToLatex(above);
                 }
                 if (i < len && formula.charAt(i) == '[') {
+                    int end = bracketEnd(formula, i);
                     below = extractBracketArg(formula, i);
-                    i += below.length() + 2;
+                    i = end;
                     if (below.contains("\\")) below = ceToLatex(below);
                 }
                 if (isBidirectional) {
@@ -308,15 +348,31 @@ final class MathRenderer {
     }
     // Extract content inside [brackets], handling nested brackets
     private static String extractBracketArg(String s, int start) {
-        // start is index of the opening '['
-        int depth = 1;
-        int i = start + 1;
-        while (i < s.length() && depth > 0) {
-            if (s.charAt(i) == '[') depth++;
-            else if (s.charAt(i) == ']') depth--;
-            i++;
+        int end = bracketEnd(s, start);
+        int from = Math.min(start + 1, s.length());
+        // 只有真的遇到配对的 ']' 才把末位剥掉；未闭合（end==len）时整段都是内容。
+        int to = end > start && s.charAt(end - 1) == ']' ? end - 1 : end;
+        if (to < from) to = from;
+        return s.substring(from, to);
+    }
+
+    /**
+     * 返回与 {@code start} 处 '[' 配对的 ']' 之后的位置；没有配对时返回字符串长度。
+     *
+     * <p>调用方原来用 {@code i += arg.length() + 2} 推进下标，一旦方括号未闭合，
+     * arg 被截短、i 会落在串中间甚至越界，后续 charAt 直接抛异常。
+     */
+    private static int bracketEnd(String s, int start) {
+        int depth = 0;
+        for (int i = start; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == '[') depth++;
+            else if (c == ']') {
+                depth--;
+                if (depth <= 0) return i + 1;
+            }
         }
-        return s.substring(start + 1, i - 1); // content between [ and ]
+        return s.length();
     }
     // Detect and render bare \command or \command{args} that aren't inside $...$ or backticks
     static String renderBareLatexCommands(String text, float density, List<String> mathTags) {
@@ -436,7 +492,9 @@ final class MathRenderer {
         }
         String key = formula + (block ? "b" : "i") + ":" + Integer.toHexString(fgColor)
                 + ":" + Integer.toHexString(fallbackBg) + ":" + Integer.toHexString(fallbackFg);
-        String cached = latexCache.get(key);
+        boolean transientFrame = Boolean.TRUE.equals(TRANSIENT.get());
+        String cached = transientFrame ? frameCache.get(key) : null;
+        if (cached == null) cached = latexCache.get(key);
         if (cached != null) {
             LogUtil.v(TAG, "latex CACHE hit: block=%s %s", block, LogUtil.preview(formula, 80));
             return cached;
@@ -529,9 +587,11 @@ final class MathRenderer {
             }
         }
 
-        if (Boolean.TRUE.equals(TRANSIENT.get())) {
-            // 流式中间帧：位图照常返回给当前显示，但不进缓存（见 TRANSIENT 注释）
-            LogUtil.v(TAG, "latex transient (skip cache): %s", LogUtil.preview(formula, 80));
+        if (transientFrame) {
+            // 流式中间帧：位图照常返回给当前显示，但不进 latexCache（见 TRANSIENT 注释），
+            // 只进独立的小 frameCache，让同一帧内重复公式与相邻帧的稳定公式不必重画。
+            LogUtil.v(TAG, "latex transient (frame cache only): %s", LogUtil.preview(formula, 80));
+            putFrame(key, imgTag);
             return imgTag;
         }
         synchronized (latexCache) {

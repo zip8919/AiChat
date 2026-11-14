@@ -393,8 +393,11 @@ public class MainActivity extends ThemedActivity {
             queue.destroy();
             queue = null;
         }
-        // 兜底：onPause 之后可能又有保存入队，销毁前再清一次
-        conversationManager.flushSaves();
+        // 兜底：onPause 之后可能又有保存入队，销毁前再清一次。
+        // 这里给了 400ms 而不是默认 1.5s：onDestroy 在主线程上，而进程可能正在被系统
+        // 回收，等满 1.5s 有触发 ANR 的风险；剩下的写盘由保存线程自己跑完，
+        // 真的要丢也只会丢最后一句新增（onPause 已经存过一次）。
+        conversationManager.flushSaves(400);
         super.onDestroy();
     }
 
@@ -1246,8 +1249,11 @@ public class MainActivity extends ThemedActivity {
             chip.setOnClickListener(new View.OnClickListener() {
                 public void onClick(View v) {
                     if (index < pendingAttachments.size()) {
-                        String removed = pendingAttachments.remove(index).name;
-                        LogUtil.d(TAG, "attachment removed: %s", removed);
+                        AttachmentText.File gone = pendingAttachments.remove(index);
+                        // 离开草稿就不再受「孤儿清理」保护：否则用户移除后又
+                        // 去存储页清理，会被误判成「还在用」而清不掉。
+                        if (gone.path != null) AttachmentFiles.unmarkPending(gone.path);
+                        LogUtil.d(TAG, "attachment removed: %s", gone.name);
                         refreshAttachmentBar();
                     }
                 }
@@ -1280,6 +1286,10 @@ public class MainActivity extends ThemedActivity {
 
     private void clearAttachments() {
         if (pendingAttachments.isEmpty()) return;
+        for (int i = 0; i < pendingAttachments.size(); i++) {
+            AttachmentText.File f = pendingAttachments.get(i);
+            if (f.path != null) AttachmentFiles.unmarkPending(f.path);
+        }
         pendingAttachments.clear();
         refreshAttachmentBar();
     }
@@ -2513,6 +2523,39 @@ public class MainActivity extends ThemedActivity {
     }
 
     /**
+     * 把「定稿 HTML 预热」推到消息定稿帧之后再跑。
+     *
+     * <p>预热本身是纯后台计算（解析 markdown、高亮代码、渲染公式位图），但它占 CPU
+     * 几百毫秒；紧挨着 UI post 执行会把定稿那一帧往后推。延后 600ms 后跑，既不影响
+     * 用户看到定稿，也仍然赶在「切会话 / 换肤」之前把缓存焐热——这两类操作都在用户
+     * 主动点击之后，最快也要几百毫秒。
+     */
+    private void scheduleWarmUp(final String content, final int generation) {
+        if (content == null || content.length() == 0) return;
+        handler.postDelayed(new Runnable() {
+            public void run() {
+                if (isFinishing() || requestGeneration.get() != generation) return;
+                if (MessageHtmlRenderer.isCached(content)) return;
+                new Thread(new Runnable() {
+                    public void run() {
+                        // 外层 Runnable 的 isFinishing 只在 600ms 那一刻判过一次；
+                        // 这个线程脱离 handler.removeCallbacks 管辖，且定稿完成后
+                        // onDestroy 不会自增代数，只校验 requestGeneration 拦不住：
+                        // 会用已销毁的 Activity 当 Context 渲染并写进静态缓存。
+                        if (isFinishing() || isDestroyed()
+                                || requestGeneration.get() != generation) return;
+                        try {
+                            MessageHtmlRenderer.contentToHtml(content, MainActivity.this, true);
+                        } catch (Throwable t) {
+                            LogUtil.w("MainActivity", "warm-up render failed: " + t.getMessage());
+                        }
+                    }
+                }, "aichat-warmup").start();
+            }
+        }, 600);
+    }
+
+    /**
      * 请求收尾：成功则提交正文与来源，失败则挂错误卡片或回滚空占位。
      * 渲染离开主线程，落盘与放行队列的顺序不能调换（见方法内注释）。
      */
@@ -2532,7 +2575,8 @@ public class MainActivity extends ThemedActivity {
                                 && settled.toolHistory.length() > 2
                                 && settled.httpCode != 400 && settled.httpCode != 422) {
                             markAssistantFailed(finalIdx, settled.errorDetail, settled.trace,
-                                    settled.toolHistory, settled.apiText, settled.generation);
+                                    settled.toolHistory, settled.apiText, settled.generation,
+                                    settled.partialStart);
                             return;
                         }
                         // 首轮就失败：移除空 assistant 占位，避免空气泡落盘/进入后续请求体
@@ -2553,7 +2597,14 @@ public class MainActivity extends ThemedActivity {
                         // DOM 已是最终态，不重渲染（避免公式图片重新解码闪一下），
                         // 但流式路径全部 cacheable=false，这里要把定稿 HTML 预热进
                         // 缓存，否则下次切会话/换肤整页重灌时必然全 miss。
-                        MessageHtmlRenderer.contentToHtml(settled.content, MainActivity.this, true);
+                        //
+                        // 预热不能挡在 UI post 前面：这份 HTML 是整条回答的完整重渲染
+                        // （含代码高亮与公式位图），长回答要 200~800ms；而下面那个
+                        // runOnUiThread 才是「消息定稿、按钮出现、滚动到底」的那一帧。
+                        // 原来的顺序等于让用户盯着还在闪光标的界面等这段渲染跑完。
+                        // 改成延时到定稿帧之后（600ms 足够 UI 那帧画完），
+                        // 缓存晚一点热，但用户看到的是立刻定稿。
+                        scheduleWarmUp(settled.content, settled.generation);
                     }
                     final String html = domComplete ? null
                             : MessageHtmlRenderer.contentToHtml(settled.content, MainActivity.this);
@@ -2628,11 +2679,15 @@ public class MainActivity extends ThemedActivity {
      * 「从出错处重试」的错误卡片。工具历史一并落盘，重启后仍可继续。
      */
     private void markAssistantFailed(final int aiIndex, final String detail, final String traceText,
-            final String toolHistoryJson, final String apiText, final int generation) {
+            final String toolHistoryJson, final String apiText, final int generation,
+            final int retryTrim) {
         if (aiIndex < 0 || aiIndex >= messages.size()) return;
         Message am = messages.get(aiIndex);
         if (am == null || !am.isAssistant()) return;
         am.content = traceText == null ? "" : traceText;
+        // 断流时补进来的那半截正文要记下起点：续跑时模型会重写这一轮，
+        // 不截掉就会新旧两份连在一起（界面重复、落盘也重复）。
+        am.retryTrim = retryTrim;
         am.errorDetail = detail == null ? "" : detail;
         am.apiText = apiText == null ? "" : apiText;
         am.toolHistory = toolHistoryJson == null ? "" : toolHistoryJson;
@@ -4061,8 +4116,14 @@ public class MainActivity extends ThemedActivity {
             int gen = requestGeneration.incrementAndGet();
             LogUtil.i(TAG, "resumeAssistantRequest: pos=%d rounds=%d traceLen=%d",
                     pos, rounds, am.content == null ? 0 : am.content.length());
+            // 上次断流补进来的半截正文不属于「已完成的轮次」，续跑基准要把它截掉
+            String resumeTrace = am.content == null ? "" : am.content;
+            if (am.retryTrim >= 0 && am.retryTrim <= resumeTrace.length()) {
+                resumeTrace = resumeTrace.substring(0, am.retryTrim);
+            }
+            am.retryTrim = -1;
             sendStreamingRequest(provider, thinkingLevel, gen,
-                    new StreamJob.Resume(pos, rounds, am.content == null ? "" : am.content,
+                    new StreamJob.Resume(pos, rounds, resumeTrace,
                             conversation, sources, am.apiText == null ? "" : am.apiText,
                             am.toolHistory == null ? "" : am.toolHistory));
         } catch (Exception e) {

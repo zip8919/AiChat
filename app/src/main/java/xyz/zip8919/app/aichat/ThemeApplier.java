@@ -71,11 +71,20 @@ final class ThemeApplier implements AppearanceManager.Applier {
 
     private void applyWindow(Activity a, AppearanceManager m, boolean dark, boolean def) {
         if (def) {
-            // 回到默认：清掉注入的纯色背景，让 styles.xml 的 windowBackground 生效
+            // 回到默认：写回内置默认色，**不能置 null**。
+            //
+            // setBackgroundDrawable(null) 只是把背景变透明，并不会让 styles.xml 里的
+            // windowBackground / ActionBarStyle 重新生效。而 everCustomized 一旦置位，
+            // 在本进程内不再复位——于是「打开再关掉深色」之后打开的每一个页面都会
+            // 走这条分支：顶栏蓝条消失、页面底色变灰，必须杀进程才恢复。
             try {
-                a.getWindow().setBackgroundDrawable(null);
+                a.getWindow().setBackgroundDrawable(new ColorDrawable(
+                        ThemeTokens.defaultColor(ThemeTokens.AC_BG, false)));
                 ActionBar ab = a.getActionBar();
-                if (ab != null) ab.setBackgroundDrawable(null);
+                if (ab != null) {
+                    ab.setBackgroundDrawable(new ColorDrawable(
+                            ThemeTokens.defaultColor(ThemeTokens.AC_PRIMARY, false)));
+                }
             } catch (Throwable ignored) {}
             return;
         }

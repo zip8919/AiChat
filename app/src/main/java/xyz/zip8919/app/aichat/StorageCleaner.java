@@ -82,7 +82,10 @@ final class StorageCleaner {
         }
         // 一条引用都没解析出来却要按「全都无引用」删：判定没有把握，一律不动。
         // 用户仍可在图片页逐张确认删除（那里会显示警告）。
-        if (refs.size() == 0 && refs.matched == 0) {
+        // 但「扫到了会话文件、确实零引用」是确定事实，与 Scanner/附件页的
+        // indexEmpty 判定保持一致；缺 scanned>0 会让「会话目录已空 + 存在
+        // 孤儿图」时一键清理直接 return，用户反复点无效。
+        if (refs.size() == 0 && refs.matched == 0 && refs.scanned > 0) {
             LogUtil.w(TAG, "cleanOrphans skipped: index empty, refusing to treat all as orphans");
             return res;
         }
@@ -97,6 +100,9 @@ final class StorageCleaner {
                 // 只认引用：判定依据越少越不容易漂移。保护期已移除，
                 // 因为导入是同步的，那个窗口只有毫秒级，留一小时只会让清理看起来没生效。
                 if (refs.has(name)) continue;
+                // 输入框里还没发出去的图：没有引用，但删掉就等于用户点发送时静默丢图
+                // （缩略图在内存里，界面看起来完全正常）。见 AttachmentFiles.PENDING。
+                if (AttachmentFiles.isPendingName(name)) continue;
                 delete(f, res);
             }
         }

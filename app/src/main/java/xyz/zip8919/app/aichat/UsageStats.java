@@ -445,20 +445,23 @@ final class UsageStats {
     }
 
     private void flush() {
-        final List<Ev> snapshot;
         synchronized (this) {
             // 加载未完成时 events 只有本次启动的新事件，落盘会把磁盘历史覆盖掉。
             // dirty 保持 true，finishLoad() 会补一次完整快照。
             if (!ready) return;
             if (!dirty) return;
             dirty = false;
-            // 主线程只做引用浅拷贝（Ev 入列后不再被修改），MB 级 JSON 构造
-            // 与几 MB 字符串拼接全部交给 io 线程。序列化期间的新 append 会
-            // 重新置 dirty，800ms 后用更新的快照再写一次，最终不丢事件。
-            snapshot = new ArrayList<Ev>(events);
         }
         io.execute(new Runnable() {
             public void run() {
+                // 快照在 io 线程里做：2 万条事件在主线程浅拷贝虽然只要 ~1ms，
+                // 但 flush 是挂在 800ms 节流上的常驻动作，能挪就挪。
+                // Ev 入列后不再被修改，浅拷贝足够；拷贝期间的新 append 会重新置
+                // dirty，800ms 后用更新的快照再写一次，最终不丢事件。
+                final List<Ev> snapshot;
+                synchronized (UsageStats.this) {
+                    snapshot = new ArrayList<Ev>(events);
+                }
                 try {
                     StorageManager sm = StorageManager.getInstance();
                     if (sm == null) { schedule(); return; }

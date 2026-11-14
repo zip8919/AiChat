@@ -48,7 +48,11 @@ final class CrashCatcher implements Thread.UncaughtExceptionHandler {
             appCtx = ctx.getApplicationContext();
             sDefault = Thread.getDefaultUncaughtExceptionHandler();
             Thread.setDefaultUncaughtExceptionHandler(new CrashCatcher());
-            LogUtil.i(TAG, "installed, crash log -> " + logFile().getAbsolutePath());
+            // 不要在这里拼 logFile().getAbsolutePath()：getExternalFilesDir 在 4.4 上
+            // 要判挂载点、必要时还要 mkdir，SD 卡慢时 10~40ms，而这段代码在
+            // Application.onCreate 的最前端，直接计入冷启动首帧时间。
+            // 崩溃日志本身带绝对路径，这里少一行不影响排查。
+            LogUtil.i(TAG, "installed");
         } catch (Throwable t) {
             LogUtil.w(TAG, "install failed: " + t.getMessage());
         }

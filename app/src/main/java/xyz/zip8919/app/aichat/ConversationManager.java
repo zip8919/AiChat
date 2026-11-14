@@ -16,13 +16,79 @@ public class ConversationManager {
     private static final String TAG = "ConversationMgr";
     private static ConversationManager instance;
     private StorageManager storageManager;
-    private List<Conversation> conversations;
+    /**
+     * 会话列表。
+     *
+     * <p>必须是并发安全容器：删除会话已挪到后台线程（deleteOne 会 remove），
+     * 而主线程同时可能在 add(0) 新会话、标题生成线程在遍历。普通 ArrayList
+     * 在这种组合下会抛 ConcurrentModificationException，或让列表静默丢项。
+     */
+    private volatile List<Conversation> conversations;
     private Conversation currentConversation;
     /**
      * 保存队列：一次会话可能有几百条消息，序列化 + 写盘在主线程做会直接掉帧。
      * 单线程保证同一会话的多次保存按调用顺序落盘（后写覆盖前写是期望行为）。
      */
     private final ExecutorService saveExecutor = Executors.newSingleThreadExecutor();
+
+    /**
+     * 待落盘快照，按会话 id 合并：同一个会话在队列里只保留最新一份。
+     *
+     * <p>原来每次保存都 execute 一个独立任务、各自把整条会话重新序列化并整文件重写。
+     * 而一次回答的收尾路径会连着排进好几个：轮次结束、改标题、失败标记、切会话前保存。
+     * 一条 300 条消息、含多张 base64 图片的会话，单次 toJson + 写盘 20~80ms，
+     * 谁都没变的那几份就是纯浪费，排队期间用户在等下一次操作。
+     *
+     * <p>合并后语义不变：写的一定是「最后一次请求保存的时刻」的内容快照；
+     * 只是中间那几份被同一份终态覆盖掉了——它们本来也会被覆盖。
+     */
+    private final java.util.Map<String, Conversation> pendingSaves =
+            new java.util.HashMap<String, Conversation>();
+    private boolean saveDraining;
+    /** flushSaves 的等待者：队列排空时统一唤醒。 */
+    private final java.util.List<java.util.concurrent.CountDownLatch> flushWaiters =
+            new java.util.ArrayList<java.util.concurrent.CountDownLatch>();
+
+    /** 队列排空任务：一次只写一条，写完再看队列；空则收工并唤醒 flush 等待者。 */
+    private final Runnable saveDrainTask = new Runnable() {
+        public void run() {
+            while (true) {
+                Conversation c;
+                synchronized (pendingSaves) {
+                    java.util.Iterator<java.util.Map.Entry<String, Conversation>> it =
+                            pendingSaves.entrySet().iterator();
+                    if (!it.hasNext()) {
+                        saveDraining = false;
+                        for (int i = 0; i < flushWaiters.size(); i++) {
+                            flushWaiters.get(i).countDown();
+                        }
+                        flushWaiters.clear();
+                        return;
+                    }
+                    c = it.next().getValue();
+                    it.remove();
+                }
+                try {
+                    writeConversation(c);
+                } catch (Throwable t) {
+                    // 单条写失败不能让整个队列停摆，否则后续所有保存都卡死在这里
+                    LogUtil.e(TAG, "save failed: " + t.getMessage());
+                }
+            }
+        }
+    };
+
+    /** 入队一次保存；同 id 覆盖，保证写的是最新内容。 */
+    private void enqueueSave(Conversation snapshot) {
+        if (snapshot == null) return;
+        synchronized (pendingSaves) {
+            pendingSaves.put(snapshot.id, snapshot);
+            if (saveDraining) return;
+            saveDraining = true;
+        }
+        saveExecutor.execute(saveDrainTask);
+    }
+
     // 被删除的「当前会话」的消息列表：主界面 messages 仍指向它，留给下一个 current 复用，避免分裂
     private List<Message> orphanMessages;
     /**
@@ -43,7 +109,7 @@ public class ConversationManager {
 
     private ConversationManager() {
         this.storageManager = StorageManager.getInstance();
-        this.conversations = new ArrayList<Conversation>();
+        this.conversations = new java.util.concurrent.CopyOnWriteArrayList<Conversation>();
     }
 
     public static synchronized ConversationManager getInstance() {
@@ -71,6 +137,9 @@ public class ConversationManager {
 
     public void setCurrentConversation(Conversation conv) {
         LogUtil.d(TAG, "setCurrentConversation: %s", conv == null ? "null" : conv.id);
+        // 显式切回/复用某个会话：解除删除拉黑，避免 deletedIds 只增不减导致
+        // 该 id 一旦被删过就永远无法再保存。
+        if (conv != null) deletedIds.remove(conv.id);
         this.currentConversation = conv;
         this.orphanMessages = null;
     }
@@ -96,17 +165,14 @@ public class ConversationManager {
         }
         // 主线程只做一次浅拷贝，序列化与写盘都挪到后台：调用点大多在 UI 线程
         // （流式收尾、失败标记、标题回写），长会话在这里同步写会卡住主线程。
-        final Conversation snapshot = snapshotOf(conv);
-        if (Looper.myLooper() == Looper.getMainLooper()) {
-            saveExecutor.execute(new Runnable() {
-                public void run() {
-                    writeConversation(snapshot);
-                }
-            });
-        } else {
-            writeConversation(snapshot);
-        }
+        //
+        // 非主线程同样走队列：保存线程只有一条，入队顺序就是落盘顺序；而按 id 合并
+        // 能让「同一会话连排四五份」收敛成一份，避免把同一份终态内容重复序列化写盘。
+        enqueueSave(snapshotOf(conv));
     }
+
+    /** 上一次索引落盘时间，用于节流（见 writeConversation）。 */
+    private volatile long lastIndexSaveAt;
 
     /** 序列化 + 落盘。只在保存线程（或非主线程调用方）执行。 */
     private void writeConversation(Conversation conv) {
@@ -123,14 +189,45 @@ public class ConversationManager {
         }
         boolean ok = storageManager.saveConversation(conv.id, json);
         if (ok) {
+            // 删除与这次写盘可能并发：开头那次 deletedIds 检查早于 toJson/写盘，
+            // 拦不住「删除线程在我写盘途中才 add」的交错。此时文件已被删，
+            // renameAtomic 目标不存在会直接成功 → 文件复活，且该 id 被
+            // deletedIds 永久拉黑、后续所有保存被静默跳过。写盘后再查一次，
+            // 命中就立刻删掉刚复活的文件，保证「删掉」是终态。
+            if (deletedIds.contains(conv.id)) {
+                storageManager.deleteConversation(conv.id);
+                LogUtil.w(TAG, "save raced with delete: removed resurrected id=%s", conv.id);
+                return;
+            }
             // 索引跟着落盘：下次打开历史列表只读这一份元数据，不再解析本文件。
             // 必须在写完文件之后取 mtime/长度，否则记下的是旧值，下次必然判定失效。
             java.io.File dir = new java.io.File(storageManager.getConversationsPath());
             java.io.File f = new java.io.File(dir, conv.id + ".json");
             ConversationIndex idx = indexFor(dir);
             synchronized (indexLock) {
-                idx.put(conv, f.lastModified(), f.length());
-                if (idx.isDirty()) idx.save(dir);
+                long mtime = f.lastModified();
+                long fileBytes = f.length();
+                ConversationIndex.Entry old = idx.get(conv.id);
+                // 「同秒 + 等长」写两次时，冷启动靠 mtime/length 判定索引
+                // 失效会命中旧条目（旧标题/旧条数/旧时间）。这种场景磁盘
+                // 索引必须立刻跟上，不能等 5 秒节流 —— 否则进程被杀就永久
+                // 读到旧元数据。正常场景 mtime 会变，仍走节流不增加写盘。
+                boolean sameStamp = old != null && old.mtime == mtime
+                        && old.fileBytes == fileBytes;
+                idx.put(conv, mtime, fileBytes);
+                long now = System.currentTimeMillis();
+                // 索引落盘按 5 秒节流，内存里始终是最新的。
+                //
+                // 原来每条消息保存都要把索引整份重新序列化并 rename 一次
+                // （sameContent 把 mtime 也算进「变了没」，而刚写完文件 mtime 必变，
+                // 所以 dirty 永远为 true）。索引 300 条时每条约 5~15ms CPU + 一次写盘。
+                // 落后几秒的唯一后果是「下次冷启动多解析几个文件」——索引本身
+                // 就是靠 mtime/length 比对自愈的（见 ConversationIndex 头部注释）。
+                // 删除与批量路径走 saveIndexOnce()，那里不节流，保证删掉的会话不残留。
+                if (idx.isDirty() && (sameStamp || now - lastIndexSaveAt >= 5000L)) {
+                    idx.save(dir);
+                    lastIndexSaveAt = now;
+                }
             }
         }
         LogUtil.d(TAG, "saveCurrentConversation: id=%s msgs=%d jsonLen=%d ok=%s",
@@ -153,7 +250,7 @@ public class ConversationManager {
                     LogUtil.w(TAG, "saveConversationAsync skipped: id=%s load incomplete, refuse overwrite", conv.id);
                     return;
                 }
-                writeConversation(snapshotOf(conv));
+                enqueueSave(snapshotOf(conv));
             }
         });
     }
@@ -163,17 +260,32 @@ public class ConversationManager {
      * 会把刚删掉的文件又写回来。
      */
     public void flushSaves() {
-        // 批量删除放到后台线程后也必须排空队列：若这里直接返回，
-        // 已过 deletedIds 检查、正在写盘的保存任务会把刚删的文件写回来。
+        flushSaves(1500);
+    }
+
+    /**
+     * 带超时的排空。
+     *
+     * @param timeoutMs 最长等多久；超时返回 false，但不影响已排队的保存继续写
+     *                  （删除路径已用 deletedIds 拦住迟到的写，所以超时不再致命）
+     */
+    public boolean flushSaves(long timeoutMs) {
+        final java.util.concurrent.CountDownLatch latch =
+                new java.util.concurrent.CountDownLatch(1);
+        synchronized (pendingSaves) {
+            // 双检：队列空且没有在跑的排空任务，直接返回，一次线程切换都不花
+            if (!saveDraining && pendingSaves.isEmpty()) return true;
+            flushWaiters.add(latch);
+            if (!saveDraining) {
+                saveDraining = true;
+                saveExecutor.execute(saveDrainTask);
+            }
+        }
         try {
-            // 1.5s：够写完一个中等会话，又不至于让主线程卡到接近 ANR 阈值（5s）。
-            // 超时不再是致命的——deleteConversation 已用 deletedIds 拦住迟到的写。
-            saveExecutor.submit(new Runnable() {
-                public void run() {
-                }
-            }).get(1500, TimeUnit.MILLISECONDS);
-        } catch (Exception e) {
-            LogUtil.w(TAG, "flushSaves timeout/failed: %s", e.getMessage());
+            return latch.await(timeoutMs, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
         }
     }
 
@@ -195,6 +307,13 @@ public class ConversationManager {
 
     public void switchConversation(String conversationId) {
         LogUtil.i(TAG, "switchConversation -> %s", conversationId);
+        // id 会被拼进文件路径，而它的来源可能是外部 Intent（MainActivity 是
+        // exported 的）或手工改过的 JSON。非法 id 一律当作「新会话」处理，
+        // 否则一次带 ../ 的 Intent 就能让后续保存覆盖到 conversations 目录之外。
+        if (!StorageManager.isValidConversationId(conversationId)) {
+            LogUtil.w(TAG, "switchConversation rejected: illegal id '%s'", conversationId);
+            return;
+        }
         this.orphanMessages = null;
         // Try to find in memory
         for (Conversation c : this.conversations) {
@@ -210,6 +329,14 @@ public class ConversationManager {
         String content = storageManager.loadConversation(conversationId);
         if (content != null) {
             Conversation conv = fromJson(content);
+            // 文件里的 id 字段可能与文件名不一致（手工改过、旧版本写错）。
+            // 文件名才是这条会话的身份：不一致时必须纠正，否则之后
+            // 「删除这条」删的是另一个文件，保存也会写到另一个 id 下。
+            if (!conversationId.equals(conv.id)) {
+                LogUtil.w(TAG, "switchConversation: id mismatch file=%s json=%s, use file",
+                        conversationId, conv.id);
+                conv.id = conversationId;
+            }
             this.currentConversation = conv;
             this.conversations.add(0, conv);
             LogUtil.d(TAG, "switchConversation: loaded from disk, msgs=%d", conv.messages.size());
@@ -260,8 +387,10 @@ public class ConversationManager {
     public void deleteConversation(String conversationId) {
         // 先落盘队列里的写：否则删完文件后，队列里排着的保存会把它重新写回来
         flushSaves();
-        deleteOne(conversationId);
+        java.util.Set<String> own = new java.util.HashSet<String>();
+        deleteOne(conversationId, own);
         saveIndexOnce();
+        StorageCleaner.recycleAsync(storageManager, own);
     }
 
     /**
@@ -273,20 +402,36 @@ public class ConversationManager {
     public void deleteConversations(java.util.List<String> ids) {
         if (ids == null || ids.isEmpty()) return;
         flushSaves();
+        // 候选附件攒成并集，整批只回收一次。
+        //
+        // StorageCleaner.recycleAsync 内部会把整个 conversations 目录重扫一遍
+        // （它要确认某张图没有被别的会话引用）。原来每条删除各调一次，删 N 条
+        // 含图会话就是 N 次全目录扫描 + N 个线程——「清空历史」在 4.4 上是分钟级
+        // IO、CPU 打满，而 UI 早已弹完「已删除」。
+        // 合并后判据反而更严：扫描发生在所有会话文件都删完之后，看到的引用只剩活着的。
+        java.util.Set<String> candidates = new java.util.HashSet<String>();
         for (int i = 0; i < ids.size(); i++) {
-            deleteOne(ids.get(i));
+            deleteOne(ids.get(i), candidates);
         }
         saveIndexOnce();
+        StorageCleaner.recycleAsync(storageManager, candidates);
     }
 
-    /** 删单条：不 flush 保存队列、不写索引，由调用方统一收口。 */
-    private void deleteOne(String conversationId) {
+    /**
+     * 删单条：不 flush 保存队列、不写索引、不回收附件，由调用方统一收口。
+     *
+     * @param attachmentSink 收集本条会话引用过的附件名，由调用方合并后统一回收
+     */
+    private void deleteOne(String conversationId, java.util.Set<String> attachmentSink) {
         LogUtil.i(TAG, "deleteConversation: id=%s, before=%d", conversationId, this.conversations.size());
+        // 先置位再读附件。读附件要扫一遍这条会话的 JSON（可能几 MB），是个长窗口；
+        // 窗口里主线程若又入队一次保存（流式收尾、切后台都会），保存线程已经过了
+        // writeConversation 里的 deletedIds 检查，等它 rename 完，删掉的文件就复活了。
+        // flush 可能超时（大会话序列化慢），残余任务靠这里兜底拦掉。
+        deletedIds.add(conversationId);
         // 附件文件名必须在删文件之前取：删完就无从知道这条会话引用过哪些图
         java.util.Set<String> ownAttachments =
                 StorageCleaner.attachmentNames(storageManager, conversationId);
-        // flush 可能超时（大会话序列化慢），残余任务靠这里兜底拦掉
-        deletedIds.add(conversationId);
         if (this.currentConversation != null && this.currentConversation.id.equals(conversationId)) {
             // 主界面 messages 仍指向被删会话的列表，暂存给下一个 current 复用
             this.orphanMessages = this.currentConversation.messages;
@@ -306,9 +451,9 @@ public class ConversationManager {
             idx.remove(conversationId);
         }
         boolean ok = storageManager.deleteConversation(conversationId);
-        // 回收只被这条会话引用的图片。异步执行、失败静默：
-        // 删会话本身已经成功，回收失败最多是留几张孤儿图，不影响用户操作
-        StorageCleaner.recycleAsync(storageManager, ownAttachments);
+        // 回收只被这条会话引用的图片：候选集交给调用方合并后统一异步回收，
+        // 避免批量删除时每条都触发一次全目录重扫
+        if (attachmentSink != null) attachmentSink.addAll(ownAttachments);
         LogUtil.d(TAG, "deleteConversation: file deleted=%s, remaining=%d, attachments=%d",
                 ok, this.conversations.size(), ownAttachments.size());
     }
@@ -356,6 +501,9 @@ public class ConversationManager {
                 if (content == null || content.length() == 0) continue;
                 try {
                     Conversation conv = fromJson(content);
+                    // 以文件名为准（理由见 switchConversation）：id 与文件名不一致时，
+                    // 列表里点「删除」会删到另一个文件，用户看到「删了 A，B 也没了」。
+                    conv.id = conversationId;
                     // 体积取磁盘实际字节，不按正文字符数估：JSON 转义、缩略图 Base64、
                     // 中文 UTF-8 多字节都会让字符数与文件大小差出好几倍
                     conv.fileBytes = bytes;
@@ -390,7 +538,10 @@ public class ConversationManager {
             }
         });
 
-        this.conversations = loaded;
+        // 重建后的列表同样要是并发容器：这里一替换引用，后台删除线程可能还持有旧引用，
+        // 换成 ArrayList 就等于把上面的并发保证又撤掉了。
+        this.conversations =
+                new java.util.concurrent.CopyOnWriteArrayList<Conversation>(loaded);
         // 列表已从磁盘重建，之前暂存的消息列表不再对应任何会话
         this.orphanMessages = null;
         LogUtil.i(TAG, "loadConversations done: %d conversations (index=%d, parsed=%d, %dms)",
@@ -611,7 +762,11 @@ public class ConversationManager {
             String rawId = json.optString("id", "");
             // 旧版本可能把 null 写成字符串 "null"，那样这个会话永远匹配不上
             // 任何一次 switchConversation，等于打不开
-            if (rawId.length() > 0 && !"null".equalsIgnoreCase(rawId)) {
+            // 旧版本可能把 null 写成字符串 "null"，那样这个会话永远匹配不上
+            // 任何一次 switchConversation，等于打不开；含路径分隔符的 id 更要拒绝
+            // ——它会让后续保存写到别的目录去。
+            if (rawId.length() > 0 && !"null".equalsIgnoreCase(rawId)
+                    && StorageManager.isValidConversationId(rawId)) {
                 conv.id = rawId;
             }
             conv.title = normalizeTitle(json.optString("title", null));

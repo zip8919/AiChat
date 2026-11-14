@@ -17,15 +17,15 @@ import org.json.JSONObject;
  * 添加校验、删除时改引用。
  *
  * <p>元数据单独存 fonts.json，不塞进 appearance.json（外观配置与资源索引分离）；
- * Typeface 用「按文件字节计费」的 LruCache，上限 8MB，思路复用
- * StorageAttachmentsActivity 的图片缓存，避免 66MB 内存的老设备被大字体拖垮。
+ * Typeface 用「按条数计费」的 LruCache（上限 3 个：UI 字体 + 等宽字体 + 切换中的旧字体）。
+ * 不能按文件字节计费——导入上限本身就是 8MB，sizeOf 取文件长度会让大字体一进来就被
+ * 逐出（命中率恒为 0），两个中文字体也会互相把对方挤掉，详见 {@code cache()} 注释。
  */
 final class FontRepository {
 
     private static final String TAG = "FontRepository";
     private static final String META_FILE = "fonts.json";
     private static final int MAX_FONT_BYTES = 8 * 1024 * 1024;
-    private static final int CACHE_BYTES = 8 * 1024 * 1024;
     private static FontRepository instance;
 
     static final int ADD_OK = 0;
@@ -69,11 +69,23 @@ final class FontRepository {
     /** key 用字体文件绝对路径：id 不带 .ttf/.otf 后缀，直接 new File(dir,id) 会找不到文件。 */
     private LruCache<String, Typeface> cache() {
         if (typefaceCache == null) {
-            typefaceCache = new LruCache<String, Typeface>(CACHE_BYTES) {
+            // 按「条数」计费，不按文件字节计费。
+            //
+            // 原来 maxSize = 8MB 且 sizeOf 返回文件长度，而导入上限也是 8MB：
+            //   · 单个 8MB 以上的字体（CJK 常见 4~16MB）永远超限，put 完立刻被
+            //     trimToSize 逐出，等于没有缓存；
+            //   · UI 字体 + 等宽字体两个各 5MB，加起来超限，互相把对方挤出去，
+            //     每次切换都重新 createFromFile。
+            // 而 getTypeface 是 ThemeApplier.applyTextStyle 给**每个 TextView** 调的，
+            // 一个设置页 200 个控件 × 30~100ms 的 createFromFile = 6~20 秒，直接 ANR。
+            //
+            // 条数上限 3：主题最多同时用 UI + 等宽两个字号，留一个给「切换中」的旧字体。
+            // Typeface 的字体数据是 mmap 的 native 内存（文件页可回收），
+            // 不占 Dalvik 堆，3 个实例是安全的；换成按条计费后 sizeOf 也不用再 stat。
+            typefaceCache = new LruCache<String, Typeface>(3) {
                 @Override
                 protected int sizeOf(String key, Typeface value) {
-                    long n = new File(key).length();
-                    return n > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) n;
+                    return 1;
                 }
             };
         }
@@ -184,6 +196,16 @@ final class FontRepository {
     /** 加载失败回退系统默认：返回 null 表示调用方应使用默认字体。 */
     Typeface getTypeface(String id) {
         if (id == null || "system".equals(id) || id.length() == 0) return null;
+        // 已判定为坏字体：直接回退，不要再走一遍 createFromFile。
+        //
+        // 原来每次都重试，失败后又 markLoadFailed() → saveMetas()，即「整份 fonts.json
+        // 序列化 + 原子写盘」。而 getTypeface 是每个 TextView 调一次的：
+        // 一个字体文件损坏，设置页 100 个控件就是 100 次全量写盘 ≈ 0.5~2 秒，
+        // 而且每次 onResume 都重来。坏字体是确定状态，没有理由每个控件重新判定一次。
+        synchronized (this) {
+            Meta m = metas.get(id);
+            if (m != null && m.loadFailed) return null;
+        }
         String path = pathOf(id);
         if (path == null) return null;
         Typeface cached = cache().get(path);
@@ -235,6 +257,10 @@ final class FontRepository {
     private synchronized void markLoadFailed(String id) {
         Meta m = metas.get(id);
         if (m == null) { m = new Meta(); m.name = id; metas.put(id, m); }
+        // 状态没变就不要写盘：markLoadFailed 可能在「标记之前就已经被并发调用」后
+        // 再次进来（getTypeface 不是 synchronized，两个线程可能同时判定失败）。
+        // saveMetas 是整份序列化 + 原子写，一次 5~20ms，能省就省。
+        if (m.loadFailed && !m.enabled) return;
         m.loadFailed = true;
         m.enabled = false;
         saveMetas();
@@ -301,12 +327,59 @@ final class FontRepository {
         return true;
     }
 
+    /**
+     * 批量启用/停用，整批只写一次盘。
+     *
+     * <p>管理页多选后逐项调 {@link #setEnabled}，每项一次「整份 fonts.json 序列化 +
+     * 原子写」：勾 10 个字体点一次「启用」= 10 次写盘，主线程冻结 100~300ms。
+     */
+    synchronized void setEnabledAll(java.util.Collection<String> ids, boolean enabled) {
+        if (ids == null || ids.isEmpty()) return;
+        boolean changed = false;
+        for (String id : ids) {
+            Meta m = metas.get(id);
+            if (m != null && m.enabled != enabled) {
+                m.enabled = enabled;
+                changed = true;
+            }
+        }
+        if (changed) saveMetas();
+    }
+
     synchronized boolean rename(String id, String newName) {
         Meta m = metas.get(id);
         if (m == null) return false;
         m.name = newName;
         saveMetas();
         return true;
+    }
+
+    /**
+     * 批量删除：目录只列一次，元数据只写一次。
+     *
+     * <p>逐项调 {@link #delete} 时，每一项内部都走一次 {@code list()}（listFiles +
+     * 逐文件 stat）和一次 {@code saveMetas()}。删 10 个字体 = 10 次全目录扫描
+     * + 10 次整份 JSON 原子写，主线程几百毫秒到秒级。
+     *
+     * @return 真正删掉的文件数
+     */
+    synchronized int deleteAll(java.util.Collection<String> ids) {
+        if (ids == null || ids.isEmpty()) return 0;
+        int n = 0;
+        boolean touched = false;
+        List<FontItem> all = list();
+        for (FontItem f : all) {
+            if (!ids.contains(f.id)) continue;
+            if (new File(f.path).delete()) n++;
+            metas.remove(f.id);
+            pathById.remove(f.id);
+            touched = true;
+        }
+        if (touched) {
+            cache().evictAll();   // key 是绝对路径，无法按 id 精确移除，整体清空最稳
+            saveMetas();
+        }
+        return n;
     }
 
     synchronized boolean delete(String id) {

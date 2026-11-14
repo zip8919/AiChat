@@ -223,13 +223,19 @@ final class ThemeText {
         // format 字段名与值都归一化：AI 会写 "Format":"ACTHEME"、"format":"AiChat Theme"。
         // 值里只要含 actheme（忽略大小写）就归一成标准值；字段名统一回小写，
         // 否则 Theme.parse 的 FORMAT.equals(...) 严格比较会失败。
-        r = r.replaceAll("(?i)\"format\"(\\s*:\\s*)\"[^\"]*actheme[^\"]*\"",
-                "\"format\"$1\"actheme\"");
+        // Pattern 必须静态持有：String.replaceAll 每次调用都要重新编译正则，
+        // 而 clean() 是每个主题文件解析的必经步骤（ThemeRepository.loadOne ->
+        // ThemeValidator.validate），一次重建缓存就是 N 份主题 × 2 次编译 + 2 趟全文扫描。
+        r = P_FORMAT.matcher(r).replaceAll("\"format\"$1\"actheme\"");
         // version 字段名大小写 + 写成字符串 "1" 两种情况都接受
-        r = r.replaceAll("(?i)\"version\"(\\s*:\\s*)\"(\\d+)\"",
-                "\"version\"$1$2");
+        r = P_VERSION.matcher(r).replaceAll("\"version\"$1$2");
         return r;
     }
+
+    private static final java.util.regex.Pattern P_FORMAT = java.util.regex.Pattern.compile(
+            "(?i)\"format\"(\\s*:\\s*)\"[^\"]*actheme[^\"]*\"");
+    private static final java.util.regex.Pattern P_VERSION = java.util.regex.Pattern.compile(
+            "(?i)\"version\"(\\s*:\\s*)\"(\\d+)\"");
 
     private static int findSingleClose(String s, int from) {
         boolean esc = false;

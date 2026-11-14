@@ -64,6 +64,14 @@ final class StorageRefs {
     /** 读过的会话文件数，用于「N 个会话无法读取」的提示。 */
     int unreadable;
 
+    /**
+     * 成功扫过的会话文件数。
+     *
+     * <p>用来区分「索引为空是因为会话全删了」（正常，图片可以清）与
+     * 「索引为空是因为一个会话都没读到」（可疑，禁止按无引用删除）。
+     */
+    int scanned;
+
     /** 命中次数，用于判断「索引为空到底是真没引用，还是根本没对上格式」。 */
     int matched;
 
@@ -101,14 +109,21 @@ final class StorageRefs {
     void scanConversation(File file) {
         BufferedReader reader = null;
         try {
+            scanned++;
             reader = new BufferedReader(
                     new InputStreamReader(new FileInputStream(file), "UTF-8"), CHUNK);
             char[] buf = new char[CHUNK];
             StringBuilder carry = new StringBuilder(CARRY);
+            // 每块的拼装缓冲复用：原来每块都要 new String(8K) 再 carry + 拼一次，
+            // 扫 20MB 会话就是 2500 块 × 约 17KB 字符 ≈ 40MB 临时垃圾，在 128MB 堆的
+            // 老机上表现为「存储页转圈时周期性地卡」。Matcher 接受任意 CharSequence，
+            // 不需要先转成 String。
+            StringBuilder chunk = new StringBuilder(CHUNK + CARRY);
             int n;
             while ((n = reader.read(buf, 0, CHUNK)) > 0) {
-                String chunk = carry + new String(buf, 0, n);
                 int processed = carry.length();
+                chunk.setLength(0);
+                chunk.append(carry).append(buf, 0, n);
                 Matcher m = ATTACH_PATH.matcher(chunk);
                 while (m.find()) {
                     // 只接受「结束位置在本次新增区域」的匹配：
@@ -165,6 +180,18 @@ final class StorageRefs {
             LogUtil.w("StorageRefs", "conversation dir unlistable: %s", convDir.getAbsolutePath());
             return refs;
         }
+        return scanListed(files);
+    }
+
+    /**
+     * 用「已经列好的目录项」建索引。
+     *
+     * <p>调用方（如 {@link StorageScanner}）往往已经为统计体积列过一次目录。
+     * 再走 {@link #scan(File)} 会重复一次 {@code listFiles()}——在外部存储上
+     * 这一次是每个目录项一次 stat，几百个会话就是几百次系统调用，纯浪费。
+     */
+    static StorageRefs scanListed(File[] files) {
+        StorageRefs refs = new StorageRefs();
         for (int i = 0; i < files.length; i++) {
             File f = files[i];
             if (f.isFile() && f.getName().endsWith(".json")) {

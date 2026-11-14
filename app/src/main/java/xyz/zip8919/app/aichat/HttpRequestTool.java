@@ -72,7 +72,10 @@ final class HttpRequestTool {
         method.put("type", "string");
         method.put("description", "请求方法，默认 GET");
         method.put("enum", new org.json.JSONArray()
-                .put("GET").put("POST").put("PUT").put("DELETE").put("PATCH").put("HEAD"));
+                // 不能列 PATCH：Android 的 HttpURLConnection 只认
+                // GET/POST/HEAD/OPTIONS/PUT/DELETE/TRACE，setRequestMethod("PATCH")
+                // 必抛 ProtocolException，工具 100% 失败，模型还会反复重试。
+                .put("GET").put("POST").put("PUT").put("DELETE").put("HEAD"));
         props.put("method", method);
 
         JSONObject headers = new JSONObject();
@@ -82,7 +85,7 @@ final class HttpRequestTool {
 
         JSONObject body = new JSONObject();
         body.put("type", "string");
-        body.put("description", "请求体原文，POST/PUT/PATCH 时使用；JSON 请自行序列化成字符串");
+        body.put("description", "请求体原文，POST/PUT 时使用；JSON 请自行序列化成字符串");
         props.put("body", body);
 
         JSONObject timeout = new JSONObject();
@@ -209,7 +212,7 @@ final class HttpRequestTool {
 
     private static boolean isAllowedMethod(String m) {
         return "GET".equals(m) || "POST".equals(m) || "PUT".equals(m)
-                || "DELETE".equals(m) || "PATCH".equals(m) || "HEAD".equals(m);
+                || "DELETE".equals(m) || "HEAD".equals(m);
     }
 
     /**

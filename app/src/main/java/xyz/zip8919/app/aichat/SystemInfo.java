@@ -131,18 +131,18 @@ final class SystemInfo {
         if (template.indexOf('{') < 0) return template;
 
         String out = template;
-        out = out.replace("{android}", androidVersion());
-        out = out.replace("{api}", apiLevel());
-        if (out.indexOf("{webview}") >= 0) {
-            out = out.replace("{webview}", webviewVersion(ctx));
-        }
-        out = out.replace("{model}", deviceModel());
-        if (out.indexOf("{app_version}") >= 0) {
-            out = out.replace("{app_version}", appVersion(ctx));
-        }
-        if (out.indexOf("{ua}") >= 0) {
-            out = out.replace("{ua}", webviewUserAgent(ctx));
-        }
+        // 全部走 replaceIfPresent：Android 的 String.replace(CharSequence,CharSequence)
+        // 对多字符目标是 Pattern.compile(target, LITERAL) + 全串扫描 + 新串分配，
+        // 即使目标根本不存在。十几条叠加在「回主页」这条已经很重的 onResume 路径上，
+        // 每次 1~3ms 纯浪费。
+        out = replaceIfPresent(out, "{android}", androidVersion());
+        out = replaceIfPresent(out, "{api}", apiLevel());
+        out = replaceIfPresent(out, "{model}", deviceModel());
+        // 下面三个的值是惰性求值的（webviewVersion 会初始化 WebView 内核、
+        // webviewUserAgent 要跑一段 JS），必须先判存在再求值，不能套 replaceIfPresent
+        if (out.indexOf("{webview}") >= 0) out = out.replace("{webview}", webviewVersion(ctx));
+        if (out.indexOf("{app_version}") >= 0) out = out.replace("{app_version}", appVersion(ctx));
+        if (out.indexOf("{ua}") >= 0) out = out.replace("{ua}", webviewUserAgent(ctx));
 
         // ---- 时间类：每次渲染取实时值 ----
         // 注意：{date} 每天变一次，会让 system 前缀每天断一次 prompt cache。
@@ -174,8 +174,9 @@ final class SystemInfo {
                 if (out.indexOf("{density}") >= 0) out = out.replace("{density}", "未知");
             }
         }
-        out = out.replace("{brand}", isBlank(Build.MANUFACTURER) ? "未知" : Build.MANUFACTURER.trim());
-        if (out.indexOf("{cpu_abi}") >= 0) out = out.replace("{cpu_abi}", cpuAbi());
+        out = replaceIfPresent(out, "{brand}",
+                isBlank(Build.MANUFACTURER) ? "未知" : Build.MANUFACTURER.trim());
+        out = replaceIfPresent(out, "{cpu_abi}", cpuAbi());
         if (out.indexOf("{locale}") >= 0) {
             out = out.replace("{locale}", java.util.Locale.getDefault().toString());
         }
@@ -188,6 +189,12 @@ final class SystemInfo {
             out = out.replace("{free_storage}", freeStorage(ctx));
         }
         return out;
+    }
+
+    /** 只在目标串真的存在时才 replace：未命中零分配、零正则编译。 */
+    private static String replaceIfPresent(String s, String token, String value) {
+        if (s == null || s.length() == 0 || s.indexOf(token) < 0) return s;
+        return s.replace(token, value == null ? "" : value);
     }
 
     private static String formatDate(long ts) {
@@ -243,7 +250,11 @@ final class SystemInfo {
         try {
             java.io.File dir = ctx.getFilesDir();
             if (dir == null) return "未知";
-            long free = dir.getUsableSpace();
+            // File.getUsableSpace() 是 API 21 才加的，4.4 上抛 NoSuchMethodError
+            // 被下面 catch 吞掉 → {free_storage} 恒为「未知」。StatFs 的长整型
+            // 取值方法从 API 18（本项目 minSdk）就有。
+            android.os.StatFs stat = new android.os.StatFs(dir.getAbsolutePath());
+            long free = stat.getAvailableBlocksLong() * stat.getBlockSizeLong();
             if (free <= 0) return "未知";
             if (free >= 1024L * 1024L * 1024L) {
                 return String.format(java.util.Locale.US, "%.1f GB",

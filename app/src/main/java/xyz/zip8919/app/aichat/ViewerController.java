@@ -220,6 +220,10 @@ final class ViewerController {
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT);
         imageDialog.getWindow().setBackgroundDrawable(new ColorDrawable(bgColor));
+        // Activity 已结束还 show()：WindowManager$BadTokenException，主线程未捕获 = 闪退。
+        // JS 桥回调是延迟派发的，点完「放大」立刻按返回就会走到这里（表格那条
+        // 调用链在 MainActivity 侧还没有 try/catch 兜着）。
+        if (activity.isFinishing()) return;
         imageDialog.show();
         loadAfterLayout(imageWebView, new Runnable() {
             public void run() { loadCurrentImage(); }
@@ -377,6 +381,10 @@ final class ViewerController {
         tableDialog.getWindow().setLayout(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT);
+        // Activity 已结束还 show()：WindowManager$BadTokenException，主线程未捕获 = 闪退。
+        // JS 桥回调是延迟派发的，点完「放大」立刻按返回就会走到这里（表格那条
+        // 调用链在 MainActivity 侧还没有 try/catch 兜着）。
+        if (activity.isFinishing()) return;
         tableDialog.show();
 
         loadAfterLayout(tableWebView, new Runnable() {
@@ -528,6 +536,10 @@ final class ViewerController {
         // 显式设置 softInputMode 会清掉该 flag，键盘才随焦点出现。
         codeDialog.getWindow().setSoftInputMode(
                 android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+        // Activity 已结束还 show()：WindowManager$BadTokenException，主线程未捕获 = 闪退。
+        // JS 桥回调是延迟派发的，点完「放大」立刻按返回就会走到这里（表格那条
+        // 调用链在 MainActivity 侧还没有 try/catch 兜着）。
+        if (activity.isFinishing()) return;
         codeDialog.show();
 
         loadAfterLayout(codeWebView, new Runnable() {
@@ -619,10 +631,14 @@ final class ViewerController {
                     + "<style>" + wrapCss + "</style>"
                     + "<script>" + zoomJs + "</script>";
             String doc;
-            if (code.toLowerCase().contains("<head>")) {
-                doc = code.replaceFirst("(?i)<head[^>]*>", "$0" + Matcher.quoteReplacement(inject));
-            } else if (code.toLowerCase().contains("<html>")) {
-                doc = code.replaceFirst("(?i)<html[^>]*>",
+            // 不再 code.toLowerCase()：那会给整篇文档生成一份小写副本（100KB 的模型输出
+            // 就是 200KB 临时 char 数组，一次一份），而这里连着判两次。
+            // 静态 Pattern 带 (?i) 一样是不区分大小写，且只扫到第一个命中为止。
+            if (P_HEAD.matcher(code).find()) {
+                doc = P_HEAD.matcher(code).replaceFirst(
+                        "$0" + Matcher.quoteReplacement(inject));
+            } else if (P_HTML.matcher(code).find()) {
+                doc = P_HTML.matcher(code).replaceFirst(
                         "$0<head>" + Matcher.quoteReplacement(inject) + "</head>");
             } else {
                 doc = "<!DOCTYPE html><html><head>" + inject
@@ -632,9 +648,13 @@ final class ViewerController {
                 return doc;
             }
             // 只包裹 body 内容，旋转施加在我们的容器上
-            if (doc.matches("(?is).*<body[^>]*>.*</body>.*")) {
-                doc = doc.replaceFirst("(?is)(<body[^>]*>)", "$1<div class=\"viewer-rot\">");
-                doc = doc.replaceFirst("(?is)</body>", "</div></body>");
+            // 原来先用 doc.matches("(?is).*<body[^>]*>.*</body>.*") 判一次全文，
+            // 再 replaceFirst 两次（每次各自就地编译 Pattern）。matches 那次是
+            // 整篇回溯扫描，而 replaceFirst 找不到时本来就等于不替换——
+            // 判据完全多余。这里改成两次 find()，省掉一整趟全文匹配。
+            if (P_BODY_OPEN.matcher(doc).find() && P_BODY_CLOSE.matcher(doc).find()) {
+                doc = P_BODY_OPEN.matcher(doc).replaceFirst("$1<div class=\"viewer-rot\">");
+                doc = P_BODY_CLOSE.matcher(doc).replaceFirst("</div></body>");
             }
             return doc;
         }
@@ -655,6 +675,18 @@ final class ViewerController {
                 "<div class=\"preview-wrap\">" + code + "</div>" +
                 "</body></html>";
     }
+
+    // 文档注入用的静态 Pattern：原来每一处 replaceFirst/matches 都会就地编译一次，
+    // 且为了「不区分大小写」先对整篇文档做 toLowerCase 副本。静态预编译 + (?i) 既
+    // 省掉整篇小写副本，也省掉每次进预览/旋转 90° 时的 4 次 Pattern.compile。
+    private static final java.util.regex.Pattern P_HEAD =
+            java.util.regex.Pattern.compile("(?i)<head[^>]*>");
+    private static final java.util.regex.Pattern P_HTML =
+            java.util.regex.Pattern.compile("(?i)<html[^>]*>");
+    private static final java.util.regex.Pattern P_BODY_OPEN =
+            java.util.regex.Pattern.compile("(?is)(<body[^>]*>)");
+    private static final java.util.regex.Pattern P_BODY_CLOSE =
+            java.util.regex.Pattern.compile("(?is)</body>");
 
     // ==================== 文件查看器（附件） ====================
 
@@ -792,6 +824,10 @@ final class ViewerController {
         // 同 showCode：不设 softInputMode，HTML 附件里的输入框收不到键盘
         docDialog.getWindow().setSoftInputMode(
                 android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+        // Activity 已结束还 show()：WindowManager$BadTokenException，主线程未捕获 = 闪退。
+        // JS 桥回调是延迟派发的，点完「放大」立刻按返回就会走到这里（表格那条
+        // 调用链在 MainActivity 侧还没有 try/catch 兜着）。
+        if (activity.isFinishing()) return;
         docDialog.show();
 
         loadAfterLayout(docWebView, new Runnable() {

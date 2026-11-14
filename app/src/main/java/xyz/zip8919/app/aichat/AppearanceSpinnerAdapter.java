@@ -89,12 +89,12 @@ class AppearanceSpinnerAdapter extends BaseAdapter {
         boolean cDark = am.isDark();
         int cMain = cDef ? 0xFF333333
                 : am.getEffectiveColor(ThemeTokens.AC_TEXT, cDark);
-        int cSub = cDef ? 0xFF888888
-                : am.getEffectiveColor(ThemeTokens.AC_TEXT_SECONDARY, cDark);
-        int cDim = cDef ? 0xFFBDBDBD
-                : am.getEffectiveColor(ThemeTokens.AC_TEXT_SECONDARY, cDark);
-        int cHead = cDef ? 0xFF9E9E9E
-                : am.getEffectiveColor(ThemeTokens.AC_TEXT_SECONDARY, cDark);
+        // 次级文字的三种默认灰共用一个 token：定制态下三者同色，只需取一次。
+        // 原来每一项 bind 都取三遍同一个 token，下拉列表 20 项就是 20 次白跑。
+        int cText2 = am.getEffectiveColor(ThemeTokens.AC_TEXT_SECONDARY, cDark);
+        int cSub = cDef ? 0xFF888888 : cText2;
+        int cDim = cDef ? 0xFFBDBDBD : cText2;
+        int cHead = cDef ? 0xFF9E9E9E : cText2;
         main.setSingleLine(true);
         main.setEllipsize(android.text.TextUtils.TruncateAt.END);
         sub.setSingleLine(true);

@@ -218,6 +218,10 @@ public class ThemeAttrActivity extends ThemedActivity {
      */
     private void finishWithApply() {
         if (theme != null) rollbackPreview();
+        // 覆盖模式下也要还原全局明暗：编辑时点「深色」只是为了预览深色那一套，
+        // 点「应用」后不该把整个 App 停在深色（点「取消」走 rollbackPreview
+        // 反而会还原，两条路径原来不一致）。
+        if (am.isDark() != originDark) am.setDark(originDark);
         finish();
     }
 
@@ -285,6 +289,13 @@ public class ThemeAttrActivity extends ThemedActivity {
                 Map<String, String> m = editingDark ? theme.darkTokens : theme.lightTokens;
                 if (value == null) m.remove(token);
                 else m.put(token, value);
+                // hasDark / hasLight 必须跟着置位：Theme.toJson() 按这两个标志决定是否
+                // 输出对应分组。只往 darkTokens 写而不置位，保存时整套深色 token 会被
+                // 静默丢掉——用户看不到任何提示，重进发现改动没了。
+                if (value != null) {
+                    if (editingDark) theme.hasDark = true;
+                    else theme.hasLight = true;
+                }
             }
             if (value == null) am.clearExplicit(token, editingDark);
             else am.setExplicit(token, value, editingDark);
@@ -641,8 +652,15 @@ public class ThemeAttrActivity extends ThemedActivity {
         return token;
     }
 
+    /**
+     * 色值转 #RRGGBB。
+     *
+     * <p>直接复用 {@link ThemeCssBuilder#hexOf(int)}：那边是零分配的手写版，
+     * 这里的 {@code String.format} 每次都会构造 {@code Formatter} + 解析格式串，
+     * 而 refreshRows() 一次刷 18 行、每行调用一次，属于纯浪费。
+     */
     private static String hexOf(int color) {
-        return String.format("#%06X", 0xFFFFFF & color);
+        return ThemeCssBuilder.hexOf(color);
     }
 
     private GradientDrawable rounded(int color, int radiusDp) {

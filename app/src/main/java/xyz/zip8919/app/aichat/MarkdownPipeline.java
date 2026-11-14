@@ -46,14 +46,18 @@ final class MarkdownPipeline {
         // Mask fenced code blocks and inline code spans first, so the math /
         // extension preprocessing below can never rewrite their contents.
         List<String> codeBlocks = new ArrayList<>();
-        // 反引号与 ~ 都没有时不可能出现围栏/行内代码，整趟逐字符扫描可以跳过
-        if (text.indexOf('`') >= 0 || text.indexOf('~') >= 0) {
+        // 反引号与围栏（~~~）都没有时不可能出现行内代码/围栏，整趟逐字符扫描可以跳过。
+        // 判据必须是 "~~~" 而不是单个 '~'：中文正文里「10~20」「约~」这类波浪号
+        // 极常见，按单个 '~' 判断会让绝大多数消息都白跑一遍状态机。
+        if (text.indexOf('`') >= 0 || text.indexOf("~~~") >= 0) {
             text = protectCode(text, codeBlocks);
         }
 
         // 0. Protect raw SVG blocks from markdown parsing — commonmark doesn't treat <svg> as HTML block
         List<String> svgBlocks = new ArrayList<>();
-        if (text.indexOf('<') >= 0) {
+        // 光有 '<' 不够：比较运算符、HTML 片段都含 '<'，但没有 svg 时
+        // extractAndProtectSvg 的输出与输入恒等，白复制一遍整串。
+        if (text.indexOf('<') >= 0 && hasSvgTag(text)) {
             text = extractAndProtectSvg(text, svgBlocks);
         }
 
@@ -70,7 +74,9 @@ final class MarkdownPipeline {
         Node document = PARSER.parse(text);
         StringBuilder html = new StringBuilder();
         document.accept(new HtmlVisitor(html));
-        String result = backfillPlaceholders(html.toString(), mathTags, svgBlocks);
+        // 没有公式/SVG 时 backfill 只会把整串再复制一遍，直接交出 html
+        String result = (mathTags.isEmpty() && svgBlocks.isEmpty())
+                ? html.toString() : backfillPlaceholders(html.toString(), mathTags, svgBlocks);
         LogUtil.v(TAG, "renderMarkdown: %d -> %d chars, %d math formulas",
                 text.length(), result.length(), mathTags.size());
         return result;
@@ -193,6 +199,21 @@ final class MarkdownPipeline {
         }
         return out.toString();
     }
+    /**
+     * 是否存在会被 {@link #extractAndProtectSvg} 认出来的 &lt;svg 开标签。
+     *
+     * <p>判定条件必须与 extractAndProtectSvg 内部一致（忽略大小写 + 标签边界），
+     * 否则会漏保护或多跑一趟；宁可多跑（返回 true 但实际在围栏里）也不能漏。
+     */
+    private static boolean hasSvgTag(String t) {
+        int len = t.length();
+        for (int i = t.indexOf('<'); i >= 0; i = t.indexOf('<', i + 1)) {
+            if (t.regionMatches(true, i, "<svg", 0, 4)
+                    && (i + 4 >= len || isTagBoundary(t.charAt(i + 4)))) return true;
+        }
+        return false;
+    }
+
     // Extract <svg ...>...</svg> blocks (case-insensitive) and replace with placeholders
     // so commonmark doesn't mangle them (svg is not a recognized HTML block tag).
     // Skips SVGs inside fenced code blocks (```) and inline code spans (`).

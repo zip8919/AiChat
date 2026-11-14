@@ -24,6 +24,16 @@ public class Message {
      */
     public boolean sendFailed;
 
+    /**
+     * 续跑时应把 content 截到这个长度（-1 表示不截）。
+     *
+     * <p>流式中途断流时，本轮已经流到屏幕上的正文会被补进 content（否则那半截
+     * 回答会凭空消失）。但续跑是从 conversation 重建请求的，模型会**重写**这一轮；
+     * 不截掉这段半截文本，新回答就会接在旧半截后面——界面和落盘都是两份。
+     * 刻意不落盘：进程重启后这条消息的对象已换，续跑基准应以磁盘上的 content 为准。
+     */
+    public int retryTrim = -1;
+
     /** 失败详情（HTTP 状态、响应体、异常等）。仅用于错误卡片，不进入 API 请求。 */
     public String errorDetail = "";
 

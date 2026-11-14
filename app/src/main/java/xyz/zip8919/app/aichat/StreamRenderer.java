@@ -21,9 +21,33 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 final class StreamRenderer {
 
+    private static final String TAG = "StreamRenderer";
+
     /** 实时渲染（转 HTML）的节流间隔；纯文本直出更快，用户能明显感到「在打字」。 */
     private static final long INTERVAL_HTML_MS = 200;
     private static final long INTERVAL_TEXT_MS = 120;
+
+    /**
+     * 渲染线程池。
+     *
+     * <p>原来每个 tick 都 {@code new Thread(...).start()}：一条长回答按 200ms 一帧算，
+     * 5 分钟的输出就是 1500 个线程的创建/销毁，单次创建在 Cortex-A7 上约 0.1~0.3ms，
+     * 加上线程栈的 mmap/munmap，整条回答要为此白烧几百毫秒 CPU，还制造大量内存抖动。
+     *
+     * <p>用 2 个线程而不是 1 个：{@code flushAndWait} 需要在 tick 还在飞的时候插进来
+     * （它带 2500ms 超时，排在长渲染后面就可能超时，退回缺字的旧行为）。
+     * 2 个线程既覆盖了这个并发场景，又把线程创建次数从「每 tick 一次」降到「进程一次」。
+     */
+    private static final java.util.concurrent.ExecutorService RENDER_POOL =
+            java.util.concurrent.Executors.newFixedThreadPool(2,
+                    new java.util.concurrent.ThreadFactory() {
+                        public Thread newThread(Runnable r) {
+                            Thread t = new Thread(r, "aichat-render");
+                            t.setPriority(Thread.NORM_PRIORITY - 1);
+                            t.setDaemon(true);
+                            return t;
+                        }
+                    });
 
     /** 宿主能力：全部是动作，不是 getter，便于在测试里用假实现替换。 */
     interface Ui {
@@ -68,6 +92,8 @@ final class StreamRenderer {
     private volatile long lastEmitMs;
     /** commitTail 已经发出但 UI 还没落地：这段时间内的分片直接跳过，避免写进旧的 tail。 */
     private volatile boolean committing;
+    /** flushAndWait 迟到落地帧的作废代数，见 commitTail。 */
+    private volatile int commitEpoch = 0;
 
     StreamRenderer(Ui ui, int aiIndex, int generation, boolean realtime) {
         this.ui = ui;
@@ -93,8 +119,74 @@ final class StreamRenderer {
      *
      * <p>搬移是纯 DOM 操作，不解析 markdown，所以没有重排代价。
      */
+    /**
+     * 强制把最后一帧推下去，并等它真正落到 DOM（最多 {@code timeoutMs}）。
+     *
+     * <p>为什么需要：每一帧都受 {@value #INTERVAL_HTML_MS}/{@value #INTERVAL_TEXT_MS}
+     * 节流，而分片通常 20~50ms 一片——本轮结束时最后一个分片几乎必然还在节流窗口里。
+     * 紧接着的 {@link #commitTail} 会把 DOM 现有的 tail 搬进 base、并把 baseRendered
+     * 登记成「完整文本」，于是这一截正文永久缺失：屏幕上句子断在工具卡片处，
+     * 而落盘的 content 是完整的，切走再回来又对得上。
+     *
+     * <p>调用方在请求线程上，可以安全阻塞；渲染仍在后台线程做，UI 线程只负责写入。
+     * 超时只是退回原来的行为（可能缺十几字），不会卡住 UI。
+     */
+    void flushAndWait(final String baseNow, final String roundNow, long timeoutMs) {
+        final String base = baseNow == null ? "" : baseNow;
+        final String round = roundNow == null ? "" : roundNow;
+        if (committing) return;
+        final java.util.concurrent.CountDownLatch latch =
+                new java.util.concurrent.CountDownLatch(1);
+        // flush 超时只返回、提交的任务并不取消。它若迟于 commitTail 落地，会
+        // nextSeq() 作废新一轮在飞帧、把旧 base 和旧 tail 各写回一帧（末尾
+        // 正文重复、DOM 与落盘 content 不符）。捕获代数以便届时丢弃。
+        final int myEpoch = commitEpoch;
+        RENDER_POOL.execute(new Runnable() {
+            public void run() {
+                String bh = null;
+                String th = null;
+                try {
+                    if (!base.equals(ui.baseRendered())) bh = ui.renderHtml(base);
+                    th = ui.renderHtml(round);
+                } catch (Throwable t) {
+                    LogUtil.e(TAG, "flush render failed: " + t.getMessage());
+                }
+                final String baseHtml = bh;
+                final String tailHtml = th;
+                ui.runOnUi(new Runnable() {
+                    public void run() {
+                        try {
+                            // 代数在同一请求内不变，拦不住迟到帧；再比 commitEpoch，
+                            // commitTail 已执行就整帧丢弃（finally 仍 countDown）。
+                            if (!ui.isCurrent(generation) || commitEpoch != myEpoch) return;
+                            // 这一次落地作废所有在飞的 tick：它们带的是更旧的文本
+                            ui.nextSeq();
+                            inFlight.set(false);
+                            ui.setContent(aiIndex, base + round);
+                            if (baseHtml != null) {
+                                ui.evalJsHtml("streamBase", baseHtml);
+                                ui.noteBaseRendered(base);
+                            }
+                            if (tailHtml != null) ui.evalJsHtml("streamTailHtml", tailHtml);
+                        } catch (Throwable t) {
+                            LogUtil.e(TAG, "flush apply failed: " + t.getMessage());
+                        } finally {
+                            latch.countDown();
+                        }
+                    }
+                });
+            }
+        });
+        try {
+            latch.await(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
     void commitTail(String baseNow) {
         if (baseNow == null) baseNow = "";
+        commitEpoch++;          // 作废旧 flush 的迟到落地帧
         committing = true;
         ui.nextSeq();              // 作废正在飞的 tick，避免它回头覆盖搬好的 base
         ui.noteBaseRendered(baseNow);
@@ -135,7 +227,7 @@ final class StreamRenderer {
         inFlight.set(true);
         final boolean baseChanged = !baseNow.equals(ui.baseRendered());
         final int mySeq = ui.nextSeq();
-        new Thread(new Runnable() {
+        RENDER_POOL.execute(new Runnable() {
             public void run() {
                 String bh = null;
                 String th = null;
@@ -173,7 +265,7 @@ final class StreamRenderer {
                     }
                 });
             }
-        }).start();
+        });
     }
 
     private void renderPlain(final String baseNow, final String roundNow) {
@@ -196,7 +288,7 @@ final class StreamRenderer {
         }
         // trace 刚追加了工具卡片：重建一次 base，再续上本轮文字
         inFlight.set(true);
-        new Thread(new Runnable() {
+        RENDER_POOL.execute(new Runnable() {
             public void run() {
                 final String baseHtml;
                 try {
@@ -221,6 +313,6 @@ final class StreamRenderer {
                     }
                 });
             }
-        }).start();
+        });
     }
 }

@@ -63,6 +63,15 @@ public class JsRunnerActivity extends ThemedActivity {
 
     private String lang = "js";
     private final StringBuilder output = new StringBuilder();
+    /**
+     * 输出缓冲里当前的行数（与 {@code output} 内容严格同步）。
+     *
+     * <p>原实现每次追加一行都把整个缓冲区（最多 64 K 字符）从头扫一遍数换行，
+     * 超 1000 行时还要再扫一遍找裁剪点。跑一个 5000 行的 demo 脚本就是
+     * 5000 × 64 K ≈ 3 亿次 charAt，主线程累计几百毫秒，而且随输出量线性变长。
+     * 改为增量维护，只有真的裁剪过才重算一次。
+     */
+    private int outputLines = 1;
     /** 本次运行的起始时间，用于回报耗时。 */
     private long runStartedAt;
     /** 本次运行是否出过错。 */
@@ -166,6 +175,7 @@ public class JsRunnerActivity extends ThemedActivity {
         clearOutBtn.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 output.setLength(0);
+                outputLines = 1;
                 outputView.setText("");
                 if (state == ST_DONE || state == ST_ERROR) setStatus("输出 · 已清空", false);
             }
@@ -277,6 +287,10 @@ public class JsRunnerActivity extends ThemedActivity {
                 }
                 if (output.length() > 0) {
                     output.append('\n');
+                    outputLines++;
+                }
+                for (int ci = 0; ci < line.length(); ci++) {
+                    if (line.charAt(ci) == '\n') outputLines++;
                 }
                 output.append(line);
                 if (line.startsWith("ERROR")) {
@@ -317,6 +331,7 @@ public class JsRunnerActivity extends ThemedActivity {
      * 超过 1000 行时删除最前面的行至 1000 行内，始终保留最近输出。
      */
     private void trimOutput() {
+        boolean trimmed = false;
         if (output.length() > 65536) {
             int cut = output.length() - 32768;
             int nl = output.indexOf("\n", cut);
@@ -324,15 +339,13 @@ public class JsRunnerActivity extends ThemedActivity {
                 cut = nl + 1;
             }
             output.delete(0, cut);
+            trimmed = true;
+            // 字符裁剪已经删掉了大段内容，行数必须先按新内容重算：
+            // 拿裁剪前的行数去算 skip，会一路删到最后一个换行，只剩最后一行。
+            outputLines = countLines(output);
         }
-        int lines = 1;
-        for (int i = 0; i < output.length(); i++) {
-            if (output.charAt(i) == '\n') {
-                lines++;
-            }
-        }
-        if (lines > 1000) {
-            int skip = lines - 1000;
+        if (outputLines > 1000) {
+            int skip = outputLines - 1000;
             int cut = 0;
             for (int i = 0; i < output.length() && skip > 0; i++) {
                 if (output.charAt(i) == '\n') {
@@ -342,8 +355,11 @@ public class JsRunnerActivity extends ThemedActivity {
             }
             if (cut > 0) {
                 output.delete(0, cut);
+                trimmed = true;
             }
         }
+        // 只有真的裁过才重算行数：正常路径（未超限）零扫描。
+        if (trimmed) outputLines = countLines(output);
     }
 
     private void runCurrent() {
@@ -353,6 +369,7 @@ public class JsRunnerActivity extends ThemedActivity {
             return;
         }
         output.setLength(0);
+        outputLines = 1;
         outputView.setText("");
         runHadError = false;
         firstError = null;
@@ -539,6 +556,32 @@ public class JsRunnerActivity extends ThemedActivity {
     @Override
     public void onBackPressed() {
         super.onBackPressed();
+    }
+
+    /**
+     * 退到后台就停掉闪烁点与心跳。
+     *
+     * <p>不停的话，用户跑一段带 {@code setInterval} 的脚本后按 Home：状态行每
+     * 400ms 刷新一次 TextView（每次都走 measure/layout），心跳每 1.5s 往 WebView
+     * 塞一个 {@code javascript:} URL。后台十分钟 = 1500 次 setText + 400 次 JS 注入，
+     * 4.4 单核机上就是持续唤醒 + 明显掉电；脚本若是死循环，每次 loadUrl 还会在
+     * 渲染线程后面排队，队列只增不减。
+     */
+    @Override
+    protected void onStop() {
+        super.onStop();
+        ui.removeCallbacks(ticker);
+        ui.removeCallbacks(heartbeat);
+    }
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        // 计时用的是墙钟（runStartedAt），回来直接续上，不会跳变
+        if (state == ST_RUNNING) {
+            startTicker();
+            if (!bridgeEverCalled) ui.postDelayed(heartbeat, 600);
+        }
     }
 
     @Override

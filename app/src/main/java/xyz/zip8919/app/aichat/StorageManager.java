@@ -398,7 +398,34 @@ public class StorageManager {
 
     // ---- conversations ----
 
+    /**
+     * 会话 id 是否合法。
+     *
+     * <p>id 会被直接拼进文件路径（{@code conversations/<id>.json}），而它的来源
+     * 并不总是我们自己生成的：MainActivity 是 exported 的，{@code onNewIntent}
+     * 会把外部 Intent 里的 {@code conversation_id} 原样传给 switchConversation；
+     * 会话 JSON 里的 {@code id} 字段也可能被手工改过。含 {@code ../} 的 id
+     * 可以让保存写到 conversations 目录之外（覆盖 config.json），也能让删除
+     * 删掉别人的文件。存量 id 都是纯数字时间戳，收紧规则不会拒绝老数据。
+     */
+    static boolean isValidConversationId(String id) {
+        if (id == null) return false;
+        int n = id.length();
+        if (n == 0 || n > 64) return false;
+        for (int i = 0; i < n; i++) {
+            char c = id.charAt(i);
+            boolean ok = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z')
+                    || (c >= 'A' && c <= 'Z') || c == '_' || c == '-';
+            if (!ok) return false;
+        }
+        return true;
+    }
+
     public boolean saveConversation(String conversationId, String content) {
+        if (!isValidConversationId(conversationId)) {
+            LogUtil.w(TAG, "saveConversation rejected: illegal id '%s'", conversationId);
+            return false;
+        }
         String filePath = this.conversationsPath + File.separator + conversationId + ".json";
         boolean ok = writeFile(filePath, content);
         LogUtil.v(TAG, "saveConversation: id=%s %d chars ok=%s", conversationId,
@@ -407,6 +434,7 @@ public class StorageManager {
     }
 
     public String loadConversation(String conversationId) {
+        if (!isValidConversationId(conversationId)) return null;
         String filePath = this.conversationsPath + File.separator + conversationId + ".json";
         String content = readFile(filePath);
         // 0 字节会话文件维持「视为不存在」语义：switchConversation 按请求 id 建空会话，而不是随机 id
@@ -418,9 +446,17 @@ public class StorageManager {
     }
 
     public boolean deleteConversation(String conversationId) {
+        if (!isValidConversationId(conversationId)) {
+            LogUtil.w(TAG, "deleteConversation rejected: illegal id '%s'", conversationId);
+            return false;
+        }
         String filePath = this.conversationsPath + File.separator + conversationId + ".json";
         File file = new File(filePath);
         boolean ok = file.exists() && file.delete();
+        // 同时清掉可能残留的备份：只删主文件的话，「清空历史」之后
+        // 每段对话的正文仍以 .bak 形式留在磁盘上（隐私 + 占用）。
+        File bak = new File(filePath + ".bak");
+        if (bak.exists()) bak.delete();
         LogUtil.d(TAG, "deleteConversation: id=%s exists=%s deleted=%s", conversationId, file.exists(), ok);
         return ok;
     }
@@ -515,10 +551,23 @@ public class StorageManager {
         if (!file.exists() && bak.exists() && !bak.renameTo(file)) {
             LogUtil.w(TAG, "stale .bak restore failed: %s", file.getAbsolutePath());
         }
-        if (tmp.renameTo(file)) return true;
-        boolean saved = !file.exists() || file.renameTo(bak);
-        boolean ok = saved && tmp.renameTo(file);
-        if (!ok && saved && bak.exists()) bak.renameTo(file);
+        // 主流文件系统的 renameTo 会原子覆盖已存在的目标，直接成功；但绝不能
+        // 在这里 early return —— 下面「成功后删 .bak」还要执行。轮 13 加的清理
+        // 正因为这个早退从未生效：旧 .bak（旧正文明文副本）永远留着，既不进
+        // 会话列表也不在任何清理范围内，只有删整条会话才会被带走。
+        boolean ok = tmp.renameTo(file);
+        if (!ok) {
+            boolean saved = !file.exists() || file.renameTo(bak);
+            ok = saved && tmp.renameTo(file);
+            if (!ok && saved && bak.exists()) bak.renameTo(file);
+        }
+        // 成功替换后必须删掉备份：在 renameTo 不覆盖的目标文件系统上
+        // （部分 ROM / FUSE 就是这样），每次覆盖保存都会留下一个完整的旧副本。
+        // 它既不会被 getConversationFiles 列出、也不在 .tmp 清理范围内，
+        // 于是「删掉会话」之后正文仍以明文躺在磁盘上，容量还接近翻倍。
+        if (ok && bak.exists() && !bak.delete()) {
+            LogUtil.w(TAG, "stale .bak delete failed: %s", bak.getAbsolutePath());
+        }
         return ok;
     }
 
@@ -532,18 +581,49 @@ public class StorageManager {
                 return null;
             }
             reader = new BufferedReader(new InputStreamReader(new FileInputStream(file), "UTF-8"));
-            StringBuilder sb = new StringBuilder();
-            String line;
-            boolean firstLine = true;
-            while ((line = reader.readLine()) != null) {
-                // readLine() 会剥掉行尾换行符，需在行间补回，否则多行文本被压成一行
-                if (!firstLine) {
-                    sb.append('\n');
+            // 按文件字节数预置容量：UTF-8 的字节数就是字符数的上界。
+            // 不预置时从 16 开始倍增，读一个 5MB 会话累计复制约 10M 字符（20MB 垃圾），
+            // 而 loadConversations 会逐文件走这里。超大文件不预置，避免一次申请几十 MB。
+            long est = file.length();
+            StringBuilder sb = new StringBuilder(est > 0 && est < (8L << 20) ? (int) est : 8192);
+            // 直接按 char 块读，不再用 readLine()：
+            // readLine 每一行都要 new 一个 String，读完再 append 一次；5MB 的会话若每行
+            // 40 字符就是 13 万个临时 String，加上 append 的二次复制，等于比实际内容多
+            // 复制三份。这里只有「文件 → char[] → sb → toString」两趟。
+            char[] buf = new char[8192];
+            int n;
+            boolean sawCr = false;
+            while ((n = reader.read(buf)) > 0) {
+                sb.append(buf, 0, n);
+                if (!sawCr) {
+                    for (int i = 0; i < n; i++) {
+                        if (buf[i] == '\r') { sawCr = true; break; }
+                    }
                 }
-                sb.append(line);
-                firstLine = false;
             }
-            String result = sb.toString();
+            String result;
+            if (sawCr) {
+                // 保持与 readLine 版一致的行尾语义：\r\n 与单独的 \r 都归一成 \n。
+                // 只有外部工具改过的文件才会带 \r，自己写的一直是 \n，所以这是少数路径。
+                int len = sb.length();
+                StringBuilder clean = new StringBuilder(len);
+                for (int i = 0; i < len; i++) {
+                    char c = sb.charAt(i);
+                    if (c == '\r') {
+                        // \r\n 只出一个 \n；孤立的 \r 也要补一个 \n。
+                        // 原来直接丢弃 \r 会把 `a\rb` 粘成 `ab`，与注释宣称的
+                        // 「\r\n 和单独的 \r 都归一成 \n」及 readLine 语义都不符，
+                        // 且展示后写回会把被破坏的内容永久覆盖原文件。
+                        clean.append('\n');
+                        if (i + 1 < len && sb.charAt(i + 1) == '\n') i++;
+                    } else {
+                        clean.append(c);
+                    }
+                }
+                result = clean.toString();
+            } else {
+                result = sb.toString();
+            }
             LogUtil.v(TAG, "readFile: read %d chars <- %s", result.length(), filePath);
             return result;
         } catch (IOException e) {

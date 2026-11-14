@@ -288,7 +288,8 @@ public class FontManagerActivity extends ThemedActivity {
     private void batchSetEnabled(boolean on) {
         Set<String> keys = adapter.checkedKeys();
         if (keys.isEmpty()) { toast("请先勾选字体"); return; }
-        for (String id : keys) repo.setEnabled(id, on);
+        // 一次写盘：逐项 setEnabled 会为每个字体整份重写 fonts.json
+        repo.setEnabledAll(keys, on);
         load();
         toast(on ? "已批量启用" : "已批量停用");
     }
@@ -316,7 +317,8 @@ public class FontManagerActivity extends ThemedActivity {
                             changed = true;
                         }
                         if (changed) am.applyPermanent();
-                        for (String id : keys) repo.delete(id);
+                        // 目录只列一次、元数据只写一次，不再逐项 delete（每项一次全表重扫）
+                        repo.deleteAll(keys);
                         selectionMode = false;
                         adapter.setSelectionMode(false);
                         btnMulti.setText("批量管理");

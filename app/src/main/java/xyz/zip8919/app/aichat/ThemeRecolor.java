@@ -152,6 +152,26 @@ final class ThemeRecolor {
         String tintSig;
         boolean sysTinted;
         boolean captured;
+        /**
+         * 背景采样缓存：记「从哪个 drawable 实例采到的是什么色」。
+         *
+         * <p>9-patch / selector 这类背景没有 {@code getColor()}，只能缩到位图上取
+         * 中心像素（9x9 采不到再 48x48），一次 two 次 draw + 两次 {@code getPixel}
+         * （加锁 JNI）。而列表 bind、对话框重着色都会对同一个 View 反复调 apply，
+         * 背景实例没变却每次都重采——快速滑动时就是每秒几百次位图绘制。
+         *
+         * <p>只按<b>实例相等</b>命中：{@link #paintBackground} 换底后实例变了，
+         * 缓存自然失效，不需要任何手动清理。
+         */
+        Drawable sampledFrom;
+        Integer sampledValue;
+        boolean sampled;
+        /** 上一次由本类染上的 GradientDrawable 与颜色，同色同实例时跳过 setBackgroundDrawable。 */
+        Drawable paintedDrawable;
+        int lastPaintedColor = Integer.MIN_VALUE;
+        /** 上一次设置的 ListView 分割线 / Spinner 浮层底色，相同就跳过（setDivider 会 requestLayout）。 */
+        int lastDividerColor = Integer.MIN_VALUE;
+        int lastPopupColor = Integer.MIN_VALUE;
     }
 
     /**
@@ -247,7 +267,7 @@ final class ThemeRecolor {
         }
         if (def) {
             restore(v, bs);
-            applyPopup(v, m, dark, true);
+            applyPopup(v, bs, m, dark, true);
             applySystemTint(v, bs, m, dark, true);
             return;
         }
@@ -293,7 +313,7 @@ final class ThemeRecolor {
                 applyInputHint((TextView) v, bs, m, dark);
             }
         }
-        applyPopup(v, m, dark, false);
+        applyPopup(v, bs, m, dark, false);
         applyDivider(v, bs, m, dark, false);
         // 4) 系统 tint 控件：进度条 / 拖动条 / 开关 / 单选 / 复选
         //    这几类的颜色来自各自 drawable，setBackground 那套完全覆盖不到，
@@ -328,7 +348,7 @@ final class ThemeRecolor {
         if (v instanceof android.widget.EditText) {
             Boolean r = applyInputBackground(v, bs, m, dark);
             if (r != null) return r.booleanValue();
-            Integer cur = sampleSolidColor(v.getBackground());
+            Integer cur = sampledBg(v, bs);
             return cur == null ? dark : isDarkColor(cur.intValue());
         }
 
@@ -356,7 +376,7 @@ final class ThemeRecolor {
         if (isThemedControlHost(v) && paintThemedControlBg(v, bs, m, dark)) return dark;
 
         // 4) 其余按实际采样判断；透明背景跟随窗口
-        Integer cur = sampleSolidColor(v.getBackground());
+        Integer cur = sampledBg(v, bs);
         return cur == null ? dark : isDarkColor(cur.intValue());
     }
 
@@ -475,9 +495,17 @@ final class ThemeRecolor {
         try {
             android.widget.ListView lv = (android.widget.ListView) v;
             if (def) {
-                lv.setDivider(bs.origDivider);
+                // 只在真的换过的时候还原：setDivider 内部是 requestLayout + invalidate，
+                // 每次 onResume 都白做一次等于整表重新 measure。
+                if (bs.lastDividerColor != Integer.MIN_VALUE) {
+                    lv.setDivider(bs.origDivider);
+                    bs.lastDividerColor = Integer.MIN_VALUE;
+                }
             } else {
-                lv.setDivider(new ColorDrawable(m.getEffectiveColor(ThemeTokens.AC_DIVIDER, dark)));
+                int c = m.getEffectiveColor(ThemeTokens.AC_DIVIDER, dark);
+                if (c == bs.lastDividerColor) return;
+                bs.lastDividerColor = c;
+                lv.setDivider(new ColorDrawable(c));
             }
         } catch (Throwable ignored) {
         }
@@ -488,16 +516,20 @@ final class ThemeRecolor {
      * （Holo 浅色下就是纯白），它的 item 虽然会被 inflate 期着色，但浮层底板仍会露出一片白。
      * {@code setPopupBackgroundDrawable} 在 API 16+ 可用，minSdk 18 安全。
      */
-    private static void applyPopup(View v, AppearanceManager m, boolean dark, boolean def) {
+    private static void applyPopup(View v, BaseStyle bs, AppearanceManager m, boolean dark, boolean def) {
         if (!(v instanceof android.widget.Spinner)) return;
         try {
             android.widget.Spinner sp = (android.widget.Spinner) v;
             if (def) {
-                sp.setPopupBackgroundDrawable(null);
+                if (bs.lastPopupColor != Integer.MIN_VALUE) {
+                    sp.setPopupBackgroundDrawable(null);
+                    bs.lastPopupColor = Integer.MIN_VALUE;
+                }
             } else {
-                sp.setPopupBackgroundDrawable(
-                        new android.graphics.drawable.ColorDrawable(
-                                m.getEffectiveColor(ThemeTokens.AC_SURFACE, dark)));
+                int c = m.getEffectiveColor(ThemeTokens.AC_SURFACE, dark);
+                if (c == bs.lastPopupColor) return;
+                bs.lastPopupColor = c;
+                sp.setPopupBackgroundDrawable(new android.graphics.drawable.ColorDrawable(c));
             }
         } catch (Throwable t) {
             // 个别 ROM 对 popupBackground 有自定义处理，失败不影响主体
@@ -671,7 +703,13 @@ final class ThemeRecolor {
 
     private static BaseStyle capture(View v) {
         BaseStyle bs = new BaseStyle();
-        bs.bgColor = sampleSolidColor(v.getBackground());
+        // 顺手把这次采样的结果填进缓存：capture 之后紧接着就会走 apply，
+        // 同一个背景实例没必要再 draw 一遍位图。
+        Drawable bg = v.getBackground();
+        bs.sampledFrom = bg;
+        bs.sampledValue = sampleSolidColor(bg);
+        bs.sampled = true;
+        bs.bgColor = bs.sampledValue;
         if (v instanceof TextView) {
             try {
                 bs.textColors = ((TextView) v).getTextColors();
@@ -703,6 +741,11 @@ final class ThemeRecolor {
         // 深色遍历误以为「已经换过、签名也一致」，从而跳过重建。
         bs.themedBg = false;
         bs.themedSig = null;
+        // 同色短路标记也必须清。GradientDrawable 那条还原路径是 mutate() 后 setColor，
+        // 挂着的还是同一个实例：不清标记的话，默认 -> 切回同一套主题时
+        // 「实例相同 + 颜色相同」会命中短路，底色永远停在原色上。
+        bs.paintedDrawable = null;
+        bs.lastPaintedColor = Integer.MIN_VALUE;
         if (bs.origSelector != null) {
             try {
                 v.setBackgroundDrawable(bs.origSelector);
@@ -754,6 +797,10 @@ final class ThemeRecolor {
                 ((android.widget.ListView) v).setDivider(bs.origDivider);
             } catch (Throwable ignored) {
             }
+            // 还原后必须清掉「已上色」标记：否则同一进程内再从默认切回
+            // 同一套主题时，applyDivider 会因为颜色相等而跳过，分割线永远
+            // 停在 layout 的灰色上（深色底上一条亮白线）。
+            bs.lastDividerColor = Integer.MIN_VALUE;
         }
         restoreSysTint(v, bs);
     }
@@ -941,6 +988,10 @@ final class ThemeRecolor {
     private static boolean paintBackground(View v, BaseStyle bs, int color) {
         Drawable d = v.getBackground();
         if (d instanceof ColorDrawable) {
+            // 已经是目标色就不动。只改字号/显示大小时整棵树重刷一遍，颜色一个没变，
+            // 但每次 setBackgroundDrawable 都会 requestLayout + invalidate(true)，
+            // 拖一次显示大小滑条就是几百次整页 measure/layout（老机器上就是「整页抖」）。
+            if (((ColorDrawable) d).getColor() == color) return true;
             // **必须换新实例，不能 setColor**：从资源取到的 ColorDrawable 之间共享
             // ConstantState，setColor 改的是那份共享状态。后果是同布局后续 inflate
             // 出来的 View 一出生就是「上次主题色」，capture() 采样到的也是它，
@@ -949,11 +1000,15 @@ final class ThemeRecolor {
             v.setBackgroundDrawable(new ColorDrawable(color));
             return true;
         } else if (d instanceof GradientDrawable) {
+            // 同色同实例：说明这层底就是上一轮本类染的，再刷只会白搭一次 requestLayout
+            if (d == bs.paintedDrawable && bs.lastPaintedColor == color) return true;
             // GradientDrawable.setColor 同样会写共享的 GradientState；mutate() 先复制
             // 一份自己的状态，圆角/描边/Angle 一起带过来，既不丢样式也不污染他人。
             Drawable own = d.mutate();
             ((GradientDrawable) own).setColor(color);
             if (own != d) v.setBackgroundDrawable(own);
+            bs.paintedDrawable = own;
+            bs.lastPaintedColor = color;
             return true;
         } else if (v.getId() == R.id.send_button && d instanceof StateListDrawable) {
             if (bs.origSelector == null) bs.origSelector = d;
@@ -991,6 +1046,22 @@ final class ThemeRecolor {
         return Color.rgb((int) (Color.red(a) * (1 - ratio) + Color.red(b) * ratio),
                 (int) (Color.green(a) * (1 - ratio) + Color.green(b) * ratio),
                 (int) (Color.blue(a) * (1 - ratio) + Color.blue(b) * ratio));
+    }
+
+    /**
+     * 带缓存的背景采样，见 {@link BaseStyle#sampledFrom}。
+     *
+     * <p>同一 drawable 实例的采样结果是纯函数，缓存不改变任何判定；
+     * 换底/还原后实例变了，下一次自动重采。
+     */
+    private static Integer sampledBg(View v, BaseStyle bs) {
+        Drawable d = v.getBackground();
+        if (bs.sampled && d == bs.sampledFrom) return bs.sampledValue;
+        Integer px = sampleSolidColor(d);
+        bs.sampledFrom = d;
+        bs.sampledValue = px;
+        bs.sampled = true;
+        return px;
     }
 
     /**

@@ -28,6 +28,27 @@ final class ThemeRepository {
     /** 目录签名复用时间窗：colorSignature/整树重刷会连续调十几次 list()。 */
     private static final long DIR_SIG_TTL_MS = 500;
 
+    /**
+     * 按文件缓存「已解析 + 已校验」的主题。
+     *
+     * <p>原来只要目录签名变了就把**全部**用户主题重读重解析一遍：每个文件一次
+     * readFile + ThemeText.clean（逐字符重建）+ 两趟正则 + JSON 解析，单个 8KB 主题
+     * 在 Cortex-A7 上 5~15ms，10 个主题就是 60~180ms 主线程。
+     * 而触发点全是「改了其中一个」：保存、重命名、复制、导入、删除一个主题，
+     * 以及批量删除里的每一轮——等于改一个文件重解析十个。
+     *
+     * <p>按 mtime+length 命中，写/删路径显式失效（同一秒内二次保存时 mtime 不变，
+     * 只靠签名会读到旧内容，所以写路径必须自己 remove 掉这一条）。
+     */
+    private static final class FileEntry {
+        long mtime;
+        long len;
+        Theme theme;
+    }
+
+    private final java.util.Map<String, FileEntry> fileCache =
+            new java.util.HashMap<String, FileEntry>();
+
     private ThemeRepository() {
         this.storage = StorageManager.getInstance();
     }
@@ -66,12 +87,18 @@ final class ThemeRepository {
         out.addAll(BuiltinThemes.list());
 
         if (files != null) {
+            java.util.Set<String> seen = new java.util.HashSet<String>();
             for (int i = 0; i < files.length; i++) {
                 File f = files[i];
                 if (!f.isFile() || !f.getName().toLowerCase().endsWith(SUFFIX)) continue;
+                seen.add(f.getName());
                 Theme t = loadOne(f);
                 if (t != null) out.add(t);
             }
+            // 顺手清掉「文件已被外部删掉」的解析缓存，否则它会一直留在这个 map 里
+            fileCache.keySet().retainAll(seen);
+        } else {
+            fileCache.clear();
         }
         cache = out;
         dirSig = sig;
@@ -93,6 +120,25 @@ final class ThemeRepository {
     }
 
     private Theme loadOne(File f) {
+        String fileName = f.getName();
+        long mtime = f.lastModified();
+        long len = f.length();
+        FileEntry fe = fileCache.get(fileName);
+        if (fe != null && fe.mtime == mtime && fe.len == len) return fe.theme;
+        Theme parsed = parseOne(f);
+        fileCache.put(fileName, fe = new FileEntry());
+        fe.mtime = mtime;
+        fe.len = len;
+        fe.theme = parsed;
+        return parsed;
+    }
+
+    /** 丢掉某个文件的解析缓存（写/删之后必须调，否则同秒内改动读不到）。 */
+    private void dropFileCache(String fileName) {
+        if (fileName != null) fileCache.remove(fileName);
+    }
+
+    private Theme parseOne(File f) {
         String content = storage.readFile(f.getAbsolutePath());
         String id = stripSuffix(f.getName());
         if (content == null || content.length() == 0) {
@@ -173,6 +219,9 @@ final class ThemeRepository {
             t.filePath = path;
             t.builtin = false;
             cache = null;
+            // 同一秒内二次保存时 mtime 不变，必须显式丢掉这一条，
+            // 否则 list() 会命中上一次的解析结果
+            dropFileCache(new File(path).getName());
             LogUtil.i(TAG, "save: %s -> %s (%d chars)", t.id, path, json.length());
             return t.id;
         } catch (Exception e) {
@@ -188,11 +237,38 @@ final class ThemeRepository {
         return vr.theme;
     }
 
+    /**
+     * 批量删除：整表只读一次，不再「删一个 → 目录签名失效 → 重解析剩下全部」。
+     *
+     * <p>逐项调 {@link #delete} 时，每项内部都走 {@code find()} → {@code list()}；
+     * 删掉一个文件后目录签名必变，下一次 list() 就把剩下的主题全部重读重解析一遍。
+     * 删 10 个、目录里原有 10 个 = 10 次全表解析（约 0.5~1.5 秒），全在主线程。
+     *
+     * @return 真正删掉的文件数
+     */
+    synchronized int deleteAll(java.util.Collection<String> ids) {
+        if (ids == null || ids.isEmpty()) return 0;
+        int n = 0;
+        List<Theme> all = list();          // 全表只读一次
+        for (int i = 0; i < all.size(); i++) {
+            Theme t = all.get(i);
+            if (!ids.contains(t.id) || t.builtin || t.filePath == null) continue;
+            File f = new File(t.filePath);
+            if (f.delete()) n++;
+            dropFileCache(f.getName());
+        }
+        cache = null;
+        LogUtil.i(TAG, "deleteAll: %d requested, %d deleted", ids.size(), n);
+        return n;
+    }
+
     synchronized boolean delete(String id) {
         Theme t = find(id);
         if (t == null || t.builtin || t.filePath == null) return false;
-        boolean ok = new File(t.filePath).delete();
+        File victim = new File(t.filePath);
+        boolean ok = victim.delete();
         cache = null;
+        dropFileCache(victim.getName());
         LogUtil.i(TAG, "delete: %s ok=%s", id, ok);
         return ok;
     }

@@ -42,7 +42,12 @@ public class ApiClient {
             // 512: models that ignore all thinking-off switches burn tokens on
             // reasoning first; 50 left no room for the actual title (empty content)
             body.put("max_tokens", 512);
-            LogUtil.v(TAG, "callWithError body(%d): %s", body.toString().length(), LogUtil.preview(body.toString(), 1200));
+            // 参数先求值：不加守卫的话，关掉日志也要把请求体序列化两遍（含 preview 的截取）
+            if (LogUtil.ENABLED) {
+                String payload = body.toString();
+                LogUtil.v(TAG, "callWithError body(%d): %s", payload.length(),
+                        LogUtil.preview(payload, 1200));
+            }
             result = doRequestWithError(provider.apiUrl + provider.chatPath, provider.apiKey, body, 20000);
         } catch (Exception e) {
             LogUtil.e(TAG, "callWithError build/request exception: " + e.getMessage(), e);
@@ -191,9 +196,12 @@ public class ApiClient {
                 }
             }
             reader.close();
-            LogUtil.d(TAG, "doRequest <- %d chars in %d ms: %s", sb.length(),
-                    System.currentTimeMillis() - startTs, LogUtil.preview(sb.toString(), 500));
-            return sb.toString();
+            String raw = sb.toString();
+            if (LogUtil.ENABLED) {
+                LogUtil.d(TAG, "doRequest <- %d chars in %d ms: %s", raw.length(),
+                        System.currentTimeMillis() - startTs, LogUtil.preview(raw, 500));
+            }
+            return raw;
         } catch (Exception e) {
             LogUtil.e(TAG, "doRequest EXCEPTION: " + e.getMessage(), e);
             throw e;
@@ -290,9 +298,13 @@ public class ApiClient {
                 reader.close();
             }
             // 复用 queryBalance 的清洗：BOM/NUL/零宽字符、截取首 { 到末 }
-            result.response = sanitizeJson(sb.toString());
-            LogUtil.d(TAG, "doRequestWithError <- %d chars in %d ms: %s", sb.length(),
-                    System.currentTimeMillis() - startTs, LogUtil.preview(sb.toString(), 500));
+            String raw = sb.toString();
+            result.response = sanitizeJson(raw);
+            // 响应体上限 4MB，这里原先会为一行日志再复制两份整串
+            if (LogUtil.ENABLED) {
+                LogUtil.d(TAG, "doRequestWithError <- %d chars in %d ms: %s", raw.length(),
+                        System.currentTimeMillis() - startTs, LogUtil.preview(raw, 500));
+            }
         } catch (Exception e) {
             LogUtil.e(TAG, "doRequestWithError EXCEPTION: " + e.getMessage(), e);
             result.error = e.getMessage();

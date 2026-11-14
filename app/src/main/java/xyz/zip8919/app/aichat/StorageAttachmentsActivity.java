@@ -205,6 +205,15 @@ public class StorageAttachmentsActivity extends ThemedActivity {
         super.onBackPressed();
     }
 
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // 从聊天页返回时，草稿（PENDING）与会话引用可能都变了。本页原来只在
+        // onCreate 扫一次，列表是旧快照：刚加进输入框的图会被当孤儿、可能被
+        // 误删。load() 内部有 loading 守卫，重复调用无害。
+        if (!loading) load();
+    }
+
     // ---------------------------------------------------------------- 扫描
 
     private void load() {
@@ -229,7 +238,10 @@ public class StorageAttachmentsActivity extends ThemedActivity {
                             if (!f.isFile()) continue;
                             String name = f.getName();
                             if (name.startsWith("tmp-")) continue;
+                            // 草稿里的图（选好了还没发）也算「使用中」：删掉就是
+                            // 用户点发送时静默丢图，而缩略图仍在内存里、界面完全正常。
                             int n = refs.count(name);
+                            if (n == 0 && AttachmentFiles.isPendingName(name)) n = 1;
                             Item it = new Item(f, name, f.length(), f.lastModified(), n);
                             // 只按「有没有引用」判断，不再有 1 小时保护期。
                             // 原来那层保护期是为了「导入中的图片消息还没落盘，此刻必然查不到引用」，
@@ -252,7 +264,10 @@ public class StorageAttachmentsActivity extends ThemedActivity {
                         orphans.clear();
                         orphans.addAll(o);
                         incomplete = refs.incomplete;
-                        indexEmpty = !refs.incomplete && refs.size() == 0 && !o.isEmpty();
+                        // 会话全删光时索引为空是确定事实，不能再判成「可疑」：
+                        // 否则本页会永久禁用删除，用户看着「无引用 N 张」却删不掉。
+                        indexEmpty = !refs.incomplete && refs.size() == 0
+                                && refs.scanned > 0 && !o.isEmpty();
                         // 从「最占空间」点进来：先判断这张图在哪一段，再切页签，
                         // 否则用户会落在空列表上，以为没定位到
                         if (highlight != null) {
@@ -469,18 +484,55 @@ public class StorageAttachmentsActivity extends ThemedActivity {
         new Thread(new Runnable() {
             public void run() {
                 StorageManager sm = StorageManager.getInstance(getApplicationContext());
+                // 判定 vs 删除之间必须重扫一次引用。列表里的 refs 是进页面那一刻的快照，
+                // 而「刚发出去的图片」可能还压在 ConversationManager 的保存队列里
+                // （会话 JSON 尚未落盘），或者那次保存失败、文件里根本没有这条引用。
+                // 拿旧快照当依据删掉，历史消息立刻裂图，且不可恢复。
+                final StorageRefs refs = buildRefs(sm);
+                if (refs.incomplete) {
+                    // 索引本身就不可信：宁可让用户退出去重进，也不能赌。
+                    runOnUiThread(new Runnable() {
+                        public void run() {
+                            if (isFinishing() || isDestroyed()) return;
+                            AcToast.show(StorageAttachmentsActivity.this,
+                                    "会话索引读取失败，已取消删除，请稍后重试");
+                            // 退出多选并重扫：只把按钮文案改回「删除」会让页面停在
+                            // 上一次的判定上（仍显示「不与任何对话关联，可安全删除」），
+                            // 用户会反复点、每次都被拒。重扫失败时列表会变成
+                            // 「全部使用中」，不给任何可删入口。
+                            exitSelection();
+                            load();
+                        }
+                    });
+                    return;
+                }
                 File dir = sm.getAttachmentsDir();
                 int ok = 0;
                 int failed = 0;
+                int skipped = 0;
                 long bytes = 0;
                 if (dir != null) {
                     for (int i = 0; i < names.size(); i++) {
-                        File f = new File(dir, names.get(i));
+                        String name = names.get(i);
+                        // 重扫后发现被引用：跳过。这是「删除前一刻」的最新事实，
+                        // 与列表里显示的可能不一致，以它为准。
+                        if (refs.count(name) > 0) {
+                            skipped++;
+                            continue;
+                        }
+                        // 草稿里的图（输入框已选、还没发送/落盘）磁盘上必然查不到
+                        // 引用，但删掉就是点发送时静默裂图。load() 已把这类图归入
+                        // 「使用中」，删除前重扫必须同口径，否则判定不一致。
+                        if (AttachmentFiles.isPendingName(name)) {
+                            skipped++;
+                            continue;
+                        }
+                        File f = new File(dir, name);
                         long len = f.length();
                         if (f.isFile() && f.delete()) {
                             ok++;
                             bytes += len;
-                            THUMBS.remove(names.get(i));
+                            THUMBS.remove(name);
                         } else {
                             failed++;
                         }
@@ -488,12 +540,14 @@ public class StorageAttachmentsActivity extends ThemedActivity {
                 }
                 final int okCount = ok;
                 final int failCount = failed;
+                final int skipCount = skipped;
                 final long freed = bytes;
                 runOnUiThread(new Runnable() {
                     public void run() {
                         if (isFinishing() || isDestroyed()) return;
                         AcToast.show(StorageAttachmentsActivity.this, "已删除 " + okCount + " 张，释放 " + StorageReport.size(freed)
-                                        + (failCount > 0 ? "，" + failCount + " 张被占用" : ""));
+                                        + (failCount > 0 ? "，" + failCount + " 张被占用" : "")
+                                        + (skipCount > 0 ? "，" + skipCount + " 张已被会话引用，已跳过" : ""));
                         exitSelection();
                         // 总览页的缓存已过期，否则返回后仍显示旧数字
                         StorageActivity.invalidateCache();

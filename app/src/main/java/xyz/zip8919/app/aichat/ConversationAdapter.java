@@ -161,7 +161,9 @@ public class ConversationAdapter extends BaseAdapter {
         }
 
         Conversation conv = conversations.get(position);
-        LogUtil.v(TAG, "getView: pos=%d id=%s title=%s", position, conv.id, conv.title);
+        // 这里原来每次 bind 写一行 LogUtil.v：String.format 装箱 + logcat 写入
+        // （IPC + 内核缓冲）单次 30~80µs，快速滑动时每秒几十次，全花在与刷新
+        // 无关的事情上。bind 顺序出问题时用布局边界/adapter 断点查，不再靠日志。
         holder.titleView.setText(ConversationManager.normalizeTitle(conv.title));
         String timeKey = conv.id + ":" + conv.updatedAt;
         String timeText = timeCache.get(timeKey);

@@ -39,7 +39,15 @@ public class MessageHtmlRenderer {
     // oversized renders (e.g. base64 math images) are not cached — otherwise up
     // to 24 near-identical full-message copies stay in memory for good.
     private static final int RENDER_CACHE_MAX_HTML = 256 * 1024;
-    private static final int RENDER_CACHE_MAX_ENTRIES = 24;
+    /**
+     * 条目上限必须大于「一屏条数」（{@code MainActivity.INITIAL_VISIBLE_MESSAGES} = 40）。
+     *
+     * <p>原来 24 < 40：任何一次整页重建（切会话、切主题、从设置页返回）都必然
+     * 前 16 条 miss，命中率被硬压到 60% 且长期稳定在这个值。那 16 条一字未改，
+     * 却要重新跑 markdown + 代码高亮 + 公式，200ms~1.5s 的白屏时间就出在这里。
+     * 真正的内存闸门是下面 2MB 的字节上限，条目数放宽到 48（40 + 8 缓冲）不影响它。
+     */
+    private static final int RENDER_CACHE_MAX_ENTRIES = 48;
     private static final int RENDER_CACHE_MAX_BYTES = 2 * 1024 * 1024;
     // accessOrder=true → entrySet() 按 LRU 顺序迭代（最久未用在前）；
     // contentToHtml 在 put 之前从前端手动淘汰。
@@ -527,6 +535,14 @@ public class MessageHtmlRenderer {
         return contentToHtml(text, ctx, true);
     }
 
+    /** 这份正文是否已经在 HTML 缓存里（供预热路径避免重复渲染，注意会加锁）。 */
+    static boolean isCached(String text) {
+        if (text == null || text.length() == 0) return false;
+        synchronized (renderCache) {
+            return renderCache.containsKey(text);
+        }
+    }
+
     /**
      * cacheable=false：流式每 200ms 的新正文都会产生一个新 key，若照常写入，
      * 24 槽的 LRU 会被中间态轮占，历史消息缓存全被挤出，整页重灌时 40 条全 miss。
@@ -649,8 +665,17 @@ public class MessageHtmlRenderer {
                 if (gs > start) html.append(MarkdownPipeline.render(text.substring(start, gs), ctx));
                 int ge = findToolBlockEnd(text, gs + WebSearchTool.TRACE_START.length());
                 if (ge == -1) {
-                    // Unclosed tool block (should not happen): drop the remainder.
-                    LogUtil.w(TAG, "tool trace block UNCLOSED at %d, dropping tail", gs);
+                    // 未闭合的 [tool]：**不能丢正文**。
+                    //
+                    // 原来这里直接 break，`[tool]` 之后的整段回答永久消失（定稿走同一条
+                    // 路径，重进会话也不恢复），而复制/编辑走的是 plainTextOf、尾部还在，
+                    // 用户复制出来的内容和屏幕上看到的对不上。
+                    // 两条现实触发路径：模型在正文里原样写出 "[tool]"；或工具 payload 里
+                    // 反引号计数不配对，findToolBlockEnd 的代码态机再也找不到 [/tool]。
+                    // 与上面 [thinking] 分支保持一致：把剩余内容当普通 markdown 渲染。
+                    LogUtil.w(TAG, "tool trace block UNCLOSED at %d, render tail as text", gs);
+                    String tail = text.substring(gs + WebSearchTool.TRACE_START.length());
+                    if (tail.length() > 0) html.append(MarkdownPipeline.render(tail, ctx));
                     break;
                 }
                 String payload = text.substring(gs + WebSearchTool.TRACE_START.length(), ge);
