@@ -1,385 +1,931 @@
 package xyz.zip8919.app.aichat;
 
-import android.app.Activity;
-import android.app.AlertDialog;
 import android.content.DialogInterface;
+import android.content.Intent;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.view.View;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
-import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ListView;
+import android.widget.Spinner;
 import android.widget.TextView;
-import android.widget.Toast;
-import java.util.ArrayList;
-import java.util.List;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+
+/**
+ * 管理模型：提供商 / 模型两个页签，顶部切换（与「小工具」页同一套分段交互）。
+ *
+ * <p>此前是一个页面上下两个 ListView、所有编辑都是 AlertDialog：模型多起来以后
+ * 既看不到谁配了什么，也没法批量操作，更没法判断某个提供商到底通不通。
+ *
+ * <p>本页只做「列表 + 入口 + 批量」，单个对象的字段编辑都在
+ * {@link ProviderEditActivity} / {@link ModelEditActivity}，避免弹窗里塞六个输入框。
+ *
+ * <p>数据一律现读现写 {@link ConfigManager}（内存里的 COW 列表就是唯一真相），
+ * 编辑页保存后回 onResume 重新拉一遍，不做跨页缓存。
+ */
 public class ModelConfigActivity extends ThemedActivity {
+
     private static final String TAG = "ModelConfig";
-    private ConfigManager configManager;
-    private ListView providerList, modelList;
-    private ArrayAdapter<String> providerAdapter, modelAdapter;
-    private List<ProviderInfo> providers;
-    private List<ModelInfo> models;
+
+    private static final int REQ_PROVIDER = 3001;
+    private static final int REQ_MODEL = 3002;
+
+    /** 排序方式。 */
+    private static final int SORT_CUSTOM = 0;
+    private static final int SORT_NAME = 1;
+    private static final int SORT_PROVIDER = 2;
+    private static final int SORT_FEATURE = 3;
+
+    private ConfigManager cfg;
+
+    // 页签
+    private Button tabProvider, tabModel;
+    private LinearLayout panelProvider, panelModel;
+    private boolean modelTab;
+
+    // 提供商
+    private ListView providerList;
+    private TextView providerEmpty;
+    private ConfigRowAdapter providerAdapter;
+    private LinearLayout providerSelBar;
+    private TextView providerSelCount;
+    private Button providerMulti;
+
+    // 模型
+    private ListView modelList;
+    private TextView modelEmpty, modelStatus;
+    private ConfigRowAdapter modelAdapter;
+    private EditText modelSearch;
+    private Spinner filterProvider, sortMode;
+    private Button sortDir, modelTestAll, modelMulti;
+    private LinearLayout modelSelBar;
+    private TextView modelSelCount;
+
+    private boolean providerSelection;
+    private boolean modelSelection;
+    private boolean sortAscending = true;
+    private int sortKind = SORT_NAME;
+    private String filterProviderName = "";
+    private String searchText = "";
+    /** 批量测试进行中的标记；置 false 时当前批次的线程会自行退出。 */
+    private final AtomicBoolean testing = new AtomicBoolean(false);
+    private int testBatchTotal;
+    private int testBatchDone;
+    private final Handler ui = new Handler(Looper.getMainLooper());
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_model_config);
+        cfg = ConfigManager.getInstance();
 
-        configManager = ConfigManager.getInstance();
-        providers = configManager.getProviders();
-        models = configManager.getModels();
+        bindViews();
+        wireTabs();
+        wireProviderPanel();
+        wireModelPanel();
 
-        providerList = (ListView) findViewById(R.id.provider_list);
-        modelList = (ListView) findViewById(R.id.model_list);
+        showTab(false);
+        LogUtil.i(TAG, "onCreate: providers=%d models=%d",
+                cfg.getProviders().size(), cfg.getModels().size());
+    }
 
-        refreshProviderList();
-        refreshModelList();
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // 编辑页保存后回来：列表、筛选下拉、模型页的状态都要按新数据重建
+        refreshProviderFilter();
+        reloadProviders();
+        reloadModels();
+    }
 
-        LogUtil.i(TAG, "========== onCreate ========== (%s) providers=%d models=%d",
-                LogUtil.thread(), providers.size(), models.size());
+    @Override
+    protected void onDestroy() {
+        // 页面销毁后批量测试线程若还在跑，回调会因为 isFinishing 被丢掉，
+        // 但仍会白跑一轮网络请求，这里直接叫停。
+        testing.set(false);
+        ui.removeCallbacksAndMessages(null);
+        super.onDestroy();
+    }
 
-        findViewById(R.id.add_provider_btn).setOnClickListener(new View.OnClickListener() {
+    private void bindViews() {
+        findViewById(R.id.mc_back).setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { finish(); }
+        });
+        tabProvider = (Button) findViewById(R.id.mc_tab_provider);
+        tabModel = (Button) findViewById(R.id.mc_tab_model);
+        panelProvider = (LinearLayout) findViewById(R.id.mc_panel_provider);
+        panelModel = (LinearLayout) findViewById(R.id.mc_panel_model);
+
+        providerList = (ListView) findViewById(R.id.mc_provider_list);
+        providerEmpty = (TextView) findViewById(R.id.mc_provider_empty);
+        providerAdapter = new ConfigRowAdapter(this);
+        providerList.setAdapter(providerAdapter);
+        providerSelBar = (LinearLayout) findViewById(R.id.mc_provider_sel_bar);
+        providerSelCount = (TextView) findViewById(R.id.mc_provider_sel_count);
+        providerMulti = (Button) findViewById(R.id.mc_provider_multi);
+
+        modelList = (ListView) findViewById(R.id.mc_model_list);
+        modelEmpty = (TextView) findViewById(R.id.mc_model_empty);
+        modelStatus = (TextView) findViewById(R.id.mc_model_status);
+        modelAdapter = new ConfigRowAdapter(this);
+        modelList.setAdapter(modelAdapter);
+        modelSearch = (EditText) findViewById(R.id.mc_model_search);
+        filterProvider = (Spinner) findViewById(R.id.mc_filter_provider);
+        sortMode = (Spinner) findViewById(R.id.mc_sort_mode);
+        sortDir = (Button) findViewById(R.id.mc_sort_dir);
+        modelTestAll = (Button) findViewById(R.id.mc_model_test_all);
+        modelMulti = (Button) findViewById(R.id.mc_model_multi);
+        modelSelBar = (LinearLayout) findViewById(R.id.mc_model_sel_bar);
+        modelSelCount = (TextView) findViewById(R.id.mc_model_sel_count);
+
+        // 页签按钮自身会按选中态换底色，豁免主题重着色（否则选中态被抹平）
+        tabProvider.setTag(R.id.ac_no_recolor, Boolean.TRUE);
+        tabModel.setTag(R.id.ac_no_recolor, Boolean.TRUE);
+    }
+
+    // ---- 页签 ----
+
+    private void wireTabs() {
+        tabProvider.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { showTab(false); }
+        });
+        tabModel.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { showTab(true); }
+        });
+    }
+
+    private void showTab(boolean model) {
+        modelTab = model;
+        panelProvider.setVisibility(model ? View.GONE : View.VISIBLE);
+        panelModel.setVisibility(model ? View.VISIBLE : View.GONE);
+        int primary = ThemeTokens.get(this, ThemeTokens.AC_PRIMARY);
+        int surface = AppearanceManager.getInstance(this)
+                .getEffectiveColor(ThemeTokens.AC_SURFACE);
+        int text = AppearanceManager.getInstance(this)
+                .getEffectiveColor(ThemeTokens.AC_TEXT);
+        tabProvider.setBackgroundColor(model ? surface : primary);
+        tabProvider.setTextColor(model ? text : 0xFFFFFFFF);
+        tabModel.setBackgroundColor(model ? primary : surface);
+        tabModel.setTextColor(model ? 0xFFFFFFFF : text);
+        // 切换页签时退出另一页的多选：两页的多选条同时亮着会让人不知道删的是哪边
+        if (model) {
+            exitProviderSelection();
+            reloadModels();
+        } else {
+            exitModelSelection();
+            reloadProviders();
+        }
+    }
+
+    @Override
+    public void onBackPressed() {
+        if (providerSelection) { exitProviderSelection(); return; }
+        if (modelSelection) { exitModelSelection(); return; }
+        if (modelTab) { showTab(false); return; }
+        super.onBackPressed();
+    }
+
+    // ================= 提供商 =================
+
+    private void wireProviderPanel() {
+        findViewById(R.id.mc_provider_new).setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { openProviderEditor(null); }
+        });
+        providerMulti.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
-                LogUtil.d(TAG, "click: add provider");
-                showProviderDialog(null);
+                if (providerSelection) {
+                    exitProviderSelection();
+                    return;
+                }
+                if (cfg.getProviders().isEmpty()) {
+                    AcToast.show(ModelConfigActivity.this, "还没有提供商");
+                    return;
+                }
+                providerSelection = true;
+                providerAdapter.setSelectionMode(true);
+                providerMulti.setText("退出多选");
+                updateProviderSelectionBar();
             }
         });
-        findViewById(R.id.add_model_btn).setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) {
-                LogUtil.d(TAG, "click: add model");
-                showModelDialog(null);
-            }
-        });
-
         providerList.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             public void onItemClick(AdapterView<?> p, View v, int pos, long id) {
-                LogUtil.d(TAG, "provider item click: pos=%d", pos);
-                showProviderActionDialog(pos);
+                ConfigRowAdapter.Row r = providerAdapter.rowAt(pos);
+                if (r == null) return;
+                if (providerSelection) {
+                    providerAdapter.toggle(r.key);
+                    updateProviderSelectionBar();
+                } else {
+                    openProviderEditor(r.key);
+                }
+            }
+        });
+        providerList.setOnItemLongClickListener(new AdapterView.OnItemLongClickListener() {
+            public boolean onItemLongClick(AdapterView<?> p, View v, int pos, long id) {
+                ConfigRowAdapter.Row r = providerAdapter.rowAt(pos);
+                if (r == null) return false;
+                if (providerSelection) {
+                    providerAdapter.toggle(r.key);
+                    updateProviderSelectionBar();
+                } else {
+                    showProviderMenu(r.key);
+                }
+                return true;
+            }
+        });
+        findViewById(R.id.mc_provider_sel_all).setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                providerAdapter.checkAll(true);
+                updateProviderSelectionBar();
+            }
+        });
+        findViewById(R.id.mc_provider_sel_invert).setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                providerAdapter.invert();
+                updateProviderSelectionBar();
+            }
+        });
+        findViewById(R.id.mc_provider_sel_delete).setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { confirmBatchDeleteProviders(); }
+        });
+        findViewById(R.id.mc_provider_sel_exit).setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { exitProviderSelection(); }
+        });
+    }
+
+    private void exitProviderSelection() {
+        if (!providerSelection) return;
+        providerSelection = false;
+        providerAdapter.setSelectionMode(false);
+        providerMulti.setText("多选");
+        providerSelBar.setVisibility(View.GONE);
+    }
+
+    private void updateProviderSelectionBar() {
+        providerSelBar.setVisibility(providerSelection ? View.VISIBLE : View.GONE);
+        providerSelCount.setText("已选 " + providerAdapter.checkedKeys().size() + " 个");
+    }
+
+    private void reloadProviders() {
+        if (providerAdapter == null) return;
+        List<ConfigRowAdapter.Row> rows = new ArrayList<ConfigRowAdapter.Row>();
+        String def = defaultProviderOfDefaultModel();
+        for (ProviderInfo p : cfg.getProviders()) {
+            int count = cfg.modelsOf(p.name).size();
+            StringBuilder sub = new StringBuilder();
+            // 显示名与唯一标识不同时，把标识也带上，否则改了显示名就分不清是哪条地址
+            if (!p.label().equals(p.name)) sub.append(p.name).append(" · ");
+            sub.append(Endpoint.chatUrl(p));
+            String keyState = (p.apiKey == null || p.apiKey.trim().length() == 0)
+                    ? "未填 Key" : "Key ✓";
+            sub.append(" · ").append(keyState).append(" · ").append(count).append(" 个模型");
+            String badge = p.name.equals(def) ? "默认" : "";
+            rows.add(new ConfigRowAdapter.Row(p.name, p.label(), sub.toString(), badge));
+        }
+        providerAdapter.setRows(rows);
+        boolean has = !rows.isEmpty();
+        providerEmpty.setVisibility(has ? View.GONE : View.VISIBLE);
+        providerList.setVisibility(has ? View.VISIBLE : View.GONE);
+        updateProviderSelectionBar();
+        LogUtil.d(TAG, "reloadProviders: %d", rows.size());
+    }
+
+    /** 默认模型所属的提供商，列表里标一个「默认」，让人一眼看到当前在用的。 */
+    private String defaultProviderOfDefaultModel() {
+        String dm = cfg.getDefaultModel();
+        if (dm == null || dm.length() == 0) return "";
+        ModelInfo m = cfg.getModel(dm);
+        return m == null || m.provider == null ? "" : m.provider;
+    }
+
+    private void openProviderEditor(String name) {
+        Intent it = new Intent(this, ProviderEditActivity.class);
+        if (name != null) it.putExtra(ProviderEditActivity.EXTRA_PROVIDER, name);
+        startActivityForResult(it, REQ_PROVIDER);
+    }
+
+    private void showProviderMenu(final String name) {
+        final ProviderInfo p = cfg.getProvider(name);
+        if (p == null) return;
+        String[] items = {"编辑", "复制一份", "测试连通性", "新建模型", "删除"};
+        AcDialog.builder(this)
+                .setTitle(p.label())
+                .setItems(items, new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface d, int w) {
+                        if (w == 0) openProviderEditor(name);
+                        else if (w == 1) duplicateProvider(p);
+                        else if (w == 2) testProviderInline(p);
+                        else if (w == 3) openModelEditor(null, name);
+                        else confirmDeleteProviders(Collections.singletonList(name));
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    /**
+     * 复制提供商：名称顺延（{@code name2}），Key 与地址照抄，模型<b>不复制</b>
+     * （模型名是全局唯一键，硬复制必然撞名；用户要的是「再开一个同源账号」）。
+     */
+    private void duplicateProvider(ProviderInfo src) {
+        ProviderInfo cp = src.copy();
+        cp.name = nextProviderName(src.name);
+        cp.displayName = src.label() + " 副本";
+        cfg.getProviders().add(cp);
+        cfg.save();
+        reloadProviders();
+        refreshProviderFilter();
+        AcToast.show(this, "已复制为 " + cp.label());
+        LogUtil.i(TAG, "duplicateProvider: %s -> %s", src.name, cp.name);
+    }
+
+    private String nextProviderName(String base) {
+        String b = base == null || base.length() == 0 ? "provider" : base;
+        for (int n = 2; n < 1000; n++) {
+            String cand = b + n;
+            if (!cfg.isProviderNameTaken(cand, null)) return cand;
+        }
+        return b + System.currentTimeMillis();
+    }
+
+    private void confirmBatchDeleteProviders() {
+        Set<String> keys = new HashSet<String>(providerAdapter.checkedKeys());
+        if (keys.isEmpty()) {
+            AcToast.show(this, "请先勾选提供商");
+            return;
+        }
+        confirmDeleteProviders(new ArrayList<String>(keys));
+    }
+
+    private void confirmDeleteProviders(final List<String> names) {
+        if (names == null || names.isEmpty()) return;
+        final List<String> list = new ArrayList<String>(names);
+        int models = 0;
+        for (String n : list) models += cfg.modelsOf(n).size();
+        StringBuilder sb = new StringBuilder();
+        sb.append(list.size() == 1 ? "确定删除 " : "确定删除选中的 ").append(list.size())
+                .append(" 个提供商？");
+        if (models > 0) sb.append("\n\n其名下的 ").append(models).append(" 个模型会一并删除，无法恢复。");
+        else sb.append("此操作无法恢复。");
+        AcDialog.builder(this)
+                .setTitle("删除提供商")
+                .setMessage(sb.toString())
+                .setPositiveButton("删除", new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface d, int w) {
+                        deleteProviders(list);
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void deleteProviders(List<String> names) {
+        int modelsRemoved = 0;
+        for (String n : names) {
+            ProviderInfo p = cfg.getProvider(n);
+            if (p != null) {
+                cfg.getProviders().remove(p);
+                // 与旧版一致：提供商删掉，挂在它名下的模型就是孤儿，一并清掉
+                for (ModelInfo m : cfg.modelsOf(n)) {
+                    cfg.getModels().remove(m);
+                    modelsRemoved++;
+                }
+            }
+        }
+        fixDefaultModel();
+        cfg.save();
+        exitProviderSelection();
+        reloadProviders();
+        refreshProviderFilter();
+        reloadModels();
+        AcToast.show(this, "已删除 " + names.size() + " 个提供商、"
+                + modelsRemoved + " 个模型");
+        LogUtil.i(TAG, "deleteProviders: %d providers, %d models", names.size(), modelsRemoved);
+    }
+
+    /** 默认模型被删除 / 改名后可能悬空：回退到第一个，没有就清空。 */
+    private void fixDefaultModel() {
+        String cur = cfg.getDefaultModel();
+        if (cur != null && cur.length() > 0 && cfg.getModel(cur) != null) return;
+        List<ModelInfo> all = cfg.getModels();
+        String fallback = all.isEmpty() ? "" : all.get(0).name;
+        LogUtil.i(TAG, "default model '%s' dangling, fallback to '%s'", cur, fallback);
+        cfg.setDefaultModel(fallback);
+    }
+
+    /** 列表上的行内测试：结果弹一个对话框说清楚原因。 */
+    private void testProviderInline(final ProviderInfo p) {
+        AcToast.show(this, "正在测试 " + p.label() + "…");
+        final ProviderInfo snap = p.copy();
+        new Thread(new Runnable() {
+            public void run() {
+                final ProviderTester.Result r = ProviderTester.testProvider(snap);
+                ui.post(new Runnable() {
+                    public void run() {
+                        if (isFinishing()) return;
+                        AcDialog.builder(ModelConfigActivity.this)
+                                .setTitle(snap.label() + (r.ok() ? " · 可用" : " · 不可用"))
+                                .setMessage(r.message)
+                                .setPositiveButton("知道了", null)
+                                .show();
+                    }
+                });
+            }
+        }, "aichat-test-" + snap.name).start();
+    }
+
+    // ================= 模型 =================
+
+    private void wireModelPanel() {
+        findViewById(R.id.mc_model_new).setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { openModelEditor(null, null); }
+        });
+        modelMulti.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                if (modelSelection) {
+                    exitModelSelection();
+                    return;
+                }
+                if (modelAdapter.getCount() == 0) {
+                    AcToast.show(ModelConfigActivity.this, "当前筛选下没有模型");
+                    return;
+                }
+                modelSelection = true;
+                modelAdapter.setSelectionMode(true);
+                modelMulti.setText("退出多选");
+                updateModelSelectionBar();
             }
         });
         modelList.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             public void onItemClick(AdapterView<?> p, View v, int pos, long id) {
-                LogUtil.d(TAG, "model item click: pos=%d", pos);
-                showModelActionDialog(pos);
+                ConfigRowAdapter.Row r = modelAdapter.rowAt(pos);
+                if (r == null) return;
+                if (modelSelection) {
+                    modelAdapter.toggle(r.key);
+                    updateModelSelectionBar();
+                } else {
+                    openModelEditor(r.key, null);
+                }
+            }
+        });
+        modelList.setOnItemLongClickListener(new AdapterView.OnItemLongClickListener() {
+            public boolean onItemLongClick(AdapterView<?> p, View v, int pos, long id) {
+                ConfigRowAdapter.Row r = modelAdapter.rowAt(pos);
+                if (r == null) return false;
+                if (modelSelection) {
+                    modelAdapter.toggle(r.key);
+                    updateModelSelectionBar();
+                } else {
+                    showModelMenu(r.key);
+                }
+                return true;
+            }
+        });
+        modelSearch.addTextChangedListener(new TextWatcher() {
+            public void beforeTextChanged(CharSequence s, int a, int b, int c) { }
+            public void onTextChanged(CharSequence s, int a, int b, int c) { }
+            public void afterTextChanged(Editable s) {
+                searchText = s == null ? "" : s.toString().trim();
+                reloadModels();
+            }
+        });
+        sortMode.setAdapter(simpleAdapter(new String[]{"自定义顺序", "名称", "提供商", "能力"}));
+        sortMode.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            public void onItemSelected(AdapterView<?> p, View v, int pos, long id) {
+                sortKind = pos;
+                reloadModels();
+            }
+            public void onNothingSelected(AdapterView<?> p) { }
+        });
+        sortDir.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                sortAscending = !sortAscending;
+                sortDir.setText(sortAscending ? "↑ 升序" : "↓ 降序");
+                reloadModels();
+            }
+        });
+        modelTestAll.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { startBatchTest(null); }
+        });
+        findViewById(R.id.mc_model_sel_all).setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                modelAdapter.checkAll(true);
+                updateModelSelectionBar();
+            }
+        });
+        findViewById(R.id.mc_model_sel_invert).setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                modelAdapter.invert();
+                updateModelSelectionBar();
+            }
+        });
+        findViewById(R.id.mc_model_sel_test).setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                Set<String> keys = new HashSet<String>(modelAdapter.checkedKeys());
+                if (keys.isEmpty()) {
+                    AcToast.show(ModelConfigActivity.this, "请先勾选模型");
+                    return;
+                }
+                startBatchTest(new ArrayList<String>(keys));
+            }
+        });
+        findViewById(R.id.mc_model_sel_delete).setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { confirmBatchDeleteModels(); }
+        });
+        findViewById(R.id.mc_model_sel_exit).setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { exitModelSelection(); }
+        });
+    }
+
+    private ArrayAdapter<String> simpleAdapter(String[] items) {
+        ArrayAdapter<String> a = new ArrayAdapter<String>(this,
+                android.R.layout.simple_spinner_item, items);
+        a.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        return a;
+    }
+
+    /** 筛选下拉：全部 + 每个提供商（用显示名）。 */
+    private void refreshProviderFilter() {
+        final List<String> names = new ArrayList<String>();
+        names.add("");
+        List<String> labels = new ArrayList<String>();
+        labels.add("全部提供商");
+        for (ProviderInfo p : cfg.getProviders()) {
+            names.add(p.name);
+            labels.add(p.label());
+        }
+        ArrayAdapter<String> a = new ArrayAdapter<String>(this,
+                android.R.layout.simple_spinner_item, labels);
+        a.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        filterProvider.setAdapter(a);
+        int target = 0;
+        for (int i = 0; i < names.size(); i++) {
+            if (names.get(i).equals(filterProviderName)) target = i;
+        }
+        final List<String> keys = names;
+        // 第二个参数 false：重建 adapter 时不要把用户的筛选重置回「全部」
+        filterProvider.setSelection(target, false);
+        filterProvider.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            public void onItemSelected(AdapterView<?> p, View v, int pos, long id) {
+                filterProviderName = pos >= 0 && pos < keys.size() ? keys.get(pos) : "";
+                reloadModels();
+            }
+            public void onNothingSelected(AdapterView<?> p) { }
+        });
+    }
+
+    private void reloadModels() {
+        if (modelAdapter == null) return;
+        List<ModelInfo> src = new ArrayList<ModelInfo>(cfg.getModels());
+        String q = searchText.toLowerCase(Locale.US);
+        List<ModelInfo> kept = new ArrayList<ModelInfo>();
+        for (ModelInfo m : src) {
+            if (filterProviderName != null && filterProviderName.length() > 0
+                    && !filterProviderName.equals(m.provider)) {
+                continue;
+            }
+            if (q.length() > 0) {
+                String hay = (m.label() + " " + m.name + " " + cfg.providerLabel(m.provider)
+                        + " " + (m.provider == null ? "" : m.provider)).toLowerCase(Locale.US);
+                if (hay.indexOf(q) < 0) continue;
+            }
+            kept.add(m);
+        }
+        if (sortKind != SORT_CUSTOM) {
+            Collections.sort(kept, comperator(sortKind, sortAscending));
+        } else if (!sortAscending) {
+            Collections.reverse(kept);
+        }
+
+        String def = cfg.getDefaultModel();
+        List<ConfigRowAdapter.Row> rows = new ArrayList<ConfigRowAdapter.Row>();
+        for (ModelInfo m : kept) {
+            StringBuilder sub = new StringBuilder();
+            sub.append(m.name);
+            sub.append(" · ").append(cfg.providerLabel(m.provider));
+            if (m.supportsVision) sub.append(" · 视觉");
+            if (!m.supportsThinking) sub.append(" · 无思考");
+            String badge;
+            if (m.name.equals(def)) badge = "默认";
+            else if (m.supportsVision) badge = "视觉";
+            else badge = "";
+            rows.add(new ConfigRowAdapter.Row(m.name, m.label(), sub.toString(), badge));
+        }
+        modelAdapter.setRows(rows);
+        boolean has = !rows.isEmpty();
+        modelEmpty.setVisibility(has ? View.GONE : View.VISIBLE);
+        modelEmpty.setText(src.isEmpty() ? "还没有模型。\n点上面的「新建」添加一个。"
+                : "没有符合条件的模型，试试换个筛选条件。");
+        modelList.setVisibility(has ? View.VISIBLE : View.GONE);
+        updateModelSelectionBar();
+        LogUtil.d(TAG, "reloadModels: shown=%d total=%d filter='%s' q='%s' sort=%d/%s",
+                rows.size(), src.size(), filterProviderName, searchText, sortKind,
+                sortAscending ? "asc" : "desc");
+    }
+
+    private Comparator<ModelInfo> comperator(final int mode, final boolean asc) {
+        return new Comparator<ModelInfo>() {
+            public int compare(ModelInfo a, ModelInfo b) {
+                int r;
+                if (mode == SORT_PROVIDER) {
+                    r = cfg.providerLabel(a.provider)
+                            .compareToIgnoreCase(cfg.providerLabel(b.provider));
+                    if (r == 0) r = a.name.compareToIgnoreCase(b.name);
+                } else if (mode == SORT_FEATURE) {
+                    r = featureRank(a) - featureRank(b);
+                    if (r == 0) r = a.name.compareToIgnoreCase(b.name);
+                } else {
+                    r = a.label().compareToIgnoreCase(b.label());
+                    if (r == 0) r = a.name.compareToIgnoreCase(b.name);
+                }
+                return asc ? r : -r;
+            }
+        };
+    }
+
+    /** 能力排序：视觉在前，其次思考，最后按名字。 */
+    private static int featureRank(ModelInfo m) {
+        if (m.supportsVision) return 0;
+        if (m.supportsThinking) return 1;
+        return 2;
+    }
+
+    private void exitModelSelection() {
+        if (!modelSelection) return;
+        modelSelection = false;
+        modelAdapter.setSelectionMode(false);
+        modelMulti.setText("多选");
+        modelSelBar.setVisibility(View.GONE);
+    }
+
+    private void updateModelSelectionBar() {
+        modelSelBar.setVisibility(modelSelection ? View.VISIBLE : View.GONE);
+        modelSelCount.setText("已选 " + modelAdapter.checkedKeys().size() + " 个");
+    }
+
+    private void openModelEditor(String modelName, String presetProvider) {
+        Intent it = new Intent(this, ModelEditActivity.class);
+        if (modelName != null) it.putExtra(ModelEditActivity.EXTRA_MODEL, modelName);
+        if (presetProvider != null) it.putExtra(ModelEditActivity.EXTRA_PROVIDER, presetProvider);
+        startActivityForResult(it, REQ_MODEL);
+    }
+
+    private void showModelMenu(final String name) {
+        final ModelInfo m = cfg.getModel(name);
+        if (m == null) return;
+        String[] items = {"编辑", "测试连通性", "设为默认模型", "复制一份", "删除"};
+        AcDialog.builder(this)
+                .setTitle(m.label())
+                .setItems(items, new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface d, int w) {
+                        if (w == 0) openModelEditor(name, null);
+                        else if (w == 1) testModelInline(m, name);
+                        else if (w == 2) setDefault(name);
+                        else if (w == 3) duplicateModel(m);
+                        else confirmDeleteModels(Collections.singletonList(name));
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    /** 模型名全局唯一，副本顺延成 {@code id2}，显示名加「副本」。 */
+    private void duplicateModel(ModelInfo src) {
+        ModelInfo cp = src.copy();
+        String base = src.name;
+        for (int n = 2; n < 1000; n++) {
+            String cand = base + n;
+            if (!cfg.isModelNameTaken(cand, null)) {
+                cp.name = cand;
+                break;
+            }
+        }
+        cp.displayName = src.label() + " 副本";
+        cfg.getModels().add(cp);
+        cfg.save();
+        reloadModels();
+        AcToast.show(this, "已复制为 " + cp.label());
+    }
+
+    private void setDefault(String name) {
+        cfg.setDefaultModel(name);
+        cfg.save();
+        reloadModels();
+        reloadProviders();
+        AcToast.show(this, "默认模型已设为 " + cfg.modelLabel(name));
+        LogUtil.i(TAG, "setDefault: %s", name);
+    }
+
+    private void confirmBatchDeleteModels() {
+        Set<String> keys = new HashSet<String>(modelAdapter.checkedKeys());
+        if (keys.isEmpty()) {
+            AcToast.show(this, "请先勾选模型");
+            return;
+        }
+        confirmDeleteModels(new ArrayList<String>(keys));
+    }
+
+    private void confirmDeleteModels(final List<String> names) {
+        if (names == null || names.isEmpty()) return;
+        final List<String> list = new ArrayList<String>(names);
+        StringBuilder sb = new StringBuilder();
+        sb.append("确定删除").append(list.size() == 1 ? " " : "选中的 ")
+                .append(list.size()).append(" 个模型？");
+        if (list.contains(cfg.getDefaultModel())) {
+            sb.append("\n\n包含当前默认模型，删除后会自动切换到第一个可用模型。");
+        }
+        AcDialog.builder(this)
+                .setTitle("删除模型")
+                .setMessage(sb.toString())
+                .setPositiveButton("删除", new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface d, int w) {
+                        int n = 0;
+                        for (String name : list) {
+                            ModelInfo m = cfg.getModel(name);
+                            if (m != null) {
+                                cfg.getModels().remove(m);
+                                n++;
+                            }
+                        }
+                        fixDefaultModel();
+                        cfg.save();
+                        exitModelSelection();
+                        reloadModels();
+                        reloadProviders();
+                        AcToast.show(ModelConfigActivity.this, "已删除 " + n + " 个模型");
+                        LogUtil.i(TAG, "deleteModels: %d", n);
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    // ---- 批量测试 ----
+
+    /**
+     * 批量测试连通性：串行、逐个更新徽标。
+     *
+     * <p>串行而不是并发：词典笔是 4.4 的小机器，并发几个 HTTPS 握手会拖慢整机；
+     * 而且限流（429）在并发下会把本来能用的模型也测成失败。
+     *
+     * @param only 只测这些模型名；null 表示测「当前筛选出来的全部」
+     */
+    private void startBatchTest(final List<String> only) {
+        if (testing.get()) {
+            testing.set(false);
+            ui.post(new Runnable() {
+                public void run() {
+                    modelTestAll.setText("全部测试");
+                    modelStatus.setText("已停止（已测 " + testBatchDone + " / " + testBatchTotal + "）");
+                }
+            });
+            return;
+        }
+        final List<String> targets = new ArrayList<String>();
+        if (only != null) {
+            targets.addAll(only);
+        } else {
+            for (int i = 0; i < modelAdapter.getCount(); i++) {
+                ConfigRowAdapter.Row r = modelAdapter.rowAt(i);
+                if (r != null) targets.add(r.key);
+            }
+        }
+        if (targets.isEmpty()) {
+            AcToast.show(this, "没有可测试的模型");
+            return;
+        }
+        testing.set(true);
+        testBatchTotal = targets.size();
+        testBatchDone = 0;
+        modelTestAll.setText("停止测试");
+        modelStatus.setText("测试中 0 / " + testBatchTotal + "…");
+        final AtomicInteger fail = new AtomicInteger(0);
+        final List<String> failures = Collections.synchronizedList(new ArrayList<String>());
+
+        new Thread(new Runnable() {
+            public void run() {
+                for (int i = 0; i < targets.size(); i++) {
+                    if (!testing.get()) break;
+                    final String name = targets.get(i);
+                    final ModelInfo m = cfg.getModel(name);
+                    if (m == null) continue;
+                    final ProviderInfo p = cfg.getProvider(m.provider);
+                    if (p == null) {
+                        reportBadge(name, "无提供商", true);
+                        failures.add(cfg.modelLabel(name) + "：提供商不存在");
+                        fail.incrementAndGet();
+                    } else {
+                        reportBadge(name, "测试中…", false);
+                        final ProviderTester.Result r = ProviderTester.testChat(p, m.name);
+                        reportBadge(name, r.ok() ? "✓ " + r.ms + "ms" : "✗ 失败", !r.ok());
+                        if (!r.ok()) {
+                            fail.incrementAndGet();
+                            failures.add(m.label() + "：" + r.message);
+                        }
+                    }
+                    testBatchDone++;
+                    final int done = testBatchDone;
+                    ui.post(new Runnable() {
+                        public void run() {
+                            if (testing.get()) {
+                                modelStatus.setText("测试中 " + done + " / " + testBatchTotal + "…");
+                            }
+                        }
+                    });
+                }
+                final boolean stopped = !testing.get();
+                testing.set(false);
+                ui.post(new Runnable() {
+                    public void run() {
+                        modelTestAll.setText("全部测试");
+                        if (isFinishing()) return;
+                        modelStatus.setText((stopped ? "已停止" : "测试完成")
+                                + "：共 " + testBatchTotal + " 个，失败 " + fail.get() + " 个");
+                        showTestSummary(failures, fail.get(), stopped);
+                    }
+                });
+            }
+        }, "aichat-batch-test").start();
+        LogUtil.i(TAG, "startBatchTest: %d targets", targets.size());
+    }
+
+    private void reportBadge(final String name, final String text, final boolean error) {
+        ui.post(new Runnable() {
+            public void run() {
+                if (isFinishing()) return;
+                modelAdapter.setBadge(name, text, error);
             }
         });
     }
 
-    private void refreshProviderList() {
-        List<String> items = new ArrayList<String>();
-        for (ProviderInfo p : providers) {
-            items.add(p.name + " | " + p.apiUrl);
+    private void showTestSummary(List<String> failures, int failCount, boolean stopped) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(stopped ? "测试已停止。" : "测试完成。");
+        sb.append("共 ").append(testBatchTotal).append(" 个模型，失败 ")
+                .append(failCount).append(" 个。");
+        List<String> copy;
+        synchronized (failures) {
+            copy = new ArrayList<String>(failures);
         }
-        if (providerAdapter == null) {
-            providerAdapter = new ArrayAdapter<String>(this,
-                    android.R.layout.simple_list_item_1, items);
-            providerList.setAdapter(providerAdapter);
-        } else {
-            providerAdapter.clear();
-            providerAdapter.addAll(items);
-            providerAdapter.notifyDataSetChanged();
+        if (!copy.isEmpty()) {
+            sb.append("\n\n失败明细：\n");
+            int limit = Math.min(copy.size(), 12);
+            for (int i = 0; i < limit; i++) {
+                sb.append("· ").append(copy.get(i)).append("\n");
+            }
+            if (copy.size() > limit) {
+                sb.append("…… 其余 ").append(copy.size() - limit)
+                        .append(" 条请在列表徽标上查看\n");
+            }
+        } else if (!stopped) {
+            sb.append("\n全部可用。");
         }
-        LogUtil.d(TAG, "refreshProviderList: %d providers", providers.size());
+        AcDialog.builder(this)
+                .setTitle("模型连通性")
+                .setMessage(sb.toString())
+                .setPositiveButton("知道了", null)
+                .show();
     }
 
-    private void refreshModelList() {
-        List<String> items = new ArrayList<String>();
-        for (ModelInfo m : models) {
-            items.add(m.name + " | " + m.provider + (m.supportsThinking ? " | 思考" : "")
-                    + (m.supportsVision ? " | 视觉" : ""));
+    // ---- 单项测试（长按菜单） ----
+
+    private void testModelInline(final ModelInfo m, final String name) {
+        final ProviderInfo p = cfg.getProvider(m.provider);
+        if (p == null) {
+            AcToast.show(this, "该模型没有关联的提供商");
+            return;
         }
-        if (modelAdapter == null) {
-            modelAdapter = new ArrayAdapter<String>(this,
-                    android.R.layout.simple_list_item_1, items);
-            modelList.setAdapter(modelAdapter);
-        } else {
-            modelAdapter.clear();
-            modelAdapter.addAll(items);
-            modelAdapter.notifyDataSetChanged();
-        }
-        LogUtil.d(TAG, "refreshModelList: %d models", models.size());
-    }
-
-    // ---- Provider dialogs ----
-
-    private void showProviderActionDialog(final int pos) {
-        String[] items = {"编辑", "删除"};
-        AcDialog.builder(this)
-                .setTitle(providers.get(pos).name)
-                .setItems(items, new DialogInterface.OnClickListener() {
-                    public void onClick(DialogInterface d, int w) {
-                        LogUtil.d(TAG, "provider action: pos=%d which=%d (%s)", pos, w,
-                                w == 0 ? "编辑" : "删除");
-                        if (w == 0) showProviderDialog(pos);
-                        else showDeleteProviderDialog(pos);
+        AcToast.show(this, "正在测试 " + m.label() + "…");
+        new Thread(new Runnable() {
+            public void run() {
+                final ProviderTester.Result r = ProviderTester.testChat(p, m.name);
+                ui.post(new Runnable() {
+                    public void run() {
+                        if (isFinishing()) return;
+                        modelAdapter.setBadge(name, r.ok() ? "✓ " + r.ms + "ms" : "✗ 失败", !r.ok());
+                        AcDialog.builder(ModelConfigActivity.this)
+                                .setTitle(m.label() + (r.ok() ? " · 可用" : " · 不可用"))
+                                .setMessage(r.message)
+                                .setPositiveButton("知道了", null)
+                                .show();
                     }
-                }).setNegativeButton("取消", null).show();
-    }
-
-    private void showProviderDialog(final Integer editPos) {
-        final ProviderInfo p = editPos != null ? providers.get(editPos) : null;
-        final boolean isEdit = p != null;
-        LogUtil.d(TAG, "showProviderDialog: editPos=%s isEdit=%s", editPos, isEdit);
-
-        LinearLayout layout = new LinearLayout(this);
-        layout.setOrientation(LinearLayout.VERTICAL);
-        layout.setPadding(32, 16, 32, 0);
-
-        final EditText nameEt = new EditText(this);
-        nameEt.setHint("提供商名称");
-        if (p != null) nameEt.setText(p.name);
-        layout.addView(nameEt);
-
-        final EditText urlEt = new EditText(this);
-        urlEt.setHint("API URL (如 https://api.example.com)");
-        if (p != null) urlEt.setText(p.apiUrl);
-        layout.addView(urlEt);
-
-        final EditText pathEt = new EditText(this);
-        pathEt.setHint("Chat Path (如 /v1/chat/completions)");
-        if (p != null) pathEt.setText(p.chatPath);
-        layout.addView(pathEt);
-
-        final EditText keyEt = new EditText(this);
-        keyEt.setHint("API Key");
-        if (p != null) keyEt.setText(p.apiKey);
-        layout.addView(keyEt);
-
-        AcDialog.builder(this)
-                .setTitle(isEdit ? "编辑提供商" : "添加提供商")
-                .setView(layout)
-                .setPositiveButton("保存", new DialogInterface.OnClickListener() {
-                    public void onClick(DialogInterface d, int w) {
-                        String name = nameEt.getText().toString().trim();
-                        String url = urlEt.getText().toString().trim();
-                        String path = pathEt.getText().toString().trim();
-                        String key = keyEt.getText().toString().trim();
-                        if (name.isEmpty() || url.isEmpty()) {
-                            LogUtil.w(TAG, "provider save rejected: name='%s' url='%s' (empty)", name, url);
-                            AcToast.show(ModelConfigActivity.this, "名称和URL不能为空");
-                            return;
-                        }
-                        // URL 必须以 http:// 或 https:// 开头（不区分大小写）
-                        String lowerUrl = url.toLowerCase();
-                        if (!lowerUrl.startsWith("http://") && !lowerUrl.startsWith("https://")) {
-                            LogUtil.w(TAG, "provider save rejected: url '%s' must start with http(s)://", url);
-                            AcToast.show(ModelConfigActivity.this, "URL必须以 http:// 或 https:// 开头");
-                            return;
-                        }
-                        // chatPath 非空则必须以 "/" 开头
-                        if (!path.isEmpty() && !path.startsWith("/")) {
-                            LogUtil.w(TAG, "provider save rejected: chatPath '%s' must start with '/'", path);
-                            AcToast.show(ModelConfigActivity.this, "Chat Path必须以 / 开头");
-                            return;
-                        }
-                        // 重名校验：同名 provider 会让 getProvider 的首个匹配产生二义
-                        for (int i = 0; i < providers.size(); i++) {
-                            if ((!isEdit || i != editPos.intValue()) && name.equals(providers.get(i).name)) {
-                                LogUtil.w(TAG, "provider save rejected: duplicate name '%s'", name);
-                                AcToast.show(ModelConfigActivity.this, "该提供商名称已存在");
-                                return;
-                            }
-                        }
-                        ProviderInfo info = isEdit ? p : new ProviderInfo();
-                        // 记录旧名：ModelInfo.provider 以名字引用，改名后必须同步
-                        String oldName = isEdit ? info.name : null;
-                        info.name = name;
-                        info.apiUrl = url;
-                        info.chatPath = path.isEmpty() ? "/chat/completions" : path;
-                        info.apiKey = key;
-                        // 仅在缺省时填默认，保留原 provider 已有的 thinkingType/thinkingParamName
-                        if (info.thinkingType == null || info.thinkingType.isEmpty()) info.thinkingType = "object";
-                        if (info.thinkingParamName == null || info.thinkingParamName.isEmpty()) info.thinkingParamName = "thinking";
-                        if (!isEdit) providers.add(info);
-                        if (isEdit && oldName != null && !oldName.equals(name)) {
-                            // 引用该 provider 的模型仍存旧名，改名后会按名找不到
-                            // provider，变成无法发送的孤儿模型；同步更新引用
-                            for (int i = 0; i < models.size(); i++) {
-                                ModelInfo mi = models.get(i);
-                                if (oldName.equals(mi.provider)) mi.provider = name;
-                            }
-                            configManager.setModels(models);
-                            refreshModelList();
-                            LogUtil.i(TAG, "provider renamed '%s' -> '%s', model refs synced",
-                                    oldName, name);
-                        }
-                        configManager.setProviders(providers);
-                        configManager.save();
-                        refreshProviderList();
-                        LogUtil.i(TAG, "provider saved: name=%s url=%s path=%s keyLen=%d (isEdit=%s), total=%d",
-                                info.name, info.apiUrl, info.chatPath,
-                                info.apiKey == null ? 0 : info.apiKey.length(), isEdit, providers.size());
-                    }
-                }).setNegativeButton("取消", null).show();
-    }
-
-    private void showDeleteProviderDialog(final int pos) {
-        final ProviderInfo p = providers.get(pos);
-        AcDialog.builder(this)
-                .setTitle("删除提供商")
-                .setMessage("确定删除 " + p.name + "？引用该提供商的模型将一并删除。")
-                .setPositiveButton("删除", new DialogInterface.OnClickListener() {
-                    public void onClick(DialogInterface d, int w) {
-                        LogUtil.i(TAG, "provider delete confirmed: pos=%d name=%s", pos, p.name);
-                        providers.remove(pos);
-                        // 同步移除以该 provider 命名的模型，避免留下无法发送的孤儿模型
-                        for (int i = models.size() - 1; i >= 0; i--) {
-                            if (p.name.equals(models.get(i).provider)) models.remove(i);
-                        }
-                        configManager.setProviders(providers);
-                        configManager.setModels(models);
-                        // 默认模型指向已删除 provider 的模型时回退：剩余模型非空→第一个，为空→""
-                        String curDefault = configManager.getDefaultModel();
-                        if (!curDefault.isEmpty()) {
-                            boolean stillExists = false;
-                            for (ModelInfo m : models) {
-                                if (curDefault.equals(m.name)) { stillExists = true; break; }
-                            }
-                            if (!stillExists) {
-                                String fallback = models.isEmpty() ? "" : models.get(0).name;
-                                LogUtil.i(TAG, "default model '%s' removed with provider, fallback to '%s'", curDefault, fallback);
-                                configManager.setDefaultModel(fallback);
-                            }
-                        }
-                        configManager.save();
-                        refreshProviderList();
-                        refreshModelList();
-                        LogUtil.d(TAG, "provider deleted: remaining providers=%d models=%d",
-                                providers.size(), models.size());
-                    }
-                }).setNegativeButton("取消", null).show();
-    }
-
-    // ---- Model dialogs ----
-
-    private void showModelActionDialog(final int pos) {
-        String[] items = {"编辑", "删除"};
-        AcDialog.builder(this)
-                .setTitle(models.get(pos).name)
-                .setItems(items, new DialogInterface.OnClickListener() {
-                    public void onClick(DialogInterface d, int w) {
-                        LogUtil.d(TAG, "model action: pos=%d which=%d (%s)", pos, w,
-                                w == 0 ? "编辑" : "删除");
-                        if (w == 0) showModelDialog(pos);
-                        else showDeleteModelDialog(pos);
-                    }
-                }).setNegativeButton("取消", null).show();
-    }
-
-    private void showModelDialog(final Integer editPos) {
-        final ModelInfo m = editPos != null ? models.get(editPos) : null;
-        final boolean isEdit = m != null;
-        LogUtil.d(TAG, "showModelDialog: editPos=%s isEdit=%s", editPos, isEdit);
-
-        LinearLayout layout = new LinearLayout(this);
-        layout.setOrientation(LinearLayout.VERTICAL);
-        layout.setPadding(32, 16, 32, 0);
-
-        final EditText nameEt = new EditText(this);
-        nameEt.setHint("模型名称 (如 deepseek-v4-flash)");
-        if (m != null) nameEt.setText(m.name);
-        layout.addView(nameEt);
-
-        // Provider dropdown as EditText for simplicity
-        final EditText provEt = new EditText(this);
-        provEt.setHint("提供商名称 (如 DeepSeek)");
-        if (m != null) provEt.setText(m.provider);
-        layout.addView(provEt);
-
-        // 多模态开关：勾上才会把图片以 image_url 形式放进请求体。
-        // 不勾时图片附件只写一行「本次为纯文本请求」，避免端点因不认 content 数组直接 400。
-        final CheckBox visionCb = new CheckBox(this);
-        visionCb.setText("支持图片输入（多模态）");
-        visionCb.setChecked(m != null && m.supportsVision);
-        layout.addView(visionCb);
-
-        TextView visionTip = new TextView(this);
-        visionTip.setText("开启后：附加的图片（原图口径）与图片搜索结果（最多 2 张、压缩后约 184 token/张）"
-                + "会随请求发给模型。DeepSeek Flash 系列默认已开。"
-                + "请确认该模型确实支持 image_url 格式，否则请求会失败。");
-        visionTip.setTextSize(11);
-        visionTip.setTextColor(0xFF888888);
-        visionTip.setPadding(0, 0, 0, 8);
-        layout.addView(visionTip);
-
-        AcDialog.builder(this)
-                .setTitle(isEdit ? "编辑模型" : "添加模型")
-                .setView(layout)
-                .setPositiveButton("保存", new DialogInterface.OnClickListener() {
-                    public void onClick(DialogInterface d, int w) {
-                        String name = nameEt.getText().toString().trim();
-                        String prov = provEt.getText().toString().trim();
-                        if (name.isEmpty() || prov.isEmpty()) {
-                            LogUtil.w(TAG, "model save rejected: name='%s' provider='%s' (empty)", name, prov);
-                            AcToast.show(ModelConfigActivity.this, "名称和提供商不能为空");
-                            return;
-                        }
-                        // 提供商必须已存在，否则该模型按名永远解析不到 provider
-                        if (configManager.getProvider(prov) == null) {
-                            LogUtil.w(TAG, "model save rejected: provider '%s' not found", prov);
-                            AcToast.show(ModelConfigActivity.this, "提供商不存在: " + prov);
-                            return;
-                        }
-                        // 模型名是全局唯一 key：ConfigManager.getModel(name) 只返回第一个，
-                        // 重名时实际请求可能用的是另一条的 provider/apiKey/supportsVision，
-                        // 表现成静默 401 或图片不生效。与 provider 的重名校验保持一致。
-                        for (int i = 0; i < models.size(); i++) {
-                            ModelInfo o = models.get(i);
-                            if (o != m && name.equals(o.name)) {
-                                LogUtil.w(TAG, "model save rejected: duplicate name '%s'", name);
-                                AcToast.show(ModelConfigActivity.this, "模型名已存在: " + name);
-                                return;
-                            }
-                        }
-                        ModelInfo info = isEdit ? m : new ModelInfo();
-                        // 记录旧名：默认模型按模型名引用，改名后要同步，否则选中态丢失
-                        String oldName = isEdit ? info.name : null;
-                        info.name = name;
-                        info.provider = prov;
-                        // 编辑时保留原有能力位：这里原来硬编码 true，改个名字就把
-                        // 用户关掉的思考开关又打开了
-                        if (!isEdit) info.supportsThinking = true;
-                        info.supportsVision = visionCb.isChecked();
-                        if (!isEdit) models.add(info);
-                        configManager.setModels(models);
-                        if (isEdit && oldName != null && !oldName.equals(name)
-                                && oldName.equals(configManager.getDefaultModel())) {
-                            configManager.setDefaultModel(name);
-                            LogUtil.i(TAG, "default model renamed: '%s' -> '%s'", oldName, name);
-                        }
-                        configManager.save();
-                        refreshModelList();
-                        LogUtil.i(TAG, "model saved: name=%s provider=%s (isEdit=%s), total=%d",
-                                info.name, info.provider, isEdit, models.size());
-                    }
-                }).setNegativeButton("取消", null).show();
-    }
-
-    private void showDeleteModelDialog(final int pos) {
-        final ModelInfo m = models.get(pos);
-        AcDialog.builder(this)
-                .setTitle("删除模型")
-                .setMessage("确定删除 " + m.name + "？")
-                .setPositiveButton("删除", new DialogInterface.OnClickListener() {
-                    public void onClick(DialogInterface d, int w) {
-                        LogUtil.i(TAG, "model delete confirmed: pos=%d name=%s provider=%s", pos, m.name, m.provider);
-                        models.remove(pos);
-                        // 默认模型被删时回退，避免指向不存在的模型（与删除 provider 一致）
-                        if (m.name.equals(configManager.getDefaultModel())) {
-                            String fallback = models.isEmpty() ? "" : models.get(0).name;
-                            configManager.setDefaultModel(fallback);
-                            LogUtil.i(TAG, "default model '%s' deleted, fallback to '%s'", m.name, fallback);
-                        }
-                        configManager.setModels(models);
-                        configManager.save();
-                        refreshModelList();
-                        LogUtil.d(TAG, "model deleted: remaining=%d", models.size());
-                    }
-                }).setNegativeButton("取消", null).show();
+                });
+            }
+        }, "aichat-test-model").start();
     }
 }

@@ -48,7 +48,7 @@ public class ApiClient {
                 LogUtil.v(TAG, "callWithError body(%d): %s", payload.length(),
                         LogUtil.preview(payload, 1200));
             }
-            result = doRequestWithError(provider.apiUrl + provider.chatPath, provider.apiKey, body, 20000);
+            result = doRequestWithError(Endpoint.chatUrl(provider), provider.apiKey, body, 20000);
         } catch (Exception e) {
             LogUtil.e(TAG, "callWithError build/request exception: " + e.getMessage(), e);
             result.error = e.getMessage();
@@ -67,7 +67,7 @@ public class ApiClient {
     public static String queryBalance(ProviderInfo provider) {
         HttpURLConnection conn = null;
         long startTs = System.currentTimeMillis();
-        String balanceUrl = provider.apiUrl + "/user/balance";
+        String balanceUrl = Endpoint.join(provider.apiUrl, "/user/balance");
         LogUtil.i(TAG, "queryBalance -> %s (%s)", balanceUrl, LogUtil.thread());
         try {
             URL url = new URL(balanceUrl);

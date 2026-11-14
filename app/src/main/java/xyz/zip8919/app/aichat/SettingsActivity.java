@@ -131,8 +131,12 @@ public class SettingsActivity extends ThemedActivity {
     /** 后台扫描进行中，避免反复进出设置页叠起多个线程。 */
     private boolean storageScanning;
     private Button managePresetsButton, savePresetButton;
-    private AlertDialog manageDialog;
-    private List<String[]> presetList; // [name, prompt]
+    private List<PresetStore.Preset> presetList;
+    /** 最近一次应用 / 保存的预设名，用来让下拉框停在对应项上。 */
+    private String appliedPresetName = "";
+    /** 系统提示词草稿：预设页的「保存当前提示词」读它，省掉「先保存设置」这一步。 */
+    public static final String KEY_SYSTEM_PROMPT_DRAFT = "system_prompt_draft";
+    private static final int REQ_PRESET_MANAGER = 2001;
     private int titleModelMissingPos = -1; // saved 模型不存在时 spinner 停放的位置，-1 表示无此情况
     private boolean titleModelUserPicked;  // 用户是否手动动过标题模型 spinner（尚未保存）
     private String titleModelSignature;    // 上次构建 adapter 时的模型列表快照，用于判断是否需要重建
@@ -266,16 +270,21 @@ public class SettingsActivity extends ThemedActivity {
             }
         });
         managePresetsButton.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) { LogUtil.d(TAG, "click: manage presets"); showManagePresetsDialog(); }
+            public void onClick(View v) { LogUtil.d(TAG, "click: manage presets -> PresetManagerActivity"); openPresetManager(); }
         });
         savePresetButton.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) { LogUtil.d(TAG, "click: save as preset"); saveCurrentAsPreset(); }
+            public void onClick(View v) {
+                LogUtil.d(TAG, "click: save as preset");
+                promptSavePreset(systemPromptEdit.getText().toString());
+            }
         });
         presetSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             public void onItemSelected(AdapterView<?> parent, View view, int pos, long id) {
-                if (pos > 0 && pos - 1 < presetList.size()) {
-                    LogUtil.d(TAG, "preset selected: pos=%d name=%s", pos, presetList.get(pos - 1)[0]);
-                    systemPromptEdit.setText(presetList.get(pos - 1)[1]);
+                if (pos > 0 && presetList != null && pos - 1 < presetList.size()) {
+                    PresetStore.Preset p = presetList.get(pos - 1);
+                    LogUtil.d(TAG, "preset selected: pos=%d name=%s", pos, p.name);
+                    appliedPresetName = p.name;
+                    systemPromptEdit.setText(p.prompt == null ? "" : p.prompt);
                 }
             }
             public void onNothingSelected(AdapterView<?> parent) {}
@@ -472,7 +481,10 @@ public class SettingsActivity extends ThemedActivity {
 
         StringBuilder sig = new StringBuilder();
         for (int i = 0; i < models.size(); i++) {
-            sig.append(models.get(i).name).append("::").append(models.get(i).provider).append(";");
+            // 签名要带上显示名：只改别名时列表也要重建，否则下拉里还是旧名字
+            sig.append(models.get(i).name).append("::").append(models.get(i).provider)
+                    .append("::").append(models.get(i).label())
+                    .append("::").append(cm.providerLabel(models.get(i).provider)).append(";");
         }
         String signature = sig.toString();
         if (signature.equals(titleModelSignature)) {
@@ -485,7 +497,7 @@ public class SettingsActivity extends ThemedActivity {
 
         List<String> names = new ArrayList<String>();
         for (ModelInfo m : models) {
-            names.add(m.name + " (" + m.provider + ")");
+            names.add(m.label() + " (" + cm.providerLabel(m.provider) + ")");
         }
         ArrayAdapter<String> adapter = new ArrayAdapter<String>(this,
                 android.R.layout.simple_spinner_item, names);
@@ -727,7 +739,7 @@ public class SettingsActivity extends ThemedActivity {
                             LogUtil.i(TAG, "queryBalance OK: %s", sb.toString().replace("\n", " | "));
 
                             AcDialog.builder(SettingsActivity.this)
-                                    .setTitle(dsProvider.name + " 余额")
+                                    .setTitle(dsProvider.label() + " 余额")
                                     .setMessage(sb.toString())
                                     .setPositiveButton("确定", null)
                                     .show();
@@ -751,6 +763,11 @@ public class SettingsActivity extends ThemedActivity {
     protected void onResume() {
         super.onResume();
         LogUtil.d(TAG, "onResume");
+        // 草稿落盘：预设页的「保存当前提示词」要拿到设置页里还没保存的内容
+        if (systemPromptEdit != null) {
+            prefs.edit().putString(KEY_SYSTEM_PROMPT_DRAFT,
+                    systemPromptEdit.getText().toString()).apply();
+        }
         refreshTitleModelSpinner();
         refreshStorageEntry();
         refreshAppearanceEntry();
@@ -1026,232 +1043,126 @@ public class SettingsActivity extends ThemedActivity {
 
     // ---- Presets ----
 
-    private void loadPresets() {
-        presetList = new ArrayList<>();
-        try {
-            String json = prefs.getString(KEY_PRESETS, "[]");
-            org.json.JSONArray arr = new org.json.JSONArray(json);
-            for (int i = 0; i < arr.length(); i++) {
-                org.json.JSONObject obj = arr.getJSONObject(i);
-                presetList.add(new String[]{obj.getString("name"), obj.getString("prompt")});
-            }
-            LogUtil.d(TAG, "loadPresets: %d presets", presetList.size());
-        } catch (Exception e) {
-            LogUtil.e(TAG, "loadPresets parse failed: " + e.getMessage(), e);
-            presetList = new ArrayList<>();
-        }
-    }
-
-    private void savePresets() {
-        try {
-            org.json.JSONArray arr = new org.json.JSONArray();
-            for (String[] p : presetList) {
-                org.json.JSONObject obj = new org.json.JSONObject();
-                obj.put("name", p[0]);
-                obj.put("prompt", p[1]);
-                arr.put(obj);
-            }
-            prefs.edit().putString(KEY_PRESETS, arr.toString()).apply();
-            LogUtil.d(TAG, "savePresets: %d presets saved", presetList.size());
-        } catch (Exception e) {
-            LogUtil.e(TAG, "savePresets failed: " + e.getMessage(), e);
-        }
-    }
-
+    /**
+     * 预设下拉框 + 两个按钮（一行放不下：258dp 屏上「预设 + 下拉 + 两个按钮」会全部被省略号吃掉）。
+     *
+     * <p>下拉只负责「看一眼现在有哪几套」，真正的管理（预览 / 应用 / 修改 / 删除）在
+     * {@link PresetManagerActivity}：弹窗版的管理列表既没法展示完整提示词，
+     * 也没法和列表滚动配合。
+     */
     private void refreshPresetSpinner() {
-        loadPresets();
-        List<String> names = new ArrayList<>();
+        presetList = PresetStore.load(this);
+        List<String> names = new ArrayList<String>();
         names.add("(不选择)");
-        for (String[] p : presetList) names.add(p[0]);
-        ArrayAdapter<String> adapter = new ArrayAdapter<>(this,
+        for (PresetStore.Preset p : presetList) names.add(p.name);
+        ArrayAdapter<String> adapter = new ArrayAdapter<String>(this,
                 android.R.layout.simple_spinner_item, names);
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         presetSpinner.setAdapter(adapter);
-        presetSpinner.setSelection(0);
+        // 直接 setSelection 会触发 onItemSelected，把提示词输入框改成预设内容 ——
+        // 从预设页返回、刚应用了另一套提示词时看起来没变，但从 onResume 重建时会
+        // 把用户正在编辑的草稿覆盖掉。只在用户真正点选下拉时才回填。
+        presetSpinner.setSelection(presetIndexByName(appliedPresetName), false);
         LogUtil.d(TAG, "refreshPresetSpinner: %d presets", presetList.size());
     }
 
-    private void saveCurrentAsPreset() {
-        final String prompt = systemPromptEdit.getText().toString().trim();
-        if (prompt.isEmpty()) {
-            LogUtil.w(TAG, "saveCurrentAsPreset aborted: prompt empty");
+    private int presetIndexByName(String name) {
+        if (name == null || name.length() == 0 || presetList == null) return 0;
+        for (int i = 0; i < presetList.size(); i++) {
+            if (name.equals(presetList.get(i).name)) return i + 1;
+        }
+        return 0;
+    }
+
+    /**
+     * 预填名称的保存框（「保存当前」与预设页的「新建」共用同一套规则）。
+     *
+     * <p>名称默认「新预设」、重名自动顺延成「新预设2」…，用户几乎不用打字；
+     * 想改名的仍然可以改，所以不做成「静默保存」。
+     */
+    private void promptSavePreset(final String presetPrompt) {
+        final String prompt = presetPrompt == null ? "" : presetPrompt.trim();
+        if (prompt.length() == 0) {
+            LogUtil.w(TAG, "promptSavePreset aborted: prompt empty");
             AcToast.show(this, "系统提示词为空");
             return;
         }
-        LogUtil.d(TAG, "saveCurrentAsPreset: promptLen=%d", prompt.length());
+        List<PresetStore.Preset> list = PresetStore.load(this);
+        if (list.size() >= PresetStore.MAX_PRESETS) {
+            AcToast.show(this, "最多" + PresetStore.MAX_PRESETS + "个预设");
+            return;
+        }
         final EditText input = new EditText(this);
         input.setHint("预设名称");
         input.setSingleLine(true);
-        AcDialog.builder(this)
+        input.setText(PresetStore.nextName(list, "新预设"));
+        input.setSelection(input.getText().length());
+
+        final android.app.AlertDialog dlg = AcDialog.builder(this)
                 .setTitle("保存为预设")
+                .setMessage("将保存当前系统提示词（" + prompt.length() + " 字）")
                 .setView(input)
-                .setPositiveButton("保存", new DialogInterface.OnClickListener() {
-                    public void onClick(DialogInterface d, int w) {
-                        String name = input.getText().toString().trim();
-                        if (name.isEmpty()) {
-                            LogUtil.w(TAG, "saveCurrentAsPreset aborted: name empty");
-                            AcToast.show(SettingsActivity.this, "名称不能为空");
-                            return;
-                        }
-                        for (String[] p : presetList) {
-                            if (p[0].equals(name)) {
-                                LogUtil.w(TAG, "saveCurrentAsPreset aborted: duplicate name '%s'", name);
-                                AcToast.show(SettingsActivity.this, "名称已存在");
-                                return;
-                            }
-                        }
-                        if (presetList.size() >= 20) {
-                            LogUtil.w(TAG, "saveCurrentAsPreset aborted: limit reached (%d)", presetList.size());
-                            AcToast.show(SettingsActivity.this, "最多20个预设");
-                            return;
-                        }
-                        LogUtil.i(TAG, "saveCurrentAsPreset: adding '%s'", name);
-                        presetList.add(new String[]{name, prompt});
-                        savePresets();
-                        refreshPresetSpinner();
-                        AcToast.show(SettingsActivity.this, "已保存");
-                    }
-                })
+                .setPositiveButton("保存", null)
                 .setNegativeButton("取消", null)
-                .show();
-    }
-
-    private void showManagePresetsDialog() {
-        if (presetList.isEmpty()) {
-            LogUtil.d(TAG, "showManagePresetsDialog: no presets");
-            AcToast.show(this, "暂无预设");
-            return;
-        }
-        LogUtil.d(TAG, "showManagePresetsDialog: %d presets", presetList.size());
-        final String[] names = new String[presetList.size()];
-        for (int i = 0; i < presetList.size(); i++)
-            names[i] = presetList.get(i)[0] + "  — " + (presetList.get(i)[1].length() > 15
-                ? TextKit.cut(presetList.get(i)[1], 15) + "..." : presetList.get(i)[1]);
-        AlertDialog.Builder builder = AcDialog.builder(this);
-        builder.setTitle("管理预设（点击选择，长按编辑/删除）");
-        android.widget.ListView lv = new android.widget.ListView(this);
-        lv.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_list_item_1, names));
-        lv.setOnItemClickListener(new AdapterView.OnItemClickListener() {
-            public void onItemClick(AdapterView<?> p, View v, int pos, long id) {
-                LogUtil.d(TAG, "preset clicked: pos=%d name=%s", pos, presetList.get(pos)[0]);
-                presetSpinner.setSelection(pos + 1);
-                systemPromptEdit.setText(presetList.get(pos)[1]);
-                if (manageDialog != null) manageDialog.dismiss();
-                AcToast.show(SettingsActivity.this, "已选择: " + presetList.get(pos)[0]);
-            }
-        });
-        lv.setOnItemLongClickListener(new AdapterView.OnItemLongClickListener() {
-            public boolean onItemLongClick(AdapterView<?> p, View v, final int pos, long id) {
-                AcDialog.builder(SettingsActivity.this)
-                        .setTitle(presetList.get(pos)[0])
-                        .setItems(new String[]{"修改", "删除"}, new DialogInterface.OnClickListener() {
-                            public void onClick(DialogInterface d, int w) {
-                                if (w == 0) {
-                                    LogUtil.d(TAG, "preset long-press action: edit pos=%d", pos);
-                                    if (manageDialog != null) manageDialog.dismiss();
-                                    showEditPresetDialog(pos);
-                                } else {
-                                    LogUtil.i(TAG, "preset long-press action: delete pos=%d name=%s", pos, presetList.get(pos)[0]);
-                                    presetList.remove(pos);
-                                    savePresets();
-                                    refreshPresetSpinner();
-                                    if (manageDialog != null) manageDialog.dismiss();
-                                    if (!presetList.isEmpty()) showManagePresetsDialog();
-                                    AcToast.show(SettingsActivity.this, "已删除");
-                                }
-                            }
-                        }).show();
-                return true;
-            }
-        });
-        builder.setView(lv);
-        builder.setPositiveButton("新建", new DialogInterface.OnClickListener() {
-            public void onClick(DialogInterface d, int w) {
-                if (manageDialog != null) manageDialog.dismiss();
-                showEditPresetDialog(-1);
-            }
-        });
-        builder.setNegativeButton("关闭", null);
-        manageDialog = builder.show();
-    }
-
-    private void showEditPresetDialog(final int pos) {
-        final boolean isNew = pos < 0;
-        LogUtil.d(TAG, "showEditPresetDialog: pos=%d isNew=%s", pos, isNew);
-        final String oldName = isNew ? "" : presetList.get(pos)[0];
-        final String oldPrompt = isNew ? "" : presetList.get(pos)[1];
-
-        LinearLayout layout = new LinearLayout(this);
-        layout.setOrientation(LinearLayout.VERTICAL);
-        layout.setPadding(16, 16, 16, 16);
-
-        final EditText nameEdit = new EditText(this);
-        nameEdit.setHint("预设名称");
-        nameEdit.setSingleLine(true);
-        if (!isNew) nameEdit.setText(oldName);
-        layout.addView(nameEdit);
-
-        final EditText promptEdit = new EditText(this);
-        promptEdit.setHint("提示词内容");
-        promptEdit.setMinLines(3);
-        promptEdit.setMaxLines(6);
-        promptEdit.setGravity(android.view.Gravity.TOP);
-        promptEdit.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE);
-        if (!isNew) promptEdit.setText(oldPrompt);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        lp.topMargin = 8;
-        promptEdit.setLayoutParams(lp);
-        layout.addView(promptEdit);
-
-        AcDialog.builder(this)
-                .setTitle(isNew ? "新建预设" : "修改预设")
-                .setView(layout)
-                .setPositiveButton("保存", new DialogInterface.OnClickListener() {
-                    public void onClick(DialogInterface d, int w) {
-                        String name = nameEdit.getText().toString().trim();
-                        String prompt = promptEdit.getText().toString().trim();
-                        if (name.isEmpty() || prompt.isEmpty()) {
-                            LogUtil.w(TAG, "editPreset aborted: empty name or prompt");
-                            AcToast.show(SettingsActivity.this, "名称和提示词不能为空");
-                            return;
-                        }
-                        if (isNew) {
-                            for (String[] p : presetList) {
-                                if (p[0].equals(name)) {
-                                    LogUtil.w(TAG, "editPreset aborted: duplicate name '%s'", name);
-                                    AcToast.show(SettingsActivity.this, "名称已存在");
+                .create();
+        AcDialog.onShow(dlg, new android.content.DialogInterface.OnShowListener() {
+            public void onShow(android.content.DialogInterface dialog) {
+                ((android.app.AlertDialog) dialog)
+                        .getButton(android.app.AlertDialog.BUTTON_POSITIVE)
+                        .setOnClickListener(new View.OnClickListener() {
+                            public void onClick(View v) {
+                                String name = input.getText().toString().trim();
+                                if (name.length() == 0) {
+                                    AcToast.show(SettingsActivity.this, "名称不能为空");
                                     return;
                                 }
-                            }
-                            if (presetList.size() >= 20) {
-                                LogUtil.w(TAG, "editPreset aborted: limit reached (%d)", presetList.size());
-                                AcToast.show(SettingsActivity.this, "最多20个预设");
-                                return;
-                            }
-                            LogUtil.i(TAG, "editPreset: create '%s' (%d chars)", name, prompt.length());
-                            presetList.add(new String[]{name, prompt});
-                        } else {
-                            if (!name.equals(oldName)) {
-                                for (String[] p : presetList) {
-                                    if (p[0].equals(name)) {
-                                        LogUtil.w(TAG, "editPreset aborted: duplicate name '%s'", name);
-                                        AcToast.show(SettingsActivity.this, "名称已存在");
-                                        return;
-                                    }
+                                List<PresetStore.Preset> cur = PresetStore.load(SettingsActivity.this);
+                                if (PresetStore.contains(cur, name, null)) {
+                                    AcToast.show(SettingsActivity.this, "名称已存在：" + name);
+                                    return;
                                 }
+                                if (cur.size() >= PresetStore.MAX_PRESETS) {
+                                    AcToast.show(SettingsActivity.this,
+                                            "最多" + PresetStore.MAX_PRESETS + "个预设");
+                                    return;
+                                }
+                                cur.add(new PresetStore.Preset(name, prompt));
+                                if (!PresetStore.save(SettingsActivity.this, cur)) {
+                                    AcToast.show(SettingsActivity.this, "保存失败");
+                                    return;
+                                }
+                                LogUtil.i(TAG, "savePreset: '%s' (%d chars), total=%d",
+                                        name, prompt.length(), cur.size());
+                                appliedPresetName = name;
+                                refreshPresetSpinner();
+                                dlg.dismiss();
+                                AcToast.show(SettingsActivity.this, "已保存：" + name);
                             }
-                            LogUtil.i(TAG, "editPreset: update pos=%d '%s' -> '%s'", pos, oldName, name);
-                            presetList.get(pos)[0] = name;
-                            presetList.get(pos)[1] = prompt;
-                        }
-                        savePresets();
-                        refreshPresetSpinner();
-                        showManagePresetsDialog();
-                        AcToast.show(SettingsActivity.this, "已保存");
-                    }
-                })
-                .setNegativeButton("取消", null)
-                .show();
+                        });
+            }
+        });
+        dlg.show();
+    }
+
+    /** 打开预设管理页；应用某个预设后回填输入框。 */
+    private void openPresetManager() {
+        Intent it = new Intent(this, PresetManagerActivity.class);
+        startActivityForResult(it, REQ_PRESET_MANAGER);
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQ_PRESET_MANAGER && resultCode == RESULT_OK && data != null) {
+            String prompt = data.getStringExtra(PresetManagerActivity.EXTRA_APPLY_PROMPT);
+            String name = data.getStringExtra(PresetManagerActivity.EXTRA_APPLY_NAME);
+            if (prompt != null) {
+                appliedPresetName = name;
+                systemPromptEdit.setText(prompt);
+                refreshPresetSpinner();
+                LogUtil.i(TAG, "preset applied from manager: '%s' (%d chars)",
+                        name, prompt.length());
+            }
+        }
     }
 }

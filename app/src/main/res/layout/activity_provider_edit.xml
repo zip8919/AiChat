@@ -1,0 +1,251 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 提供商编辑页。两行地址栏（Base URL / Chat Path）+ 下方常驻的「最终请求地址」预览，
+     再往下是页内模型列表（可一键添加）与底部保存。 -->
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/background"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:orientation="vertical"
+        android:paddingLeft="16dp"
+        android:paddingRight="16dp"
+        android:paddingTop="8dp"
+        android:paddingBottom="24dp"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
+
+        <LinearLayout
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content">
+            <TextView
+                android:id="@+id/pe_back"
+                android:textSize="14sp"
+                android:textColor="@color/primary"
+                android:paddingTop="10dp"
+                android:paddingBottom="10dp"
+                android:paddingRight="10dp"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="‹ 返回" />
+            <TextView
+                android:id="@+id/pe_title"
+                android:textSize="17sp"
+                android:textStyle="bold"
+                android:textColor="@color/text_primary"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:text="新建提供商" />
+        </LinearLayout>
+
+        <!-- 名称 -->
+        <TextView
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:textColor="@color/text_primary"
+            android:layout_marginTop="8dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="名称（唯一标识）" />
+        <EditText
+            android:id="@+id/pe_name"
+            android:textSize="14sp"
+            android:singleLine="true"
+            android:background="@drawable/edit_text_background"
+            android:padding="10dp"
+            android:hint="填写 Base URL 后自动提取，如 example"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+        <TextView
+            android:id="@+id/pe_name_tip"
+            android:textSize="11sp"
+            android:textColor="@color/text_secondary"
+            android:layout_marginBottom="8dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="模型按此名称引用提供商；改名会同步更新已有模型。" />
+
+        <TextView
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:textColor="@color/text_primary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="显示名称（可选）" />
+        <EditText
+            android:id="@+id/pe_display_name"
+            android:textSize="14sp"
+            android:singleLine="true"
+            android:background="@drawable/edit_text_background"
+            android:padding="10dp"
+            android:hint="界面里显示的名字，留空则显示上面的名称"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <TextView
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:textColor="@color/text_primary"
+            android:layout_marginTop="10dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="API Base URL" />
+        <EditText
+            android:id="@+id/pe_base_url"
+            android:textSize="14sp"
+            android:singleLine="true"
+            android:inputType="textUri"
+            android:background="@drawable/edit_text_background"
+            android:padding="10dp"
+            android:hint="https://api.example.com/v1"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <TextView
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:textColor="@color/text_primary"
+            android:layout_marginTop="10dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Chat Path" />
+        <EditText
+            android:id="@+id/pe_chat_path"
+            android:textSize="14sp"
+            android:singleLine="true"
+            android:inputType="text"
+            android:background="@drawable/edit_text_background"
+            android:padding="10dp"
+            android:hint="/chat/completions"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <!-- 最终地址：两行地址栏下方常驻，实时更新 -->
+        <TextView
+            android:id="@+id/pe_final_url"
+            android:textSize="12sp"
+            android:textColor="@color/primary"
+            android:textIsSelectable="true"
+            android:paddingLeft="2dp"
+            android:paddingTop="6dp"
+            android:paddingRight="2dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="最终请求地址：—" />
+
+        <TextView
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:textColor="@color/text_primary"
+            android:layout_marginTop="10dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="API Key" />
+        <EditText
+            android:id="@+id/pe_api_key"
+            android:textSize="14sp"
+            android:singleLine="true"
+            android:inputType="textPassword"
+            android:background="@drawable/edit_text_background"
+            android:padding="10dp"
+            android:hint="sk-…"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <Button
+            android:id="@+id/pe_test"
+            android:textSize="13sp"
+            android:layout_marginTop="10dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="测试连通性" />
+        <TextView
+            android:id="@+id/pe_test_result"
+            android:textSize="12sp"
+            android:textColor="@color/text_secondary"
+            android:textIsSelectable="true"
+            android:paddingTop="4dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="" />
+
+        <!-- 页内模型管理 -->
+        <LinearLayout
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginTop="14dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content">
+            <TextView
+                android:id="@+id/pe_models_title"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:textColor="@color/text_primary"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:text="该提供商的模型（0）" />
+            <Button
+                android:id="@+id/pe_fetch_models"
+                android:textSize="12sp"
+                android:minWidth="0dp"
+                android:paddingLeft="8dp"
+                android:paddingRight="8dp"
+                android:layout_width="wrap_content"
+                android:layout_height="36dp"
+                android:text="获取模型列表" />
+            <Button
+                android:id="@+id/pe_add_model"
+                android:textSize="12sp"
+                android:minWidth="0dp"
+                android:paddingLeft="8dp"
+                android:paddingRight="8dp"
+                android:layout_marginLeft="4dp"
+                android:layout_width="wrap_content"
+                android:layout_height="36dp"
+                android:text="新建模型" />
+        </LinearLayout>
+        <TextView
+            android:id="@+id/pe_models_hint"
+            android:textSize="11sp"
+            android:textColor="@color/text_secondary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="点击模型可编辑，长按删除。新建的提供商先保存后才能添加模型。" />
+        <LinearLayout
+            android:id="@+id/pe_models_box"
+            android:orientation="vertical"
+            android:layout_marginTop="4dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <LinearLayout
+            android:orientation="horizontal"
+            android:layout_marginTop="10dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content">
+            <Button
+                android:id="@+id/pe_delete"
+                android:textSize="13sp"
+                android:minWidth="0dp"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:visibility="gone"
+                android:text="删除提供商" />
+            <Button
+                android:id="@+id/pe_save"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:minWidth="0dp"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:text="保存" />
+        </LinearLayout>
+    </LinearLayout>
+</ScrollView>

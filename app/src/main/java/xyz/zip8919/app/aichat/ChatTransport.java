@@ -148,8 +148,11 @@ final class ChatTransport {
 
     /** @param beta 走官方前缀续写端点，仅 {@link #isOfficialDeepSeek} 为真时传 true。 */
     static HttpURLConnection open(ProviderInfo provider, boolean beta) throws Exception {
-        String endpoint = (beta ? betaBase(provider.apiUrl) : provider.apiUrl)
-                + provider.chatPath;
+        // 走 Endpoint 统一拼接：老配置里 apiUrl 与 chatPath 常常各带一个斜杠，
+        // 裸拼会发出 //chat/completions，部分网关直接 404。
+        String endpoint = (beta
+                ? Endpoint.join(betaBase(provider.apiUrl), provider.chatPath)
+                : Endpoint.chatUrl(provider));
         LogUtil.d(TAG, "open: %s%s", endpoint, beta ? " (beta prefix)" : "");
         HttpURLConnection conn = (HttpURLConnection) new URL(endpoint).openConnection();
         conn.setRequestMethod("POST");

@@ -46,6 +46,13 @@
 | `ViewerController` | 图片 / 表格 / HTML·SVG 全屏预览；附件文件查看（源码高亮 + 预览/运行） | 不持有会话状态 |
 | `FullscreenInputActivity` | 全屏输入编辑，完成后回填主输入框 | 不做草稿持久化（主输入框是唯一数据源） |
 | `AboutActivity` | 版本展示、检查更新、反馈、开源许可 | 不发起版本网络请求（功能待开发） |
+| `PresetStore` | 提示词预设的存取（`aichat_settings` / `system_presets`），上限 20 条、重名自动编号 | 不碰 UI，不认识 SettingsActivity |
+| `PresetManagerActivity` | 预设管理页：单击/长按都是「预览 → 应用 / 修改 / 取消」 | 不直接改主界面输入框（一律用 `EXTRA_APPLY_*` 回传） |
+| `ConfigRowAdapter` | 提供商 / 模型列表的通用行适配器，按 key 记勾选、单行刷徽标 | 不做筛选排序，不落盘 |
+| `ProviderEditActivity` | 提供商编辑：名称自动提取、Chat Path 归一化、最终地址实时预览、连通性测试、拉取远端模型 | 不在页内直接写配置（统一走 `ConfigManager.save*` 并同步模型引用） |
+| `ModelEditActivity` | 模型编辑：提供商下拉、模型 ID / 显示名、视觉与思考开关、连通性测试 | 不判断模型能力（能力来自 `ModelInfo` 字段） |
+| `Endpoint` | 地址拼装纯函数：`join` / `chatUrl` / `modelsUrl` / `modelsUrlCandidates` / `deriveName` / `tidyChatPath` | 不发请求，不读配置 |
+| `ProviderTester` | 连通性探测（`/models` 零 token → 降级 `max_tokens=8` 最小对话）+ 远端模型列表解析 + 错误归类 | 不写 UI，不改配置 |
 | `MessageQueue` | 排队发送（每条带原话与附件快照） | 不知道消息内容怎么发 |
 | `AttachmentText` | 附件 → 给模型的正文、卡片摘要、老会话迁移；大小与 token 估算（图片走 `ImageTokens`） | 不读文件，不碰 UI |
 | `AttachmentFiles` | 图片：拷进私有目录（内容 SHA-1 命名）、URL/拍照导入、缩略图、API/view 两级 data URI | 不做文本解码 |
@@ -100,6 +107,10 @@
 | `http_request` 工具的能力与安全边界 | `HttpRequestTool`（默认关闭，设置页开关） |
 | 代码执行器提示词、占位符 | `SettingsActivity.getJsEnvPrompt` + `SystemInfo.fillPlaceholders` |
 | 系统 / 标题提示词、占位符 | `SettingsActivity.getSystemPrompt` / `getTitlePrompt`（都在主线程调用，`{ua}` 首次取值要初始化 WebView） |
+| 提示词预设的增删改与应用 | `PresetManagerActivity` + `PresetStore`；设置页只负责「保存当前为预设」与跳转 |
+| 请求地址怎么拼、Base URL / Chat Path 斜杠怎么归一 | `Endpoint`（`chatUrl` / `join` / `tidyChatPath`），页面里不要自己拼 |
+| 提供商 / 模型的显示名（别名） | `ProviderInfo.displayName` / `ModelInfo.displayName` + `ConfigManager.providerLabel` / `modelLabel`（`name` 永远是唯一标识，显示名只影响界面） |
+| 连通性测试与失败原因 | `ProviderTester.testProvider` / `testChat`，失败文案由 `describe` / `networkError` 给出 |
 | 首启引导文案与顺序 | `HelpText` + `MainActivity.showFirstLaunchDialog` + `KEY_FIRST_LAUNCH_DONE` |
 | 附件怎么进提示词 | `AttachmentText.toApi`（由 `apiTextOf` 调用）→ `ChatHistory.apiContentOf` |
 | 多模态请求体（图片进 content 数组） | `ChatHistory.buildConversation`（`visionEnabled` 时装配 `image_url` 块）+ `ModelInfo.supportsVision` |

@@ -287,7 +287,8 @@ final class ChatStreamRunner {
                         toolsEnabled ? toolDefs : null, includeUsage, sendThinking);
                 // 统计口径：一次 open 就是一次 HTTP 请求（含工具轮、含重试）。
                 // 重试另有 retries 计数，方便区分「请求多」是工具轮还是 429。
-                UsageStats.get().onRequest(job.modelName, job.providerName);
+                // 统计按「界面上的名字」记：用户看报表时要能对上模型下拉里的那一项
+                UsageStats.get().onRequest(modelLabelOf(job.modelName), providerLabelOf(job.providerName));
                 final long roundStartMs = System.currentTimeMillis();
                 conn = ChatTransport.open(job.provider,
                         job.isContinue() && job.cont.officialPrefix);
@@ -413,7 +414,7 @@ final class ChatStreamRunner {
                 final int dCt = st.completionTokens - ctBefore;
                 final int dHit = st.cachedTokens - hitBefore;
                 final long roundMs = System.currentTimeMillis() - roundStartMs;
-                UsageStats.get().onUsage(job.modelName, job.providerName,
+                UsageStats.get().onUsage(modelLabelOf(job.modelName), providerLabelOf(job.providerName),
                         dPt, dCt, dHit, roundMs, false);
                 // 逐轮明细：光看累计值对不上账单（3 轮工具调用的回复，用户不知道
                 // 多出来的 token 花在哪一轮）。有真实 usage 才记，估算的轮次由宿主补。
@@ -795,6 +796,29 @@ final class ChatStreamRunner {
                     errorDetail, trace.toString(), toolHistory.toString(), apiText, content,
                     promptTokens, completionTokens, totalTokens, cachedTokens, finishedAt,
                     partialStart);
+        }
+    }
+
+    /**
+     * 统计口径的显示名：模型 ID → 显示名，提供商标识 → 显示名。
+     *
+     * <p>查不到就原样返回。统计是旁路，不能因为配置里少了条目就抛异常。
+     */
+    private static String modelLabelOf(String id) {
+        if (id == null || id.length() == 0) return "";
+        try {
+            return ConfigManager.getInstance().modelLabel(id);
+        } catch (Throwable t) {
+            return id;
+        }
+    }
+
+    private static String providerLabelOf(String id) {
+        if (id == null || id.length() == 0) return "";
+        try {
+            return ConfigManager.getInstance().providerLabel(id);
+        } catch (Throwable t) {
+            return id;
         }
     }
 

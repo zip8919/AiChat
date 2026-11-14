@@ -26,6 +26,12 @@
         </activity>
 
         <activity
+            android:label="提示词预设"
+            android:name="xyz.zip8919.app.aichat.PresetManagerActivity"
+            android:exported="false"
+            android:configChanges="screenSize|orientation|keyboardHidden"/>
+
+        <activity
             android:label="设置"
             android:name="xyz.zip8919.app.aichat.SettingsActivity"
             android:exported="false"
@@ -45,9 +51,23 @@
             android:configChanges="screenSize|orientation|keyboardHidden"/>
 
         <activity
-            android:label="模型配置"
+            android:label="管理模型"
             android:name="xyz.zip8919.app.aichat.ModelConfigActivity"
             android:exported="false"
+            android:configChanges="screenSize|orientation|keyboardHidden"/>
+
+        <activity
+            android:label="提供商"
+            android:name="xyz.zip8919.app.aichat.ProviderEditActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize"
+            android:configChanges="screenSize|orientation|keyboardHidden"/>
+
+        <activity
+            android:label="模型"
+            android:name="xyz.zip8919.app.aichat.ModelEditActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize"
             android:configChanges="screenSize|orientation|keyboardHidden"/>
 
         <activity

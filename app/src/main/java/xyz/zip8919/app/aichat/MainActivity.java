@@ -1498,7 +1498,8 @@ public class MainActivity extends ThemedActivity {
         availableModels = configManager.getModels();
         List<String> names = new ArrayList<String>();
         for (ModelInfo m : availableModels) {
-            names.add(m.name + " (" + m.provider + ")");
+            // 日志用显示名：排查时看到的就是用户界面上的名字，对得上号
+            names.add(m.label() + " (" + configManager.providerLabel(m.provider) + ")");
         }
         // 每一项两行：第一行模型名（16/14/12sp 降级 + 中间省略），第二行服务商（固定 10sp）。
         // 服务商必须常显：deepseek-flash 在 DeepSeek 与商汤各有一份，只显示名字分不清。
@@ -1745,7 +1746,8 @@ public class MainActivity extends ThemedActivity {
                                         Math.max(0, System.currentTimeMillis() - lastMsg.timestamp),
                                         true));
                                 lastMsg.requestCount = Math.max(1, lastMsg.requestCount + 1);
-                                UsageStats.get().onUsage(currentModel, currentProviderName(),
+                                UsageStats.get().onUsage(configManager.modelLabel(currentModel),
+                        currentProviderName(),
                                         estPt, estCt, 0,
                                         Math.max(0, System.currentTimeMillis() - lastMsg.timestamp),
                                         true);
@@ -1778,7 +1780,7 @@ public class MainActivity extends ThemedActivity {
             int pos = modelSpinner == null ? -1 : modelSpinner.getSelectedItemPosition();
             if (pos < 0 || availableModels == null || pos >= availableModels.size()) return "";
             ProviderInfo p = configManager.getProvider(availableModels.get(pos).provider);
-            return p == null || p.name == null ? "" : p.name;
+            return p == null ? "" : p.label();
         } catch (Exception e) {
             return "";
         }
@@ -2620,8 +2622,8 @@ public class MainActivity extends ThemedActivity {
         });
 
         setRequestInProgress(true);
-        LogUtil.i(TAG, ">>> request START: gen=%d url=%s%s model=%s thinking=%s webSearch=%s backend=%s",
-                generation, provider.apiUrl, provider.chatPath, currentModel, thinkingLevel,
+        LogUtil.i(TAG, ">>> request START: gen=%d url=%s model=%s thinking=%s webSearch=%s backend=%s",
+                generation, Endpoint.chatUrl(provider), currentModel, thinkingLevel,
                 webSearchEnabled, useTavily ? "tavily" : "deepseek");
 
         StreamJob job = StreamJob.builder()
@@ -2636,7 +2638,7 @@ public class MainActivity extends ThemedActivity {
                 .systemPrompt(systemPrompt)
                 .effectiveSystemPrompt(effectiveSystemPrompt)
                 .providerName(provider.name)
-                .chatEndpoint(provider.apiUrl + provider.chatPath)
+                .chatEndpoint(Endpoint.chatUrl(provider))
                 .streamEnabled(streamEnabled)
                 .includeUsage(includeUsage)
                 .realtimeRender(SettingsActivity.isRealtimeRenderEnabled(this))

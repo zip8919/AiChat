@@ -1,68 +1,391 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<!-- 管理模型：顶部固定分段（提供商 / 模型），内容在段下方各自滚动。
+     与「小工具」页同一套结构：外层不能套整页 ScrollView，否则段控件会被一起滚走。 -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:orientation="vertical"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/background"
-    android:padding="16dp">
+    android:background="@color/background">
 
     <LinearLayout
-        android:orientation="vertical"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingLeft="8dp"
+        android:paddingRight="8dp"
+        android:paddingTop="8dp"
         android:layout_width="match_parent"
         android:layout_height="wrap_content">
 
-        <!-- Providers -->
         <TextView
-            android:textSize="16sp"
+            android:id="@+id/mc_back"
+            android:textSize="14sp"
+            android:textColor="@color/primary"
+            android:padding="10dp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="‹ 返回" />
+
+        <TextView
+            android:textSize="17sp"
             android:textStyle="bold"
             android:textColor="@color/text_primary"
-            android:layout_width="match_parent"
+            android:gravity="center"
+            android:layout_width="0dp"
+            android:layout_weight="1"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="8dp"
-            android:text="API 提供商管理"/>
-
-        <ListView
-            android:id="@+id/provider_list"
-            android:background="@drawable/edit_text_background"
-            android:layout_width="match_parent"
-            android:layout_height="160dp"
-            android:layout_marginBottom="8dp"
-            android:divider="@color/gray"
-            android:dividerHeight="1dp"/>
-
-        <Button
-            android:textSize="14sp"
-            android:id="@+id/add_provider_btn"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="24dp"
-            android:text="添加提供商"/>
-
-        <!-- Models -->
-        <TextView
-            android:textSize="16sp"
-            android:textStyle="bold"
-            android:textColor="@color/text_primary"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="8dp"
-            android:text="模型管理"/>
-
-        <ListView
-            android:id="@+id/model_list"
-            android:background="@drawable/edit_text_background"
-            android:layout_width="match_parent"
-            android:layout_height="160dp"
-            android:layout_marginBottom="8dp"
-            android:divider="@color/gray"
-            android:dividerHeight="1dp"/>
-
-        <Button
-            android:textSize="14sp"
-            android:id="@+id/add_model_btn"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="24dp"
-            android:text="添加模型"/>
-
+            android:text="管理模型" />
     </LinearLayout>
-</ScrollView>
+
+    <LinearLayout
+        android:orientation="horizontal"
+        android:paddingLeft="12dp"
+        android:paddingRight="12dp"
+        android:paddingBottom="6dp"
+        android:layout_width="match_parent"
+        android:layout_height="44dp">
+
+        <Button
+            android:id="@+id/mc_tab_provider"
+            android:textSize="13sp"
+            android:minWidth="0dp"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="36dp"
+            android:text="提供商" />
+
+        <Button
+            android:id="@+id/mc_tab_model"
+            android:textSize="13sp"
+            android:minWidth="0dp"
+            android:layout_marginLeft="6dp"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="36dp"
+            android:text="模型" />
+    </LinearLayout>
+
+    <!-- ================= 提供商页 ================= -->
+    <LinearLayout
+        android:id="@+id/mc_panel_provider"
+        android:orientation="vertical"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+        <LinearLayout
+            android:orientation="horizontal"
+            android:paddingLeft="12dp"
+            android:paddingRight="12dp"
+            android:paddingBottom="4dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content">
+            <Button
+                android:id="@+id/mc_provider_new"
+                android:textSize="12sp"
+                android:minWidth="0dp"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:text="新建" />
+            <Button
+                android:id="@+id/mc_provider_multi"
+                android:textSize="12sp"
+                android:minWidth="0dp"
+                android:layout_marginLeft="6dp"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:text="多选" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/mc_provider_hint"
+            android:textSize="11sp"
+            android:textColor="@color/text_secondary"
+            android:paddingLeft="14dp"
+            android:paddingRight="14dp"
+            android:paddingBottom="4dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="点击进入编辑，长按查看更多操作。" />
+
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1">
+            <ListView
+                android:id="@+id/mc_provider_list"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:divider="@null"
+                android:paddingLeft="12dp"
+                android:paddingRight="12dp"
+                android:clipToPadding="false" />
+            <TextView
+                android:id="@+id/mc_provider_empty"
+                android:textSize="13sp"
+                android:textColor="@color/text_secondary"
+                android:gravity="center"
+                android:padding="32dp"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:visibility="gone"
+                android:text="还没有提供商。\n点上面的「新建」添加一个。" />
+        </FrameLayout>
+
+        <!-- 多选操作条：只在多选态出现，固定底部不随列表滚动 -->
+        <LinearLayout
+            android:id="@+id/mc_provider_sel_bar"
+            android:orientation="vertical"
+            android:paddingLeft="12dp"
+            android:paddingRight="12dp"
+            android:paddingTop="4dp"
+            android:paddingBottom="8dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:visibility="gone">
+            <TextView
+                android:id="@+id/mc_provider_sel_count"
+                android:textSize="12sp"
+                android:textColor="@color/text_secondary"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="已选 0" />
+            <LinearLayout
+                android:orientation="horizontal"
+                android:layout_marginTop="2dp"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content">
+                <Button
+                    android:id="@+id/mc_provider_sel_all"
+                    android:textSize="12sp"
+                    android:minWidth="0dp"
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    android:text="全选" />
+                <Button
+                    android:id="@+id/mc_provider_sel_invert"
+                    android:textSize="12sp"
+                    android:minWidth="0dp"
+                    android:layout_marginLeft="6dp"
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    android:text="反选" />
+                <Button
+                    android:id="@+id/mc_provider_sel_delete"
+                    android:textSize="12sp"
+                    android:minWidth="0dp"
+                    android:layout_marginLeft="6dp"
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    android:text="删除" />
+                <Button
+                    android:id="@+id/mc_provider_sel_exit"
+                    android:textSize="12sp"
+                    android:minWidth="0dp"
+                    android:layout_marginLeft="6dp"
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    android:text="退出" />
+            </LinearLayout>
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- ================= 模型页 ================= -->
+    <LinearLayout
+        android:id="@+id/mc_panel_model"
+        android:orientation="vertical"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:orientation="horizontal"
+            android:paddingLeft="12dp"
+            android:paddingRight="12dp"
+            android:paddingBottom="4dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content">
+            <Button
+                android:id="@+id/mc_model_new"
+                android:textSize="12sp"
+                android:minWidth="0dp"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:text="新建" />
+            <Button
+                android:id="@+id/mc_model_test_all"
+                android:textSize="12sp"
+                android:minWidth="0dp"
+                android:layout_marginLeft="6dp"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:text="全部测试" />
+            <Button
+                android:id="@+id/mc_model_multi"
+                android:textSize="12sp"
+                android:minWidth="0dp"
+                android:layout_marginLeft="6dp"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:text="多选" />
+        </LinearLayout>
+
+        <EditText
+            android:id="@+id/mc_model_search"
+            android:textSize="13sp"
+            android:singleLine="true"
+            android:background="@drawable/edit_text_background"
+            android:padding="8dp"
+            android:hint="按显示名、模型 ID 或提供商筛选"
+            android:layout_marginLeft="12dp"
+            android:layout_marginRight="12dp"
+            android:layout_marginBottom="4dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <!-- 筛选与排序：横向可滚，窄屏不换行挤成两行 -->
+        <HorizontalScrollView
+            android:scrollbars="none"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingLeft="12dp"
+            android:paddingRight="12dp">
+            <LinearLayout
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content">
+                <Spinner
+                    android:id="@+id/mc_filter_provider"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content" />
+                <Spinner
+                    android:id="@+id/mc_sort_mode"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginLeft="6dp" />
+                <Button
+                    android:id="@+id/mc_sort_dir"
+                    android:textSize="12sp"
+                    android:minWidth="0dp"
+                    android:layout_marginLeft="4dp"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:text="↑ 升序" />
+            </LinearLayout>
+        </HorizontalScrollView>
+
+        <TextView
+            android:id="@+id/mc_model_status"
+            android:textSize="11sp"
+            android:textColor="@color/text_secondary"
+            android:paddingLeft="14dp"
+            android:paddingRight="14dp"
+            android:paddingTop="2dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="" />
+
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1">
+            <ListView
+                android:id="@+id/mc_model_list"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:divider="@null"
+                android:paddingLeft="12dp"
+                android:paddingRight="12dp"
+                android:clipToPadding="false" />
+            <TextView
+                android:id="@+id/mc_model_empty"
+                android:textSize="13sp"
+                android:textColor="@color/text_secondary"
+                android:gravity="center"
+                android:padding="32dp"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:visibility="gone"
+                android:text="没有符合条件的模型。" />
+        </FrameLayout>
+
+        <LinearLayout
+            android:id="@+id/mc_model_sel_bar"
+            android:orientation="vertical"
+            android:paddingLeft="12dp"
+            android:paddingRight="12dp"
+            android:paddingTop="4dp"
+            android:paddingBottom="8dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:visibility="gone">
+            <TextView
+                android:id="@+id/mc_model_sel_count"
+                android:textSize="12sp"
+                android:textColor="@color/text_secondary"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="已选 0" />
+            <LinearLayout
+                android:orientation="horizontal"
+                android:layout_marginTop="2dp"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content">
+                <Button
+                    android:id="@+id/mc_model_sel_all"
+                    android:textSize="12sp"
+                    android:minWidth="0dp"
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    android:text="全选" />
+                <Button
+                    android:id="@+id/mc_model_sel_invert"
+                    android:textSize="12sp"
+                    android:minWidth="0dp"
+                    android:layout_marginLeft="6dp"
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    android:text="反选" />
+                <Button
+                    android:id="@+id/mc_model_sel_test"
+                    android:textSize="12sp"
+                    android:minWidth="0dp"
+                    android:layout_marginLeft="6dp"
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    android:text="测试" />
+                <Button
+                    android:id="@+id/mc_model_sel_delete"
+                    android:textSize="12sp"
+                    android:minWidth="0dp"
+                    android:layout_marginLeft="6dp"
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    android:text="删除" />
+                <Button
+                    android:id="@+id/mc_model_sel_exit"
+                    android:textSize="12sp"
+                    android:minWidth="0dp"
+                    android:layout_marginLeft="6dp"
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    android:text="退出" />
+            </LinearLayout>
+        </LinearLayout>
+    </LinearLayout>
+</LinearLayout>

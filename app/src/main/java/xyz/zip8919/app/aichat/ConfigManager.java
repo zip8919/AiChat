@@ -186,6 +186,7 @@ public class ConfigManager {
         for (ProviderInfo p : providers) {
             JSONObject pj = new JSONObject();
             pj.put("name", p.name);
+            pj.put("display_name", p.displayName == null ? "" : p.displayName);
             pj.put("api_key", p.apiKey);
             pj.put("api_url", p.apiUrl);
             pj.put("chat_path", p.chatPath);
@@ -200,6 +201,7 @@ public class ConfigManager {
         for (ModelInfo m : models) {
             JSONObject mj = new JSONObject();
             mj.put("name", m.name);
+            mj.put("display_name", m.displayName == null ? "" : m.displayName);
             mj.put("provider", m.provider);
             mj.put("supports_thinking", m.supportsThinking);
             mj.put("supports_vision", m.supportsVision);
@@ -224,6 +226,8 @@ public class ConfigManager {
             JSONObject pj = provArr.getJSONObject(i);
             ProviderInfo p = new ProviderInfo();
             p.name = pj.getString("name");
+            // 老配置没有这个字段：语义就是「不显示别名」，界面回退到名字，零迁移成本
+            p.displayName = pj.optString("display_name", "");
             p.apiKey = pj.optString("api_key", "");
             p.apiUrl = pj.getString("api_url");
             p.chatPath = pj.optString("chat_path", "/chat/completions");
@@ -238,6 +242,7 @@ public class ConfigManager {
             JSONObject mj = modelArr.getJSONObject(i);
             ModelInfo m = new ModelInfo();
             m.name = mj.getString("name");
+            m.displayName = mj.optString("display_name", "");
             m.provider = mj.getString("provider");
             m.supportsThinking = mj.optBoolean("supports_thinking", true);
             // 没有这个字段的更老配置：默认 false，行为与 1.9.0 一致（不发图）
@@ -273,6 +278,44 @@ public class ConfigManager {
         return null;
     }
 
+    /** 显示名（无别名时回退唯一标识）。找不到返回空串，绝不给 null 让调用方 NPE。 */
+    public String providerLabel(String name) {
+        ProviderInfo p = getProvider(name);
+        return p == null ? (name == null ? "" : name) : p.label();
+    }
+
+    /**
+     * 检查某个唯一标识是否已被占用（可用于编辑器即时提示）。
+     *
+     * @param self 编辑态传当前提供商对象，新建传 null；自己不算重名
+     */
+    public boolean isProviderNameTaken(String name, ProviderInfo self) {
+        if (name == null || name.length() == 0) return false;
+        for (ProviderInfo p : providers) {
+            if (p == self) continue;
+            if (name.equals(p.name)) return true;
+        }
+        return false;
+    }
+
+    public boolean isModelNameTaken(String name, ModelInfo self) {
+        if (name == null || name.length() == 0) return false;
+        for (ModelInfo m : models) {
+            if (m == self) continue;
+            if (name.equals(m.name)) return true;
+        }
+        return false;
+    }
+
+    /** 该提供商名下的模型（顺序与配置一致）。 */
+    public List<ModelInfo> modelsOf(String providerName) {
+        List<ModelInfo> out = new ArrayList<ModelInfo>();
+        for (ModelInfo m : models) {
+            if (m.provider != null && m.provider.equals(providerName)) out.add(m);
+        }
+        return out;
+    }
+
     public List<ModelInfo> getModels() { return models; }
 
     public ModelInfo getModel(String name) {
@@ -281,6 +324,12 @@ public class ConfigManager {
         }
         LogUtil.w(TAG, "getModel('%s') -> null", name);
         return null;
+    }
+
+    /** 模型显示名（无别名时回退模型 ID），查不到原样返回。 */
+    public String modelLabel(String name) {
+        ModelInfo m = getModel(name);
+        return m == null ? (name == null ? "" : name) : m.label();
     }
 
     public String getDefaultModel() { return defaultModel; }

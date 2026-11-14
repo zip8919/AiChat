@@ -1,0 +1,164 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 模型编辑页：提供商下拉 + 模型 ID + 显示名 + 能力开关 + 连通性测试 -->
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/background"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:orientation="vertical"
+        android:paddingLeft="16dp"
+        android:paddingRight="16dp"
+        android:paddingTop="8dp"
+        android:paddingBottom="24dp"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
+
+        <LinearLayout
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content">
+            <TextView
+                android:id="@+id/me_back"
+                android:textSize="14sp"
+                android:textColor="@color/primary"
+                android:paddingTop="10dp"
+                android:paddingBottom="10dp"
+                android:paddingRight="10dp"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="‹ 返回" />
+            <TextView
+                android:id="@+id/me_title"
+                android:textSize="17sp"
+                android:textStyle="bold"
+                android:textColor="@color/text_primary"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:text="新建模型" />
+        </LinearLayout>
+
+        <TextView
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:textColor="@color/text_primary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="提供商" />
+        <Spinner
+            android:id="@+id/me_provider"
+            android:layout_marginTop="2dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+        <TextView
+            android:id="@+id/me_provider_info"
+            android:textSize="11sp"
+            android:textColor="@color/text_secondary"
+            android:layout_marginBottom="8dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="" />
+
+        <TextView
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:textColor="@color/text_primary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="模型 ID（请求时发给 API 的名称）" />
+        <EditText
+            android:id="@+id/me_name"
+            android:textSize="14sp"
+            android:singleLine="true"
+            android:inputType="text"
+            android:background="@drawable/edit_text_background"
+            android:padding="10dp"
+            android:hint="如 deepseek-v4-flash"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <TextView
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:textColor="@color/text_primary"
+            android:layout_marginTop="10dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="显示名称（可选）" />
+        <EditText
+            android:id="@+id/me_display_name"
+            android:textSize="14sp"
+            android:singleLine="true"
+            android:inputType="text"
+            android:background="@drawable/edit_text_background"
+            android:padding="10dp"
+            android:hint="界面里显示的名字，留空则显示模型 ID"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <CheckBox
+            android:id="@+id/me_vision"
+            android:layout_marginTop="10dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="支持图片输入（多模态）" />
+        <TextView
+            android:textSize="11sp"
+            android:textColor="@color/text_secondary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="开启后：附加的图片（原图口径）与图片搜索结果（最多 2 张、压缩后约 184 token/张）会随请求发给模型。请确认该模型确实支持 image_url 格式，否则请求会失败。" />
+
+        <CheckBox
+            android:id="@+id/me_thinking"
+            android:layout_marginTop="6dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="支持思考模式开关" />
+
+        <Button
+            android:id="@+id/me_test"
+            android:textSize="13sp"
+            android:layout_marginTop="12dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="测试连通性" />
+        <TextView
+            android:id="@+id/me_test_result"
+            android:textSize="12sp"
+            android:textColor="@color/text_secondary"
+            android:textIsSelectable="true"
+            android:paddingTop="4dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="" />
+
+        <LinearLayout
+            android:orientation="horizontal"
+            android:layout_marginTop="14dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content">
+            <Button
+                android:id="@+id/me_delete"
+                android:textSize="13sp"
+                android:minWidth="0dp"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:visibility="gone"
+                android:text="删除模型" />
+            <Button
+                android:id="@+id/me_save"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:minWidth="0dp"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:text="保存" />
+        </LinearLayout>
+    </LinearLayout>
+</ScrollView>

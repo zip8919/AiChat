@@ -57,7 +57,8 @@ class ModelSpinnerAdapter extends BaseAdapter {
         TextView nameTv = (TextView) v.findViewById(R.id.model_item_text);
         TextView providerTv = (TextView) v.findViewById(R.id.model_item_provider);
         ModelInfo m = models.get(position);
-        String name = (m == null || m.name == null) ? "" : m.name;
+        // 显示名优先：请求里发的是 m.name，但界面上应该看到用户自己起的名字
+        String name = (m == null) ? "" : m.label();
 
         bindProvider(providerTv, m);
         // 模型名本身也要跟主题：深色下 layout 的 @color/text_primary 是黑字。
@@ -101,7 +102,7 @@ class ModelSpinnerAdapter extends BaseAdapter {
 
         nameTv.setTextSize(15f);
         nameTv.setSingleLine(true);
-        nameTv.setText((m == null || m.name == null) ? "" : m.name);
+        nameTv.setText(m == null ? "" : m.label());
         nameTv.setEllipsize(android.text.TextUtils.TruncateAt.MIDDLE);
         bindProvider(providerTv, m);
         // 模型名本身也要跟主题：深色下 layout 的 @color/text_primary 是黑字。
@@ -112,7 +113,13 @@ class ModelSpinnerAdapter extends BaseAdapter {
 
     private static void bindProvider(TextView tv, ModelInfo m) {
         boolean missing = (m == null || m.provider == null || m.provider.trim().isEmpty());
-        tv.setText(missing ? "未指定服务商" : m.provider);
+        // 显示名优先，用户改过别名后这里也要跟着变
+        String label = "";
+        if (!missing) {
+            ProviderInfo p = ConfigManager.getInstance().getProvider(m.provider);
+            label = p == null ? m.provider : p.label();
+        }
+        tv.setText(missing ? "未指定服务商" : label);
         // 写死 #888888 在深色底上几乎融进背景，必须跟着主题走。
         // 颜色仍是内置默认时保持原值，零回归。
         AppearanceManager am = AppearanceManager.getInstance(tv.getContext());
