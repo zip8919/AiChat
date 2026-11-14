@@ -506,11 +506,20 @@ public class SettingsActivity extends ThemedActivity {
 
         String saved = prefs.getString(KEY_TITLE_MODEL, DEFAULT_TITLE_MODEL);
         LogUtil.d(TAG, "refreshTitleModelSpinner: %d models, saved=%s", models.size(), saved);
+        // 优先按唯一键匹配（同名不同厂商的两条要分得开），再退回按模型 ID 匹配老配置
+        for (int i = 0; i < models.size(); i++) {
+            if (models.get(i).key().equals(saved)) {
+                titleModelSpinner.setSelection(i);
+                titleModelMissingPos = -1;
+                LogUtil.d(TAG, "refreshTitleModelSpinner: selected pos=%d (by key)", i);
+                return;
+            }
+        }
         for (int i = 0; i < models.size(); i++) {
             if (models.get(i).name.equals(saved)) {
                 titleModelSpinner.setSelection(i);
                 titleModelMissingPos = -1;
-                LogUtil.d(TAG, "refreshTitleModelSpinner: selected pos=%d", i);
+                LogUtil.d(TAG, "refreshTitleModelSpinner: selected pos=%d (by name, legacy)", i);
                 return;
             }
         }
@@ -669,8 +678,9 @@ public class SettingsActivity extends ThemedActivity {
                     LogUtil.w(TAG, "saveSettings: title model missing, keep '%s'",
                             prefs.getString(KEY_TITLE_MODEL, DEFAULT_TITLE_MODEL));
                 } else {
-                    editor.putString(KEY_TITLE_MODEL, models.get(pos).name);
-                    LogUtil.d(TAG, "saveSettings: titleModel=%s", models.get(pos).name);
+                    // 存唯一键而不是模型 ID：同一个 ID 挂在两个提供商下时要能区分
+                    editor.putString(KEY_TITLE_MODEL, models.get(pos).key());
+                    LogUtil.d(TAG, "saveSettings: titleModel=%s", models.get(pos).key());
                 }
             } else {
                 LogUtil.w(TAG, "saveSettings: title model pos=%d out of range (%d)", pos, models.size());
@@ -1026,7 +1036,14 @@ public class SettingsActivity extends ThemedActivity {
 
     public static String getTitleModel(Context context) {
         SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, 0);
-        return prefs.getString(KEY_TITLE_MODEL, DEFAULT_TITLE_MODEL);
+        String v = prefs.getString(KEY_TITLE_MODEL, DEFAULT_TITLE_MODEL);
+        // 存储用唯一键（provider + \u001f + 模型 ID），但发给 API 的必须是模型 ID
+        if (v != null && v.indexOf('\u001f') >= 0) {
+            ModelInfo m = ConfigManager.getInstance().findModel(v);
+            if (m != null && m.name != null) return m.name;
+            return v.substring(v.indexOf('\u001f') + 1);
+        }
+        return v;
     }
 
     /**

@@ -230,6 +230,14 @@ final class ProviderTester {
         HttpURLConnection conn = null;
         try {
             conn = (HttpURLConnection) new URL(url).openConnection();
+            // TLS 兼容必须赶在任何会触发建连的调用之前。getOutputStream() 一旦被调，
+            // 连接（含 TLS 握手）当场建立，之后再 setSSLSocketFactory 已经晚了：
+            // 走的是平台默认套件，老系统上没有 AES-GCM，现代 CDN 直接拒绝握手。
+            // 之前这段排在 body 写入之后，于是「/models 探测 404 → 降级最小对话」
+            // 这条路径必然报证书错误，而同一个提供商在主界面聊天是正常的。
+            if (conn instanceof HttpsURLConnection) {
+                TlsCompat.apply((HttpsURLConnection) conn);
+            }
             conn.setRequestMethod(method);
             conn.setConnectTimeout(TIMEOUT_MS);
             conn.setReadTimeout(TIMEOUT_MS);
@@ -247,9 +255,6 @@ final class ProviderTester {
                 os.write(bytes);
                 os.flush();
                 os.close();
-            }
-            if (conn instanceof HttpsURLConnection) {
-                TlsCompat.apply((HttpsURLConnection) conn);
             }
             out.httpCode = conn.getResponseCode();
             InputStream in = out.httpCode >= 400 ? conn.getErrorStream() : conn.getInputStream();

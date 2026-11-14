@@ -37,7 +37,7 @@ public class ModelEditActivity extends ThemedActivity {
     private Spinner providerSpinner;
     private EditText nameEt, displayEt;
     private CheckBox visionCb, thinkingCb;
-    private Button testBtn, saveBtn, deleteBtn;
+    private Button testBtn, saveBtn, deleteBtn, defaultBtn;
 
     /** 下拉里每一项对应的提供商唯一标识；空串表示「（未指定）」。 */
     private final List<String> providerKeys = new ArrayList<String>();
@@ -62,6 +62,7 @@ public class ModelEditActivity extends ThemedActivity {
         testBtn = (Button) findViewById(R.id.me_test);
         saveBtn = (Button) findViewById(R.id.me_save);
         deleteBtn = (Button) findViewById(R.id.me_delete);
+        defaultBtn = (Button) findViewById(R.id.me_set_default);
 
         String modelName = getIntent().getStringExtra(EXTRA_MODEL);
         presetProvider = getIntent().getStringExtra(EXTRA_PROVIDER);
@@ -72,6 +73,11 @@ public class ModelEditActivity extends ThemedActivity {
         });
         saveBtn.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) { save(); }
+        });
+        // 「设为默认」= 先按当前输入落库，再把它设为默认。已保存的模型不必先点保存再来一次，
+        // 新建的模型也能一步到位（否则新模型根本没有标识可设）。
+        defaultBtn.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { saveInternal(true); }
         });
         deleteBtn.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) { confirmDelete(); }
@@ -123,6 +129,15 @@ public class ModelEditActivity extends ThemedActivity {
             thinkingCb.setChecked(editing.supportsThinking);
             selectProvider(editing.provider);
         }
+        updateDefaultButton();
+    }
+
+    /** 已是默认模型时禁用按钮并把文案换掉，避免重复点击产生「设了没反应」的错觉。 */
+    private void updateDefaultButton() {
+        if (defaultBtn == null) return;
+        boolean isDefault = editing != null && cfg.isDefaultModel(editing);
+        defaultBtn.setEnabled(!isDefault);
+        defaultBtn.setText(isDefault ? "当前为默认模型" : "设为默认模型");
     }
 
     private void selectProvider(String key) {
@@ -202,6 +217,17 @@ public class ModelEditActivity extends ThemedActivity {
     // ---- 保存 / 删除 ----
 
     private void save() {
+        saveInternal(false);
+    }
+
+    /**
+     * 落库。
+     *
+     * @param makeDefault 同时设为默认模型。★ 必须先设默认再 save() ——
+     *                    setDefaultModel 只改内存，早先的代码把 save 写在它前面，
+     *                    改名后同步默认模型的那次修改其实一次都没落盘。
+     */
+    private void saveInternal(boolean makeDefault) {
         String name = nameEt.getText().toString().trim();
         String display = displayEt.getText().toString().trim();
         String provider = selectedProvider();
@@ -218,14 +244,17 @@ public class ModelEditActivity extends ThemedActivity {
             AcToast.show(this, "提供商不存在：" + provider);
             return;
         }
-        if (cfg.isModelNameTaken(name, editing)) {
-            AcToast.show(this, "模型 ID 已被其他模型使用：" + name);
+        if (cfg.isModelNameTaken(provider, name, editing)) {
+            AcToast.show(this, "该提供商下已有同名模型：" + name);
             nameEt.requestFocus();
             return;
         }
         boolean creating = editing == null;
         ModelInfo target = creating ? new ModelInfo() : editing;
-        String oldName = target.name;
+        // 唯一键在改字段之前取：改完 name/provider 后旧键就还原不出来了。
+        // 默认模型存的是唯一键，改名或换提供商都必须跟着更新，否则默认模型悬空。
+        String oldKey = creating ? null : target.key();
+        boolean wasDefault = !creating && cfg.isDefaultModel(target);
         target.name = name;
         target.displayName = display;
         target.provider = provider;
@@ -234,14 +263,17 @@ public class ModelEditActivity extends ThemedActivity {
         if (creating) {
             cfg.getModels().add(target);
         }
-        cfg.save();
-        // 默认模型按名字引用，改名后要同步，否则选中态丢失
-        if (!creating && oldName != null && !oldName.equals(name)
-                && oldName.equals(cfg.getDefaultModel())) {
-            cfg.setDefaultModel(name);
-            LogUtil.i(TAG, "default model renamed '%s' -> '%s'", oldName, name);
+        if (wasDefault && oldKey != null && !oldKey.equals(target.key())) {
+            cfg.setDefaultModel(target.key());
+            LogUtil.i(TAG, "default model key '%s' -> '%s'", oldKey, target.key());
         }
-        AcToast.show(this, "已保存");
+        if (makeDefault) {
+            cfg.setDefaultModel(target.key());
+            LogUtil.i(TAG, "set as default: %s", target.key());
+        }
+        // 默认模型的变更必须在这里落盘：上面的 setDefaultModel 只动内存
+        cfg.save();
+        AcToast.show(this, makeDefault ? "已保存，并设为默认模型" : "已保存");
         LogUtil.i(TAG, "save: %s@%s vision=%s thinking=%s new=%s",
                 target.name, target.provider, target.supportsVision,
                 target.supportsThinking, creating);
@@ -255,10 +287,13 @@ public class ModelEditActivity extends ThemedActivity {
                 .setMessage("确定删除 " + editing.label() + "？")
                 .setPositiveButton("删除", new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
+                        boolean wasDefault = cfg.isDefaultModel(editing);
                         cfg.getModels().remove(editing);
-                        if (editing.name.equals(cfg.getDefaultModel())) {
+                        if (wasDefault) {
                             List<ModelInfo> all = cfg.getModels();
-                            cfg.setDefaultModel(all.isEmpty() ? "" : all.get(0).name);
+                            cfg.setDefaultModel(all.isEmpty() ? "" : all.get(0).key());
+                            LogUtil.i(TAG, "default model removed, fallback to %s",
+                                    cfg.getDefaultModel());
                         }
                         cfg.save();
                         LogUtil.i(TAG, "delete model %s", editing.name);

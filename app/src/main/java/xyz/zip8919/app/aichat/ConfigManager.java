@@ -298,11 +298,22 @@ public class ConfigManager {
         return false;
     }
 
-    public boolean isModelNameTaken(String name, ModelInfo self) {
+    /**
+     * 同一提供商下是否已有同名模型。
+     *
+     * <p><b>唯一性只到「提供商 + 模型 ID」这一级</b>，不再要求全局唯一：同一个 ID 挂在
+     * 两个提供商上（官方与中转站、境内与境外节点）是真实存在的用法，早先的全局校验
+     * 直接把它判成重名，用户只能二选一。
+     *
+     * @param self 编辑态传当前模型对象，新建传 null；自己不算重名
+     */
+    public boolean isModelNameTaken(String provider, String name, ModelInfo self) {
         if (name == null || name.length() == 0) return false;
+        String p = provider == null ? "" : provider;
         for (ModelInfo m : models) {
             if (m == self) continue;
-            if (name.equals(m.name)) return true;
+            String mp = m.provider == null ? "" : m.provider;
+            if (name.equals(m.name) && p.equals(mp)) return true;
         }
         return false;
     }
@@ -319,11 +330,48 @@ public class ConfigManager {
     public List<ModelInfo> getModels() { return models; }
 
     public ModelInfo getModel(String name) {
-        for (ModelInfo m : models) {
-            if (m.name.equals(name)) return m;
+        return findModel(name);
+    }
+
+    /**
+     * 按「唯一键」或「模型 ID」查模型。
+     *
+     * <p>先按 {@link ModelInfo#key()} 精确匹配，再退回按 name 匹配 —— 这一步是为了
+     * 兼容老配置：{@code default_model} / {@code selected_model} 在 v1.15.0 之前存的
+     * 都是裸模型 ID，升级后第一次读到的仍是旧格式，必须能解析出来。
+     *
+     * <p>只在没有 {@code \u001f} 时才走 name 兜底，避免一个恰好含分隔符的名字被误判。
+     */
+    public ModelInfo findModel(String keyOrName) {
+        if (keyOrName == null || keyOrName.length() == 0) return null;
+        boolean isKey = keyOrName.indexOf('\u001f') >= 0;
+        if (isKey) {
+            for (ModelInfo m : models) {
+                if (keyOrName.equals(m.key())) return m;
+            }
         }
-        LogUtil.w(TAG, "getModel('%s') -> null", name);
+        for (ModelInfo m : models) {
+            if (m.name != null && m.name.equals(keyOrName)) return m;
+        }
+        if (isKey) LogUtil.w(TAG, "findModel('%s') -> null", keyOrName);
         return null;
+    }
+
+    /** 该模型是不是当前默认模型（按唯一键比较，同名不同厂商不会串）。 */
+    public boolean isDefaultModel(ModelInfo m) {
+        if (m == null) return false;
+        String def = defaultModel;
+        if (def == null || def.length() == 0) return false;
+        if (def.indexOf('\u001f') >= 0) return def.equals(m.key());
+        // 老格式（裸模型 ID）：与 getDefaultModelInfo 同一口径 —— 同名有多条时
+        // 只认查出来的那一条，否则列表里会并排出现两个「默认」。
+        if (!def.equals(m.name)) return false;
+        return m == findModel(def);
+    }
+
+    /** 默认模型对应的那一条配置；老格式且同名歧义时返回第一条。 */
+    public ModelInfo getDefaultModelInfo() {
+        return findModel(defaultModel);
     }
 
     /** 模型显示名（无别名时回退模型 ID），查不到原样返回。 */

@@ -28,6 +28,27 @@ public class ModelInfo {
         return name == null ? "" : name;
     }
 
+    /**
+     * 唯一键：「提供商 + 模型 ID」。
+     *
+     * <p><b>为什么不能只用 name</b>：同一个模型 ID 在不同提供商各挂一份是常态
+     * （{@code deepseek-v4-flash} 在 DeepSeek 官方与中转站都有），而
+     * {@code deepseek-v4-flash} 这个名字本身并不唯一。早先用 name 当默认模型的
+     * 标识，两条同名记录会<b>同时</b>在列表里显示「默认」，切换也分不清是哪一条。
+     *
+     * <p>分隔符用 U+001F（单元分隔符）：模型 ID 与提供商名都是可见字符，
+     * 不可能出现控制字符，因此不会与真实名字产生歧义。存储层直接当普通字符串处理。
+     */
+    public String key() {
+        return (provider == null ? "" : provider) + '\u001f' + (name == null ? "" : name);
+    }
+
+    /** 模型 ID 与提供商都相同，才算同一条配置。 */
+    public boolean sameAs(ModelInfo other) {
+        if (other == null) return false;
+        return key().equals(other.key());
+    }
+
     public ModelInfo copy() {
         ModelInfo m = new ModelInfo();
         m.name = name;

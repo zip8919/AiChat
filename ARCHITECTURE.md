@@ -64,6 +64,27 @@
 | `HelpText` | 使用说明与免责声明文案 | 不拼 UI，不发请求 |
 | `ConversationManager` | 会话读写、异步落盘队列 | 不碰 UI |
 
+## 配置约定
+
+| 约定 | 说明 |
+|---|---|
+| 模型唯一键 | `ModelInfo.key()` = **提供商 + U+001F + 模型 ID**。默认模型（`default_model`）、标题模型（`title_model`）、主界面选中态（`selected_model` + `selected_model_provider`）一律存这个键，**不要用裸模型 ID**：同一个 ID 挂在两个提供商下是常态，裸 ID 无法区分，会出现「两条都标默认」「重启后换了端点」 |
+| 老配置兼容 | v1.15.0 及之前的配置存的是裸模型 ID。`ConfigManager.findModel()` 先按唯一键匹配、再退回按 ID 匹配；`isDefaultModel()` 对老格式沿用同一口径（同名多条只认第一条），升级不需要迁移动作 |
+| 模型重名校验 | `isModelNameTaken(provider, name, self)` —— 只要求**同一提供商下**不重复。不要改回全局唯一 |
+| 提供商唯一标识 | `ProviderInfo.name` 是模型引用它的外键，改名必须同步 `ModelInfo.provider`（`ProviderEditActivity.save` 已处理） |
+
+## 动态视图着色
+
+`ThemeApplier` 只在 `setContentView` 与 `onResume` 遍历一次当前视图树。以下三类永远刷不到，**必须自己按 token 设色**：
+
+| 场景 | 做法 |
+|---|---|
+| `new TextView(ctx)` 等纯代码创建的 View，且在 `onResume` 之后 `addView` | 渲染时 `setTextColor(ThemeTokens.get(...))` + `setBackgroundDrawable(ThemeRecolor.cardBg(ctx))` |
+| `LayoutInflater.from(ctx)` 出来的 ListView / GridView 行（不在 Activity 的 inflater 上） | 在 `getView` 末尾按上面同样方式设一次 |
+| Spinner 下拉项、AlertDialog 内容（独立 Window） | 由 `AcDialog` / `AcToast` 统一处理，不要另起 |
+
+`ThemeRecolor.cardBg()` 在默认外观下返回原 `@drawable/bg_card` 资源，所以默认态不会出现任何色差。
+
 ## 并发约定
 
 三个标记各管一件事，**不要用其中任何一个去替代另一个**：

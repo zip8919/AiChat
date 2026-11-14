@@ -345,6 +345,9 @@ public class PresetManagerActivity extends ThemedActivity {
             if (v == null) {
                 v = LayoutInflater.from(PresetManagerActivity.this)
                         .inflate(R.layout.item_preset_row, parent, false);
+                // 同 ConfigRowAdapter：这行不在 Activity 的 Factory2 钩子上，
+                // 背景只在创建时按当前主题设一次（每次 bind 重设会拖慢滚动）。
+                v.setBackgroundDrawable(ThemeRecolor.cardBg(PresetManagerActivity.this));
             }
             PresetStore.Preset item = presets.get(p);
             TextView name = (TextView) v.findViewById(R.id.preset_row_name);

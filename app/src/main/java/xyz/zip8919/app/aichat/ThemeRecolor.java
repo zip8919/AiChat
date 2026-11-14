@@ -214,6 +214,35 @@ final class ThemeRecolor {
     }
 
     /**
+     * 主题感知的圆角卡片底（对应 {@code @drawable/bg_card}）。
+     *
+     * <p><b>为什么不能直接用 bg_card</b>：那是写死的白色 solid + {@code #e0e0e0} 描边。
+     * 更深一层的问题是 —— 纯代码创建的 View（{@code new TextView(ctx)}）不在 Activity
+     * 的 inflater 上，{@code ThemeApplier} 的整树遍历与 Factory2 钩子都够不到它，
+     * 于是深色模式下就是「白底 + 浅灰字」，也就是提供商编辑页那张模型列表的样子。
+     *
+     * <p>这里直接按当前生效色造一个 drawable，不依赖任何后置遍历；调用方只管
+     * {@code setBackgroundDrawable(ThemeRecolor.cardBg(ctx))}。默认态仍返回原资源，
+     * 保证「不改外观时与旧版本逐像素一致」。
+     */
+    static android.graphics.drawable.Drawable cardBg(android.content.Context ctx) {
+        if (ctx == null) return null;
+        AppearanceManager m = AppearanceManager.getInstance(ctx);
+        if (m.isColorDefault()) {
+            // 默认浅色：原样返回资源，避免默认态出现任何色差
+            return ctx.getResources().getDrawable(R.drawable.bg_card);
+        }
+        float d = ctx.getResources().getDisplayMetrics().density;
+        GradientDrawable g = new GradientDrawable();
+        g.setShape(GradientDrawable.RECTANGLE);
+        g.setCornerRadius(8f * d);
+        g.setColor(m.getEffectiveColor(ThemeTokens.AC_SURFACE, m.isDark()));
+        g.setStroke(Math.max(1, (int) (d + 0.5f)),
+                m.getEffectiveColor(ThemeTokens.AC_BORDER, m.isDark()));
+        return g;
+    }
+
+    /**
      * 列表 item 的常规底色。
      *
      * <p>历史、已保存文件、附件三个列表都在 {@code getView} 里写死

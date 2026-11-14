@@ -136,6 +136,15 @@
             android:layout_height="wrap_content"
             android:text="" />
 
+        <!-- 设为默认：单独一行，不与「删除 / 保存」挤在一排（词典笔小屏三个按钮会被压到不可读） -->
+        <Button
+            android:id="@+id/me_set_default"
+            android:textSize="13sp"
+            android:layout_marginTop="10dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="设为默认模型" />
+
         <LinearLayout
             android:orientation="horizontal"
             android:layout_marginTop="14dp"

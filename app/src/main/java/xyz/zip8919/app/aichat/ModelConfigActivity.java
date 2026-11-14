@@ -307,9 +307,7 @@ public class ModelConfigActivity extends ThemedActivity {
 
     /** 默认模型所属的提供商，列表里标一个「默认」，让人一眼看到当前在用的。 */
     private String defaultProviderOfDefaultModel() {
-        String dm = cfg.getDefaultModel();
-        if (dm == null || dm.length() == 0) return "";
-        ModelInfo m = cfg.getModel(dm);
+        ModelInfo m = cfg.getDefaultModelInfo();
         return m == null || m.provider == null ? "" : m.provider;
     }
 
@@ -421,9 +419,10 @@ public class ModelConfigActivity extends ThemedActivity {
     /** 默认模型被删除 / 改名后可能悬空：回退到第一个，没有就清空。 */
     private void fixDefaultModel() {
         String cur = cfg.getDefaultModel();
-        if (cur != null && cur.length() > 0 && cfg.getModel(cur) != null) return;
+        if (cur != null && cur.length() > 0 && cfg.findModel(cur) != null) return;
         List<ModelInfo> all = cfg.getModels();
-        String fallback = all.isEmpty() ? "" : all.get(0).name;
+        // 存唯一键：同名不同厂商的两条不能都变成默认
+        String fallback = all.isEmpty() ? "" : all.get(0).key();
         LogUtil.i(TAG, "default model '%s' dangling, fallback to '%s'", cur, fallback);
         cfg.setDefaultModel(fallback);
     }
@@ -612,7 +611,6 @@ public class ModelConfigActivity extends ThemedActivity {
             Collections.reverse(kept);
         }
 
-        String def = cfg.getDefaultModel();
         List<ConfigRowAdapter.Row> rows = new ArrayList<ConfigRowAdapter.Row>();
         for (ModelInfo m : kept) {
             StringBuilder sub = new StringBuilder();
@@ -621,10 +619,11 @@ public class ModelConfigActivity extends ThemedActivity {
             if (m.supportsVision) sub.append(" · 视觉");
             if (!m.supportsThinking) sub.append(" · 无思考");
             String badge;
-            if (m.name.equals(def)) badge = "默认";
+            if (cfg.isDefaultModel(m)) badge = "默认";
             else if (m.supportsVision) badge = "视觉";
             else badge = "";
-            rows.add(new ConfigRowAdapter.Row(m.name, m.label(), sub.toString(), badge));
+            // 行键用唯一键：同名不同提供商的两条要能分别勾选、分别打开编辑页
+            rows.add(new ConfigRowAdapter.Row(m.key(), m.label(), sub.toString(), badge));
         }
         modelAdapter.setRows(rows);
         boolean has = !rows.isEmpty();
@@ -694,7 +693,7 @@ public class ModelConfigActivity extends ThemedActivity {
                 .setItems(items, new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         if (w == 0) openModelEditor(name, null);
-                        else if (w == 1) testModelInline(m, name);
+                        else if (w == 1) testModelInline(m, m.name);
                         else if (w == 2) setDefault(name);
                         else if (w == 3) duplicateModel(m);
                         else confirmDeleteModels(Collections.singletonList(name));
@@ -710,7 +709,7 @@ public class ModelConfigActivity extends ThemedActivity {
         String base = src.name;
         for (int n = 2; n < 1000; n++) {
             String cand = base + n;
-            if (!cfg.isModelNameTaken(cand, null)) {
+            if (!cfg.isModelNameTaken(src.provider, cand, null)) {
                 cp.name = cand;
                 break;
             }
@@ -722,13 +721,23 @@ public class ModelConfigActivity extends ThemedActivity {
         AcToast.show(this, "已复制为 " + cp.label());
     }
 
-    private void setDefault(String name) {
-        cfg.setDefaultModel(name);
+    private void setDefault(String key) {
+        ModelInfo m = cfg.findModel(key);
+        cfg.setDefaultModel(m == null ? key : m.key());
         cfg.save();
         reloadModels();
         reloadProviders();
-        AcToast.show(this, "默认模型已设为 " + cfg.modelLabel(name));
-        LogUtil.i(TAG, "setDefault: %s", name);
+        AcToast.show(this, "默认模型已设为 " + (m == null ? key : m.label()));
+        LogUtil.i(TAG, "setDefault: %s", key);
+    }
+
+    /** 待删列表里是否包含当前默认模型（按唯一键比，不看模型 ID）。 */
+    private boolean containsDefaultModel(List<String> keys) {
+        for (String k : keys) {
+            ModelInfo m = cfg.findModel(k);
+            if (m != null && cfg.isDefaultModel(m)) return true;
+        }
+        return false;
     }
 
     private void confirmBatchDeleteModels() {
@@ -746,7 +755,7 @@ public class ModelConfigActivity extends ThemedActivity {
         StringBuilder sb = new StringBuilder();
         sb.append("确定删除").append(list.size() == 1 ? " " : "选中的 ")
                 .append(list.size()).append(" 个模型？");
-        if (list.contains(cfg.getDefaultModel())) {
+        if (containsDefaultModel(list)) {
             sb.append("\n\n包含当前默认模型，删除后会自动切换到第一个可用模型。");
         }
         AcDialog.builder(this)

@@ -135,6 +135,12 @@ class ConfigRowAdapter extends BaseAdapter {
             h = (Holder) cv.getTag();
         } else {
             v = LayoutInflater.from(ctx).inflate(R.layout.item_model_row, parent, false);
+            // 背景只在首次创建时设：LayoutInflater.from(ctx) 出来的行不在 Activity 的
+            // Factory2 钩子上，onResume 的整树遍历也早于 ListView 填充，靠 layout 里的
+            // @drawable/bg_card 在深色模式下就是白底白字。
+            // 放在 else 分支而不是每次 bind：setBackgroundDrawable 会 requestLayout，
+            // 滚动时每行每帧都调一次，低端机上肉眼可见掉帧。
+            v.setBackgroundDrawable(ThemeRecolor.cardBg(ctx));
             h = new Holder();
             h.check = (CheckBox) v.findViewById(R.id.mrow_check);
             h.title = (TextView) v.findViewById(R.id.mrow_title);

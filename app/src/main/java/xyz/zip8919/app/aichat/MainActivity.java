@@ -262,11 +262,22 @@ public class MainActivity extends ThemedActivity {
     private boolean expectingQuickScanResult = false;
 
     private String currentModel;
+    /**
+     * 当前模型所属提供商的唯一标识。
+     *
+     * <p>只靠 {@link #currentModel}（模型 ID）恢复选择是不够的：同一个 ID 可能同时挂在
+     * 两个提供商下，重启后按名字匹配会落到另一条上 —— 用户看到的名字一样，实际换成了
+     * 另一个端点、另一把 Key。所以选中态记「ID + 提供商」两段。
+     * 老配置没有这一段时按 null 处理，行为与之前一致。
+     */
+    private String currentProvider;
     private String systemPrompt;
     /** 输入框上方的会话用量状态栏，见 {@link #updateUsageBar()}。 */
     private TextView usageBar;
     /** 上次手动选择的模型，Activity 重建后用它恢复，而不是回落到默认模型。 */
     private static final String KEY_SELECTED_MODEL = "selected_model";
+    /** 选中模型所属提供商，配合 {@link #KEY_SELECTED_MODEL} 消歧同名模型。 */
+    private static final String KEY_SELECTED_PROVIDER = "selected_model_provider";
 
     @Override
     protected void onSaveInstanceState(Bundle outState) {
@@ -1491,8 +1502,12 @@ public class MainActivity extends ThemedActivity {
         // 老设备关屏再亮屏很容易触发重建，只靠字段就会「切回默认模型」。
         if (currentModel == null && prefs != null) {
             currentModel = prefs.getString(KEY_SELECTED_MODEL, null);
+            if (currentProvider == null) {
+                currentProvider = prefs.getString(KEY_SELECTED_PROVIDER, null);
+            }
             if (currentModel != null) {
-                LogUtil.d(TAG, "restored selected model from prefs: %s", currentModel);
+                LogUtil.d(TAG, "restored selected model from prefs: %s@%s",
+                        currentModel, currentProvider);
             }
         }
         availableModels = configManager.getModels();
@@ -1513,17 +1528,29 @@ public class MainActivity extends ThemedActivity {
         // exists; fall back to default on first init or if it was removed.
         int targetPos = -1;
         if (currentModel != null) {
+            // 首选「ID + 提供商」全匹配；同名模型分属两个提供商时不会串到另一条
             for (int i = 0; i < availableModels.size(); i++) {
-                if (availableModels.get(i).name.equals(currentModel)) {
+                ModelInfo m = availableModels.get(i);
+                if (m.name.equals(currentModel)
+                        && (currentProvider == null || currentProvider.equals(m.provider))) {
                     targetPos = i;
                     break;
                 }
             }
+            // 老配置没有 provider 段：退回纯 ID 匹配
+            if (targetPos < 0 && currentProvider == null) {
+                for (int i = 0; i < availableModels.size(); i++) {
+                    if (availableModels.get(i).name.equals(currentModel)) {
+                        targetPos = i;
+                        break;
+                    }
+                }
+            }
         }
         if (targetPos < 0) {
-            String defaultModel = configManager.getDefaultModel();
+            // 默认模型存的是唯一键，按对象比较而不是按模型 ID 字符串比
             for (int i = 0; i < availableModels.size(); i++) {
-                if (availableModels.get(i).name.equals(defaultModel)) {
+                if (configManager.isDefaultModel(availableModels.get(i))) {
                     targetPos = i;
                     break;
                 }
@@ -1557,8 +1584,12 @@ public class MainActivity extends ThemedActivity {
         ProviderInfo provider = configManager.getProvider(model.provider);
         if (provider != null) {
             currentModel = model.name;
+            currentProvider = model.provider;
             if (prefs != null) {
-                prefs.edit().putString(KEY_SELECTED_MODEL, currentModel).apply();
+                prefs.edit()
+                        .putString(KEY_SELECTED_MODEL, currentModel)
+                        .putString(KEY_SELECTED_PROVIDER, currentProvider)
+                        .apply();
             }
             LogUtil.i(TAG, "selectModel: pos=%d model=%s provider=%s url=%s keyLen=%d",
                     pos, model.name, provider.name, provider.apiUrl,

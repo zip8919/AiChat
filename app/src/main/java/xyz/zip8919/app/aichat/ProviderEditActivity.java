@@ -324,10 +324,10 @@ public class ProviderEditActivity extends ThemedActivity {
                         for (ModelInfo m : cfg.modelsOf(editing.name)) {
                             cfg.getModels().remove(m);
                         }
-                        String dm = cfg.getDefaultModel();
-                        if (dm != null && cfg.getModel(dm) == null) {
+                        // 默认模型存的是唯一键；被删的提供商若占着它，回退到第一条
+                        if (cfg.getDefaultModelInfo() == null) {
                             List<ModelInfo> all = cfg.getModels();
-                            cfg.setDefaultModel(all.isEmpty() ? "" : all.get(0).name);
+                            cfg.setDefaultModel(all.isEmpty() ? "" : all.get(0).key());
                         }
                         cfg.save();
                         LogUtil.i(TAG, "delete provider %s (%d models)", editing.name, models);
@@ -494,7 +494,7 @@ public class ProviderEditActivity extends ThemedActivity {
         for (String n : names) {
             String id = n == null ? "" : n.trim();
             if (id.length() == 0) continue;
-            if (cfg.isModelNameTaken(id, null)) {
+            if (cfg.isModelNameTaken(editing.name, id, null)) {
                 skipped++;
                 continue;
             }
@@ -552,7 +552,10 @@ public class ProviderEditActivity extends ThemedActivity {
             row.setTextColor(ThemeTokens.get(this, ThemeTokens.AC_TEXT));
             row.setSingleLine(true);
             row.setEllipsize(android.text.TextUtils.TruncateAt.END);
-            row.setBackgroundResource(R.drawable.bg_card);
+            // 不用 @drawable/bg_card 直接设：这行是 new 出来的，且往往在 onResume 的
+            // 整树遍历之后才 addView，ThemeApplier 刷不到它 —— 深色模式下就是白底配
+            // 浅灰字。cardBg() 按当前生效色现造（默认态仍返回原资源，零回归）。
+            row.setBackgroundDrawable(ThemeRecolor.cardBg(this));
             row.setPadding(dp(12), dp(10), dp(12), dp(10));
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
@@ -560,7 +563,7 @@ public class ProviderEditActivity extends ThemedActivity {
             lp.topMargin = dp(6);
             row.setLayoutParams(lp);
             row.setOnClickListener(new View.OnClickListener() {
-                public void onClick(View v) { openModelEditor(m.name); }
+                public void onClick(View v) { openModelEditor(m.key()); }
             });
             row.setOnLongClickListener(new View.OnLongClickListener() {
                 public boolean onLongClick(View v) {
@@ -589,11 +592,11 @@ public class ProviderEditActivity extends ThemedActivity {
                 .setMessage("确定删除 " + m.label() + "？")
                 .setPositiveButton("删除", new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
+                        boolean wasDefault = cfg.isDefaultModel(m);
                         cfg.getModels().remove(m);
-                        String dm = cfg.getDefaultModel();
-                        if (m.name.equals(dm)) {
+                        if (wasDefault) {
                             List<ModelInfo> all = cfg.getModels();
-                            cfg.setDefaultModel(all.isEmpty() ? "" : all.get(0).name);
+                            cfg.setDefaultModel(all.isEmpty() ? "" : all.get(0).key());
                         }
                         cfg.save();
                         refreshModels();
