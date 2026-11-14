@@ -43,4 +43,7 @@ jobs:
           # ABI 分包：app-arm64-v8a / app-armeabi-v7a / app-x86 / app-x86_64 / app-universal
           files: app/build/outputs/apk/release/*.apk
           name: AiChat ${{ github.ref_name }}
-          generate_release_notes: true
+          # 发布说明随代码进仓库：每版打 tag 前更新 .github/RELEASE_NOTES.md，
+          # CI 直接读它当 Release body，不再被自动生成的单行 changelog 覆盖。
+          # 注意：提交本文件需 fine-grained PAT 带 workflow scope（见 gh_toks.txt #1）。
+          body_path: .github/RELEASE_NOTES.md
