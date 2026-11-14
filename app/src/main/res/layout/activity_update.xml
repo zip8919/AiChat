@@ -160,7 +160,7 @@
     </LinearLayout>
 
     <TextView
-        android:text="测速会下载并校验 release 内的测速文件；并行测速默认开，可设 1～64 并发；长按任一加速源可单独测速 / 编辑 / 移除"
+        android:text="测速会下载并校验 release 内的测速文件，结束后按延迟升序、不可用垫底；并行默认开（1～64 并发）；长按加速源可单测 / 编辑 / 移除"
         android:textSize="10sp"
         android:textColor="@color/text_secondary"
         android:paddingLeft="12dp"

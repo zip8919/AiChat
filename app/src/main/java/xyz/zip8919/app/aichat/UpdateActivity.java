@@ -36,6 +36,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 
@@ -269,6 +271,26 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
         return ms + " ms";
     }
 
+    /**
+     * 测速结果排序键：可用按延迟升序，未测次之，不可用垫底。
+     *
+     * <p>不能直接比 latency —— NOT_TESTED(-1) 与 FAILED(-2) 都是负数，
+     * 直接升序会把「不可用」顶到列表最前面，正好和用户要的相反。
+     */
+    private static int latencyRank(int ms) {
+        if (ms >= 0) return ms;                            // 0 ~ 9999，越小越快
+        if (ms == UpdateManager.NOT_TESTED) return 1000000;
+        return 2000000;                                    // FAILED 及其它异常负值
+    }
+
+    private static final Comparator<UpdateManager.Mirror> LATENCY_ORDER =
+            new Comparator<UpdateManager.Mirror>() {
+                public int compare(UpdateManager.Mirror a, UpdateManager.Mirror b) {
+                    int ra = latencyRank(a.latency), rb = latencyRank(b.latency);
+                    return ra < rb ? -1 : (ra == rb ? 0 : 1);
+                }
+            };
+
     private void selectMirror(int i) {
         selectedIndex = i;
         UpdateManager.setSelectedTemplate(this, mirrors.get(i).template);
@@ -480,23 +502,37 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
                         + (l == UpdateManager.FAILED ? "不可用（未通过文件校验）" : l + " ms"));
             }
             probeSingleIndex = -1;
+            // 只测一个源时其余都是「未测」，重排只会把列表打乱，没有信息量
             return;
         }
-        int best = -1, min = Integer.MAX_VALUE;
-        for (int i = 0; i < mirrors.size(); i++) {
-            int l = mirrors.get(i).latency;
-            if (l >= 0 && l < min) { min = l; best = i; }
+        // 下面要重排整个列表，所有下标都会失效：先用对象引用记住选中项与最快项
+        UpdateManager.Mirror keep = (selectedIndex >= 0 && selectedIndex < mirrors.size())
+                ? mirrors.get(selectedIndex) : null;
+        int min = Integer.MAX_VALUE;
+        UpdateManager.Mirror fastest = null;
+        for (UpdateManager.Mirror m : mirrors) {
+            if (m.latency >= 0 && m.latency < min) { min = m.latency; fastest = m; }
         }
+        boolean autoPick = !manualPicked;
+        if (fastest != null && autoPick) {
+            keep = fastest;
+            UpdateManager.setSelectedTemplate(this, fastest.template);
+        }
+        // 延迟低→高、不可用垫底；稳定排序让同延迟的源保持原顺序
+        Collections.sort(mirrors, LATENCY_ORDER);
+        selectedIndex = keep == null ? 0 : mirrors.indexOf(keep);
+        if (selectedIndex < 0) selectedIndex = 0;
+        if (mirrorAdapter != null) mirrorAdapter.notifyDataSetChanged();
+
         String modeSuffix = probeModeLabel.length() > 0 ? "（" + probeModeLabel + "）" : "";
-        if (best >= 0) {
-            if (manualPicked && selectedIndex >= 0 && selectedIndex < mirrors.size()) {
+        if (fastest != null) {
+            if (!autoPick) {
                 // 用户测速期间已手动点选，尊重用户选择，只用文字告知最快项
-                progressText.setText("测速完成，最快：" + mirrors.get(best).name + " " + min
+                progressText.setText("测速完成，最快：" + fastest.name + " " + min
                         + " ms" + modeSuffix + "（保留你手动选择的 "
-                        + mirrors.get(selectedIndex).name + "）");
+                        + (keep == null ? "—" : keep.name) + "）");
             } else {
-                selectMirror(best);
-                progressText.setText("已选最快：" + mirrors.get(best).name + "  " + min
+                progressText.setText("已选最快：" + fastest.name + "  " + min
                         + " ms" + modeSuffix);
             }
         } else {
