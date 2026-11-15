@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- 界面文案。由源码抽取生成，新增文案请补充在这里。 -->
 <resources>
-    <string name="aboutactivity_001">"版本 "</string>
+    <string name="aboutactivity_001">版本 %1$s</string>
     <string name="aboutactivity_002">反馈渠道尚未开放</string>
     <string name="aboutactivity_003">未知</string>
     <string name="aboutactivity_004">使用说明</string>
     <string name="aboutactivity_005">关闭</string>
-    <string name="aboutactivity_006">本应用使用了以下开源组件，版权归各自作者所有，</string>
-    <string name="aboutactivity_007">分别按其项目仓库中的许可证发布：\n\n</string>
+    <string name="aboutactivity_006">本应用使用了以下开源组件，版权归各自作者所有，分别按其项目仓库中的许可证发布：\n\n• commonmark-java\n  github.com/commonmark/commonmark-java\n\n• jlatexmath-android\n  github.com/noties/jlatexmath-android\n\n• Conscrypt\n  github.com/google/conscrypt</string>
+    
     <string name="aboutactivity_008">开源许可</string>
     <string name="aboutactivity_009">关闭</string>
     <string name="appearanceactivity_001">朱红</string>
@@ -22,10 +22,10 @@
     <string name="appearanceactivity_010">纸白</string>
     <string name="appearanceactivity_011">自定义</string>
     <string name="appearanceactivity_012">自定义</string>
-    <string name="appearanceactivity_013">"已覆盖 · "</string>
-    <string name="appearanceactivity_014">" · 主题为 "</string>
-    <string name="appearanceactivity_015">"跟随主题 · "</string>
-    <string name="appearanceactivity_016">"跟随主题 · 内置默认 · "</string>
+    <string name="appearanceactivity_013">已覆盖 · %1$s %2$s</string>
+    <string name="appearanceactivity_014">已覆盖 · %1$s %2$s · 主题为 %3$s</string>
+    <string name="appearanceactivity_015">跟随主题 · %1$s · %2$s %3$s</string>
+    <string name="appearanceactivity_016">跟随主题 · 内置默认 · %1$s %2$s</string>
     <string name="appearanceactivity_017">系统默认</string>
     <string name="appearanceactivity_018">使用系统 Roboto 字体</string>
     <string name="appearanceactivity_019">不使用自定义主题</string>
@@ -69,7 +69,7 @@
     <string name="appearancestate_002">不支持的 schema=</string>
     <string name="attachmentfiles_001">无法打开图片</string>
     <string name="attachmentfiles_002">无法创建附件目录</string>
-    <string name="attachmentfiles_003">"图片超过 "</string>
+    <string name="attachmentfiles_003">图片超过 %1$s</string>
     <string name="attachmentfiles_004">图片是空文件</string>
     <string name="attachmentfiles_005">保存图片失败</string>
     <string name="attachmentfiles_006">不是可识别的图片格式</string>
@@ -79,7 +79,7 @@
     <string name="attachmentfiles_010">图片是空文件</string>
     <string name="attachmentfiles_011">只支持 http/https 链接</string>
     <string name="attachmentfiles_012">这个链接不是图片</string>
-    <string name="attachmentfiles_013">这个链接不是图片（</string>
+    <string name="attachmentfiles_013">这个链接不是图片（%1$s）</string>
     <string name="attachmentfiles_014">无法读取图片</string>
     <string name="attachmentfiles_015">重定向缺少目标地址</string>
     <string name="attachmentfiles_016">重定向次数过多</string>
@@ -87,7 +87,7 @@
     <string name="attachmentfiles_018">图片解码失败</string>
     <string name="attachmentfiles_019">图片编码失败</string>
     <string name="attachmentfiles_020">只支持 http/https 链接</string>
-    <string name="attachmentfiles_021">链接不是图片（</string>
+    <string name="attachmentfiles_021">链接不是图片（%1$s）</string>
     <string name="attachmentfiles_022">无法读取图片</string>
     <string name="attachmentfiles_023">"图片超过 "</string>
     <string name="attachmenttext_001">未命名.txt</string>
@@ -149,14 +149,15 @@
     <string name="chatstreamrunner_003">正在整理搜索结果…</string>
     <string name="chatstreamrunner_004">当前模型不支持工具调用，已按普通对话发送</string>
     <string name="chatstreamrunner_005">\n\n已自动重试 %1$s 次仍失败</string>
-    <string name="chatstreamrunner_007">"请求失败：HTTP "</string>
+    <string name="chatstreamrunner_007">请求失败：HTTP %1$d</string>
     <string name="chatstreamrunner_008">工具调用连续 %1$s 轮未结束，已停止</string>
     <string name="chatstreamrunner_010">工具调用轮次过多，已停止（已保留已有内容）</string>
-    <string name="chatstreamrunner_011">"请求失败："</string>
+    <string name="chatstreamrunner_011">请求失败：%1$s</string>
     <string name="chatstreamrunner_012">{\"error\":\"未配置 Tavily API Key，无法使用联网搜索\"}</string>
     <string name="chatstreamrunner_013">{\"error\":\"未配置 DeepSeek API Key，无法使用联网搜索\"}</string>
     <string name="chatstreamrunner_014">未配置 Tavily API Key，联网搜索不可用</string>
     <string name="chatstreamrunner_015">未配置 DeepSeek API Key，联网搜索不可用</string>
+    <string name="chatstreamrunner_016">请求失败：HTTP %1$d · %2$s</string>
     <string name="colorpickerdialog_001">色相</string>
     <string name="colorpickerdialog_002">饱和度</string>
     <string name="colorpickerdialog_003">明度</string>
@@ -201,7 +202,7 @@
     <string name="conversationmanageractivity_007">暂无历史记录</string>
     <string name="conversationmanageractivity_008">按时间</string>
     <string name="conversationmanageractivity_009">按体积</string>
-    <string name="conversationmanageractivity_010">"已选 "</string>
+    <string name="conversationmanageractivity_010">已选 %1$d / %2$d</string>
     <string name="conversationmanageractivity_011">点按查看占用，长按查看更多操作</string>
     <string name="conversationmanageractivity_012">点「批量管理」可批量删除</string>
     <string name="conversationmanageractivity_013">请先选择要删除的对话</string>
@@ -212,16 +213,16 @@
     <string name="conversationmanageractivity_017">删除</string>
     <string name="conversationmanageractivity_018">取消</string>
     <string name="conversationmanageractivity_019">已删除 %1$s 个对话</string>
-    <string name="conversationmanageractivity_021">消息 %1$s 条\n</string>
-    <string name="conversationmanageractivity_023">"占用 "</string>
-    <string name="conversationmanageractivity_024">"最后更新 "</string>
-    <string name="conversationmanageractivity_025">删除后，该对话的图片若不再被其他对话使用，将显示为「无引用」。</string>
+    <string name="conversationmanageractivity_021">消息 %1$s 条\n占用 %2$s\n最后更新 %3$s\n\n删除后，该对话的图片若不再被其他对话使用，将显示为「无引用」。</string>
+    
+    
+    
     <string name="conversationmanageractivity_026">查看</string>
     <string name="conversationmanageractivity_027">删除</string>
     <string name="conversationmanageractivity_028">关闭</string>
     <string name="conversationmanageractivity_029">重命名</string>
     <string name="conversationmanageractivity_030">删除</string>
-    <string name="conversationmanageractivity_031">"对话操作: "</string>
+    <string name="conversationmanageractivity_031">对话操作：%1$s</string>
     <string name="conversationmanageractivity_032">重命名</string>
     <string name="conversationmanageractivity_033">删除</string>
     <string name="conversationmanageractivity_034">取消</string>
@@ -240,21 +241,21 @@
     <string name="cropactivity_002">不是可识别的图片</string>
     <string name="cropactivity_003">图片解码失败</string>
     <string name="cropactivity_004">图片太大，内存不足</string>
-    <string name="cropactivity_005">"打开图片失败："</string>
+    <string name="cropactivity_005">打开图片失败：%1$s</string>
     <string name="cropactivity_006">未知错误</string>
     <string name="cropactivity_007">"  ⚠ 低分辨率"</string>
-    <string name="cropactivity_008">"原图只有 "</string>
-    <string name="cropactivity_009">，放大会模糊。建议从相册选原图，或换系统相机重拍</string>
+    <string name="cropactivity_008">原图只有 %1$d×%2$d，放大会模糊。建议从相册选原图，或换系统相机重拍</string>
+    
     <string name="cropactivity_010">内存不足，无法旋转</string>
-    <string name="cropactivity_011">"旋转失败："</string>
+    <string name="cropactivity_011">旋转失败：%1$s</string>
     <string name="cropactivity_012">旋转失败</string>
-    <string name="cropactivity_013">"旋转 "</string>
+    <string name="cropactivity_013">旋转 %1$d°</string>
     <string name="cropactivity_014">请先选择裁剪范围</string>
     <string name="cropactivity_015">无法创建缓存目录</string>
     <string name="cropactivity_016">裁剪结果为空</string>
     <string name="cropactivity_017">内存不足，请换一张小一点的图</string>
-    <string name="cropactivity_018">"裁剪失败："</string>
-    <string name="cropactivity_019">未知错误</string>
+    <string name="cropactivity_018">裁剪失败：%1$s</string>
+    
     <string name="cropactivity_020">正在裁剪…</string>
     <string name="errorreport_001">时间：</string>
     <string name="errorreport_002">提供商：</string>
@@ -274,21 +275,21 @@
     <string name="errorreport_016">确认端点可信后，可在「设置 → 信任所有 HTTPS 证书」中临时开启再试。</string>
     <string name="exporthelper_001">代码内容为空，无法保存</string>
     <string name="exporthelper_002">保存代码</string>
-    <string name="exporthelper_003">文件名（自动追加 .</string>
+    <string name="exporthelper_003">文件名（自动追加 %1$s）</string>
     <string name="exporthelper_004">保存</string>
     <string name="exporthelper_005">取消</string>
     <string name="exporthelper_006">文件已存在</string>
-    <string name="exporthelper_007">" 已存在，是否覆盖？"</string>
+    <string name="exporthelper_007">%1$s 已存在，是否覆盖？</string>
     <string name="exporthelper_008">覆盖</string>
     <string name="exporthelper_009">取消</string>
     <string name="exporthelper_010">保存失败</string>
-    <string name="exporthelper_011">"已保存到 "</string>
+    <string name="exporthelper_011">已保存到 %1$s</string>
     <string name="fileactions_001">文件已不存在，请返回后刷新</string>
-    <string name="fileactions_002">"打开 "</string>
+    <string name="fileactions_002">打开 %1$s</string>
     <string name="fileactions_003">没有能打开 %1$s 的应用</string>
     <string name="fileactions_005">无法打开，请换一个应用尝试</string>
     <string name="fileactions_006">文件已不存在，请返回后刷新</string>
-    <string name="fileactions_007">"分享 "</string>
+    <string name="fileactions_007">分享 %1$s</string>
     <string name="fileactions_008">分享失败，请重试</string>
     <string name="fileactions_009">读取失败，请稍后重试</string>
     <string name="fileactions_010">该文件不是文本文件，无法编辑</string>
@@ -296,7 +297,7 @@
     <string name="fileactions_012">该文件不是文本文件，无法编辑</string>
     <string name="fileactions_013">该文件编码不受支持，编辑后可能乱码，已取消</string>
     <string name="fileactions_014">读取失败，请稍后重试</string>
-    <string name="fileactions_015">"编辑 "</string>
+    <string name="fileactions_015">编辑 %1$s</string>
     <string name="fileactions_016">保存</string>
     <string name="fileactions_017">保存失败</string>
     <string name="fileactions_018">取消</string>
@@ -309,7 +310,9 @@
     <string name="fileactions_025">打开方式</string>
     <string name="fileactions_026">分享</string>
     <string name="fileactions_027">关闭</string>
-    <string name="fontmanageractivity_001">管理字体</string>
+        <string name="fontmanageractivity_061">「%1$s」被当前外观或某个主题引用。先选择替换为哪个字体，引用会一并改写并保存，然后再删除文件。</string>
+    <string name="fontmanageractivity_062">删除选中的 %1$d 个字体？此操作不可撤销。\n\n其中 %2$d 个正在被引用，将统一替换为系统默认并保存外观配置。</string>
+<string name="fontmanageractivity_001">管理字体</string>
     <string name="fontmanageractivity_002">添加后需在外观中启用才会出现在字体列表。删除正在使用的字体时，需先选择替代字体。</string>
     <string name="fontmanageractivity_003">添加字体</string>
     <string name="fontmanageractivity_004">批量管理</string>
@@ -322,7 +325,7 @@
     <string name="fontmanageractivity_011">已启用</string>
     <string name="fontmanageractivity_012">已停用</string>
     <string name="fontmanageractivity_013">暂无字体。点「添加字体」导入 .ttf 或 .otf 文件（不超过 8 MB），系统默认字体始终可用。</string>
-    <string name="fontmanageractivity_014">"已选 "</string>
+    <string name="fontmanageractivity_014">已选 %1$d / %2$d</string>
     <string name="fontmanageractivity_015">停用</string>
     <string name="fontmanageractivity_016">启用</string>
     <string name="fontmanageractivity_017">重命名</string>
@@ -334,7 +337,7 @@
     <string name="fontmanageractivity_023">名称不能为空</string>
     <string name="fontmanageractivity_024">取消</string>
     <string name="fontmanageractivity_025">字体加载失败，已使用系统默认字体</string>
-    <string name="fontmanageractivity_026">"中文 ABC 123  ·  "</string>
+    <string name="fontmanageractivity_026">中文 ABC 123  ·  %1$dsp</string>
     <string name="fontmanageractivity_027">关闭</string>
     <string name="fontmanageractivity_028">删除字体</string>
     <string name="fontmanageractivity_029">删除「%1$s」？此操作不可撤销。</string>
@@ -343,17 +346,13 @@
     <string name="fontmanageractivity_033">取消</string>
     <string name="fontmanageractivity_034">系统默认</string>
     <string name="fontmanageractivity_035">字体正在使用</string>
-    <string name="fontmanageractivity_036">」被当前外观或某个主题引用。先选择替换为哪个字体，</string>
-    <string name="fontmanageractivity_037">引用会一并改写并保存，然后再删除文件。</string>
     <string name="fontmanageractivity_038">已替换并保存</string>
     <string name="fontmanageractivity_039">取消</string>
     <string name="fontmanageractivity_040">请先勾选字体</string>
     <string name="fontmanageractivity_041">已批量启用</string>
     <string name="fontmanageractivity_042">已批量停用</string>
     <string name="fontmanageractivity_043">请先勾选字体</string>
-    <string name="fontmanageractivity_044">删除选中的 %1$s 个字体？此操作不可撤销。</string>
-    <string name="fontmanageractivity_046">"\n\n其中 "</string>
-    <string name="fontmanageractivity_047">" 个正在被引用，将统一替换为系统默认并保存外观配置。"</string>
+    <string name="fontmanageractivity_044">删除选中的 %1$d 个字体？此操作不可撤销。</string>
     <string name="fontmanageractivity_048">批量删除</string>
     <string name="fontmanageractivity_049">删除</string>
     <string name="fontmanageractivity_050">批量管理</string>
@@ -375,43 +374,21 @@
     <string name="fullscreeninputactivity_002">将清空全部 %1$s 字。清空后无法撤销。</string>
     <string name="fullscreeninputactivity_004">清空</string>
     <string name="fullscreeninputactivity_005">取消</string>
-    <string name="fullscreeninputactivity_006">" 字 · ~"</string>
-    <string name="fullscreeninputactivity_007">" 字 · ~"</string>
-    <string name="helptext_001">使用说明\n</string>
-    <string name="helptext_002">1. 下方输入问题，点右侧纸飞机发送；生成中点方块可停止。\n</string>
-    <string name="helptext_003">2. 输入框有内容时，右侧会出现全屏输入按钮，点开可大屏编辑。\n</string>
-    <string name="helptext_004">3. 加号按钮可附加文本文件、图片（相册 / 拍照 / 图片链接），\n</string>
-    <string name="helptext_005">"   选图和拍照会先进裁剪页，可以只截取需要的区域。\n"</string>
-    <string name="helptext_006">4. 在「模型配置」里勾选「支持图片输入（多模态）」后，图片会随请求发给模型；\n</string>
-    <string name="helptext_007">"   未勾选时图片只在本机查看，不会转发。\n"</string>
-    <string name="helptext_008">5. 点消息下方的附件卡片可打开文件：代码带语法高亮，HTML/SVG/Markdown 右上角\n</string>
-    <string name="helptext_009">"   可切到预览，JS 可点「运行」，图片直接进图片查看器。\n"</string>
-    <string name="helptext_010">6. 联网搜索支持图片搜索：结果以缩略图显示，点开可看大图；\n</string>
-    <string name="helptext_011">"   模型支持多模态时会直接看到这些图片。\n"</string>
-    <string name="helptext_012">7. 长按任意消息可复制、重试、修改、回溯或创建分支。\n</string>
-    <string name="helptext_013">8. 消息底部显示时间；AI 消息另显示 token 用量与生成速度，\n</string>
-    <string name="helptext_014">"   图片按视觉计费口径估算 token。\n"</string>
-    <string name="helptext_015">9. 设置页可配置模型、联网搜索、429 自动重试、网络请求权限\n</string>
-    <string name="helptext_016">"   与代码执行提示词。\n"</string>
-    <string name="helptext_017">10. 联网搜索、模型调用与网络请求需要自行填写 API Key。</string>
-    <string name="helptext_018">免责声明\n</string>
-    <string name="helptext_019">· 模型输出由第三方服务生成，仅供参考，请自行核实。\n</string>
-    <string name="helptext_020">· 联网搜索内容版权归原作者所有。\n</string>
-    <string name="helptext_021">· API Key 由你自行提供，相应费用与风险由你承担。\n</string>
-    <string name="helptext_022">· 开启「允许 AI 发起网络请求」后，模型可代你请求公网地址，\n</string>
-    <string name="helptext_023">"  请自行确认请求目标可信。\n"</string>
-    <string name="helptext_024">· 对话内容与密钥只保存在本机，不会上传到任何自有服务器。</string>
+    <string name="fullscreeninputactivity_006">%1$d 字 · ~%2$s tokens</string>
+    <string name="fullscreeninputactivity_007">%1$d 字 · ~%2$s tokens</string>
+    <string name="helptext_025">使用说明\n1. 下方输入问题，点右侧纸飞机发送；生成中点方块可停止。\n2. 输入框有内容时，右侧会出现全屏输入按钮，点开可大屏编辑。\n3. 加号按钮可附加文本文件、图片（相册 / 拍照 / 图片链接），选图和拍照会先进裁剪页，可以只截取需要的区域。\n4. 在「模型配置」里勾选「支持图片输入（多模态）」后，图片会随请求发给模型；未勾选时图片只在本机查看，不会转发。\n5. 点消息下方的附件卡片可打开文件：代码带语法高亮，HTML/SVG/Markdown 右上角可切到预览，JS 可点「运行」，图片直接进图片查看器。\n6. 联网搜索支持图片搜索：结果以缩略图显示，点开可看大图；模型支持多模态时会直接看到这些图片。\n7. 长按任意消息可复制、重试、修改、回溯或创建分支。\n8. 消息底部显示时间；AI 消息另显示 token 用量与生成速度，图片按视觉计费口径估算 token。\n9. 设置页可配置模型、联网搜索、429 自动重试、网络请求权限与代码执行提示词。\n10. 联网搜索、模型调用与网络请求需要自行填写 API Key。</string>
+    <string name="helptext_026">免责声明\n· 模型输出由第三方服务生成，仅供参考，请自行核实。\n· 联网搜索内容版权归原作者所有。\n· API Key 由你自行提供，相应费用与风险由你承担。\n· 开启「允许 AI 发起网络请求」后，模型可代你请求公网地址，请自行确认请求目标可信。\n· 对话内容与密钥只保存在本机，不会上传到任何自有服务器。</string>
     <string name="jsrunneractivity_001">渲染结果 · ▶ 加载中</string>
     <string name="jsrunneractivity_002">输出 · ▶ 正在执行</string>
     <string name="jsrunneractivity_003">输出 · 已清空</string>
     <string name="jsrunneractivity_004">（等待运行）</string>
     <string name="jsrunneractivity_005">输出 · 未运行</string>
-    <string name="jsrunneractivity_006">"渲染结果 · ✓ 已加载 · "</string>
+    <string name="jsrunneractivity_006">渲染结果 · ✓ 已加载 · %1$s</string>
     <string name="jsrunneractivity_007">请输入要运行的代码</string>
     <string name="jsrunneractivity_008">渲染结果 · ▶ 加载中…</string>
     <string name="jsrunneractivity_009">输出 · ▶ 正在执行…</string>
     <string name="jsrunneractivity_010">当前没有正在运行的程序</string>
-    <string name="jsrunneractivity_011">"输出 · ■ 已中止 · "</string>
+    <string name="jsrunneractivity_011">输出 · ■ 已中止 · %1$s</string>
     <string name="jsrunneractivity_012">[已中止] 用户中止了本次运行</string>
     <string name="jsrunneractivity_013">__reportError(e||m,l?(\'第\'+l+\'行\'):\'\');return true;};</string>
     <string name="jsrunneractivity_014">没有输出可复制</string>
@@ -419,12 +396,12 @@
     <string name="jsrunneractivity_016">剪贴板为空</string>
     <string name="jsrunneractivity_017">代码内容为空，无法保存</string>
     <string name="jsrunneractivity_018">保存失败</string>
-    <string name="jsrunneractivity_019">"已保存到 "</string>
-    <string name="jsrunneractivity_020">"输出 · ✗ "</string>
-    <string name="jsrunneractivity_021">"输出 · ✓ 已完成，无 console 输出 · "</string>
+    <string name="jsrunneractivity_019">已保存到 %1$s</string>
+    <string name="jsrunneractivity_020">输出 · ✗ %1$s · %2$s</string>
+    <string name="jsrunneractivity_021">输出 · ✓ 已完成，无 console 输出 · %1$s</string>
     <string name="jsrunneractivity_022">（执行完成，但没有 console.log 输出）</string>
-    <string name="jsrunneractivity_023">"输出 · ✓ 已完成 · "</string>
-    <string name="jsrunneractivity_024">" 行 · "</string>
+    <string name="jsrunneractivity_023">输出 · ✓ 已完成 · %1$d 行 · %2$s</string>
+    
     <string name="jsrunneractivity_025">执行出错</string>
     <string name="jsrunneractivity_026">重新运行</string>
     <string name="jsrunneractivity_027">运行</string>
@@ -440,7 +417,7 @@
     <string name="mainactivity_010">启动相机失败</string>
     <string name="mainactivity_011">这不是图片文件</string>
     <string name="mainactivity_012">图片太大，内存不足</string>
-    <string name="mainactivity_013">"读取图片失败："</string>
+    <string name="mainactivity_013">读取图片失败：%1$s</string>
     <string name="mainactivity_014">未知错误</string>
     <string name="mainactivity_015">无法打开裁剪页</string>
     <string name="mainactivity_016">添加</string>
@@ -448,25 +425,25 @@
     <string name="mainactivity_018">取消</string>
     <string name="mainactivity_019">正在下载图片…</string>
     <string name="mainactivity_020">图片太大，内存不足</string>
-    <string name="mainactivity_021">"下载图片失败："</string>
-    <string name="mainactivity_022">未知错误</string>
-    <string name="mainactivity_023">"读取失败："</string>
-    <string name="mainactivity_024">未知错误</string>
+    <string name="mainactivity_021">下载图片失败：%1$s</string>
+    
+    <string name="mainactivity_023">读取失败：%1$s</string>
+    
     <string name="mainactivity_025">这不是图片文件</string>
     <string name="mainactivity_026">图片太大，内存不足</string>
-    <string name="mainactivity_027">"读取图片失败："</string>
-    <string name="mainactivity_028">未知错误</string>
+    <string name="mainactivity_027">读取图片失败：%1$s</string>
+    
     <string name="mainactivity_029">未命名.txt</string>
     <string name="mainactivity_030">最多附加 %1$s 个文件</string>
-    <string name="mainactivity_034">"已附加 "</string>
-    <string name="mainactivity_035">"移除附件 "</string>
+    <string name="mainactivity_034">已附加 %1$s（%2$s）</string>
+    <string name="mainactivity_035">移除附件 %1$s</string>
     <string name="mainactivity_036">无法打开文件</string>
-    <string name="mainactivity_037">"文件超过 "</string>
-    <string name="mainactivity_038">这不是文本文件（含二进制内容），</string>
-    <string name="mainactivity_039">图片请用「上传图片」添加</string>
+    <string name="mainactivity_037">文件超过 %1$s</string>
+    <string name="mainactivity_038">这不是文本文件（含二进制内容），图片请用「上传图片」添加</string>
+    
     <string name="mainactivity_040">清空输入</string>
-    <string name="mainactivity_041">"将清空输入框中的文字，并移除 "</string>
-    <string name="mainactivity_042">" 个待发送附件。清空后无法撤销。"</string>
+    <string name="mainactivity_041">将清空输入框中的文字，并移除 %1$d 个待发送附件。清空后无法撤销。</string>
+    
     <string name="mainactivity_043">将清空输入框中的文字。清空后无法撤销。</string>
     <string name="mainactivity_044">清空</string>
     <string name="mainactivity_045">取消</string>
@@ -476,7 +453,7 @@
     <string name="mainactivity_049">高</string>
     <string name="mainactivity_050">已创建新对话</string>
     <string name="mainactivity_051">本次回复已被手动中断。</string>
-    <string name="mainactivity_052">" (已打断)"</string>
+    <string name="mainactivity_052">%1$s (已打断)</string>
     <string name="mainactivity_053">本次回复已被手动中断。</string>
     <string name="mainactivity_054">回复生成中，请先停止</string>
     <string name="mainactivity_055">之后已有新消息，请重新回复</string>
@@ -491,7 +468,7 @@
     <string name="mainactivity_069">保存照片失败，请重试</string>
     <string name="mainactivity_070">拍照未完成或相机未返回图片，请重试</string>
     <string name="mainactivity_071">请手动打开文本摘抄应用扫描</string>
-    <string name="mainactivity_072">"无法启动扫描："</string>
+    <string name="mainactivity_072">无法启动扫描：%1$s</string>
     <string name="mainactivity_073">存储不可用，本次对话可能无法保存</string>
     <string name="mainactivity_074">未选择模型</string>
     <string name="mainactivity_075">未选择模型</string>
@@ -500,7 +477,7 @@
     <string name="mainactivity_078">正在准备 %1$s 条消息</string>
     <string name="mainactivity_080">代码已复制</string>
     <string name="mainactivity_081">代码已复制</string>
-    <string name="mainactivity_082">"复制失败："</string>
+    <string name="mainactivity_082">复制失败：%1$s</string>
     <string name="mainactivity_083">无法打开链接</string>
     <string name="mainactivity_084">回复生成中，请先停止</string>
     <string name="mainactivity_085">回复生成中，请先停止</string>
@@ -509,17 +486,17 @@
     <string name="mainactivity_088">关闭</string>
     <string name="mainactivity_089">正在加载图片…</string>
     <string name="mainactivity_090">图片太大，内存不足</string>
-    <string name="mainactivity_091">"加载图片失败："</string>
-    <string name="mainactivity_092">未知错误</string>
+    <string name="mainactivity_091">加载图片失败：%1$s</string>
+    
     <string name="mainactivity_093">查看图片失败</string>
-    <string name="mainactivity_094">导入失败：</string>
+    <string name="mainactivity_094">导入失败：%1$s</string>
     <string name="mainactivity_095">导入失败：存储不可写</string>
     <string name="mainactivity_096">已导入主题「%1$s」，可在 设置 › 外观 › 管理自定义主题 中启用</string>
-    <string name="mainactivity_098">已导入「</string>
-    <string name="mainactivity_099">"」（有 "</string>
-    <string name="mainactivity_100">" 条校验提示）"</string>
-    <string name="mainactivity_101">导入失败：</string>
-    <string name="mainactivity_102">"读取搜题结果失败："</string>
+    <string name="mainactivity_098">已导入「%1$s」（有 %2$d 条校验提示）</string>
+    
+    
+    <string name="mainactivity_101">导入失败：%1$s</string>
+    <string name="mainactivity_102">读取搜题结果失败：%1$s</string>
     <string name="mainactivity_103">复制</string>
     <string name="mainactivity_104">选择文本</string>
     <string name="mainactivity_105">修改</string>
@@ -535,7 +512,7 @@
     <string name="mainactivity_115">图片文件已丢失（可能被系统清理），请重新附加</string>
     <string name="mainactivity_116">打开图片失败</string>
     <string name="mainactivity_117">已复制</string>
-    <string name="mainactivity_118">"复制失败："</string>
+    <string name="mainactivity_118">复制失败：%1$s</string>
     <string name="mainactivity_119">选择文本</string>
     <string name="mainactivity_120">关闭</string>
     <string name="mainactivity_121">复制已生成内容</string>
@@ -553,9 +530,9 @@
     <string name="mainactivity_133">确定修改本条消息？</string>
     <string name="mainactivity_134">已修改</string>
     <string name="mainactivity_135">取消</string>
-    <string name="mainactivity_136">回复生成中，请先点「停止」再</string>
+    <string name="mainactivity_136">回复生成中，请先点「停止」再%1$s</string>
     <string name="mainactivity_137">删除消息</string>
-    <string name="mainactivity_138">确定删除本条消息？\n\n</string>
+    <string name="mainactivity_138">确定删除本条消息？\n\n%1$s</string>
     <string name="mainactivity_139">已删除</string>
     <string name="mainactivity_140">无法找到对应的用户消息</string>
     <string name="mainactivity_141">将删除本条及之后共 %1$s 条消息并重新生成回复，确定？</string>
@@ -576,19 +553,20 @@
     <string name="mainactivity_159">将前 %1$s 条消息复制到新对话分支，确定？</string>
     <string name="mainactivity_161">没有可复制的消息</string>
     <string name="mainactivity_162">-分支</string>
-    <string name="mainactivity_163">"已创建分支："</string>
+    <string name="mainactivity_163">已创建分支：%1$s</string>
     <string name="mainactivity_164">确认</string>
     <string name="mainactivity_165">确定</string>
     <string name="mainactivity_166">取消</string>
     <string name="markdownpage_001">"&lt;div class=\"banner\"&gt;文件较大，仅显示前 "</string>
     <string name="markdownpage_002">"K 字符（共 "</string>
     <string name="markdownpage_003">" 字符）。完整内容仍在消息里，也已发给模型。&lt;/div&gt;"</string>
-    <string name="messagehtmlrenderer_001">&lt;span class=\"attach-view\"&gt;查看 ›&lt;/span&gt;</string>
-    <string name="messagehtmlrenderer_002">"&lt;span class=\"attach-cut\"&gt;⚠ 超出字符预算，本次未发送正文（共 "</string>
-    <string name="messagehtmlrenderer_003">" 字符）&lt;/span&gt;"</string>
-    <string name="messagehtmlrenderer_004">"&lt;span class=\"attach-cut\"&gt;⚠ 已截断，仅发送前 "</string>
-    <string name="messagehtmlrenderer_005">" / 共 "</string>
-    <string name="messagehtmlrenderer_006">" 字符&lt;/span&gt;"</string>
+        <string name="messagehtmlrenderer_048">网页抓取：%1$s</string>
+    <string name="messagehtmlrenderer_049">搜索：%1$s（%2$d 条）</string>
+    <string name="messagehtmlrenderer_050">工具结果：%1$s</string>
+    <string name="messagehtmlrenderer_051">工具结果：%1$s · %2$s</string>
+<string name="messagehtmlrenderer_001">&lt;span class=\"attach-view\"&gt;查看 ›&lt;/span&gt;</string>
+    <string name="messagehtmlrenderer_002">"&lt;span class=\"attach-cut\"&gt;⚠ 超出字符预算，本次未发送正文（共 %1$s 字符）&lt;/span&gt;"</string>
+    <string name="messagehtmlrenderer_004">"&lt;span class=\"attach-cut\"&gt;⚠ 已截断，仅发送前 %1$s / 共 %2$s 字符&lt;/span&gt;"</string>
     <string name="messagehtmlrenderer_007">" 次请求"</string>
     <string name="messagehtmlrenderer_008">"输入 "</string>
     <string name="messagehtmlrenderer_009">" · 缓存 "</string>
@@ -623,8 +601,7 @@
     <string name="messagehtmlrenderer_038">&lt;div class=\"tool-card-head\"&gt;图片搜索</string>
     <string name="messagehtmlrenderer_039">" 张）&lt;/div&gt;"</string>
     <string name="messagehtmlrenderer_040">没有找到图片</string>
-    <string name="messagehtmlrenderer_041">搜索</string>
-    <string name="messagehtmlrenderer_042">" 条）"</string>
+    <string name="messagehtmlrenderer_041">搜索（%1$d 条）</string>
     <string name="messagehtmlrenderer_043">工具结果：</string>
     <string name="messagehtmlrenderer_044">未知工具</string>
     <string name="messagehtmlrenderer_045">没有找到结果</string>
@@ -633,9 +610,9 @@
     <string name="messagequeue_001">已排队 %1$s 条，当前回复结束后发送</string>
     <string name="messagequeue_003">排队 %1$s 条，当前回复结束后依次发送</string>
     <string name="messagequeue_005">没有排队中的消息</string>
-    <string name="messagequeue_006">"[附件] "</string>
-    <string name="messagequeue_007">" 等 "</string>
-    <string name="messagequeue_008">" 个文件"</string>
+    <string name="messagequeue_006">[附件] %1$s</string>
+    <string name="messagequeue_007">[附件] %1$s 等 %2$d 个文件</string>
+    
     <string name="messagequeue_009">排队中的消息</string>
     <string name="messagequeue_010">关闭</string>
     <string name="messagequeue_011">全部清空</string>
@@ -666,7 +643,7 @@
     <string name="modelconfigactivity_012">删除</string>
     <string name="modelconfigactivity_013">取消</string>
     <string name="modelconfigactivity_014">" 副本"</string>
-    <string name="modelconfigactivity_015">"已复制为 "</string>
+    <string name="modelconfigactivity_015">已复制为 %1$s</string>
     <string name="modelconfigactivity_016">请先勾选提供商</string>
     <string name="modelconfigactivity_017">"确定删除 "</string>
     <string name="modelconfigactivity_018">"确定删除选中的 "</string>
@@ -677,10 +654,10 @@
     <string name="modelconfigactivity_023">删除提供商</string>
     <string name="modelconfigactivity_024">删除</string>
     <string name="modelconfigactivity_025">取消</string>
-    <string name="modelconfigactivity_026">"已删除 "</string>
-    <string name="modelconfigactivity_027">" 个提供商、"</string>
-    <string name="modelconfigactivity_028">" 个模型"</string>
-    <string name="modelconfigactivity_029">"正在测试 "</string>
+    <string name="modelconfigactivity_026">已删除 %1$d 个提供商、%2$d 个模型</string>
+    
+    
+    <string name="modelconfigactivity_029">正在测试 %1$s…</string>
     <string name="modelconfigactivity_030">" · 可用"</string>
     <string name="modelconfigactivity_031">" · 不可用"</string>
     <string name="modelconfigactivity_032">关闭</string>
@@ -715,8 +692,8 @@
     <string name="modelconfigactivity_062">删除</string>
     <string name="modelconfigactivity_063">取消</string>
     <string name="modelconfigactivity_064">" 副本"</string>
-    <string name="modelconfigactivity_065">"已复制为 "</string>
-    <string name="modelconfigactivity_066">"默认模型已设为 "</string>
+    <string name="modelconfigactivity_065">已复制为 %1$s</string>
+    <string name="modelconfigactivity_066">默认模型已设为 %1$s</string>
     <string name="modelconfigactivity_067">请先勾选模型</string>
     <string name="modelconfigactivity_068">确定删除</string>
     <string name="modelconfigactivity_069">"选中的 "</string>
@@ -727,43 +704,43 @@
     <string name="modelconfigactivity_074">已删除 %1$s 个模型</string>
     <string name="modelconfigactivity_076">取消</string>
     <string name="modelconfigactivity_077">全部测试</string>
-    <string name="modelconfigactivity_078">"已停止（已测 "</string>
+    <string name="modelconfigactivity_078">已停止（已测 %1$d / %2$d）</string>
     <string name="modelconfigactivity_079">没有可测试的模型</string>
     <string name="modelconfigactivity_080">停止测试</string>
-    <string name="modelconfigactivity_081">"测试中 0 / "</string>
+    <string name="modelconfigactivity_081">测试中 0 / %1$d…</string>
     <string name="modelconfigactivity_082">无提供商</string>
-    <string name="modelconfigactivity_083">：提供商不存在</string>
+    <string name="modelconfigactivity_083">%1$s：提供商不存在</string>
     <string name="modelconfigactivity_084">测试中…</string>
     <string name="modelconfigactivity_085">✗ 失败</string>
-    <string name="modelconfigactivity_086">"测试中 "</string>
+    <string name="modelconfigactivity_086">测试中 %1$d / %2$d…</string>
     <string name="modelconfigactivity_087">全部测试</string>
-    <string name="modelconfigactivity_088">已停止</string>
-    <string name="modelconfigactivity_089">测试完成</string>
-    <string name="modelconfigactivity_090">"：共 "</string>
-    <string name="modelconfigactivity_091">" 个，失败 "</string>
-    <string name="modelconfigactivity_092">" 个"</string>
+    <string name="modelconfigactivity_088">已停止：共 %1$d 个，失败 %2$d 个</string>
+    <string name="modelconfigactivity_089">测试完成：共 %1$d 个，失败 %2$d 个</string>
+    
+    
+    
     <string name="modelconfigactivity_093">探测能力（当前列表）</string>
-    <string name="modelconfigactivity_094">"已停止（已探测 "</string>
+    <string name="modelconfigactivity_094">已停止（已探测 %1$d / %2$d）</string>
     <string name="modelconfigactivity_095">连通性测试进行中，请先停止</string>
     <string name="modelconfigactivity_096">没有可探测的模型</string>
     <string name="modelconfigactivity_097">停止探测</string>
-    <string name="modelconfigactivity_098">"探测中 0 / "</string>
+    <string name="modelconfigactivity_098">探测中 0 / %1$d…</string>
     <string name="modelconfigactivity_099">无提供商</string>
-    <string name="modelconfigactivity_100">：提供商不存在</string>
+    <string name="modelconfigactivity_100">%1$s：提供商不存在</string>
     <string name="modelconfigactivity_101">探测中…</string>
     <string name="modelconfigactivity_102">六档全部被拒绝</string>
-    <string name="modelconfigactivity_103">"探测中 "</string>
+    <string name="modelconfigactivity_103">探测中 %1$d / %2$d…</string>
     <string name="modelconfigactivity_104">探测能力（当前列表）</string>
     <string name="modelconfigactivity_105">探测已停止</string>
     <string name="modelconfigactivity_106">探测完成</string>
-    <string name="modelconfigactivity_107">"：共 "</string>
-    <string name="modelconfigactivity_108">" 个，失败 "</string>
-    <string name="modelconfigactivity_109">" 个"</string>
+    
+    
+    
     <string name="modelconfigactivity_110">探测能力</string>
-    <string name="modelconfigactivity_111">"将对 "</string>
-    <string name="modelconfigactivity_112">" 个模型逐个探测思考档位与图片输入，"</string>
-    <string name="modelconfigactivity_113">每个模型最多发起 8 次请求，会消耗少量额度。</string>
-    <string name="modelconfigactivity_114">图片输入会换两张不同数字的图各问一次，都答对才算支持。确定开始？</string>
+    <string name="modelconfigactivity_111">将对 %1$d 个模型逐个探测思考档位与图片输入，每个模型最多发起 8 次请求，会消耗少量额度。图片输入会换两张不同数字的图各问一次，都答对才算支持。确定开始？</string>
+    
+    
+    
     <string name="modelconfigactivity_115">开始</string>
     <string name="modelconfigactivity_116">取消</string>
     <string name="modelconfigactivity_117">无思考</string>
@@ -792,15 +769,15 @@
     <string name="modelconfigactivity_140">模型连通性</string>
     <string name="modelconfigactivity_141">关闭</string>
     <string name="modelconfigactivity_142">该模型没有关联的提供商</string>
-    <string name="modelconfigactivity_143">"正在测试 "</string>
+    <string name="modelconfigactivity_143">正在测试 %1$s…</string>
     <string name="modelconfigactivity_144">✗ 失败</string>
     <string name="modelconfigactivity_145">" · 可用"</string>
     <string name="modelconfigactivity_146">" · 不可用"</string>
     <string name="modelconfigactivity_147">关闭</string>
-    <string name="modeleditactivity_001">（未指定提供商）</string>
+        <string name="modeleditactivity_044">上次探测：思考可用 %1$s（该服务不区分思考档位）</string>
+<string name="modeleditactivity_001">（未指定提供商）</string>
     <string name="modeleditactivity_002">新建模型</string>
-    <string name="modeleditactivity_003">"上次探测：思考可用 "</string>
-    <string name="modeleditactivity_004">（该服务不区分思考档位）</string>
+    <string name="modeleditactivity_003">上次探测：思考可用 %1$s</string>
     <string name="modeleditactivity_005">当前为默认模型</string>
     <string name="modeleditactivity_006">设为默认模型</string>
     <string name="modeleditactivity_007">未选择提供商，模型无法发送请求</string>
@@ -809,7 +786,7 @@
     <string name="modeleditactivity_010">请先选择提供商</string>
     <string name="modeleditactivity_011">该提供商还没填 API Key</string>
     <string name="modeleditactivity_012">测试中…</string>
-    <string name="modeleditactivity_013">"正在请求 "</string>
+    <string name="modeleditactivity_013">正在请求 %1$s …</string>
     <string name="modeleditactivity_014">测试连通性</string>
     <string name="modeleditactivity_015">请先填写模型 ID</string>
     <string name="modeleditactivity_016">请先选择提供商</string>
@@ -817,7 +794,7 @@
     <string name="modeleditactivity_018">探测中…</string>
     <string name="modeleditactivity_019">正在测试 6 个思考档位，大约需要十几秒…</string>
     <string name="modeleditactivity_020">探测思考档位与图片输入</string>
-    <string name="modeleditactivity_021">探测未完成：</string>
+    <string name="modeleditactivity_021">探测未完成：%1$s</string>
     <string name="modeleditactivity_022">思考可用：</string>
     <string name="modeleditactivity_023">\n该服务不区分思考档位，六档均按可用处理。</string>
     <string name="modeleditactivity_024">\n当前全局档位「</string>
@@ -831,18 +808,18 @@
     <string name="modeleditactivity_032">。可再探测一次；仍无结论时，请按实际使用效果手动设置「支持图片输入」。</string>
     <string name="modeleditactivity_033">模型 ID 不能为空</string>
     <string name="modeleditactivity_034">请选择提供商</string>
-    <string name="modeleditactivity_035">提供商不存在：</string>
-    <string name="modeleditactivity_036">该提供商下已有同名模型：</string>
+    <string name="modeleditactivity_035">提供商不存在：%1$s</string>
+    <string name="modeleditactivity_036">该提供商下已有同名模型：%1$s</string>
     <string name="modeleditactivity_037">已保存，并设为默认模型</string>
     <string name="modeleditactivity_038">已保存预设</string>
     <string name="modeleditactivity_039">删除模型</string>
-    <string name="modeleditactivity_040">"确定删除 "</string>
+    <string name="modeleditactivity_040">确定删除 %1$s？</string>
     <string name="modeleditactivity_041">删除</string>
     <string name="modeleditactivity_042">已删除</string>
     <string name="modeleditactivity_043">取消</string>
     <string name="modelspinneradapter_001">未指定服务商</string>
     <string name="placeholderchips_001">点按插入：</string>
-    <string name="presetmanageractivity_001">" 字"</string>
+    <string name="presetmanageractivity_001">%1$d 字</string>
     <string name="presetmanageractivity_002">应用</string>
     <string name="presetmanageractivity_003">修改</string>
     <string name="presetmanageractivity_004">取消</string>
@@ -860,7 +837,7 @@
     <string name="presetmanageractivity_018">删除</string>
     <string name="presetmanageractivity_019">名称不能为空</string>
     <string name="presetmanageractivity_020">提示词内容不能为空</string>
-    <string name="presetmanageractivity_021">名称已存在：</string>
+    <string name="presetmanageractivity_021">名称已存在：%1$s</string>
     <string name="presetmanageractivity_022">删除预设</string>
     <string name="presetmanageractivity_023">删除后无法恢复，确定吗？</string>
     <string name="presetmanageractivity_024">删除</string>
@@ -869,7 +846,9 @@
     <string name="presetmanageractivity_027">（空）</string>
     <string name="presetstore_001">新预设</string>
     <string name="presetstore_002">新预设</string>
-    <string name="providereditactivity_001">新建提供商</string>
+    <string name="providereditactivity_064">确定删除 %1$s？\n\n其名下的 %2$d 个模型会一并删除，无法恢复。</string>
+    <string name="providereditactivity_063">已添加 %1$d 个模型，跳过 %2$d 个重名</string>
+<string name="providereditactivity_001">新建提供商</string>
     <string name="providereditactivity_002">留空时会从 Base URL 自动提取二级域名，如 api.example.com → example</string>
     <string name="providereditactivity_003">⚠ 名称「%1$s」已被其他提供商占用，请换一个</string>
     <string name="providereditactivity_005">⚠ 改名会同步更新引用它的模型</string>
@@ -881,10 +860,9 @@
     <string name="providereditactivity_011">\n⚠ Base URL 要以 http:// 或 https:// 开头，请补全后重试</string>
     <string name="providereditactivity_012">请填写名称，或先填 Base URL</string>
     <string name="providereditactivity_013">Base URL 必须以 http:// 或 https:// 开头</string>
-    <string name="providereditactivity_014">名称已被其他提供商使用：</string>
+    <string name="providereditactivity_014">名称已被其他提供商使用：%1$s</string>
     <string name="providereditactivity_015">已保存预设</string>
-    <string name="providereditactivity_016">"确定删除 "</string>
-    <string name="providereditactivity_017">\n\n其名下的 %1$s 个模型会一并删除，无法恢复。</string>
+    <string name="providereditactivity_016">确定删除 %1$s？</string>
     <string name="providereditactivity_019">删除提供商</string>
     <string name="providereditactivity_020">删除</string>
     <string name="providereditactivity_021">已删除</string>
@@ -892,7 +870,7 @@
     <string name="providereditactivity_023">请先填写有效的 Base URL</string>
     <string name="providereditactivity_024">请先填写 API Key</string>
     <string name="providereditactivity_025">测试中…</string>
-    <string name="providereditactivity_026">"正在测试 "</string>
+    <string name="providereditactivity_026">正在测试 %1$s …</string>
     <string name="providereditactivity_027">测试连通性</string>
     <string name="providereditactivity_028">正在获取模型列表…</string>
     <string name="providereditactivity_029">正在获取模型列表…</string>
@@ -907,58 +885,60 @@
     <string name="providereditactivity_043">取消</string>
     <string name="providereditactivity_044">没有选择模型</string>
     <string name="providereditactivity_045">已添加 %1$s 个模型</string>
-    <string name="providereditactivity_047">"，跳过 "</string>
-    <string name="providereditactivity_048">" 个重名"</string>
     <string name="providereditactivity_049">该提供商的模型（0）</string>
     <string name="providereditactivity_050">先保存提供商，再添加模型。</string>
     <string name="providereditactivity_051">点击模型可编辑，长按删除。</string>
-    <string name="providereditactivity_052">该提供商的模型（</string>
+    <string name="providereditactivity_052">该提供商的模型（%1$d）</string>
     <string name="providereditactivity_053">还没有模型。点「获取模型列表」从接口拉取，或「新建模型」手动添加。</string>
     <string name="providereditactivity_054">"  ·  视觉"</string>
     <string name="providereditactivity_055">请先保存提供商</string>
     <string name="providereditactivity_056">删除模型</string>
-    <string name="providereditactivity_057">"确定删除 "</string>
+    <string name="providereditactivity_057">确定删除 %1$s？</string>
     <string name="providereditactivity_058">删除</string>
     <string name="providereditactivity_059">已删除</string>
     <string name="providereditactivity_060">取消</string>
     <string name="providertester_001">提供商为空</string>
-    <string name="providertester_002">"，模型 "</string>
-    <string name="providertester_003">" 个"</string>
-    <string name="providertester_004">连接正常（</string>
-    <string name="providertester_005">对话端点可用（</string>
-    <string name="providertester_006">" ms；/models 返回 HTTP "</string>
-    <string name="providertester_007">，已跳过）</string>
+    <string name="providertester_002">，模型 %1$d 个</string>
+    
+    <string name="providertester_004">连接正常（%1$d ms）%2$s</string>
+    <string name="providertester_005">对话端点可用（%1$d ms；/models 返回 HTTP %2$d，已跳过）%3$s</string>
+    
+    
     <string name="providertester_008">，未指定探测模型</string>
     <string name="providertester_009">提供商为空</string>
     <string name="providertester_010">模型 ID 为空</string>
-    <string name="providertester_011">可用（</string>
+    <string name="providertester_011">可用（%1$d ms）</string>
     <string name="providertester_012">提供商为空</string>
     <string name="providertester_013">返回内容不是可识别的模型列表</string>
     <string name="providertester_014">获取到 %1$s 个模型</string>
     <string name="providertester_016">Base URL 不是有效的 http(s) 地址，请检查后重试</string>
     <string name="providertester_017">未填写 API Key，请在提供商设置里补上</string>
-    <string name="providertester_018">HTTP 401 认证失败，请检查 API Key</string>
-    <string name="providertester_019">HTTP 403 被拒绝（Key 无权限或该地区受限）</string>
-    <string name="providertester_020">HTTP 404 地址或模型不存在，请检查 Base URL / Chat Path</string>
+    <string name="providertester_018">HTTP 401 认证失败，请检查 API Key%1$s</string>
+    <string name="providertester_019">HTTP 403 被拒绝（Key 无权限或该地区受限）%1$s</string>
+    <string name="providertester_020">HTTP 404 地址或模型不存在，请检查 Base URL / Chat Path%1$s%2$s</string>
     <string name="providertester_021">" / 模型 ID"</string>
-    <string name="providertester_022">HTTP 405 该地址不接受此请求方法（可能不是 chat completions 端点）</string>
-    <string name="providertester_023">HTTP 429 触发限流或额度不足</string>
-    <string name="providertester_024">HTTP 400 请求被拒绝（模型 ID 或参数不被接受）</string>
-    <string name="providertester_025">" 服务端错误（对方故障，稍后再试）"</string>
+    <string name="providertester_022">HTTP 405 该地址不接受此请求方法（可能不是 chat completions 端点）%1$s</string>
+    <string name="providertester_023">HTTP 429 触发限流或额度不足%1$s</string>
+    <string name="providertester_024">HTTP 400 请求被拒绝（模型 ID 或参数不被接受）%1$s</string>
+    <string name="providertester_025">HTTP %1$d 服务端错误（对方故障，稍后再试）%2$s</string>
     <string name="providertester_026">端点返回错误</string>
     <string name="providertester_027">无法解析域名 %1$s，请检查地址拼写或当前网络</string>
     <string name="providertester_029">连接超时（15 秒），对方无响应</string>
-    <string name="providertester_030">；内网地址可能被网络策略拦截</string>
+    
     <string name="providertester_031">证书校验失败（自签证书可在设置里开启「信任所有证书」后重试）</string>
     <string name="providertester_032">TLS 握手失败</string>
-    <string name="providertester_033">；内网地址请确认协议是否为 https</string>
-    <string name="providertester_034">，对方可能不支持当前系统可用的加密套件</string>
+    
+    
     <string name="providertester_035">无法建立连接（端口未开放或地址不可达）</string>
     <string name="providertester_036">非 https 地址被系统拦截</string>
-    <string name="providertester_037">网络错误：</string>
+    <string name="providertester_037">网络错误：%1$s</string>
     <string name="providertester_038">无法解析域名</string>
     <string name="providertester_039">连接超时</string>
     <string name="providertester_040">证书校验失败</string>
+    <string name="providertester_042">HTTP %1$d%2$s</string>
+    <string name="providertester_043">连接超时（15 秒），对方无响应；内网地址可能被网络策略拦截</string>
+    <string name="providertester_044">TLS 握手失败；内网地址请确认协议是否为 https</string>
+    <string name="providertester_045">TLS 握手失败，对方可能不支持当前系统可用的加密套件</string>
     <string name="providertester_041">TLS 握手失败</string>
     <string name="scalepolicy_001">小</string>
     <string name="scalepolicy_002">偏小</string>
@@ -966,10 +946,14 @@
     <string name="scalepolicy_004">偏大</string>
     <string name="scalepolicy_005">大</string>
     <string name="scanactivity_001">请手动打开文本摘抄应用扫描</string>
-    <string name="scanactivity_002">"检测到扫描键: "</string>
+    <string name="scanactivity_002">检测到扫描键：%1$d</string>
     <string name="scanactivity_003">没有找到摘抄记录，请先在文本摘抄中扫描并保存</string>
-    <string name="scanactivity_004">摘抄 #</string>
+    <string name="scanactivity_004">摘抄 #%1$s</string>
     <string name="scanactivity_005">选择摘抄记录</string>
+    <string name="settingsactivity_076">开启后，AI 可以通过 http_request 访问 192.168.x.x、127.0.0.1、169.254.169.254 等地址。\n\n风险：路由器管理页、NAS 文件、云主机元数据凭证都可能被读到，而请求结果会原样发给模型服务商。</string>
+    <string name="settingsactivity_077">开启后不再校验证书与主机名，任何中间人都能解密你与服务器之间的流量，包括 API Key 和全部对话内容。\n\n仅建议在访问自签证书的内网服务时临时开启。</string>
+    <string name="settingsactivity_078">%1$s 余额</string>
+    <string name="settingsactivity_079">%1$s · 深色</string>
     <string name="settingsactivity_001">你是一个标题生成助手。根据用户消息生成 3-15 字标题，只输出标题本身，不要引号、不要解释、不要换行。</string>
     <string name="settingsactivity_008">系统提示词已为空</string>
     <string name="settingsactivity_009">清空系统提示词</string>
@@ -979,14 +963,7 @@
     <string name="settingsactivity_014">取消</string>
     <string name="settingsactivity_015">Tavily（免费）</string>
     <string name="settingsactivity_016">允许访问内网地址</string>
-    <string name="settingsactivity_017">开启后，AI 可以通过 http_request 访问 192.168.x.x、127.0.0.1、</string>
-    <string name="settingsactivity_018">169.254.169.254 等地址。\n\n</string>
-    <string name="settingsactivity_019">风险：路由器管理页、NAS 文件、云主机元数据凭证都可能被读到，</string>
-    <string name="settingsactivity_020">而请求结果会原样发给模型服务商。</string>
     <string name="settingsactivity_021">信任所有 HTTPS 证书</string>
-    <string name="settingsactivity_022">开启后不再校验证书与主机名，任何中间人都能解密你与服务器之间的流量，</string>
-    <string name="settingsactivity_023">包括 API Key 和全部对话内容。\n\n</string>
-    <string name="settingsactivity_024">仅建议在访问自签证书的内网服务时临时开启。</string>
     <string name="settingsactivity_025">我已了解，继续开启</string>
     <string name="settingsactivity_026">取消</string>
     <string name="settingsactivity_027">说明</string>
@@ -1001,16 +978,14 @@
     <string name="settingsactivity_041">"账户可用："</string>
     <string name="settingsactivity_042">是</string>
     <string name="settingsactivity_043">否</string>
-    <string name="settingsactivity_044">" 余额"</string>
     <string name="settingsactivity_045">确定</string>
-    <string name="settingsactivity_046">"余额返回异常："</string>
+    <string name="settingsactivity_046">余额返回异常：%1$s</string>
     <string name="settingsactivity_047">自定义</string>
     <string name="settingsactivity_048">内置默认</string>
     <string name="settingsactivity_049">内置默认</string>
-    <string name="settingsactivity_050">" · 深色"</string>
     <string name="settingsactivity_051">内置默认</string>
-    <string name="settingsactivity_052">"已用 "</string>
-    <string name="settingsactivity_053">"已用 "</string>
+    <string name="settingsactivity_052">已用 %1$s</string>
+    <string name="settingsactivity_053">已用 %1$s</string>
     <string name="settingsactivity_054">(不选择)</string>
     <string name="settingsactivity_055">系统提示词为空</string>
     <string name="settingsactivity_056">最多 %1$s 个预设</string>
@@ -1021,10 +996,10 @@
     <string name="settingsactivity_063">保存</string>
     <string name="settingsactivity_064">取消</string>
     <string name="settingsactivity_065">名称不能为空</string>
-    <string name="settingsactivity_066">名称已存在：</string>
+    <string name="settingsactivity_066">名称已存在：%1$s</string>
     <string name="settingsactivity_067">最多 %1$s 个预设</string>
     <string name="settingsactivity_069">保存失败</string>
-    <string name="settingsactivity_070">已保存：</string>
+    <string name="settingsactivity_070">已保存：%1$s</string>
     <string name="sourcepage_001">"&lt;div class=\"banner\"&gt;文件较大，仅显示前 "</string>
     <string name="sourcepage_002">"K 字符（共 "</string>
     <string name="sourcepage_003">" 字符）。完整内容仍在消息里，也已发给模型。&lt;/div&gt;"</string>
@@ -1044,8 +1019,7 @@
     <string name="statsactivity_003">本月</string>
     <string name="statsactivity_004">自定义</string>
     <string name="statsactivity_005">清空统计</string>
-    <string name="statsactivity_006">将删除本机全部使用统计（含按模型、按服务商的累计数据）。\n</string>
-    <string name="statsactivity_007">会话内容、设置、导出文件都不受影响。确定继续？</string>
+    <string name="statsactivity_044">将删除本机全部使用统计（含按模型、按服务商的累计数据）。\n会话内容、设置、导出文件都不受影响。确定继续？</string>
     <string name="statsactivity_008">清空</string>
     <string name="statsactivity_009">取消</string>
     <string name="statsactivity_010">"对话  "</string>
@@ -1098,13 +1072,13 @@
     <string name="storageactivity_017">正在统计各项数据的占用</string>
     <string name="storageactivity_018">无法读取存储</string>
     <string name="storageactivity_019">外部存储不可用，请检查后重试</string>
-    <string name="storageactivity_020">"已用 "</string>
-    <string name="storageactivity_021">"可用 "</string>
-    <string name="storageactivity_022">" · 共 "</string>
+    <string name="storageactivity_020">已用 %1$s</string>
+    <string name="storageactivity_021">可用 %1$s</string>
+    
     <string name="storageactivity_023">⚠ 外部存储不可用，以上仅统计内部数据</string>
-    <string name="storageactivity_024">" 个会话无法读取，为避免误删，本次不清理图片"</string>
+    <string name="storageactivity_024">⚠ %1$d 个会话无法读取，为避免误删，本次不清理图片</string>
     <string name="storageactivity_025">⚠ 无法读取部分对话，暂不能一键清理图片</string>
-    <string name="storageactivity_026">存储位置：</string>
+    <string name="storageactivity_026">存储位置：%1$s  ›</string>
     <string name="storageactivity_027">内部存储</string>
     <string name="storageactivity_028">外部存储</string>
     <string name="storageactivity_029">统计中…</string>
@@ -1118,13 +1092,13 @@
     <string name="storageactivity_042">"  （设置与统计数据，不可清理）"</string>
     <string name="storageactivity_043">其他文件</string>
     <string name="storageactivity_044">关闭</string>
-    <string name="storageactivity_045">"可安全释放 "</string>
-    <string name="storageactivity_046">"临时文件 "</string>
-    <string name="storageactivity_047">（部分对话无法读取，本次不清理图片）</string>
-    <string name="storageactivity_048">"临时文件 "</string>
-    <string name="storageactivity_049">（未读到图片引用，本次不清理图片）</string>
-    <string name="storageactivity_050">"临时文件 "</string>
-    <string name="storageactivity_051">" + 无引用图片 "</string>
+    <string name="storageactivity_045">可安全释放 %1$s</string>
+    <string name="storageactivity_046">临时文件 %1$s（部分对话无法读取，本次不清理图片）</string>
+    
+    <string name="storageactivity_048">临时文件 %1$s（未读到图片引用，本次不清理图片）</string>
+    
+    <string name="storageactivity_050">临时文件 %1$s + 无引用图片 %2$s</string>
+    
     <string name="storageactivity_052">立即清理</string>
     <string name="storageactivity_053">将清理临时文件</string>
     <string name="storageactivity_054">"和 "</string>
@@ -1136,16 +1110,16 @@
     <string name="storageactivity_060">清理</string>
     <string name="storageactivity_061">取消</string>
     <string name="storageactivity_062">清理中…</string>
-    <string name="storageactivity_063">没有可清理的文件（</string>
-    <string name="storageactivity_064">" 个被占用）"</string>
+    <string name="storageactivity_063">没有可清理的文件（%1$d 个被占用）</string>
+    
     <string name="storageactivity_065">没有可清理的文件</string>
-    <string name="storageactivity_066">"已释放 "</string>
-    <string name="storageactivity_067">"，共 "</string>
-    <string name="storageactivity_068">" 个文件"</string>
-    <string name="storageactivity_069">" 个被占用未删除"</string>
+    <string name="storageactivity_066">已释放 %1$s，共 %2$d 个文件%3$s</string>
+    
+    
+    <string name="storageactivity_069">，%1$d 个被占用未删除</string>
     <string name="storageactivity_070">" · 单个对话"</string>
-    <string name="storageactivity_071">对话、图片与导出文件都保存在下面的目录中。</string>
-    <string name="storageactivity_072">复制整个目录即可迁移到新设备。</string>
+    <string name="storageactivity_071">对话、图片与导出文件都保存在下面的目录中。复制整个目录即可迁移到新设备。</string>
+    
     <string name="storageactivity_073">数据目录</string>
     <string name="storageactivity_074">对话 / 图片 / 导出</string>
     <string name="storageactivity_075">附件目录</string>
@@ -1162,8 +1136,8 @@
     <string name="storageattachmentsactivity_001">部分对话无法读取，暂不能清理图片</string>
     <string name="storageattachmentsactivity_002">使用中的图片不能在这里删除，请先删除对应对话</string>
     <string name="storageattachmentsactivity_003">正在统计…</string>
-    <string name="storageattachmentsactivity_004">"使用中 "</string>
-    <string name="storageattachmentsactivity_005">"无引用 "</string>
+    <string name="storageattachmentsactivity_004">使用中 %1$d</string>
+    <string name="storageattachmentsactivity_005">无引用 %1$d</string>
     <string name="storageattachmentsactivity_006">取消全选</string>
     <string name="storageattachmentsactivity_007">全选</string>
     <string name="storageattachmentsactivity_008">部分对话无法读取，暂不能清理图片</string>
@@ -1184,10 +1158,10 @@
     <string name="storageattachmentsactivity_025">取消</string>
     <string name="storageattachmentsactivity_026">用于 %1$s 个对话</string>
     <string name="storageattachmentsactivity_028">无对话引用</string>
-    <string name="storageattachmentsactivity_029">文件名：</string>
-    <string name="storageattachmentsactivity_030">大小：</string>
-    <string name="storageattachmentsactivity_031">保存时间：</string>
-    <string name="storageattachmentsactivity_032">状态：</string>
+    <string name="storageattachmentsactivity_029">文件名：%1$s\n大小：%2$s\n保存时间：%3$s\n状态：%4$s\n\n</string>
+    
+    
+    
     <string name="storageattachmentsactivity_033">这张图仍被对话引用，删除后消息里的图片会无法显示。</string>
     <string name="storageattachmentsactivity_034">这张图不与任何对话关联，可以安全删除。</string>
     <string name="storageattachmentsactivity_035">使用中的图片</string>
@@ -1195,25 +1169,26 @@
     <string name="storageattachmentsactivity_037">关闭</string>
     <string name="storageattachmentsactivity_038">请先选择要删除的图片</string>
     <string name="storageattachmentsactivity_039">删除图片</string>
-    <string name="storageattachmentsactivity_040">"删除 "</string>
-    <string name="storageattachmentsactivity_041">" 张图片？\n\n共 "</string>
-    <string name="storageattachmentsactivity_042">，不与任何对话关联。\n此操作不可恢复。</string>
+    <string name="storageattachmentsactivity_040">删除 %1$d 张图片？\n\n共 %2$s，不与任何对话关联。\n此操作不可恢复。</string>
+    
+    
     <string name="storageattachmentsactivity_043">删除</string>
     <string name="storageattachmentsactivity_044">取消</string>
     <string name="storageattachmentsactivity_045">删除中…</string>
     <string name="storageattachmentsactivity_046">对话索引读取失败，已取消删除，请稍后重试</string>
-    <string name="storageattachmentsactivity_047">"已删除 "</string>
-    <string name="storageattachmentsactivity_048">" 张，释放 "</string>
-    <string name="storageattachmentsactivity_049">" 张被占用"</string>
-    <string name="storageattachmentsactivity_050">" 张已被对话引用，已跳过"</string>
-    <string name="storageattachmentsactivity_051">"用于 "</string>
-    <string name="storageattachmentsactivity_052">" 个对话"</string>
-    <string name="storageattachmentsactivity_053">无对话引用</string>
+    <string name="storageattachmentsactivity_047">已删除 %1$d 张，释放 %2$s%3$s%4$s</string>
+    
+    <string name="storageattachmentsactivity_049">，%1$d 张被占用</string>
+    <string name="storageattachmentsactivity_050">，%1$d 张已被对话引用，已跳过</string>
+    <string name="storageattachmentsactivity_051">用于 %1$d 个对话 · %2$s</string>
+    
+    <string name="storageattachmentsactivity_054">删除（%1$d）</string>
+    <string name="storageattachmentsactivity_053">无对话引用 · %1$s</string>
     <string name="storagefilesactivity_001">按时间</string>
     <string name="storagefilesactivity_002">按时间</string>
     <string name="storagefilesactivity_003">按体积</string>
     <string name="storagefilesactivity_004">暂无文件</string>
-    <string name="storagefilesactivity_005">" 个文件 · 共 "</string>
+    <string name="storagefilesactivity_005">%1$d 个文件 · 共 %2$s</string>
     <string name="storagefilesactivity_006">暂无已保存的文件。对话中导出的图片会显示在这里</string>
     <string name="storagefilesactivity_007">查看内容</string>
     <string name="storagefilesactivity_008">预览 / 运行</string>
@@ -1228,8 +1203,8 @@
     <string name="storagefilesactivity_017">重命名失败：文件名已存在或文件正在使用</string>
     <string name="storagefilesactivity_018">取消</string>
     <string name="storagefilesactivity_019">删除文件</string>
-    <string name="storagefilesactivity_020">"删除 "</string>
-    <string name="storagefilesactivity_021">，此操作不可恢复。</string>
+    <string name="storagefilesactivity_020">删除 %1$s？\n\n%2$s，此操作不可恢复。</string>
+    
     <string name="storagefilesactivity_022">删除</string>
     <string name="storagefilesactivity_023">删除失败，请稍后重试</string>
     <string name="storagefilesactivity_024">取消</string>
@@ -1256,7 +1231,7 @@
     <string name="systeminfo_014">四</string>
     <string name="systeminfo_015">五</string>
     <string name="systeminfo_016">六</string>
-    <string name="systeminfo_017">星期</string>
+    <string name="systeminfo_017">星期%1$s</string>
     <string name="systeminfo_018">未知</string>
     <string name="systeminfo_019">未知</string>
     <string name="systeminfo_020">未知</string>
@@ -1299,7 +1274,7 @@
     <string name="themeattractivity_030">超链接</string>
     <string name="themeattractivity_031">边框色</string>
     <string name="themeattractivity_032">描边、输入框边</string>
-    <string name="themeattractivity_033">"属性 · "</string>
+    <string name="themeattractivity_033">属性 · %1$s</string>
     <string name="themeattractivity_034">未命名主题</string>
     <string name="themeattractivity_035">改动会立即预览，返回后需在主题编辑页保存。</string>
     <string name="themeattractivity_036">○ 浅色</string>
@@ -1316,36 +1291,39 @@
     <string name="themeattractivity_047">未设置，使用内置默认</string>
     <string name="themeattractivity_048">已自定义</string>
     <string name="themeattractivity_049">跟随内置默认</string>
-    <string name="themeattractivity_050">跟随主题「</string>
+    <string name="themeattractivity_050">跟随主题「%1$s」</string>
     <string name="themeattractivity_051">色相</string>
     <string name="themeattractivity_052">饱和度</string>
     <string name="themeattractivity_053">明度</string>
-    <string name="themeattractivity_054">"编辑 · "</string>
+    <string name="themeattractivity_054">编辑 · %1$s</string>
     <string name="themeattractivity_055">确定</string>
     <string name="themeattractivity_056">跟随主题</string>
     <string name="themeattractivity_057">取消</string>
     <string name="themeattractivity_058">系统默认</string>
-    <string name="themeattractivity_059">"选择 · "</string>
+    <string name="appearanceactivity_063">跟随主题 · %1$s %2$s</string>
+    <string name="themeattractivity_059">选择 · %1$s</string>
     <string name="themeattractivity_060">取消</string>
-    <string name="themeeditactivity_001">新建主题</string>
-    <string name="themeeditactivity_002">"编辑主题 · "</string>
+    <string name="themeeditactivity_058">%1$d 字 · 自定义模板 · 已按当前设备填充</string>
+    <string name="themeeditactivity_059">%1$d 字 · 内置模板 · 已按当前设备填充</string>
+<string name="themeeditactivity_001">新建主题</string>
+    <string name="themeeditactivity_002">编辑主题 · %1$s</string>
     <string name="themeeditactivity_003">○ 浅色</string>
     <string name="themeeditactivity_004">● 浅色</string>
     <string name="themeeditactivity_005">● 深色</string>
     <string name="themeeditactivity_006">○ 深色</string>
     <string name="themeeditactivity_007">新建主题</string>
-    <string name="themeeditactivity_008">"编辑主题 · "</string>
+    <string name="themeeditactivity_008">编辑主题 · %1$s</string>
     <string name="themeeditactivity_009">颜色已写入主题，保存后生效</string>
     <string name="themeeditactivity_010">名称不能为空</string>
     <string name="themeeditactivity_011">保存失败：存储不可写</string>
-    <string name="themeeditactivity_012">已保存主题「</string>
+    <string name="themeeditactivity_012">已保存主题「%1$s」</string>
     <string name="themeeditactivity_013">另存为</string>
-    <string name="themeeditactivity_014">" 副本"</string>
+    <string name="themeeditactivity_014">%1$s 副本</string>
     <string name="themeeditactivity_015">另存失败：存储不可写</string>
-    <string name="themeeditactivity_016">已另存为「</string>
+    <string name="themeeditactivity_016">已另存为「%1$s」</string>
     <string name="themeeditactivity_017">无法打开文件选择器，请重试</string>
     <string name="themeeditactivity_018">读取失败或文件超过 64 KB</string>
-    <string name="themeeditactivity_019">导入失败：</string>
+    <string name="themeeditactivity_019">导入失败：%1$s</string>
     <string name="themeeditactivity_020">已填入当前编辑区，尚未保存</string>
     <string name="themeeditactivity_021">清空</string>
     <string name="themeeditactivity_022">将清空浅色与深色的样式与颜色设置，名称与作者保留。清空后无法恢复。</string>
@@ -1364,16 +1342,12 @@
     <string name="themeeditactivity_035">导入/粘贴会覆盖当前的名称、作者、描述与两套 CSS，且不会自动落盘。确定继续？</string>
     <string name="themeeditactivity_036">覆盖</string>
     <string name="themeeditactivity_037">取消</string>
-    <string name="themeeditactivity_038">校验提示\n</string>
+    <string name="themeeditactivity_038">校验提示\n%1$s</string>
     <string name="themeeditactivity_039">例如：暖白纸墨风、暗色低饱和、适合夜间阅读</string>
     <string name="themeeditactivity_040">你想要什么样的主题？</string>
     <string name="themeeditactivity_041">生成</string>
     <string name="themeeditactivity_042">取消</string>
     <string name="themeeditactivity_043">请先描述想要的主题</string>
-    <string name="themeeditactivity_044">" 字 · "</string>
-    <string name="themeeditactivity_045">自定义模板</string>
-    <string name="themeeditactivity_046">内置模板</string>
-    <string name="themeeditactivity_047"> · 已按当前设备填充</string>
     <string name="themeeditactivity_048">提示词预览</string>
     <string name="themeeditactivity_049">提示词已复制</string>
     <string name="themeeditactivity_050">有未保存的编辑</string>
@@ -1413,11 +1387,11 @@
     <string name="thememanageractivity_029">重命名</string>
     <string name="thememanageractivity_030">重命名失败</string>
     <string name="thememanageractivity_031">复制为新主题</string>
-    <string name="thememanageractivity_032">" 副本"</string>
+    <string name="thememanageractivity_032">%1$s 副本</string>
     <string name="thememanageractivity_033">复制失败，请重试</string>
-    <string name="thememanageractivity_034">已复制为「</string>
+    <string name="thememanageractivity_034">已复制为「%1$s」</string>
     <string name="thememanageractivity_035">导出失败：存储不可写</string>
-    <string name="thememanageractivity_036">"已导出到 "</string>
+    <string name="thememanageractivity_036">已导出到 %1$s</string>
     <string name="thememanageractivity_037">删除「%1$s」？此操作不可撤销。</string>
     <string name="thememanageractivity_039">\n\n这是当前使用的主题，删除后将恢复内置默认外观，已手动修改的项会保留。</string>
     <string name="thememanageractivity_040">删除主题</string>
@@ -1438,20 +1412,20 @@
     <string name="thememanageractivity_058">取消</string>
     <string name="thememanageractivity_059">无法打开文件选择器，请重试</string>
     <string name="thememanageractivity_060">读取失败或文件超过 64 KB</string>
-    <string name="thememanageractivity_061">导入失败：</string>
+    <string name="thememanageractivity_061">导入失败：%1$s</string>
     <string name="thememanageractivity_062">导入主题</string>
     <string name="thememanageractivity_063">已有同名主题</string>
     <string name="thememanageractivity_064">继续导入</string>
     <string name="thememanageractivity_065">自动改名</string>
     <string name="thememanageractivity_066">取消</string>
     <string name="thememanageractivity_067">导入失败：存储不可写</string>
-    <string name="thememanageractivity_068">已导入，有提示：\n</string>
+    <string name="thememanageractivity_068">已导入，有提示：\n%1$s</string>
     <string name="thememanageractivity_069">已导入。在外观中启用后生效。</string>
     <string name="thememanageractivity_070">确定</string>
     <string name="thememanageractivity_071">名称不能为空</string>
     <string name="thememanageractivity_072">取消</string>
     <string name="themepreviewactivity_001">Spinner 选中态</string>
-    <string name="themepreviewactivity_002">"主题预览 · 显示 "</string>
+    <string name="themepreviewactivity_002">主题预览 · 显示 %1$d%%</string>
     <string name="themepreviewactivity_003">当前没有自定义主题可应用</string>
     <string name="themepreviewactivity_004">已应用，返回外观页后点保存才会写盘</string>
     <string name="themepreviewactivity_005">深色 ⇄</string>
@@ -1475,31 +1449,29 @@
     <string name="themeprompttemplateactivity_012">保存并返回</string>
     <string name="themeprompttemplateactivity_013">继续编辑</string>
     <string name="themerepository_001">未命名主题</string>
-    <string name="themevalidator_001">文件内容为空</string>
+    <string name="themevalidator_027">只提供了%1$s配置，另一套将回退内置默认</string>
+<string name="themevalidator_001">文件内容为空</string>
     <string name="themevalidator_002">文件超过 512 KB</string>
     <string name="themevalidator_003">未找到主题内容</string>
     <string name="themevalidator_004">文件超过 64 KB</string>
-    <string name="themevalidator_005">文件格式错误：</string>
-    <string name="themevalidator_006">主题版本高于当前应用版本（v</string>
+    <string name="themevalidator_005">文件格式错误：%1$s</string>
+    <string name="themevalidator_006">主题版本高于当前应用版本（v%1$d）</string>
     <string name="themevalidator_007">缺少或无效的版本号</string>
     <string name="themevalidator_008">未命名主题</string>
     <string name="themevalidator_009">缺少主题名称，已命名为「未命名主题」</string>
     <string name="themevalidator_010">主题名称超过 32 字，已自动截断</string>
     <string name="themevalidator_011">缺少浅色与深色两套设置</string>
     <string name="themevalidator_012">样式内容超过 64 KB</string>
-    <string name="themevalidator_013">只提供了</string>
     <string name="themevalidator_014">浅色</string>
     <string name="themevalidator_015">深色</string>
-    <string name="themevalidator_016">配置，另一套将回退内置默认</string>
     <string name="themevalidator_017">浅色</string>
     <string name="themevalidator_018">深色</string>
     <string name="themevalidator_019">界面字体</string>
     <string name="themevalidator_020">等宽字体</string>
     <string name="themevalidator_021">样式检查异常，已保留原样式</string>
-    <string name="themevalidator_022">"已忽略 "</string>
-    <string name="themevalidator_023"> 条样式规则（脚本、外链、固定定位或超出屏幕宽度的设置）</string>
-    <string name="themevalidator_024">：忽略未知项「</string>
-    <string name="themevalidator_025">：忽略无效颜色值 </string>
+    <string name="themevalidator_022">已忽略 %1$d 条样式规则（脚本、外链、固定定位或超出屏幕宽度的设置）</string>
+    <string name="themevalidator_024">%1$s：忽略未知项「%2$s」</string>
+    <string name="themevalidator_025">%1$s：忽略无效颜色值 %2$s=%3$s</string>
     <string name="themevalidator_026">字体「%1$s」未安装，将使用系统默认字体</string>
     <string name="thinkinglevels_001">极低</string>
     <string name="thinkinglevels_002">低</string>
@@ -1535,7 +1507,7 @@
     <string name="toolsactivity_006">给 AI 的环境说明</string>
     <string name="toolsactivity_007">取消</string>
     <string name="toolsactivity_008">没有可用的已保存代码</string>
-    <string name="toolsactivity_009">"已选 "</string>
+    <string name="toolsactivity_009">已选 %1$d / %2$d</string>
     <string name="toolsactivity_010">请先选择要删除的代码</string>
     <string name="toolsactivity_011">删除代码</string>
     <string name="toolsactivity_012">确定要删除选中的 %1$s 个文件吗？
@@ -1564,12 +1536,12 @@
     <string name="toolsactivity_035">确定</string>
     <string name="toolsactivity_036">文件名不能为空</string>
     <string name="toolsactivity_037">文件已存在</string>
-    <string name="toolsactivity_038">" 已存在，是否覆盖？"</string>
+    <string name="toolsactivity_038">%1$s 已存在，是否覆盖？</string>
     <string name="toolsactivity_039">覆盖</string>
     <string name="toolsactivity_040">取消</string>
     <string name="toolsactivity_041">取消</string>
     <string name="toolsactivity_042">重命名失败</string>
-    <string name="toolsactivity_043">"删除 "</string>
+    <string name="toolsactivity_043">删除 %1$s？</string>
     <string name="toolsactivity_044">删除</string>
     <string name="toolsactivity_045">删除失败</string>
     <string name="toolsactivity_046">取消</string>
@@ -1585,7 +1557,7 @@
     <string name="tracekit_001">\",\"note\":\"更早的工具调用记录因内容过长已收起\"}</string>
     <string name="updateactivity_001">并行测速已开启，下次测速生效</string>
     <string name="updateactivity_002">已改为逐个测速，速度较慢但占用更低</string>
-    <string name="updateactivity_003">"并发 "</string>
+    <string name="updateactivity_003">并发 %1$d</string>
     <string name="updateactivity_004">并发（关）</string>
     <string name="updateactivity_005">并行测速并发数</string>
     <string name="updateactivity_006">"范围 "</string>
@@ -1603,39 +1575,39 @@
     <string name="updateactivity_024">正在检查更新…</string>
     <string name="updateactivity_025">检查失败：%1$s\n点「重新检查」重试</string>
     <string name="updateactivity_027">网络异常时仍可自定义镜像</string>
-    <string name="updateactivity_028">"发现新版本 "</string>
-    <string name="updateactivity_029">"\n当前 "</string>
-    <string name="updateactivity_030">"已是最新版 "</string>
-    <string name="updateactivity_031">"线上 "</string>
-    <string name="updateactivity_032">" / 本机 "</string>
-    <string name="updateactivity_033">（较新）</string>
+    <string name="updateactivity_028">发现新版本 %1$s\n当前 %2$s</string>
+    
+    <string name="updateactivity_030">已是最新版 %1$s</string>
+    <string name="updateactivity_031">线上 %1$s / 本机 %2$s（较新）</string>
+    
+    
     <string name="updateactivity_034">无可用安装包</string>
-    <string name="updateactivity_035">将下载：</string>
+    <string name="updateactivity_035">将下载：%1$s  %2$s</string>
     <string name="updateactivity_036">无可用安装包</string>
     <string name="updateactivity_037">点「测速」验证 %1$s 个加速源，或长按单独测</string>
     <string name="updateactivity_039">请先检查更新成功</string>
-    <string name="updateactivity_040">"并行 "</string>
-    <string name="updateactivity_041">" 路"</string>
+    <string name="updateactivity_040">并行 %1$d 路</string>
+    
     <string name="updateactivity_042">串行</string>
-    <string name="updateactivity_043">正在测速 0/</string>
-    <string name="updateactivity_044">，边测边排）</string>
+    <string name="updateactivity_043">正在测速 0/%1$d…（%2$s，边测边排）</string>
+    
     <string name="updateactivity_045">请先检查更新成功，再测速</string>
     <string name="updateactivity_046">单源</string>
-    <string name="updateactivity_047">"正在测速 "</string>
-    <string name="updateactivity_048">"正在测速 "</string>
-    <string name="updateactivity_049">，边测边排）</string>
-    <string name="updateactivity_050">" 测速："</string>
+    <string name="updateactivity_047">正在测速 %1$s…</string>
+    <string name="updateactivity_048">正在测速 %1$d/%2$d…（%3$s，边测边排）</string>
+    
+    <string name="updateactivity_050">%1$s 测速：%2$s</string>
     <string name="updateactivity_051">不可用（未通过文件校验）</string>
-    <string name="updateactivity_052">测速完成，最快：</string>
-    <string name="updateactivity_053">"（保留你手动选择的 "</string>
-    <string name="updateactivity_054">已选最快：</string>
+    <string name="updateactivity_052">测速完成，最快：%1$s %2$d ms%3$s（保留你手动选择的 %4$s）</string>
+    
+    <string name="updateactivity_054">已选最快：%1$s  %2$d ms%3$s</string>
     <string name="updateactivity_055">全部镜像不可用，可试直连或自定义后重测</string>
     <string name="updateactivity_056">取消下载</string>
-    <string name="updateactivity_057">"下载中…  经 "</string>
-    <string name="updateactivity_058">"（已清理 "</string>
-    <string name="updateactivity_059">" 个旧包）"</string>
-    <string name="updateactivity_060">"下载中 "</string>
-    <string name="updateactivity_061">"下载中  "</string>
+    <string name="updateactivity_057">下载中…  经 %1$s（已清理 %2$d 个旧包）</string>
+    
+    
+    <string name="updateactivity_060">下载中 %1$d%%   %2$s / %3$s</string>
+    <string name="updateactivity_061">下载中  %1$s</string>
     <string name="updateactivity_062">重试下载</string>
     <string name="updateactivity_063">下载失败：%1$s（换个镜像或直连再试）</string>
     <string name="updateactivity_065">安装</string>
@@ -1664,15 +1636,15 @@
     <string name="updateactivity_091">已复制</string>
     <string name="updateactivity_092">复制失败，请重试</string>
     <string name="updateactivity_093">移除加速源</string>
-    <string name="updateactivity_094">\n\n内置源可通过「恢复全部内置源」找回。</string>
+    <string name="updateactivity_094">%1$s\n%2$s\n\n内置源可通过「恢复全部内置源」找回。</string>
     <string name="updateactivity_095">移除</string>
-    <string name="updateactivity_096">"已移除 "</string>
+    <string name="updateactivity_096">已移除 %1$s</string>
     <string name="updateactivity_097">取消</string>
     <string name="updateactivity_098">已恢复全部内置加速源</string>
-    <string name="updateactivity_099">\n…（完整说明见 GitHub）</string>
+    <string name="updateactivity_099">%1$s\n…（完整说明见 GitHub）</string>
     <string name="updateactivity_100">关闭</string>
     <string name="updateactivity_101">选择安装包</string>
-    <string name="updateactivity_102">将下载：</string>
+    <string name="updateactivity_102">将下载：%1$s  %2$s</string>
     <string name="updateactivity_103">下载</string>
     <string name="updateactivity_104">已切换，建议重新测速</string>
     <string name="updatemanager_001">直连 github.com</string>
@@ -1680,7 +1652,7 @@
     <string name="updatemanager_003">自定义镜像</string>
     <string name="updatemanager_004">已取消</string>
     <string name="updatemanager_005">已取消</string>
-    <string name="updatemanager_006">请求失败：</string>
+    <string name="updatemanager_006">请求失败：%1$s</string>
     <string name="updatemanager_007">请求过于频繁：已超出 GitHub 的匿名访问限制（每小时 60 次），请稍后再试，或直接使用加速源下载。</string>
     <string name="updatemanager_009">已取消</string>
     <string name="updatemanager_010">无法创建下载目录</string>
@@ -1719,7 +1691,8 @@
     <string name="viewercontroller_007">预览</string>
     <string name="viewercontroller_008">预览</string>
     <string name="viewercontroller_009">源码</string>
-    <string name="viewerexport_001">预览尚未就绪，请等内容显示后再导出。</string>
+        <string name="viewerexport_040">已保存  %1$s\n尺寸  %2$d×%3$d   格式  %4$s   体积  %5$d KB\n来源  %6$s\n位置  %7$s\n\n</string>
+<string name="viewerexport_001">预览尚未就绪，请等内容显示后再导出。</string>
     <string name="viewerexport_002">导出为图片 · 选择格式</string>
     <string name="viewerexport_003">PNG（无损，体积大）</string>
     <string name="viewerexport_004">JPEG（有损，体积小）</string>
@@ -1732,7 +1705,7 @@
     <string name="viewerexport_011">图片编码失败，请换个格式重试。</string>
     <string name="viewerexport_012">保存失败：exports 目录不可写。\n请检查存储权限，或到「小工具」确认根目录。</string>
     <string name="viewerexport_013">图片过大，内存不足，请缩小预览后重试。</string>
-    <string name="viewerexport_014">导出失败：</string>
+    <string name="viewerexport_014">导出失败：%1$s</string>
     <string name="viewerexport_015">重命名</string>
     <string name="viewerexport_016">在小工具里打开</string>
     <string name="viewerexport_017">导出成功</string>
@@ -1740,12 +1713,6 @@
     <string name="viewerexport_019">原图直出（无背景）</string>
     <string name="viewerexport_020">已裁掉周围背景</string>
     <string name="viewerexport_021">当前可见区域</string>
-    <string name="viewerexport_022">"已保存  "</string>
-    <string name="viewerexport_023">"尺寸  "</string>
-    <string name="viewerexport_024">"   格式  "</string>
-    <string name="viewerexport_025">"   体积  "</string>
-    <string name="viewerexport_026">"来源  "</string>
-    <string name="viewerexport_027">"位置  "</string>
     <string name="viewerexport_028">长内容在新版系统上只导出当前可见区域。</string>
     <string name="viewerexport_029">重命名</string>
     <string name="viewerexport_030">只填文件名即可，扩展名 %1$s 会自动保留。</string>
@@ -1777,7 +1744,7 @@
     <string name="visionjudge_018">响应里读不到回复正文</string>
     <string name="visionjudge_019">回复正文为空</string>
     <string name="visionjudge_020">模型表示看不到图片</string>
-    <string name="visionjudge_021">"回复里没有出现图内数字 "</string>
+    <string name="visionjudge_021">回复里没有出现图内数字 %1$s</string>
     <string name="activity_about_001">版本 --</string>
     <string name="activity_about_002">使用说明</string>
     <string name="activity_about_003">检查更新</string>
@@ -2126,10 +2093,13 @@
     <string name="thememanageractivity_073">使用中</string>
     <string name="modelconfigactivity_148">默认</string>
     <string name="modelconfigactivity_149">视觉</string>
+    <string name="modelconfigactivity_150">已停止：共 %1$d 个，失败 %2$d 个</string>
+    <string name="modelconfigactivity_151">探测完成：共 %1$d 个，失败 %2$d 个</string>
     <string name="settingsactivity_075">改动系统提示词后，下一轮请求会重新计费，之后随着对话继续逐步恢复。\n\n只想让模型知道当前时间，用消息里的时间提示即可，不用改系统提示词。</string>
     <string name="updateactivity_105">可填 %1$s，默认 %2$d。同时测速的数量越大越快，老设备建议不超过 8。关闭并行测速后不会用到这个值。</string>
     <string name="updateactivity_106">请输入 %1$s 范围内的整数</string>
     <string name="storageactivity_088">缓存与中间文件共 %1$s，其中 %2$s 可以清理。\n\n包括拍照与裁剪的中间图、网页缓存、导入残留与写入中转。清理时会跳过正在使用的文件。</string>
+    <string name="storageactivity_090">可用 %1$s · 共 %2$s</string>
     <string name="storageactivity_089">点「复制」后，把路径粘贴到文件管理器地址栏即可打开。\n旧对话里的图片会在打开应用时自动迁移，不用手动处理。</string>
     <string name="statsactivity_043">\n统计从安装后开始累计，不回填历史会话。\n会话数与轮次按整体统计，不按模型分开。</string>
     <string name="appearanceactivity_061">恢复默认显示大小、字号与浅色模式，移除自定义主题。已导入的字体和主题文件会保留。重置后点「永久保存」才会生效。</string>
@@ -2138,7 +2108,7 @@
     <string name="mainactivity_168">正在准备 %1$d 条消息</string>
     <string name="mainactivity_169">已切换到 %1$s</string>
     <string name="mainactivity_170">已切换到 %1$s，但显示超时，部分内容可能没显示，可重新打开查看</string>
-    <string name="providereditactivity_061">\n\n有些服务不提供模型列表，可以点「新建模型」手动添加。</string>
+    <string name="providereditactivity_061">%1$s\n\n有些服务不提供模型列表，可以点「新建模型」手动添加。</string>
     <string name="providereditactivity_062">该提供商的 %1$d 个模型都已添加。</string>
     <string name="updatemanager_019">检查更新失败（HTTP %1$d），请稍后再试</string>
 </resources>

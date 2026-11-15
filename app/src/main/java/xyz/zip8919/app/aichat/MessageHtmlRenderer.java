@@ -241,11 +241,9 @@ public class MessageHtmlRenderer {
         if (cut < 0) return "";
         int total = f.chars();
         if (cut == 0) {
-            return Strings.get(R.string.messagehtmlrenderer_002)
-                    + formatTokens(total) + Strings.get(R.string.messagehtmlrenderer_003);
+            return Strings.get(R.string.messagehtmlrenderer_002, formatTokens(total));
         }
-        return Strings.get(R.string.messagehtmlrenderer_004) + formatTokens(cut)
-                + Strings.get(R.string.messagehtmlrenderer_005) + formatTokens(total) + Strings.get(R.string.messagehtmlrenderer_006);
+        return Strings.get(R.string.messagehtmlrenderer_004, formatTokens(cut), formatTokens(total));
     }
 
     /**
@@ -923,8 +921,10 @@ public class MessageHtmlRenderer {
         if (isFetch) {
             String title = json.optString("title", "");
             String url = json.optString("url", "");
-            String head = Strings.get(R.string.messagehtmlrenderer_036) + (title.length() > 0 ? "：" + esc(title)
-                    : (url.length() > 0 ? "：" + esc(url) : ""));
+            String head = title.length() > 0
+                    ? Strings.get(R.string.messagehtmlrenderer_048, esc(title))
+                    : (url.length() > 0 ? Strings.get(R.string.messagehtmlrenderer_048, esc(url))
+                                        : Strings.get(R.string.messagehtmlrenderer_036));
             out.append(collapsibleHead(head));
             out.append("<div class=\"tool-body\">");
             appendUrlLine(out, url, "", "");
@@ -982,11 +982,18 @@ public class MessageHtmlRenderer {
         // tool 已在方法开头解析，此处直接复用
         boolean isSearch = tool.length() == 0 || WebSearchTool.TOOL_SEARCH.equals(tool);
         String content = json.optString("content", "");
-        String head = isSearch
-                ? Strings.get(R.string.messagehtmlrenderer_041) + (query.length() > 0 ? "：" + esc(query) : "")
-                        + "（" + (count > 0 ? count : n) + Strings.get(R.string.messagehtmlrenderer_042)
-                : Strings.get(R.string.messagehtmlrenderer_043) + esc(tool.length() > 0 ? tool : Strings.get(R.string.messagehtmlrenderer_044))
-                        + (query.length() > 0 ? " · " + esc(query) : "");
+        String head;
+        if (isSearch) {
+            int shown = count > 0 ? count : n;
+            head = query.length() > 0
+                    ? Strings.get(R.string.messagehtmlrenderer_049, esc(query), shown)
+                    : Strings.get(R.string.messagehtmlrenderer_041, shown);
+        } else {
+            String name = esc(tool.length() > 0 ? tool : Strings.get(R.string.messagehtmlrenderer_044));
+            head = query.length() > 0
+                    ? Strings.get(R.string.messagehtmlrenderer_051, name, esc(query))
+                    : Strings.get(R.string.messagehtmlrenderer_050, name);
+        }
         out.append(collapsibleHead(head));
         out.append("<div class=\"tool-body\">");
         if (!isSearch && n == 0 && content.length() > 0) {
