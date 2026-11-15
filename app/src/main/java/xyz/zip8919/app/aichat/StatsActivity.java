@@ -282,8 +282,7 @@ public class StatsActivity extends ThemedActivity {
         sb.append(Strings.get(R.string.statsactivity_031));
         appendBuckets(sb, s.providers);
 
-        sb.append(Strings.get(R.string.statsactivity_032))
-          .append(Strings.get(R.string.statsactivity_033));
+        sb.append(Strings.get(R.string.statsactivity_043));
         statsText.setText(sb.toString());
         LogUtil.d(TAG, "render: period=%d, reqs=%d, models=%d",
                 period, s.reqs, s.models.size());

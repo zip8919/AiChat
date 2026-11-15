@@ -422,8 +422,7 @@ public class ProviderEditActivity extends ThemedActivity {
                             testResult.setTextColor(0xFFC62828);
                             AcDialog.builder(ProviderEditActivity.this)
                                     .setTitle(Strings.get(R.string.providereditactivity_031))
-                                    .setMessage(r.message + Strings.get(R.string.providereditactivity_032)
-                                            + Strings.get(R.string.providereditactivity_033))
+                                    .setMessage(r.message + Strings.get(R.string.providereditactivity_061))
                                     .setPositiveButton(Strings.get(R.string.providereditactivity_034), null)
                                     .show();
                             return;
@@ -449,7 +448,7 @@ public class ProviderEditActivity extends ThemedActivity {
         if (candidates.isEmpty()) {
             AcDialog.builder(this)
                     .setTitle(Strings.get(R.string.providereditactivity_035))
-                    .setMessage(Strings.get(R.string.providereditactivity_036) + remote.size() + Strings.get(R.string.providereditactivity_037))
+                    .setMessage(Strings.get(R.string.providereditactivity_062, remote.size()))
                     .setPositiveButton(Strings.get(R.string.providereditactivity_038), null)
                     .show();
             return;

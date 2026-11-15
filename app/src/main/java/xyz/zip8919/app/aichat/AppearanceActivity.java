@@ -676,8 +676,7 @@ public class AppearanceActivity extends ThemedActivity {
     private void confirmReset() {
         AcDialog.builder(this)
                 .setTitle(Strings.get(R.string.appearanceactivity_044))
-                .setMessage(Strings.get(R.string.appearanceactivity_045)
-                        + Strings.get(R.string.appearanceactivity_046))
+                .setMessage(Strings.get(R.string.appearanceactivity_061))
                 .setPositiveButton(Strings.get(R.string.appearanceactivity_047), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         am.reset();
@@ -693,8 +692,7 @@ public class AppearanceActivity extends ThemedActivity {
     private void confirmFollowAll() {
         AcDialog.builder(this)
                 .setTitle(Strings.get(R.string.appearanceactivity_050))
-                .setMessage(Strings.get(R.string.appearanceactivity_051)
-                        + Strings.get(R.string.appearanceactivity_052))
+                .setMessage(Strings.get(R.string.appearanceactivity_062))
                 .setPositiveButton(Strings.get(R.string.appearanceactivity_053), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         am.clearAllExplicit();

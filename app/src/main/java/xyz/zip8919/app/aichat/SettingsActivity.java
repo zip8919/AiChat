@@ -548,11 +548,7 @@ public class SettingsActivity extends ThemedActivity {
         }
         AcDialog.builder(this)
                 .setTitle(Strings.get(R.string.settingsactivity_029))
-                .setMessage(Strings.get(R.string.settingsactivity_030)
-                        + Strings.get(R.string.settingsactivity_031)
-                        + Strings.get(R.string.settingsactivity_032)
-                        + Strings.get(R.string.settingsactivity_033)
-                        + Strings.get(R.string.settingsactivity_034))
+                .setMessage(Strings.get(R.string.settingsactivity_075))
                 .setPositiveButton(Strings.get(R.string.settingsactivity_035), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         doSaveSettings();

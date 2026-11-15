@@ -1237,7 +1237,7 @@ public class MainActivity extends ThemedActivity {
             total += pendingAttachments.get(i).chars();
         }
         if (total > Limits.attachTotalChars) {
-            AcToast.showLong(this, Strings.get(R.string.mainactivity_032) + (Limits.attachTotalChars / 10000) + Strings.get(R.string.mainactivity_033));
+            AcToast.showLong(this, Strings.get(R.string.mainactivity_167, Limits.attachTotalChars / 10000));
             return;
         }
         pendingAttachments.add(f);
@@ -2038,7 +2038,7 @@ public class MainActivity extends ThemedActivity {
                         messages = conv.messages;
                         conversationRenderTitle = conv.title == null ? "" : conv.title;
                         int count = messages == null ? 0 : messages.size();
-                        updateConversationLoading(Strings.get(R.string.mainactivity_060) + count + Strings.get(R.string.mainactivity_061), 62);
+                        updateConversationLoading(Strings.get(R.string.mainactivity_168, count), 62);
                         refreshWebView();
                         LogUtil.i(TAG, "switched: id=%s title=%s messages=%d",
                                 conv.id, conv.title, count);
@@ -2146,8 +2146,8 @@ public class MainActivity extends ThemedActivity {
                 if (isFinishing() || conversationRenderState != 0) return;
                 hideConversationLoading();
                 AcToast.show(MainActivity.this, timedOut
-                        ? Strings.get(R.string.mainactivity_066) + title + Strings.get(R.string.mainactivity_067)
-                        : Strings.get(R.string.mainactivity_068) + title);
+                        ? Strings.get(R.string.mainactivity_170, title)
+                        : Strings.get(R.string.mainactivity_169, title));
             }
         };
         handler.postDelayed(pendingRenderHide, 180);

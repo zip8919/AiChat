@@ -528,7 +528,7 @@ public final class UpdateManager {
         if (code == 403 && "0".equals(c.getHeaderField("X-RateLimit-Remaining"))) {
             return Strings.get(R.string.updatemanager_007);
         }
-        return Strings.get(R.string.updatemanager_008) + code;
+        return Strings.get(R.string.updatemanager_019, code);
     }
 
     private static Release parseRelease(String body) throws Exception {

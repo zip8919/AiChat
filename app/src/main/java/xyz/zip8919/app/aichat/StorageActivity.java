@@ -283,11 +283,7 @@ public class StorageActivity extends ThemedActivity {
      */
     private void showTempDetail() {
         if (report == null) return;
-        String msg = Strings.get(R.string.storageactivity_033) + StorageReport.size(report.size[StorageReport.CAT_TEMP])
-                + Strings.get(R.string.storageactivity_034) + StorageReport.size(report.cleanableTempSize)
-                + Strings.get(R.string.storageactivity_035)
-                + Strings.get(R.string.storageactivity_036)
-                + Strings.get(R.string.storageactivity_037);
+        String msg = Strings.get(R.string.storageactivity_088, StorageReport.size(report.size[StorageReport.CAT_TEMP]), StorageReport.size(report.cleanableTempSize));
         AcDialog.builder(this)
                 .setTitle(Strings.get(R.string.storageactivity_038))
                 .setMessage(msg)
@@ -571,8 +567,7 @@ public class StorageActivity extends ThemedActivity {
         foot.setTextSize(12);
         foot.setTextColor(getResources().getColor(R.color.text_secondary));
         foot.setPadding(0, dp(12), 0, 0);
-        foot.setText(Strings.get(R.string.storageactivity_079)
-                + Strings.get(R.string.storageactivity_080));
+        foot.setText(Strings.get(R.string.storageactivity_089));
         box.addView(foot);
 
         AcDialog.builder(this)

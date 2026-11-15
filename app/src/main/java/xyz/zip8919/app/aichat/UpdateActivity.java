@@ -193,9 +193,7 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
         final String range = UpdateManager.MIN_CONCURRENCY + "～" + UpdateManager.MAX_CONCURRENCY;
         showPaused(AcDialog.builder(this)
                 .setTitle(Strings.get(R.string.updateactivity_005))
-                .setMessage(Strings.get(R.string.updateactivity_006) + range + Strings.get(R.string.updateactivity_007) + UpdateManager.DEFAULT_CONCURRENCY
-                        + Strings.get(R.string.updateactivity_008)
-                        + Strings.get(R.string.updateactivity_009))
+                .setMessage(Strings.get(R.string.updateactivity_105, range, UpdateManager.DEFAULT_CONCURRENCY))
                 .setView(input)
                 .setPositiveButton(Strings.get(R.string.updateactivity_010), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
@@ -203,11 +201,11 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
                         try {
                             n = Integer.parseInt(input.getText().toString().trim());
                         } catch (Throwable t) {
-                            AcToast.show(UpdateActivity.this, Strings.get(R.string.updateactivity_011) + range + Strings.get(R.string.updateactivity_012));
+                            AcToast.show(UpdateActivity.this, Strings.get(R.string.updateactivity_106, range));
                             return;
                         }
                         if (n < UpdateManager.MIN_CONCURRENCY || n > UpdateManager.MAX_CONCURRENCY) {
-                            AcToast.show(UpdateActivity.this, Strings.get(R.string.updateactivity_013) + range + Strings.get(R.string.updateactivity_014));
+                            AcToast.show(UpdateActivity.this, Strings.get(R.string.updateactivity_106, range));
                             return;
                         }
                         UpdateManager.setProbeConcurrency(UpdateActivity.this, n);
