@@ -320,7 +320,7 @@ public class ConversationManagerActivity extends ThemedActivity {
         }
         AcDialog.builder(this)
                 .setTitle(Strings.get(R.string.conversationmanageractivity_014))
-                .setMessage(Strings.get(R.string.conversationmanageractivity_015) + ids.size() + Strings.get(R.string.conversationmanageractivity_016))
+                .setMessage(Strings.get(R.string.conversationmanageractivity_015, ids.size()))
                 .setPositiveButton(Strings.get(R.string.conversationmanageractivity_017), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface dialog, int which) {
                         deleteSelected(ids);
@@ -344,7 +344,7 @@ public class ConversationManagerActivity extends ThemedActivity {
                     public void run() {
                         if (isFinishing() || isDestroyed()) return;
                         exitSelectionMode();
-                        AcToast.show(ConversationManagerActivity.this, Strings.get(R.string.conversationmanageractivity_019) + removed + Strings.get(R.string.conversationmanageractivity_020));
+                        AcToast.show(ConversationManagerActivity.this, Strings.get(R.string.conversationmanageractivity_019, removed));
                         loadConversations();
                         LogUtil.i(TAG, "deleteSelected done: removed=%d", removed);
                     }
@@ -405,7 +405,7 @@ public class ConversationManagerActivity extends ThemedActivity {
         // 列表项可能只有索引元数据、没有 messages，条数优先取 messageCount
         int count = conv.messageCount > 0 ? conv.messageCount
                 : (conv.messages == null ? 0 : conv.messages.size());
-        String msg = Strings.get(R.string.conversationmanageractivity_021) + count + Strings.get(R.string.conversationmanageractivity_022)
+        String msg = Strings.get(R.string.conversationmanageractivity_021, count)
                 + Strings.get(R.string.conversationmanageractivity_023) + StorageReport.size(conv.fileBytes) + "\n"
                 + Strings.get(R.string.conversationmanageractivity_024) + android.text.format.DateFormat.format("yyyy-MM-dd HH:mm",
                         conv.updatedAt) + "\n\n"
@@ -503,7 +503,7 @@ public class ConversationManagerActivity extends ThemedActivity {
     private void showDeleteDialog(final Conversation conv) {
         AcDialog.builder(this)
                 .setTitle(Strings.get(R.string.conversationmanageractivity_040))
-                .setMessage(Strings.get(R.string.conversationmanageractivity_041) + conv.title + Strings.get(R.string.conversationmanageractivity_042))
+                .setMessage(Strings.get(R.string.conversationmanageractivity_041, conv.title))
                 .setPositiveButton(Strings.get(R.string.conversationmanageractivity_043), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface dialog, int which) {
                         LogUtil.i(TAG, "delete confirmed: id=%s title=%s", conv.id, conv.title);

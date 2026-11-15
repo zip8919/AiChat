@@ -171,7 +171,7 @@ final class ProviderTester {
                     continue;
                 }
                 LogUtil.i(TAG, "fetchModels ok: %s -> %d models", url, names.size());
-                return new ModelsResult(true, names, Strings.get(R.string.providertester_014) + names.size() + Strings.get(R.string.providertester_015));
+                return new ModelsResult(true, names, Strings.get(R.string.providertester_014, names.size()));
             }
             lastMessage = describe(snap, r, 0, null);
             LogUtil.w(TAG, "fetchModels %s -> HTTP %d", url, r.httpCode);
@@ -409,7 +409,7 @@ final class ProviderTester {
         boolean local = Endpoint.isLocalHost(p.apiUrl);
         if (lower.contains("unknownhost") || lower.contains("nodename nor servname")
                 || lower.contains("unable to resolve host")) {
-            return Strings.get(R.string.providertester_027) + host + Strings.get(R.string.providertester_028);
+            return Strings.get(R.string.providertester_027, host);
         }
         if (lower.contains("sockettimeout") || lower.contains("timed out") || lower.contains("timeout")) {
             return Strings.get(R.string.providertester_029) + (local ? Strings.get(R.string.providertester_030) : "");

@@ -288,7 +288,7 @@ public class ModelConfigActivity extends ThemedActivity {
 
     private void updateProviderSelectionBar() {
         providerSelBar.setVisibility(providerSelection ? View.VISIBLE : View.GONE);
-        providerSelCount.setText(Strings.get(R.string.modelconfigactivity_004) + providerAdapter.checkedKeys().size() + Strings.get(R.string.modelconfigactivity_005));
+        providerSelCount.setText(Strings.get(R.string.modelconfigactivity_004, providerAdapter.checkedKeys().size()));
     }
 
     private void reloadProviders() {
@@ -729,7 +729,7 @@ public class ModelConfigActivity extends ThemedActivity {
 
     private void updateModelSelectionBar() {
         modelSelBar.setVisibility(modelSelection ? View.VISIBLE : View.GONE);
-        modelSelCount.setText(Strings.get(R.string.modelconfigactivity_056) + modelAdapter.checkedKeys().size() + Strings.get(R.string.modelconfigactivity_057));
+        modelSelCount.setText(Strings.get(R.string.modelconfigactivity_056, modelAdapter.checkedKeys().size()));
     }
 
     private void openModelEditor(String modelName, String presetProvider) {
@@ -831,7 +831,7 @@ public class ModelConfigActivity extends ThemedActivity {
                         exitModelSelection();
                         reloadModels();
                         reloadProviders();
-                        AcToast.show(ModelConfigActivity.this, Strings.get(R.string.modelconfigactivity_074) + n + Strings.get(R.string.modelconfigactivity_075));
+                        AcToast.show(ModelConfigActivity.this, Strings.get(R.string.modelconfigactivity_074, n));
                         LogUtil.i(TAG, "deleteModels: %d", n);
                     }
                 })

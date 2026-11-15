@@ -171,7 +171,7 @@ final class CapabilityProbe {
             if (r.error != null) {
                 // 网络层失败：后面的档位也是同样的错，直接收工
                 rep.error = ProviderTester.explainNetwork(snap, r.error);
-                if (rep.levels.size() > 0) rep.note = Strings.get(R.string.capabilityprobe_007) + rep.levels.size() + Strings.get(R.string.capabilityprobe_008);
+                if (rep.levels.size() > 0) rep.note = Strings.get(R.string.capabilityprobe_007, rep.levels.size());
                 return rep;
             }
             if (r.httpCode >= 200 && r.httpCode < 300) {

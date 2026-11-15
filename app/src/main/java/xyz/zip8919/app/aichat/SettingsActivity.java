@@ -164,7 +164,7 @@ public class SettingsActivity extends ThemedActivity {
                 final int len = systemPromptEdit.getText().length();
                 AcDialog.builder(SettingsActivity.this)
                         .setTitle(Strings.get(R.string.settingsactivity_009))
-                        .setMessage(Strings.get(R.string.settingsactivity_010) + len + Strings.get(R.string.settingsactivity_011))
+                        .setMessage(Strings.get(R.string.settingsactivity_010, len))
                         .setPositiveButton(Strings.get(R.string.settingsactivity_012), new DialogInterface.OnClickListener() {
                             public void onClick(DialogInterface d, int w) {
                                 systemPromptEdit.setText("");
@@ -1106,7 +1106,7 @@ public class SettingsActivity extends ThemedActivity {
         }
         List<PresetStore.Preset> list = PresetStore.load(this);
         if (list.size() >= PresetStore.MAX_PRESETS) {
-            AcToast.show(this, Strings.get(R.string.settingsactivity_056) + PresetStore.MAX_PRESETS + Strings.get(R.string.settingsactivity_057));
+            AcToast.show(this, Strings.get(R.string.settingsactivity_056, PresetStore.MAX_PRESETS));
             return;
         }
         final EditText input = new EditText(this);
@@ -1117,7 +1117,7 @@ public class SettingsActivity extends ThemedActivity {
 
         final android.app.AlertDialog dlg = AcDialog.builder(this)
                 .setTitle(Strings.get(R.string.settingsactivity_060))
-                .setMessage(Strings.get(R.string.settingsactivity_061) + prompt.length() + Strings.get(R.string.settingsactivity_062))
+                .setMessage(Strings.get(R.string.settingsactivity_061, prompt.length()))
                 .setView(input)
                 .setPositiveButton(Strings.get(R.string.settingsactivity_063), null)
                 .setNegativeButton(Strings.get(R.string.settingsactivity_064), null)
@@ -1140,7 +1140,7 @@ public class SettingsActivity extends ThemedActivity {
                                 }
                                 if (cur.size() >= PresetStore.MAX_PRESETS) {
                                     AcToast.show(SettingsActivity.this,
-                                            Strings.get(R.string.settingsactivity_067) + PresetStore.MAX_PRESETS + Strings.get(R.string.settingsactivity_068));
+                                            Strings.get(R.string.settingsactivity_067, PresetStore.MAX_PRESETS));
                                     return;
                                 }
                                 cur.add(new PresetStore.Preset(name, prompt));

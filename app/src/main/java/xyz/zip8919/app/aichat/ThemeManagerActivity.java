@@ -184,7 +184,7 @@ public class ThemeManagerActivity extends ThemedActivity {
 
     private void refreshSelectionUi() {
         selectionBar.setVisibility(selectionMode ? View.VISIBLE : View.GONE);
-        selectionCount.setText(Strings.get(R.string.thememanageractivity_020) + adapter.checkedKeys().size() + Strings.get(R.string.thememanageractivity_021));
+        selectionCount.setText(Strings.get(R.string.thememanageractivity_020, adapter.checkedKeys().size()));
     }
 
     private Theme findTheme(String id) {
@@ -272,7 +272,7 @@ public class ThemeManagerActivity extends ThemedActivity {
     }
 
     private void confirmDeleteOne(final Theme t) {
-        String msg = Strings.get(R.string.thememanageractivity_037) + t.name + Strings.get(R.string.thememanageractivity_038);
+        String msg = Strings.get(R.string.thememanageractivity_037, t.name);
         if (t.id.equals(am.getThemeId())) {
             msg += Strings.get(R.string.thememanageractivity_039);
         }
@@ -303,7 +303,7 @@ public class ThemeManagerActivity extends ThemedActivity {
         for (String id : keys) {
             if (repo.export(id) != null) ok++;
         }
-        toast(Strings.get(R.string.thememanageractivity_046) + ok + " / " + keys.size() + Strings.get(R.string.thememanageractivity_047));
+        toast(Strings.get(R.string.thememanageractivity_046, ok + " / " + keys.size()));
     }
 
     private void confirmBatchDelete() {
@@ -319,7 +319,7 @@ public class ThemeManagerActivity extends ThemedActivity {
         }
         if (deletable.isEmpty()) { toast(Strings.get(R.string.thememanageractivity_049)); return; }
         final boolean hit = currentHit;
-        String msg = Strings.get(R.string.thememanageractivity_050) + deletable.size() + Strings.get(R.string.thememanageractivity_051);
+        String msg = Strings.get(R.string.thememanageractivity_050, deletable.size());
         if (hit) msg += Strings.get(R.string.thememanageractivity_052);
         AcDialog.builder(this)
                 .setTitle(Strings.get(R.string.thememanageractivity_053))
@@ -335,7 +335,7 @@ public class ThemeManagerActivity extends ThemedActivity {
                         adapter.setSelectionMode(false);
                         btnMulti.setText(Strings.get(R.string.thememanageractivity_055));
                         load();
-                        toast(Strings.get(R.string.thememanageractivity_056) + deletable.size() + Strings.get(R.string.thememanageractivity_057));
+                        toast(Strings.get(R.string.thememanageractivity_056, deletable.size()));
                     }
                 })
                 .setNegativeButton(Strings.get(R.string.thememanageractivity_058), null)

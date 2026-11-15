@@ -340,7 +340,7 @@ public class StorageAttachmentsActivity extends ThemedActivity {
             hint.setText(Strings.get(R.string.storageattachmentsactivity_009));
         } else if (showOrphans) {
             hint.setText(selectionMode
-                    ? Strings.get(R.string.storageattachmentsactivity_010) + selected.size() + Strings.get(R.string.storageattachmentsactivity_011)
+                    ? Strings.get(R.string.storageattachmentsactivity_010, selected.size())
                     : Strings.get(R.string.storageattachmentsactivity_012));
         } else {
             hint.setText(Strings.get(R.string.storageattachmentsactivity_013));
@@ -408,7 +408,7 @@ public class StorageAttachmentsActivity extends ThemedActivity {
 
         AcDialog.builder(this)
                 .setTitle(it.refs > 0
-                        ? Strings.get(R.string.storageattachmentsactivity_022) + it.refs + Strings.get(R.string.storageattachmentsactivity_023)
+                        ? Strings.get(R.string.storageattachmentsactivity_022, it.refs)
                         : Strings.get(R.string.storageattachmentsactivity_024))
                 .setItems(items.toArray(new String[0]), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int which) {
@@ -433,7 +433,7 @@ public class StorageAttachmentsActivity extends ThemedActivity {
 
     private void showDetail(final Item it) {
         String sub = it.refs > 0
-                ? Strings.get(R.string.storageattachmentsactivity_026) + it.refs + Strings.get(R.string.storageattachmentsactivity_027)
+                ? Strings.get(R.string.storageattachmentsactivity_026, it.refs)
                 : Strings.get(R.string.storageattachmentsactivity_028);
         String msg = Strings.get(R.string.storageattachmentsactivity_029) + it.name + "\n"
                 + Strings.get(R.string.storageattachmentsactivity_030) + StorageReport.size(it.bytes) + "\n"

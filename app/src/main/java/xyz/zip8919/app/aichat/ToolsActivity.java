@@ -488,7 +488,7 @@ public class ToolsActivity extends ThemedActivity {
         }
         AcDialog.builder(this)
                 .setTitle(Strings.get(R.string.toolsactivity_011))
-                .setMessage(Strings.get(R.string.toolsactivity_012) + selected.size() + Strings.get(R.string.toolsactivity_013))
+                .setMessage(Strings.get(R.string.toolsactivity_012, selected.size()))
                 .setPositiveButton(Strings.get(R.string.toolsactivity_014), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         deleteSelectedFiles(selected);
@@ -506,7 +506,7 @@ public class ToolsActivity extends ThemedActivity {
             }
         }
         LogUtil.i(TAG, "deleteSelectedFiles: %d/%d ok", ok, selected.size());
-        AcToast.show(this, Strings.get(R.string.toolsactivity_016) + ok + Strings.get(R.string.toolsactivity_017));
+        AcToast.show(this, Strings.get(R.string.toolsactivity_016, ok));
         StorageActivity.invalidateCache();
         selectionMode = false;
         checkedNames.clear();   // 同上：不清会被下一轮多选继承，导致误删

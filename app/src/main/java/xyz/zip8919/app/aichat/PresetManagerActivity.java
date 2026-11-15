@@ -179,7 +179,7 @@ public class PresetManagerActivity extends ThemedActivity {
 
     private void createPreset(String presetPrompt) {
         if (presets.size() >= PresetStore.MAX_PRESETS) {
-            AcToast.show(this, Strings.get(R.string.presetmanageractivity_006) + PresetStore.MAX_PRESETS + Strings.get(R.string.presetmanageractivity_007));
+            AcToast.show(this, Strings.get(R.string.presetmanageractivity_006, PresetStore.MAX_PRESETS));
             return;
         }
         editNew(presetPrompt == null ? "" : presetPrompt.trim());
@@ -191,7 +191,7 @@ public class PresetManagerActivity extends ThemedActivity {
         showEditDialog(name, initialPrompt, new EditSink() {
             public boolean onSave(String newName, String newPrompt) {
                 if (presets.size() >= PresetStore.MAX_PRESETS) {
-                    AcToast.show(PresetManagerActivity.this, Strings.get(R.string.presetmanageractivity_009) + PresetStore.MAX_PRESETS + Strings.get(R.string.presetmanageractivity_010));
+                    AcToast.show(PresetManagerActivity.this, Strings.get(R.string.presetmanageractivity_009, PresetStore.MAX_PRESETS));
                     return false;
                 }
                 presets.add(new PresetStore.Preset(newName, newPrompt));

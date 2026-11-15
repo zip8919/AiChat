@@ -222,7 +222,7 @@ public class FontManagerActivity extends ThemedActivity {
         }
         AcDialog.builder(this)
                 .setTitle(Strings.get(R.string.fontmanageractivity_028))
-                .setMessage(Strings.get(R.string.fontmanageractivity_029) + f.name + Strings.get(R.string.fontmanageractivity_030))
+                .setMessage(Strings.get(R.string.fontmanageractivity_029, f.name))
                 .setPositiveButton(Strings.get(R.string.fontmanageractivity_031), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         repo.delete(f.id);
@@ -302,7 +302,7 @@ public class FontManagerActivity extends ThemedActivity {
         for (String id : keys) {
             if (isReferenced(id)) used.add(id);
         }
-        String msg = Strings.get(R.string.fontmanageractivity_044) + keys.size() + Strings.get(R.string.fontmanageractivity_045);
+        String msg = Strings.get(R.string.fontmanageractivity_044, keys.size());
         if (!used.isEmpty()) {
             msg += Strings.get(R.string.fontmanageractivity_046) + used.size()
                     + Strings.get(R.string.fontmanageractivity_047);
@@ -324,7 +324,7 @@ public class FontManagerActivity extends ThemedActivity {
                         adapter.setSelectionMode(false);
                         btnMulti.setText(Strings.get(R.string.fontmanageractivity_050));
                         load();
-                        toast(Strings.get(R.string.fontmanageractivity_051) + keys.size() + Strings.get(R.string.fontmanageractivity_052));
+                        toast(Strings.get(R.string.fontmanageractivity_051, keys.size()));
                     }
                 })
                 .setNegativeButton(Strings.get(R.string.fontmanageractivity_053), null)

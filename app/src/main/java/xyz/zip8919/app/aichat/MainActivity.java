@@ -1229,7 +1229,7 @@ public class MainActivity extends ThemedActivity {
     private void addAttachment(AttachmentText.File f) {
         // 上限来自设置（Limits），不再写死：不同机型内存差一个数量级
         if (pendingAttachments.size() >= Limits.maxAttachments) {
-            AcToast.show(this, Strings.get(R.string.mainactivity_030) + Limits.maxAttachments + Strings.get(R.string.mainactivity_031));
+            AcToast.show(this, Strings.get(R.string.mainactivity_030, Limits.maxAttachments));
             return;
         }
         int total = f.chars();
@@ -3232,7 +3232,7 @@ public class MainActivity extends ThemedActivity {
             public void run() {
                 if (conversationRenderState != 0 && conversationRenderGen == myRenderGen) {
                     reportConversationRenderStage(
-                            Strings.get(R.string.mainactivity_078) + (snapshot.size() - from) + Strings.get(R.string.mainactivity_079), 68);
+                            Strings.get(R.string.mainactivity_078, (snapshot.size() - from)), 68);
                 }
                 // 渲染线程必须有兜底：pageReady 已在上面关门，一旦这里抛异常（例如
                 // 公式提取遇到截断的 \ce{A ->[），runOnUiThread 永不执行 → pageReady
@@ -3827,7 +3827,7 @@ public class MainActivity extends ThemedActivity {
                         }
                         ThemeRepository.getInstance().invalidate();
                         String tip = vr.warnings.isEmpty()
-                                ? Strings.get(R.string.mainactivity_096) + t.name + Strings.get(R.string.mainactivity_097)
+                                ? Strings.get(R.string.mainactivity_096, t.name)
                                 : Strings.get(R.string.mainactivity_098) + t.name + Strings.get(R.string.mainactivity_099) + vr.warnings.size() + Strings.get(R.string.mainactivity_100);
                         AcToast.showLong(MainActivity.this, tip);
                     } catch (Throwable e) {
@@ -4379,7 +4379,7 @@ public class MainActivity extends ThemedActivity {
                 AcToast.show(this, Strings.get(R.string.mainactivity_140));
                 return;
             }
-            showConfirmDialog(Strings.get(R.string.mainactivity_141) + n + Strings.get(R.string.mainactivity_142), new Runnable() {
+            showConfirmDialog(Strings.get(R.string.mainactivity_141, n), new Runnable() {
                 public void run() {
                     LogUtil.i(TAG, "retry(regenerate): truncating from pos=%d", pos);
                     messages.subList(pos, messages.size()).clear();
@@ -4389,7 +4389,7 @@ public class MainActivity extends ThemedActivity {
                 }
             });
         } else {
-            showConfirmDialog(Strings.get(R.string.mainactivity_143) + n + Strings.get(R.string.mainactivity_144), new Runnable() {
+            showConfirmDialog(Strings.get(R.string.mainactivity_143, n), new Runnable() {
                 public void run() {
                     LogUtil.i(TAG, "retry(resend): truncate from pos=%d then resend", pos);
                     resendUserAt(pos);
@@ -4644,7 +4644,7 @@ public class MainActivity extends ThemedActivity {
             return;
         }
         final int n = messages.size() - pos - 1;
-        showConfirmDialog(Strings.get(R.string.mainactivity_156) + n + Strings.get(R.string.mainactivity_157), new Runnable() {
+        showConfirmDialog(Strings.get(R.string.mainactivity_156, n), new Runnable() {
             public void run() {
                 LogUtil.i(TAG, "rollbackTo: removing %d messages after pos=%d", n, pos);
                 messages.subList(messages.size() - n, messages.size()).clear();
@@ -4659,7 +4659,7 @@ public class MainActivity extends ThemedActivity {
     // 7. 创建分支
     private void branchAt(final int pos) {
         final int n = pos + 1;
-        showConfirmDialog(Strings.get(R.string.mainactivity_159) + n + Strings.get(R.string.mainactivity_160), new Runnable() {
+        showConfirmDialog(Strings.get(R.string.mainactivity_159, n), new Runnable() {
             public void run() {
                 // 与新建/切换会话同一套收口：排队消息属于旧会话，在途请求会继续往
                 // messages 里写。不先停掉，分支切过去后收尾逻辑会按旧下标写到新列表。

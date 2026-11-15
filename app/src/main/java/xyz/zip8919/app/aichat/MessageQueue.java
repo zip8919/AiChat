@@ -107,7 +107,7 @@ final class MessageQueue {
         LogUtil.i(TAG, "enqueued: len=%d files=%d pending=%d",
                 text == null ? 0 : text.length(),
                 files == null ? 0 : files.size(), pending.size());
-        AcToast.show(activity, Strings.get(R.string.messagequeue_001) + pending.size() + Strings.get(R.string.messagequeue_002));
+        AcToast.show(activity, Strings.get(R.string.messagequeue_001, pending.size()));
     }
 
     /** 本轮回复结束：若队列非空且当前空闲，取出队首发送。 */
@@ -171,7 +171,7 @@ final class MessageQueue {
             bar.setVisibility(View.GONE);
         } else {
             bar.setVisibility(View.VISIBLE);
-            barText.setText(Strings.get(R.string.messagequeue_003) + n + Strings.get(R.string.messagequeue_004));
+            barText.setText(Strings.get(R.string.messagequeue_003, n));
         }
     }
 
@@ -253,7 +253,7 @@ final class MessageQueue {
         }
         final String[] actions = {Strings.get(R.string.messagequeue_013), Strings.get(R.string.messagequeue_014), Strings.get(R.string.messagequeue_015), Strings.get(R.string.messagequeue_016)};
         actionsDialog = AcDialog.builder(activity)
-                .setTitle(Strings.get(R.string.messagequeue_017) + (index + 1) + Strings.get(R.string.messagequeue_018))
+                .setTitle(Strings.get(R.string.messagequeue_017, (index + 1)))
                 .setItems(actions, new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int which) {
                         actionTaken = true;

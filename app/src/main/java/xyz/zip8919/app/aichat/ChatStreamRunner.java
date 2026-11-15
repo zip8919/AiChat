@@ -389,7 +389,7 @@ final class ChatStreamRunner {
                     st.errorDetail = ErrorReport.build(job.providerName, job.modelName,
                             job.chatEndpoint, round, code, bodyForReport, null);
                     if (retryCount > 0) {
-                        st.errorDetail += Strings.get(R.string.chatstreamrunner_005) + retryCount + Strings.get(R.string.chatstreamrunner_006);
+                        st.errorDetail += Strings.get(R.string.chatstreamrunner_005, retryCount);
                     }
                     LogUtil.e(TAG, "request failed (round %d): %s", round, st.errorDetail);
                     String failReason = ErrorReport.providerMessage(bodyForReport);
@@ -499,7 +499,7 @@ final class ChatStreamRunner {
                         st.failed = true;
                         st.errorDetail = ErrorReport.build(job.providerName, job.modelName,
                                 job.chatEndpoint, round, -1, "",
-                                new Exception(Strings.get(R.string.chatstreamrunner_008) + MAX_TOOL_ROUNDS + Strings.get(R.string.chatstreamrunner_009)));
+                                new Exception(Strings.get(R.string.chatstreamrunner_008, MAX_TOOL_ROUNDS)));
                         LogUtil.w(TAG, "tool round limit %d reached, stop looping", MAX_TOOL_ROUNDS);
                         if (session.isCurrent(job.generation)) {
                             ui.toast(Strings.get(R.string.chatstreamrunner_010));

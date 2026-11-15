@@ -464,7 +464,7 @@ final class ChatHistory {
             JSONObject out = new JSONObject();
             out.put("query", json.optString("query", ""));
             out.put("results", kept);
-            if (dropped > 0) out.put("truncated", Strings.get(R.string.chathistory_006) + dropped + Strings.get(R.string.chathistory_007));
+            if (dropped > 0) out.put("truncated", Strings.get(R.string.chathistory_006, dropped));
             return out.toString();
         } catch (Exception e) {
             return s.substring(0, RESULT_MAX) + Strings.get(R.string.chathistory_008);

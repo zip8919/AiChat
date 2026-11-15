@@ -211,7 +211,7 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
                         UpdateManager.setProbeConcurrency(UpdateActivity.this, n);
                         refreshProbeOptionText();
                         AcToast.show(UpdateActivity.this,
-                                Strings.get(R.string.updateactivity_015) + n + Strings.get(R.string.updateactivity_016));
+                                Strings.get(R.string.updateactivity_015, n));
                     }
                 })
                 .setNegativeButton(Strings.get(R.string.updateactivity_017), null)
@@ -374,7 +374,7 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
         UpdateManager.setSelectedTemplate(this, mirrors.get(i).template);
         refreshAllRows();
         if (!downloading) {
-            progressText.setText(Strings.get(R.string.updateactivity_019) + mirrors.get(i).name + Strings.get(R.string.updateactivity_020));
+            progressText.setText(Strings.get(R.string.updateactivity_019, mirrors.get(i).name));
         }
     }
 
@@ -475,7 +475,7 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
     public void onRelease(UpdateManager.Release r, String err) {
         if (destroyed) return;
         if (err != null || r == null) {
-            statusView.setText(Strings.get(R.string.updateactivity_025) + err + Strings.get(R.string.updateactivity_026));
+            statusView.setText(Strings.get(R.string.updateactivity_025, err));
             progressText.setText(Strings.get(R.string.updateactivity_027));
             btnAction.setEnabled(false);
             return;
@@ -500,7 +500,7 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
         // 那是分钟级长任务，还会把用户上次选中的源悄悄换成某个陌生域名。
         // 改成明确提示，测速由用户点按钮或长按单个源触发。
         progressText.setText(asset == null ? Strings.get(R.string.updateactivity_036)
-                : Strings.get(R.string.updateactivity_037) + mirrors.size() + Strings.get(R.string.updateactivity_038));
+                : Strings.get(R.string.updateactivity_037, mirrors.size()));
     }
 
     /**
@@ -695,13 +695,13 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
         if (err != null || f == null) {
             apkFile = null;
             btnAction.setText(Strings.get(R.string.updateactivity_062));
-            progressText.setText(Strings.get(R.string.updateactivity_063) + err + Strings.get(R.string.updateactivity_064));
+            progressText.setText(Strings.get(R.string.updateactivity_063, err));
             return;
         }
         installPending = false;
         apkFile = f;
         btnAction.setText(Strings.get(R.string.updateactivity_065));
-        progressText.setText(Strings.get(R.string.updateactivity_066) + formatSize(f.length()) + Strings.get(R.string.updateactivity_067));
+        progressText.setText(Strings.get(R.string.updateactivity_066, formatSize(f.length())));
     }
 
     private void install() {
@@ -834,7 +834,7 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
         // 列表整体替换，reloadMirrors 内部会先作废旧测速
         UpdateManager.setSelectedTemplate(this, t);
         reloadMirrors(t);
-        progressText.setText(Strings.get(R.string.updateactivity_073) + t + Strings.get(R.string.updateactivity_074));
+        progressText.setText(Strings.get(R.string.updateactivity_073, t));
         LogUtil.i(TAG, "addCustom: selected=%d", selectedIndex);
     }
 
@@ -903,7 +903,7 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
                         }
                         UpdateManager.setSelectedTemplate(UpdateActivity.this, t);
                         reloadMirrors(t);
-                        progressText.setText(Strings.get(R.string.updateactivity_087) + t + Strings.get(R.string.updateactivity_088));
+                        progressText.setText(Strings.get(R.string.updateactivity_087, t));
                     }
                 })
                 .setNegativeButton(Strings.get(R.string.updateactivity_089), null)

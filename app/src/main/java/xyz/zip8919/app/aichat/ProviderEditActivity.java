@@ -192,7 +192,7 @@ public class ProviderEditActivity extends ThemedActivity {
             return;
         }
         if (cfg.isProviderNameTaken(nm, editing)) {
-            nameTip.setText(Strings.get(R.string.providereditactivity_003) + nm + Strings.get(R.string.providereditactivity_004));
+            nameTip.setText(Strings.get(R.string.providereditactivity_003, nm));
         } else if (!isNew && editing != null && !nm.equals(editing.name)) {
             nameTip.setText(Strings.get(R.string.providereditactivity_005));
         } else {
@@ -314,7 +314,7 @@ public class ProviderEditActivity extends ThemedActivity {
         if (editing == null) return;
         final int models = cfg.modelsOf(editing.name).size();
         String msg = Strings.get(R.string.providereditactivity_016) + editing.label() + "？"
-                + (models > 0 ? Strings.get(R.string.providereditactivity_017) + models + Strings.get(R.string.providereditactivity_018) : "");
+                + (models > 0 ? Strings.get(R.string.providereditactivity_017, models) : "");
         AcDialog.builder(this)
                 .setTitle(Strings.get(R.string.providereditactivity_019))
                 .setMessage(msg)
@@ -457,7 +457,7 @@ public class ProviderEditActivity extends ThemedActivity {
         final String[] labels = new String[candidates.size()];
         for (int i = 0; i < candidates.size(); i++) labels[i] = candidates.get(i);
         AcDialog.builder(this)
-                .setTitle(Strings.get(R.string.providereditactivity_039) + candidates.size() + Strings.get(R.string.providereditactivity_040))
+                .setTitle(Strings.get(R.string.providereditactivity_039, candidates.size()))
                 .setMultiChoiceItems(labels, checked, new DialogInterface.OnMultiChoiceClickListener() {
                     public void onClick(DialogInterface d, int which, boolean isChecked) {
                         checked[which] = isChecked;
@@ -507,7 +507,7 @@ public class ProviderEditActivity extends ThemedActivity {
         }
         cfg.save();
         refreshModels();
-        String msg = Strings.get(R.string.providereditactivity_045) + added + Strings.get(R.string.providereditactivity_046);
+        String msg = Strings.get(R.string.providereditactivity_045, added);
         if (skipped > 0) msg += Strings.get(R.string.providereditactivity_047) + skipped + Strings.get(R.string.providereditactivity_048);
         AcToast.show(this, msg);
         LogUtil.i(TAG, "addModels: added=%d skipped=%d provider=%s", added, skipped, editing.name);

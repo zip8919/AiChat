@@ -194,7 +194,7 @@ final class ThemeValidator {
     private static void checkFontRef(String ref, String label, Set<String> installed, Result r) {
         if (ref == null || "system".equals(ref) || ref.length() == 0) return;
         if (!installed.contains(ref)) {
-            r.warnings.add(label + Strings.get(R.string.themevalidator_026) + ref + Strings.get(R.string.themevalidator_027));
+            r.warnings.add(label + Strings.get(R.string.themevalidator_026, ref));
         }
     }
 

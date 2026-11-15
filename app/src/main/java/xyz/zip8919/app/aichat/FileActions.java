@@ -125,7 +125,7 @@ final class FileActions {
             a.startActivity(Intent.createChooser(view, Strings.get(R.string.fileactions_002) + f.getName()));
             LogUtil.i(TAG, "open: %s mime=%s", f.getName(), mime);
         } catch (ActivityNotFoundException e) {
-            AcToast.showLong(a, Strings.get(R.string.fileactions_003) + f.getName() + Strings.get(R.string.fileactions_004));
+            AcToast.showLong(a, Strings.get(R.string.fileactions_003, f.getName()));
         } catch (Throwable t) {
             LogUtil.w(TAG, "open failed: %s : %s", f.getName(), t.getMessage());
             AcToast.show(a, Strings.get(R.string.fileactions_005));

@@ -632,7 +632,7 @@ public class AppearanceActivity extends ThemedActivity {
             miss.append(Strings.get(R.string.appearanceactivity_041)).append(t.fontMono);
         }
         if (miss.length() > 0) {
-            themeFontMissingTv.setText(Strings.get(R.string.appearanceactivity_042) + miss + Strings.get(R.string.appearanceactivity_043));
+            themeFontMissingTv.setText(Strings.get(R.string.appearanceactivity_042, miss));
             themeFontMissingTv.setVisibility(View.VISIBLE);
         } else {
             themeFontMissingTv.setVisibility(View.GONE);

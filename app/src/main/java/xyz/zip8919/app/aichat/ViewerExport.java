@@ -642,7 +642,7 @@ final class ViewerExport {
 
         final AlertDialog dlg = AcDialog.builder(a)
                 .setTitle(Strings.get(R.string.viewerexport_029))
-                .setMessage(Strings.get(R.string.viewerexport_030) + ext + Strings.get(R.string.viewerexport_031))
+                .setMessage(Strings.get(R.string.viewerexport_030, ext))
                 .setView(box)
                 .setPositiveButton(Strings.get(R.string.viewerexport_032), null)
                 .setNegativeButton(Strings.get(R.string.viewerexport_033), null)

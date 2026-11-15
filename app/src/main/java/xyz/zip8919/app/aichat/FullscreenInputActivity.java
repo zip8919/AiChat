@@ -76,7 +76,7 @@ public class FullscreenInputActivity extends ThemedActivity {
                 // 这里没有后悔药：主界面清空也先问一句，长文更是如此
                 AcDialog.builder(FullscreenInputActivity.this)
                         .setTitle(Strings.get(R.string.fullscreeninputactivity_001))
-                        .setMessage(Strings.get(R.string.fullscreeninputactivity_002) + len + Strings.get(R.string.fullscreeninputactivity_003))
+                        .setMessage(Strings.get(R.string.fullscreeninputactivity_002, len))
                         .setPositiveButton(Strings.get(R.string.fullscreeninputactivity_004), new DialogInterface.OnClickListener() {
                             public void onClick(DialogInterface d, int w) {
                                 edit.setText("");
