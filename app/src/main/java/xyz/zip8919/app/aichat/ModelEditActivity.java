@@ -310,13 +310,15 @@ public class ModelEditActivity extends ThemedActivity {
         if (rep.vision != null) {
             boolean ok = rep.vision.booleanValue();
             sb.append("\n").append(ok
-                    ? "图片输入可用，两张测试图都读出了数字，已勾选。"
+                    ? "图片输入可用，测试图都读出了数字，已勾选。"
                     : "图片输入不可用，已取消勾选。");
             if (!ok && rep.visionNote.length() > 0) {
                 sb.append("判定依据：").append(rep.visionNote).append("。");
             }
         } else if (rep.visionNote.length() > 0) {
-            sb.append("\n").append(rep.visionNote);
+            // 图片这一项没得出明确结论：勾选状态保持原样，并把出路写清楚
+            sb.append("\n").append(rep.visionNote)
+                    .append("。可再探测一次；仍无结论时，请按实际使用效果手动设置「支持图片输入」。");
         }
         // 有可用项就按常态色显示，两项都没得出可用结论才标红
         boolean usable = levelsOk || Boolean.TRUE.equals(rep.vision);

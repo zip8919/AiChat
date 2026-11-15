@@ -34,6 +34,13 @@ final class CapabilityProbe {
     private static final int TIMEOUT_MS = 20000;
     /** 思考档位探测的回复长度上限：只要端点能起来，回答多短都算通过。 */
     private static final int THINKING_MAX_TOKENS = 64;
+    /**
+     * 图片探测的等待时间比档位探测长。
+     *
+     * <p>开着思考的模型看图会先想一段，常见 10 到 30 秒；按 20 秒掐断会把正常模型
+     * 判成「回复正文为空」，所以图片请求单独放宽。
+     */
+    private static final int VISION_TIMEOUT_MS = 60000;
     private static final int VISION_MAX_TOKENS = 24;
 
     /**
@@ -206,22 +213,35 @@ final class CapabilityProbe {
             Stop stop) {
         VisionJudge.Round a = askNumber(url, snap, model, IMAGE_A_BASE64,
                 VisionJudge.ANSWER_A, VisionJudge.ANSWER_A_CN);
-        if (a.correct == null) {
-            // 第一轮就断网或端点异常：不硬撑第二轮，记为未能判定
-            rep.visionNote = "未能判定：" + a.note;
-            return;
-        }
         if (Boolean.FALSE.equals(a.correct)) {
             // 第一张就读错了，不可能是视觉模型，省掉第二次请求
             rep.vision = Boolean.FALSE;
             rep.visionNote = a.note;
             return;
         }
+        VisionJudge.Round b;
+        if (a.correct == null) {
+            // 第一张没读出结论：再发一次同一张图，多给一次机会。
+            // 模型先想后答时容易「思考用掉额度、正文为空」，一次空回复不足以判死。
+            if (stop != null && stop.stopped()) {
+                rep.visionNote = "未能判定：" + a.note;
+                return;
+            }
+            b = askNumber(url, snap, model, IMAGE_A_BASE64,
+                    VisionJudge.ANSWER_A, VisionJudge.ANSWER_A_CN);
+            if (b.correct == null) {
+                rep.visionNote = "未能判定：" + (b.note.length() > 0 ? b.note : a.note);
+                return;
+            }
+            rep.vision = b.correct;
+            rep.visionNote = b.correct.booleanValue() ? "" : b.note;
+            return;
+        }
         if (stop != null && stop.stopped()) {
             rep.visionNote = "第二张图未测：已停止";
             return;
         }
-        VisionJudge.Round b = askNumber(url, snap, model, IMAGE_B_BASE64,
+        b = askNumber(url, snap, model, IMAGE_B_BASE64,
                 VisionJudge.ANSWER_B, VisionJudge.ANSWER_B_CN);
         VisionJudge.Result j = VisionJudge.combine(a, b);
         rep.vision = j.supported;
@@ -232,7 +252,7 @@ final class CapabilityProbe {
     private static VisionJudge.Round askNumber(String url, ProviderInfo snap, String model,
             String imageBase64, String answer, String answerCn) {
         VisionJudge.Round out = new VisionJudge.Round();
-        Raw v = post(url, snap.apiKey, visionBody(snap, model, imageBase64));
+        Raw v = post(url, snap.apiKey, visionBody(snap, model, imageBase64), VISION_TIMEOUT_MS);
         if (v.error != null) {
             out.note = ProviderTester.explainNetwork(snap, v.error);
             return out;
@@ -318,10 +338,11 @@ final class CapabilityProbe {
         }
     }
 
-    /** 带一张「42」图片的请求体，{@code content} 用 OpenAI 的多模态数组格式。 */
+    /** 带一张数字图的请求体，{@code content} 用 OpenAI 的多模态数组格式。 */
     static String visionBody(ProviderInfo p, String model, String imageBase64) {
         try {
             JSONObject body = baseBody(model, VISION_MAX_TOKENS);
+            disableThinking(p, body);
             JSONArray content = new JSONArray();
             JSONObject text = new JSONObject();
             text.put("type", "text");
@@ -343,6 +364,30 @@ final class CapabilityProbe {
         } catch (Exception e) {
             LogUtil.w(TAG, "build vision body failed: %s", e.getMessage());
             return null;
+        }
+    }
+
+    /**
+     * 图片探测显式关掉思考。
+     *
+     * <p>看图任务不需要推理，关掉能让模型直接作答，既快也避开「想完没给正文」的
+     * 空回复。关不掉的端点（不认识这个参数）多半会忽略，不影响判定。
+     */
+    private static void disableThinking(ProviderInfo p, JSONObject body) {
+        if (p.thinkingType == null || p.thinkingParamName == null
+                || p.thinkingParamName.length() == 0) {
+            return;
+        }
+        try {
+            if ("boolean".equals(p.thinkingType)) {
+                body.put(p.thinkingParamName, false);
+            } else {
+                JSONObject off = new JSONObject();
+                off.put("type", "disabled");
+                body.put(p.thinkingParamName, off);
+            }
+        } catch (Exception e) {
+            LogUtil.w(TAG, "disable thinking failed: %s", e.getMessage());
         }
     }
 
@@ -369,6 +414,10 @@ final class CapabilityProbe {
     }
 
     private static Raw post(String url, String apiKey, String body) {
+        return post(url, apiKey, body, TIMEOUT_MS);
+    }
+
+    private static Raw post(String url, String apiKey, String body, int timeoutMs) {
         Raw out = new Raw();
         if (body == null) {
             out.error = "IllegalArgument: 请求体为空";
@@ -383,7 +432,7 @@ final class CapabilityProbe {
             }
             conn.setRequestMethod("POST");
             conn.setConnectTimeout(TIMEOUT_MS);
-            conn.setReadTimeout(TIMEOUT_MS);
+            conn.setReadTimeout(timeoutMs);
             conn.setRequestProperty("Accept", "application/json");
             conn.setRequestProperty("Accept-Encoding", "identity");
             if (apiKey != null && apiKey.trim().length() > 0) {

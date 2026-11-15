@@ -55,7 +55,7 @@ final class VisionJudge {
      * 两轮汇总。
      *
      * <p>任一轮明确答错就判不支持 —— 能看图的模型不会把 93 读成别的东西。
-     * 两轮都读不出正文才记未能判定，此时不动用户配置。
+     * 两轮都读不出正文才记未能判定（备注以「未能判定」开头），此时不动用户配置。
      */
     static Result combine(Round a, Round b) {
         Result out = new Result();
@@ -69,8 +69,7 @@ final class VisionJudge {
             out.supported = Boolean.TRUE;
             return out;
         }
-        out.note = "未能判定：" + (a.correct == null && a.note.length() > 0
-                ? a.note : b.note);
+        out.note = a.correct == null && a.note.length() > 0 ? a.note : b.note;
         return out;
     }
 
