@@ -33,11 +33,14 @@ public class ModelEditActivity extends ThemedActivity {
     private ConfigManager cfg;
     private ModelInfo editing;
 
-    private TextView title, providerInfo, testResult;
+    private TextView title, providerInfo, testResult, probeResult;
     private Spinner providerSpinner;
     private EditText nameEt, displayEt;
     private CheckBox visionCb, thinkingCb;
-    private Button testBtn, saveBtn, deleteBtn, defaultBtn;
+    private Button testBtn, saveBtn, deleteBtn, defaultBtn, probeBtn;
+
+    /** 探测得到的档位集合（本次编辑内的临时值）；null 表示没探过。 */
+    private List<String> probedLevels;
 
     /** 下拉里每一项对应的提供商唯一标识；空串表示「（未指定）」。 */
     private final List<String> providerKeys = new ArrayList<String>();
@@ -63,6 +66,8 @@ public class ModelEditActivity extends ThemedActivity {
         saveBtn = (Button) findViewById(R.id.me_save);
         deleteBtn = (Button) findViewById(R.id.me_delete);
         defaultBtn = (Button) findViewById(R.id.me_set_default);
+        probeBtn = (Button) findViewById(R.id.me_probe);
+        probeResult = (TextView) findViewById(R.id.me_probe_result);
 
         String modelName = getIntent().getStringExtra(EXTRA_MODEL);
         presetProvider = getIntent().getStringExtra(EXTRA_PROVIDER);
@@ -84,6 +89,9 @@ public class ModelEditActivity extends ThemedActivity {
         });
         testBtn.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) { runTest(); }
+        });
+        probeBtn.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { runProbe(); }
         });
 
         buildProviderSpinner();
@@ -128,6 +136,11 @@ public class ModelEditActivity extends ThemedActivity {
             visionCb.setChecked(editing.supportsVision);
             thinkingCb.setChecked(editing.supportsThinking);
             selectProvider(editing.provider);
+            if (editing.levelsProbed()) {
+                probedLevels = editing.levelList();
+                probeResult.setText("上次探测：思考可用 " + ThinkingLevels.describe(probedLevels)
+                        + (editing.levelsUnverifiable ? "（端点未校验档位取值）" : ""));
+            }
         }
         updateDefaultButton();
     }
@@ -214,6 +227,89 @@ public class ModelEditActivity extends ThemedActivity {
         }, "aichat-test-model").start();
     }
 
+    // ---- 能力探测 ----
+
+    /** 单个模型探测：用当前输入值，结果直接写回两个勾选框，保存时一起落库。 */
+    private void runProbe() {
+        if (busy) return;
+        String model = nameEt.getText().toString().trim();
+        if (model.length() == 0) {
+            AcToast.show(this, "请先填写模型 ID");
+            return;
+        }
+        String key = selectedProvider();
+        ProviderInfo p = key.length() == 0 ? null : cfg.getProvider(key);
+        if (p == null) {
+            AcToast.show(this, "请先选择提供商");
+            return;
+        }
+        if (p.apiKey == null || p.apiKey.trim().length() == 0) {
+            AcToast.show(this, "该提供商还没填 API Key");
+            return;
+        }
+        busy = true;
+        probeBtn.setEnabled(false);
+        probeBtn.setText("探测中…");
+        probeResult.setText("正在逐档请求，共 6 档，可能需要十几秒…");
+        final ProviderInfo snap = p.copy();
+        final String modelId = model;
+        new Thread(new Runnable() {
+            public void run() {
+                final CapabilityProbe.Report rep = CapabilityProbe.probe(snap, modelId, null);
+                ui.post(new Runnable() {
+                    public void run() {
+                        busy = false;
+                        if (isFinishing()) return;
+                        probeBtn.setEnabled(true);
+                        probeBtn.setText("探测思考档位与图片输入");
+                        applyProbe(rep, modelId);
+                    }
+                });
+            }
+        }, "aichat-probe-model").start();
+    }
+
+    private void applyProbe(CapabilityProbe.Report rep, String modelId) {
+        if (!rep.ok()) {
+            probeResult.setTextColor(0xFFC62828);
+            probeResult.setText("探测未完成：" + rep.error);
+            LogUtil.w(TAG, "probe %s failed: %s", modelId, rep.error);
+            return;
+        }
+        if (rep.levels.isEmpty()) {
+            probeResult.setTextColor(0xFFC62828);
+            probeResult.setText("六档全部被拒绝，该模型不接受思考参数，已把思考开关置为关闭。");
+            thinkingCb.setChecked(false);
+            probedLevels = null;
+            return;
+        }
+        probedLevels = new ArrayList<String>(rep.levels);
+        thinkingCb.setChecked(true);
+        StringBuilder sb = new StringBuilder();
+        sb.append("思考可用：").append(ThinkingLevels.describe(rep.levels));
+        if (rep.unverifiable) {
+            sb.append("\n端点对任何档位都返回成功，无法区分具体档位，六档均视为可用。");
+        }
+        String global = cfg.getThinkingLevel();
+        String actual = ThinkingLevels.resolve(global, probedLevels);
+        if (!actual.equals(global)) {
+            sb.append("\n当前全局档位「").append(ThinkingLevels.label(global))
+                    .append("」不可用，使用时将自动按「").append(ThinkingLevels.label(actual))
+                    .append("」发送。");
+        }
+        if (rep.vision != null) {
+            visionCb.setChecked(rep.vision.booleanValue());
+            sb.append("\n").append(rep.vision.booleanValue()
+                    ? "图片输入可用，已勾选。" : "图片输入不可用，已取消勾选。");
+        } else if (rep.visionNote.length() > 0) {
+            sb.append("\n").append(rep.visionNote);
+        }
+        probeResult.setTextColor(ThemeTokens.get(this, ThemeTokens.AC_TEXT_SECONDARY));
+        probeResult.setText(sb.toString());
+        LogUtil.i(TAG, "probe %s ok: levels=%s vision=%s unverifiable=%s",
+                modelId, ThinkingLevels.join(probedLevels), rep.vision, rep.unverifiable);
+    }
+
     // ---- 保存 / 删除 ----
 
     private void save() {
@@ -260,6 +356,13 @@ public class ModelEditActivity extends ThemedActivity {
         target.provider = provider;
         target.supportsVision = visionCb.isChecked();
         target.supportsThinking = thinkingCb.isChecked();
+        if (probedLevels != null) {
+            // 探测结论先落：setLevelList 会把 supportsThinking 同步为 true，
+            // 随后用户手动关掉勾选框也要能被尊重，所以再写一次
+            target.setLevelList(probedLevels);
+            target.supportsThinking = thinkingCb.isChecked();
+            target.probedAt = System.currentTimeMillis();
+        }
         if (creating) {
             cfg.getModels().add(target);
         }

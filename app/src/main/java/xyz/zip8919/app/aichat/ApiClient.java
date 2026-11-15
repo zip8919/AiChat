@@ -37,7 +37,10 @@ public class ApiClient {
         CallResult result = new CallResult();
         LogUtil.i(TAG, "callWithError -> model=%s provider=%s stream=false", model, provider.name);
         try {
-            JSONObject body = buildRequestBody(model, messages, systemPrompt, thinkingLevel,
+            // 与主流程同一口径落档：模型探测过档位、且不含全局档时换成最近可用档，
+            // 否则标题生成会在只认 max 的模型上被 400，标题静默失败。
+            String level = ChatTransport.resolveThinkingLevel(model, provider, thinkingLevel);
+            JSONObject body = buildRequestBody(model, messages, systemPrompt, level,
                     provider.thinkingType, provider.thinkingParamName, false);
             // 512: models that ignore all thinking-off switches burn tokens on
             // reasoning first; 50 left no room for the actual title (empty content)
@@ -355,16 +358,14 @@ public class ApiClient {
             if ("boolean".equals(thinkingType)) {
                 // SiliconFlow style
                 json.put(thinkingParamName, true);
-                int budget = getThinkingBudget(thinkingLevel);
-                if (budget > 0) {
-                    json.put("thinking_budget", budget);
-                }
+                json.put("thinking_budget", ThinkingLevels.budget(thinkingLevel));
             } else {
                 // DeepSeek style (object type)
                 JSONObject thinkingObj = new JSONObject();
                 thinkingObj.put("type", "enabled");
                 json.put(thinkingParamName, thinkingObj);
-                json.put("reasoning_effort", getReasoningEffort(thinkingLevel));
+                String effort = ThinkingLevels.reasoningEffort(thinkingLevel);
+                if (effort != null) json.put("reasoning_effort", effort);
             }
         } else if (thinkingLevel != null && "off".equals(thinkingLevel)) {
             if ("boolean".equals(thinkingType)) {
@@ -384,18 +385,6 @@ public class ApiClient {
         // thinkingLevel == null: skip all thinking params
 
         return json;
-    }
-
-    private static int getThinkingBudget(String level) {
-        if ("low".equals(level)) return 2048;
-        if ("medium".equals(level)) return 4096;
-        if ("high".equals(level)) return 32768;
-        return 0;
-    }
-
-    private static String getReasoningEffort(String level) {
-        if ("high".equals(level)) return "max";
-        return "high"; // low/medium/off → high (API default)
     }
 
     /**

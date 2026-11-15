@@ -73,7 +73,7 @@ public class ModelConfigActivity extends ThemedActivity {
     private ConfigRowAdapter modelAdapter;
     private EditText modelSearch;
     private Spinner filterProvider, sortMode;
-    private Button sortDir, modelTestAll, modelMulti;
+    private Button sortDir, modelTestAll, modelMulti, modelProbe, modelProbeUnprobed;
     private LinearLayout modelSelBar;
     private TextView modelSelCount;
 
@@ -87,6 +87,10 @@ public class ModelConfigActivity extends ThemedActivity {
     private final AtomicBoolean testing = new AtomicBoolean(false);
     private int testBatchTotal;
     private int testBatchDone;
+    /** 能力探测进行中的标记；置 false 时探测在下一个请求前退出。 */
+    private final AtomicBoolean probing = new AtomicBoolean(false);
+    private int probeTotal;
+    private int probeDone;
     private final Handler ui = new Handler(Looper.getMainLooper());
 
     @Override
@@ -108,10 +112,14 @@ public class ModelConfigActivity extends ThemedActivity {
     @Override
     protected void onResume() {
         super.onResume();
-        // 编辑页保存后回来：列表、筛选下拉、模型页的状态都要按新数据重建
+        // 编辑页保存后回来：列表、筛选下拉、模型页的状态都要按新数据重建。
+        // 但探测/测试线程还在跑时不能重建：它们每一步都按行的唯一键刷徽标，
+        // 列表换一批新 Row 对象后，正在刷的那一行就找不到了，进度会停在原地。
         refreshProviderFilter();
         reloadProviders();
-        reloadModels();
+        if (!probing.get() && !testing.get()) {
+            reloadModels();
+        }
     }
 
     @Override
@@ -150,6 +158,8 @@ public class ModelConfigActivity extends ThemedActivity {
         sortMode = (Spinner) findViewById(R.id.mc_sort_mode);
         sortDir = (Button) findViewById(R.id.mc_sort_dir);
         modelTestAll = (Button) findViewById(R.id.mc_model_test_all);
+        modelProbe = (Button) findViewById(R.id.mc_model_probe);
+        modelProbeUnprobed = (Button) findViewById(R.id.mc_model_probe_unprobed);
         modelMulti = (Button) findViewById(R.id.mc_model_multi);
         modelSelBar = (LinearLayout) findViewById(R.id.mc_model_sel_bar);
         modelSelCount = (TextView) findViewById(R.id.mc_model_sel_count);
@@ -519,7 +529,32 @@ public class ModelConfigActivity extends ThemedActivity {
             }
         });
         modelTestAll.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) { startBatchTest(null); }
+            public void onClick(View v) {
+                if (probing.get() && !testing.get()) {
+                    AcToast.show(ModelConfigActivity.this, "能力探测进行中，请先停止");
+                    return;
+                }
+                startBatchTest(null);
+            }
+        });
+        modelProbe.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { startBatchProbe(null); }
+        });
+        modelProbeUnprobed.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                List<String> keys = new ArrayList<String>();
+                for (int i = 0; i < modelAdapter.getCount(); i++) {
+                    ConfigRowAdapter.Row row = modelAdapter.rowAt(i);
+                    if (row == null) continue;
+                    ModelInfo m = cfg.findModel(row.key);
+                    if (m != null && !m.levelsProbed()) keys.add(row.key);
+                }
+                if (keys.isEmpty()) {
+                    AcToast.show(ModelConfigActivity.this, "当前列表里的模型都已探测过");
+                    return;
+                }
+                startBatchProbe(keys);
+            }
         });
         findViewById(R.id.mc_model_sel_all).setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
@@ -540,7 +575,21 @@ public class ModelConfigActivity extends ThemedActivity {
                     AcToast.show(ModelConfigActivity.this, "请先勾选模型");
                     return;
                 }
+                if (probing.get()) {
+                    AcToast.show(ModelConfigActivity.this, "能力探测进行中，请先停止");
+                    return;
+                }
                 startBatchTest(new ArrayList<String>(keys));
+            }
+        });
+        findViewById(R.id.mc_model_sel_probe).setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                Set<String> keys = new HashSet<String>(modelAdapter.checkedKeys());
+                if (keys.isEmpty()) {
+                    AcToast.show(ModelConfigActivity.this, "请先勾选模型");
+                    return;
+                }
+                startBatchProbe(new ArrayList<String>(keys));
             }
         });
         findViewById(R.id.mc_model_sel_delete).setOnClickListener(new View.OnClickListener() {
@@ -617,7 +666,13 @@ public class ModelConfigActivity extends ThemedActivity {
             sub.append(m.name);
             sub.append(" · ").append(cfg.providerLabel(m.provider));
             if (m.supportsVision) sub.append(" · 视觉");
-            if (!m.supportsThinking) sub.append(" · 无思考");
+            if (m.levelsProbed()) {
+                // 探测过的按实测档位显示，未探测的沿用「无思考」的手动标记
+                sub.append(" · 思考 ").append(ThinkingLevels.describe(m.levelList()));
+                if (m.levelsUnverifiable) sub.append("(未校验)");
+            } else if (!m.supportsThinking) {
+                sub.append(" · 无思考");
+            }
             String badge;
             if (cfg.isDefaultModel(m)) badge = "默认";
             else if (m.supportsVision) badge = "视觉";
@@ -880,6 +935,175 @@ public class ModelConfigActivity extends ThemedActivity {
                 modelAdapter.setBadge(name, text, error);
             }
         });
+    }
+
+    // ---- 能力探测 ----
+
+    /**
+     * 批量探测思考档位与图片输入能力。
+     *
+     * <p>与连通性测试一样串行：每个模型要发最多 7 次请求，并发会直接把低端机拖住，
+     * 也更容易撞上 429。用户可以随时点同一个按钮停止，停止后已探测到的结论照样落库。
+     *
+     * @param only 只探这些模型的唯一键；null 表示「当前筛选出来的全部」
+     */
+    private void startBatchProbe(final List<String> only) {
+        if (probing.get()) {
+            probing.set(false);
+            ui.post(new Runnable() {
+                public void run() {
+                    modelProbe.setText("探测能力（当前列表）");
+                    modelStatus.setText("已停止（已探测 " + probeDone + " / " + probeTotal + "）");
+                }
+            });
+            return;
+        }
+        if (testing.get()) {
+            AcToast.show(this, "连通性测试进行中，请先停止");
+            return;
+        }
+        final List<String> targets = new ArrayList<String>();
+        if (only != null) {
+            targets.addAll(only);
+        } else {
+            for (int i = 0; i < modelAdapter.getCount(); i++) {
+                ConfigRowAdapter.Row r = modelAdapter.rowAt(i);
+                if (r != null) targets.add(r.key);
+            }
+        }
+        if (targets.isEmpty()) {
+            AcToast.show(this, "没有可探测的模型");
+            return;
+        }
+        int valid = 0;
+        for (String k : targets) {
+            ModelInfo m = cfg.findModel(k);
+            if (m != null && cfg.getProvider(m.provider) != null) valid++;
+        }
+        confirmProbeCost(valid, targets);
+    }
+
+    /** 确认之后真正开始：先定下总数，再起线程。 */
+    private void runBatchProbe(final List<String> targets, int validTotal) {
+        probing.set(true);
+        probeTotal = validTotal;
+        probeDone = 0;
+        modelProbe.setText("停止探测");
+        modelStatus.setText("探测中 0 / " + probeTotal + "…");
+        final AtomicInteger fail = new AtomicInteger(0);
+        final List<String> details = Collections.synchronizedList(new ArrayList<String>());
+
+        new Thread(new Runnable() {
+            public void run() {
+                for (int i = 0; i < targets.size(); i++) {
+                    if (!probing.get()) break;
+                    final String key = targets.get(i);
+                    final ModelInfo m = cfg.findModel(key);
+                    if (m == null) continue;
+                    final ProviderInfo p = cfg.getProvider(m.provider);
+                    if (p == null) {
+                        reportBadge(key, "无提供商", true);
+                        details.add(m.label() + "：提供商不存在");
+                        fail.incrementAndGet();
+                        probeDone++;
+                        continue;
+                    }
+                    reportBadge(key, "探测中…", false);
+                    final CapabilityProbe.Report rep = CapabilityProbe.probe(p, m.name,
+                            new CapabilityProbe.Stop() {
+                                public boolean stopped() { return !probing.get(); }
+                            });
+                    // 结论写回配置：即使后面整体停止，已经探到的也不浪费
+                    if (rep.ok() && !rep.levels.isEmpty()) {
+                        m.setLevelList(rep.levels);
+                        m.supportsThinking = true;
+                        m.levelsUnverifiable = rep.unverifiable;
+                        m.probedAt = System.currentTimeMillis();
+                        if (rep.vision != null) m.supportsVision = rep.vision.booleanValue();
+                    }
+                    cfg.save();
+                    reportBadge(key, probeBadge(rep), !rep.ok() || rep.levels.isEmpty());
+                    if (!rep.ok() || rep.levels.isEmpty()) {
+                        fail.incrementAndGet();
+                        details.add(m.label() + "：" + (rep.ok() ? "六档全部被拒绝" : rep.error));
+                    }
+                    probeDone++;
+                    final int done = probeDone;
+                    ui.post(new Runnable() {
+                        public void run() {
+                            if (isFinishing()) return;
+                            if (probing.get()) {
+                                modelStatus.setText("探测中 " + done + " / " + probeTotal + "…");
+                            }
+                            // 每完成一个就刷一次行文案，「思考 低·高」当场可见
+                            reloadModels();
+                        }
+                    });
+                }
+                final boolean stopped = !probing.get();
+                probing.set(false);
+                ui.post(new Runnable() {
+                    public void run() {
+                        modelProbe.setText("探测能力（当前列表）");
+                        if (isFinishing()) return;
+                        modelStatus.setText((stopped ? "探测已停止" : "探测完成")
+                                + "：共 " + probeTotal + " 个，失败 " + fail.get() + " 个");
+                        reloadModels();
+                        showProbeSummary(details, fail.get(), stopped);
+                    }
+                });
+            }
+        }, "aichat-batch-probe").start();
+        LogUtil.i(TAG, "startBatchProbe: %d targets", probeTotal);
+    }
+
+    /** 探测要发真实请求，先讲清代价再执行。 */
+    private void confirmProbeCost(final int n, final List<String> targets) {
+        AcDialog.builder(this)
+                .setTitle("探测能力")
+                .setMessage("将对 " + n + " 个模型逐个探测思考档位与图片输入，"
+                        + "每个模型最多发起 7 次请求，会消耗少量额度。确定开始？")
+                .setPositiveButton("开始", new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface d, int w) { runBatchProbe(targets, n); }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private static String probeBadge(CapabilityProbe.Report rep) {
+        if (!rep.ok() || rep.levels.isEmpty()) return "✗ 探测失败";
+        StringBuilder sb = new StringBuilder();
+        String top = ThinkingLevels.highest(rep.levels);
+        sb.append("思考 ").append(ThinkingLevels.label(top));
+        if (Boolean.TRUE.equals(rep.vision)) sb.append(" · 视觉");
+        return sb.toString();
+    }
+
+    private void showProbeSummary(List<String> details, int failCount, boolean stopped) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(stopped ? "探测已停止。" : "探测完成。");
+        sb.append("共 ").append(probeTotal).append(" 个模型，失败 ")
+                .append(failCount).append(" 个。");
+        sb.append("\n\n列表里已按实测结果显示可用的思考档位与图片输入。");
+        List<String> copy;
+        synchronized (details) {
+            copy = new ArrayList<String>(details);
+        }
+        if (!copy.isEmpty()) {
+            sb.append("\n\n失败明细：\n");
+            int limit = Math.min(copy.size(), 10);
+            for (int i = 0; i < limit; i++) {
+                sb.append("· ").append(copy.get(i)).append("\n");
+            }
+            if (copy.size() > limit) {
+                sb.append("…… 其余 ").append(copy.size() - limit).append(" 个请在列表中查看\n");
+            }
+        }
+        AcDialog.builder(this)
+                .setTitle("能力探测结果")
+                .setMessage(sb.toString())
+                .setPositiveButton("知道了", null)
+                .show();
     }
 
     private void showTestSummary(List<String> failures, int failCount, boolean stopped) {

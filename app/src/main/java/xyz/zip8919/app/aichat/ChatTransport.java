@@ -48,6 +48,9 @@ final class ChatTransport {
         JSONObject body = new JSONObject();
         body.put("model", model);
         body.put("stream", stream);
+        // 档位落档：模型探测过档位、且不含全局档位时，换成最近可用档。
+        // 必须在拼 thinking 参数之前做，否则全局档位会原样下发被端点 400 或静默忽略。
+        String level = resolveThinkingLevel(model, provider, thinkingLevel);
         // 唯一出口统一做一次协议修复：把 tool_calls 与其 tool 回复重新配平，
         // 位置在最后一个出口而不是每个拼接点，坏历史（已落盘）也能自愈。
         body.put("messages", MessageSanitizer.sanitize(messages));
@@ -65,28 +68,51 @@ final class ChatTransport {
 
         if (sendThinking) {
             if ("boolean".equals(provider.thinkingType)) {
-                if ("off".equals(thinkingLevel)) {
+                if ("off".equals(level)) {
                     // 关思考必须显式下发 false。原来 off 时一个字段都不发，端点保持默认
                     // （多数是「开」），用户以为开关坏了，实际还在思考、白烧 token。
                     // 少数端点不认这个字段会 400，由 ChatStreamRunner 的 thinking 降级兜底。
                     body.put(provider.thinkingParamName, false);
                 } else {
                     body.put(provider.thinkingParamName, true);
-                    int budget = 4096;
-                    if ("low".equals(thinkingLevel)) budget = 2048;
-                    else if ("high".equals(thinkingLevel)) budget = 32768;
-                    body.put("thinking_budget", budget);
+                    body.put("thinking_budget", ThinkingLevels.budget(level));
                 }
             } else {
                 JSONObject tObj = new JSONObject();
-                tObj.put("type", "off".equals(thinkingLevel) ? "disabled" : "enabled");
+                tObj.put("type", "off".equals(level) ? "disabled" : "enabled");
                 body.put(provider.thinkingParamName, tObj);
-                if (!"off".equals(thinkingLevel)) {
-                    body.put("reasoning_effort", "high".equals(thinkingLevel) ? "max" : "high");
+                String effort = ThinkingLevels.reasoningEffort(level);
+                if (effort != null) {
+                    body.put("reasoning_effort", effort);
                 }
             }
         }
         return body;
+    }
+
+    /**
+     * 把全局思考档位换成这个模型真正接受的档位。
+     *
+     * <p>没有探测过档位的模型原样返回，行为与旧版完全一致。
+     * 按「提供商 + 模型 ID」查配置：同一个模型 ID 挂在不同提供商下，档位能力可能不同。
+     */
+    static String resolveThinkingLevel(String model, ProviderInfo provider, String globalLevel) {
+        if (globalLevel == null || globalLevel.length() == 0) return globalLevel;
+        if ("off".equals(globalLevel)) return globalLevel;
+        try {
+            ConfigManager cfg = ConfigManager.getInstance();
+            String providerName = provider == null ? null : provider.name;
+            ModelInfo m = cfg.findModel(providerName, model);
+            if (m == null || !m.levelsProbed()) return globalLevel;
+            String actual = ThinkingLevels.resolve(globalLevel, m.levelList());
+            if (!actual.equals(globalLevel)) {
+                LogUtil.d(TAG, "thinking level %s -> %s (model %s supports %s)",
+                        globalLevel, actual, model, m.thinkingLevels);
+            }
+            return actual;
+        } catch (Throwable t) {
+            return globalLevel;
+        }
     }
 
     /**

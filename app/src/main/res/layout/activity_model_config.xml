@@ -239,6 +239,33 @@
                 android:text="多选" />
         </LinearLayout>
 
+        <!-- 能力探测：单独一行，避免与上面三个按钮挤在一起（小屏读不清） -->
+        <LinearLayout
+            android:orientation="horizontal"
+            android:paddingLeft="12dp"
+            android:paddingRight="12dp"
+            android:paddingBottom="4dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content">
+            <Button
+                android:id="@+id/mc_model_probe"
+                android:textSize="12sp"
+                android:minWidth="0dp"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:text="探测能力（当前列表）" />
+            <Button
+                android:id="@+id/mc_model_probe_unprobed"
+                android:textSize="12sp"
+                android:minWidth="0dp"
+                android:layout_marginLeft="6dp"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:text="只探未探测" />
+        </LinearLayout>
+
         <EditText
             android:id="@+id/mc_model_search"
             android:textSize="13sp"
@@ -367,6 +394,15 @@
                     android:layout_weight="1"
                     android:layout_height="wrap_content"
                     android:text="测试" />
+                <Button
+                    android:id="@+id/mc_model_sel_probe"
+                    android:textSize="12sp"
+                    android:minWidth="0dp"
+                    android:layout_marginLeft="6dp"
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    android:text="探能力" />
                 <Button
                     android:id="@+id/mc_model_sel_delete"
                     android:textSize="12sp"

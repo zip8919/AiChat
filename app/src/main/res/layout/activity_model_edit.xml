@@ -136,6 +136,24 @@
             android:layout_height="wrap_content"
             android:text="" />
 
+        <!-- 能力探测：结果写回下面的两个勾选框 + 档位明细 -->
+        <Button
+            android:id="@+id/me_probe"
+            android:textSize="13sp"
+            android:layout_marginTop="6dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="探测思考档位与图片输入" />
+        <TextView
+            android:id="@+id/me_probe_result"
+            android:textSize="12sp"
+            android:textColor="@color/text_secondary"
+            android:textIsSelectable="true"
+            android:paddingTop="4dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="" />
+
         <!-- 设为默认：单独一行，不与「删除 / 保存」挤在一排（词典笔小屏三个按钮会被压到不可读） -->
         <Button
             android:id="@+id/me_set_default"

@@ -205,6 +205,9 @@ public class ConfigManager {
             mj.put("provider", m.provider);
             mj.put("supports_thinking", m.supportsThinking);
             mj.put("supports_vision", m.supportsVision);
+            mj.put("thinking_levels", m.thinkingLevels == null ? "" : m.thinkingLevels);
+            mj.put("probed_at", m.probedAt);
+            mj.put("levels_unverifiable", m.levelsUnverifiable);
             modelArr.put(mj);
         }
         json.put("models", modelArr);
@@ -247,6 +250,10 @@ public class ConfigManager {
             m.supportsThinking = mj.optBoolean("supports_thinking", true);
             // 没有这个字段的更老配置：默认 false，行为与 1.9.0 一致（不发图）
             m.supportsVision = mj.optBoolean("supports_vision", false);
+            // 老配置没有档位字段：空串表示未探测，请求侧按全局档位下发，行为不变
+            m.thinkingLevels = mj.optString("thinking_levels", "");
+            m.probedAt = mj.optLong("probed_at", 0L);
+            m.levelsUnverifiable = mj.optBoolean("levels_unverifiable", false);
             models.add(m);
         }
 
@@ -254,7 +261,8 @@ public class ConfigManager {
         // 只在首次读到旧配置时翻一次，之后完全以 supports_vision 为准，用户关了不会再翻回来。
         if (!json.optBoolean("vision_defaults_v2", false)) {
             for (ModelInfo m : models) {
-                if (isVisionDefaultName(m.name)) m.supportsVision = true;
+                // 只补没探测过的：探测结果比名字规则可信
+                if (m.probedAt == 0 && isVisionDefaultName(m.name)) m.supportsVision = true;
             }
         }
 
@@ -355,6 +363,29 @@ public class ConfigManager {
         }
         if (isKey) LogUtil.w(TAG, "findModel('%s') -> null", keyOrName);
         return null;
+    }
+
+    /** 按「提供商 + 模型 ID」精确查一条，用于同名模型分属不同提供商的场景。 */
+    public ModelInfo findModel(String providerName, String modelName) {
+        if (modelName == null || modelName.length() == 0) return null;
+        for (ModelInfo m : models) {
+            if (!modelName.equals(m.name)) continue;
+            if (providerName == null) {
+                // 没给提供商：只有全局唯一时才算命中，有歧义就返回 null 让调用方自己决定
+                if (countByName(modelName) == 1) return m;
+                continue;
+            }
+            if (providerName.equals(m.provider)) return m;
+        }
+        return null;
+    }
+
+    private int countByName(String modelName) {
+        int n = 0;
+        for (ModelInfo m : models) {
+            if (modelName.equals(m.name)) n++;
+        }
+        return n;
     }
 
     /** 该模型是不是当前默认模型（按唯一键比较，同名不同厂商不会串）。 */

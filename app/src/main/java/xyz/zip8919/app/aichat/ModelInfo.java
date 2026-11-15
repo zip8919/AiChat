@@ -22,6 +22,24 @@ public class ModelInfo {
      */
     public boolean supportsVision;
 
+    /**
+     * 模型实际接受的思考档位，逗号分隔（如 {@code low,high,max}）。空串 = 未探测。
+     *
+     * <p>与 {@link #supportsThinking} 分工：那个是「开不开思考」的开关，这个是
+     * 「开到哪几档」的明细。探测出档位集合后，{@code supportsThinking} 同步置为
+     * 非空，两者不会互相矛盾。
+     *
+     * <p>请求侧按它落档（见 {@link ThinkingLevels#resolve}）：全局档位不在集合里时
+     * 自动换成最近可用档，避免端点 400 或静默忽略。未探测（空串）时行为与旧版一致。
+     */
+    public String thinkingLevels;
+
+    /** 能力探测时间（毫秒）。0 表示从未探测，界面显示「未探测」。 */
+    public long probedAt;
+
+    /** 探测时端点对档位取值不做校验（传什么都 200），档位结论只能算「全部接受」。 */
+    public boolean levelsUnverifiable;
+
     /** 界面上一律用它，读不到显示名就回退模型 ID。 */
     public String label() {
         if (displayName != null && displayName.trim().length() > 0) return displayName.trim();
@@ -49,6 +67,21 @@ public class ModelInfo {
         return key().equals(other.key());
     }
 
+    /** 可用思考档位列表（未探测为空列表）。 */
+    public java.util.List<String> levelList() {
+        return ThinkingLevels.parse(thinkingLevels);
+    }
+
+    public boolean levelsProbed() {
+        return thinkingLevels != null && thinkingLevels.trim().length() > 0;
+    }
+
+    /** 写入档位集合（同步维护「是否支持思考」）。 */
+    public void setLevelList(java.util.List<String> levels) {
+        thinkingLevels = ThinkingLevels.join(levels);
+        if (thinkingLevels.length() > 0) supportsThinking = true;
+    }
+
     public ModelInfo copy() {
         ModelInfo m = new ModelInfo();
         m.name = name;
@@ -56,6 +89,9 @@ public class ModelInfo {
         m.provider = provider;
         m.supportsThinking = supportsThinking;
         m.supportsVision = supportsVision;
+        m.thinkingLevels = thinkingLevels;
+        m.probedAt = probedAt;
+        m.levelsUnverifiable = levelsUnverifiable;
         return m;
     }
 }

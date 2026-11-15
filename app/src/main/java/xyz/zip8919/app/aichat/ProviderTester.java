@@ -378,6 +378,30 @@ final class ProviderTester {
         return "HTTP " + code + suffix;
     }
 
+    /**
+     * 给能力探测用的公开包装：把失败翻译成人话。
+     *
+     * <p>{@link #describe} 是私有的，能力探测走的是另一条请求链，重复实现一份
+     * 归类逻辑迟早会出现两处口径不一致，所以这里只做转发。
+     */
+    static String describeFailure(ProviderInfo p, int code, String body, String model) {
+        Raw r = new Raw();
+        r.httpCode = code;
+        r.body = body;
+        return describe(p, r, 0, model);
+    }
+
+    /** 网络层异常转人话（能力探测复用同一套措辞）。 */
+    static String explainNetwork(ProviderInfo p, String raw) {
+        return networkError(p, raw);
+    }
+
+    /** 错误体里的一句话摘要，用于探测结果的附注。 */
+    static String shortError(String body) {
+        String m = errorMessage(body);
+        return m.length() == 0 ? "端点返回错误" : TextKit.shorten(m, 80);
+    }
+
     private static String networkError(ProviderInfo p, String raw) {
         String r = raw == null ? "" : raw;
         String lower = r.toLowerCase(java.util.Locale.US);
