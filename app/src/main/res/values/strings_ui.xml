@@ -100,7 +100,7 @@
     <string name="attachmenttext_003">"\n\n[图片附件] "</string>
     <string name="attachmenttext_004">\n（图像内容随本条消息一并提供）</string>
     <string name="attachmenttext_005">\n（本次为纯文本请求，未包含图像内容）</string>
-    <string name="attachmenttext_006">\n\n&lt;附件 name=\</string>
+    <string name="attachmenttext_006">\n\n&lt;附件 name=\"</string>
     <string name="attachmenttext_007">"&lt;已截断：原文 "</string>
     <string name="attachmenttext_008">" 字符，本请求未发送正文&gt;"</string>
     <string name="attachmenttext_009">"\n&lt;已截断：原文 "</string>
@@ -110,7 +110,7 @@
     <string name="attachmenttext_013">" 字 · "</string>
     <string name="attachmenttext_014">"\n[附件] "</string>
     <string name="attachmenttext_015">未命名</string>
-    <string name="attachmenttext_016">&lt;附件 name=\</string>
+    <string name="attachmenttext_016">&lt;附件 name=\"</string>
     <string name="attachmenttext_017">\n&lt;/附件&gt;</string>
     <string name="attachmenttext_018">"[附件] "</string>
     <string name="builtinthemes_001">默认</string>
@@ -191,6 +191,10 @@
     <string name="conversationmanager_003">正在读取对话内容</string>
     <string name="conversationmanager_006">正在读取对话记录</string>
     <string name="conversationmanager_007">正在解析消息</string>
+    <string name="conversationmanager_004">解析消息记录（</string>
+    <string name="conversationmanager_005">" 条）"</string>
+    <string name="conversationmanager_008">解析消息记录（</string>
+    <string name="conversationmanager_009">" 条）"</string>
     <string name="conversationmanager_010">正在新建对话</string>
     <string name="conversationmanager_011">正在恢复附件与工具记录</string>
     <string name="conversationmanager_012">正在准备界面</string>
@@ -237,7 +241,7 @@
     <string name="conversationmanageractivity_038">名称不能为空</string>
     <string name="conversationmanageractivity_039">取消</string>
     <string name="conversationmanageractivity_040">删除对话</string>
-    <string name="conversationmanageractivity_041">确定要删除\</string>
+    <string name="conversationmanageractivity_041">确定要删除\"</string>
     <string name="conversationmanageractivity_042">\"吗？</string>
     <string name="conversationmanageractivity_043">删除</string>
     <string name="conversationmanageractivity_044">已删除</string>
@@ -2184,6 +2188,7 @@
     <string name="activity_settings_tag_008">改小可以省钱省内存，改大容易撞端点限制。附件正文上限填 0 表示不截断。</string>
     <string name="activity_settings_tag_009">仅对「请求过于频繁」(HTTP 429) 生效；服务端返回 Retry-After 时以它为准。</string>
     <string name="conversation_load_parsing">正在解析 %1$d 条消息</string>
+    <string name="js_env_prompt_default">我在 Android {android}（API {api}）的 WebView 中运行 JavaScript，内核版本为 {webview}。请优先使用 ES5 写法；如果该内核支持 ES6，可以直接使用对应语法。只输出一个 ```js 代码块，变量用 var 声明，代码可直接运行并输出结果。</string>
     <string name="renderer_001">复制</string>
     <string name="renderer_002">已复制</string>
     <string name="renderer_003">保存</string>
@@ -2208,7 +2213,6 @@
     <string name="settingsactivity_073">充值余额：</string>
     <string name="settingsactivity_074">赠送余额：</string>
     <string name="thememanageractivity_073">使用中</string>
-    <string name="js_env_prompt_default">我在 Android {android}（API {api}）的 WebView 中运行 JavaScript，内核版本为 {webview}。请优先使用 ES5 写法；如果该内核支持 ES6，可以直接使用对应语法。只输出一个 ```js 代码块，变量用 var 声明，代码可直接运行并输出结果。</string>
     <string name="modelconfigactivity_148">默认</string>
     <string name="modelconfigactivity_149">视觉</string>
 </resources>

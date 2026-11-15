@@ -172,7 +172,7 @@ public class ThemeManagerActivity extends ThemedActivity {
         String badge;
         if (t.fileMissing) badge = Strings.get(R.string.thememanageractivity_016);
         else if (t.versionIncompatible) badge = Strings.get(R.string.thememanageractivity_017);
-        else if (t.id.equals(am.getThemeId())) badge = "使用中";
+        else if (t.id.equals(am.getThemeId())) badge = Strings.get(R.string.thememanageractivity_073);
         else badge = t.builtin ? Strings.get(R.string.thememanageractivity_018) : Strings.get(R.string.thememanageractivity_019);
         String sub = (t.author == null ? "" : t.author);
         if (t.description != null && t.description.length() > 0) {
