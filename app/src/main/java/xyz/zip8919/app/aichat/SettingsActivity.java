@@ -201,6 +201,16 @@ public class SettingsActivity extends ThemedActivity {
         visionMaxImagesEdit = (EditText) findViewById(R.id.vision_max_images_edit);
         webSearchMaxCallsEdit = (EditText) findViewById(R.id.web_search_max_calls_edit);
         jsEnvPromptEdit = (EditText) findViewById(R.id.js_env_prompt_edit);
+        // 三个提示词输入框的占位符快插胶囊条；集合要与各输入框下方的说明文字一致
+        PlaceholderChips.attach(
+                (LinearLayout) findViewById(R.id.system_prompt_chips),
+                systemPromptEdit, PlaceholderChips.FULL);
+        PlaceholderChips.attach(
+                (LinearLayout) findViewById(R.id.title_prompt_chips),
+                titlePromptEdit, PlaceholderChips.DEVICE_ONLY);
+        PlaceholderChips.attach(
+                (LinearLayout) findViewById(R.id.js_env_prompt_chips),
+                jsEnvPromptEdit, PlaceholderChips.DEVICE_ONLY);
         logSwitch = (Switch) findViewById(R.id.log_switch);
         realtimeRenderSwitch = (Switch) findViewById(R.id.realtime_render_switch);
         streamSwitch = (Switch) findViewById(R.id.stream_switch);

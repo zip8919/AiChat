@@ -6,6 +6,7 @@ import android.os.Bundle;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.LinearLayout;
 import android.widget.Toast;
 
 /**
@@ -32,6 +33,11 @@ public class ThemePromptTemplateActivity extends ThemedActivity {
         templateEdit = (EditText) findViewById(R.id.template_edit);
         btnReset = (Button) findViewById(R.id.btn_reset);
         btnSave = (Button) findViewById(R.id.btn_save);
+
+        // 模板五 六千字，{desc} 加 18 个设备占位符全都可用，逐字敲大括号不现实
+        PlaceholderChips.attach(
+                (LinearLayout) findViewById(R.id.template_chips),
+                templateEdit, PlaceholderChips.THEME);
 
         original = ThemePromptStore.getTemplate(this);
         templateEdit.setText(original);
