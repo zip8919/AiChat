@@ -173,8 +173,8 @@ Android/data/xyz.zip8919.app.aichat/files/
 | `Endpoint` | 地址拼装纯函数：`join` / `chatUrl` / `tidyChatPath` / `deriveName` | 不发请求，不读配置 |
 | `PresetStore` | 提示词预设存取（上限 20，重名自动编号） | 不碰 UI，不认识 SettingsActivity |
 | `ProviderTester` | 连通性探测 + 远端模型列表解析 + 错误归类 | 不写 UI，不改配置 |
-| `CapabilityProbe` | 能力探测：逐档测思考档位是否被接受（看状态码）+ 发一张写有「42」的图测图片输入 | 不改配置，不落库（结论由调用方写回 `ModelInfo`） |
-| `VisionJudge` | 图片输入判定：解析回复正文，读不出图内数字即判不支持 | 纯字符串处理，不碰网络与 Android |
+| `CapabilityProbe` | 能力探测：逐档测思考档位是否被接受（看状态码）+ 换两张不同数字的图各问一次测图片输入 | 不改配置，不落库（结论由调用方写回 `ModelInfo`） |
+| `VisionJudge` | 图片输入判定：解析回复正文，两轮各读对应图内数字，两张都读对才算支持 | 纯字符串处理，不碰网络与 Android |
 | `ThinkingLevels` | 六档定义与排序、`resolve` 落档、`reasoning_effort` / `thinking_budget` 映射 | 纯函数，不读配置 |
 | `AppearanceManager` | 外观系统唯一门面，working / committed 双态 | 不直接落盘，不做 View 变换 |
 | `ThemeApplier` | 窗口、字号、字体注入 | 不做颜色反查（那是 `ThemeRecolor`） |

@@ -309,7 +309,9 @@ public class ModelEditActivity extends ThemedActivity {
 
         if (rep.vision != null) {
             boolean ok = rep.vision.booleanValue();
-            sb.append("\n").append(ok ? "图片输入可用，已勾选。" : "图片输入不可用，已取消勾选。");
+            sb.append("\n").append(ok
+                    ? "图片输入可用，两张测试图都读出了数字，已勾选。"
+                    : "图片输入不可用，已取消勾选。");
             if (!ok && rep.visionNote.length() > 0) {
                 sb.append("判定依据：").append(rep.visionNote).append("。");
             }

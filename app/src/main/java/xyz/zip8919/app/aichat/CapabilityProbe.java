@@ -36,38 +36,70 @@ final class CapabilityProbe {
     private static final int THINKING_MAX_TOKENS = 64;
     private static final int VISION_MAX_TOKENS = 24;
 
-    /** 提问，逼模型直接报数字；判据见 {@link VisionJudge}。 */
+    /**
+     * 提问，逼模型直接报数字；判据见 {@link VisionJudge}。
+     *
+     * <p>两轮探测用同一句话：靠换图换答案，不靠换问法，避免模型因为提示不同而
+     * 给出不同表现。
+     */
     private static final String VISION_ASK = "图中的数字是多少？只回答数字，不要解释。";
 
     /**
-     * 探测图：128×128 白底黑字「42」，灰度 PNG，约 1.1 KB。
+     * 探测图 A：128×128 白底黑字「93」，灰度 PNG，约 1.4 KB；B 为「7」，约 0.7 KB。
      *
      * <p>以前用 1×1 空白图，只能证明「端点不拒绝图片块」，很多中转会把图片丢掉
      * 照样回话，于无视觉能力的模型也被判成支持。改成看图报数：读不出数字就是
-     * 没看到图，判定只能靠这条内容校验，不能靠状态码。
+     * 没看到图。
+     *
+     * <p><b>为什么必须两轮换图</b>：没有视觉能力的模型看不到图也会顺着问题编一个
+     * 数字，个别模型还会在常见答案上碰运气。单轮单图无法区分「读到了」和
+     * 「猜对了」。两张图答出两个不同的数字，靠猜同时命中的概率才够低。
      */
-    private static final String PROBE_IMAGE_BASE64 =
-            "iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAAAAADmVT4XAAAEMklEQVR42u3bWUhUURgA4JnU"
-            + "LKcxN7QpKyoQlcjAwsgpWhQEC7KFQorIVpcoKrOX6kHapKIFsgyhqCjMoqio0ZQyCulBbaGF"
-            + "NgcXRmxGLcchdebvpbme4/3P1dEz14fOfbvnP3Pv59z7n+Uf1IJmZI9RGgEQAAEQAAEQAAEQ"
-            + "AAEQAAH43wG+XrkqNH391tDcbG3vsPd0a/z9A8IjDFExM2cgXbW8d0Z/3tfW1rztQmMRC5LS"
-            + "wmVY5vEIvUgC+wNgLc2M81P2+Swp6aU+wwa0TfQIYDftjx/cCzWlsHdQgA0ajwC7PHhMsZV9"
-            + "n2OiH1zz3pv/YWlu90BpaNvmzdyDk8ltAwByLN5N/yqjRRFw76a3B6APqZ0KAOsO7w+BNekK"
-            + "gKwWFQbhB0VMQGmJKtPA3lYGoDVLnXmo8whjMspsHf7Fg4zzo6PCArVW67uq8h+MThcPhWBz"
-            + "gXICDGYknLav2kmEnHfmMi52HhuKLaHDA/itfSYLOvN90IvNwwArNMMB6PMsaNg0Gp0bO+SA"
-            + "gaYARYD+sI01t13XYld7JAM0B5PxwDhPAL6ZLQqLhQwMUCCbDbe1kWenIj148Re/uxCuEM4P"
-            + "QBq/9h8Hrjwkz1K2DP72huuV0YodJq5DGhv7pWFjEJXLjZDq0ZJM+ShFAAv7PYKt7eTZmUlc"
-            + "B74lSJudfgTFj8mz5Rv5jrzBY+VtARSgYQ8ZCyniPfZHICgKsOUXNUxOUGEXFkI2XiojQyvT"
-            + "uc9+bfKmGAJgziUjYYXc79+CAOb0AWDzbzKiOKYM7ahGHkp8H6CwgoysXcN//XFX3rRovDQQ"
-            + "fddR7+vPf80cByLbODmgWNoZQYadWqqE8v8CznXKmnSrpN3xWSqwXmLz+wbMOrkpT9qcfqFm"
-            + "KoONP8CVIr+//qd7c+raRBUULgfzfwDHn8jbDoS6CxSnqfZNBJzXN3AfWRPO7nbXBz5Ts0Rk"
-            + "O3/AS2Qe0n1yFyic86mACbgDXuiRh3JLqpAU0Gsy4A4oQxJAc1Aq0XwcQ7ZP/cUdcA2rW22U"
-            + "akS9CVTVrgJ4A45h6/HUHglwjApkA2eAMxtLyiRHX5XMnwxM7+QMcKRh919kJ8p01AN4DnwB"
-            + "1kTs/sldwADsBr6AenSnsMwBDEBUF19AnQG7f3oPMACjXgFXQLkerf+5gAXIBa4ANP01R/t3"
-            + "IxaoDq6AE1j6+10FJsDnNXAEOHOwP19vAjZgCMd2dvqvQjfQtaASwGbEusfUg0oAcwzW24hX"
-            + "b7wAqEN/alntAJUATwOxvrudoBLgBlaP055kvq+8AQVY+vvfApUAzp1o3fgZqATA03/ye1AJ"
-            + "gKf/rCZQCWCOxTot7QCVAG/Q9F/fDSoBKtD0z3OBWoDEoV3jtq8yYZnsJ/SEaq/X7tQ9BEAA"
-            + "BEAABEAAtOLffARAAARAAARAAARAAARAAARgpAF/AepxcQuibdtNAAAAAElFTkSuQmCC";
+    static final String IMAGE_A_BASE64 =
+            "iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAAAAADmVT4XAAAFQ0lEQVR42u2ab0yVZRTAH+QK"
+            + "F8Eul5syjcmfwAzk4mgWWcMtB0atD0GuDG2tEU1Xa42iaY7WlOHaoA/JcrXabEojw3KZozZN"
+            + "wRoDJBTRC947hbQL9wJ2hfsP7uXtQ7bdc+77vs95X9z80PN8Yec9zznvj+fPec5z3hsjsXvb"
+            + "FjEBIAAEgAAQAAJAAAgAASAABIAAEAACQAAIgHvcDGrKge4+x6jbFzAmmjKz1xWv4Xqbsdvt"
+            + "znGXyxMMBOcWxyWaU9LSH7LmG9VsJKXWuyMNdX3g3YuKvaVrbbufXiH/iviNDXZFOyWAnx+T"
+            + "9VXWo9D/Kmdsio9rAhjdrOjpjdu6ABh7op8O8O19Ko7S+/UBsPiDVIC9MaqOkk7qA2BsLw2g"
+            + "jucn7hedAOwwBeAzvp+kXp0AS2/yAbrjCI6yPPoAWBUXYDaP5KhSJ4BxkgfQhCzu/+Ccc9bV"
+            + "W5+Bnp+RBzCVvNV8avDPv0PTzq6vticTVgECCKBg9uKtOwr/21CxLhwFYCj9uCcEvTUmc+cA"
+            + "ARyC3csjXoMIjkFD++OfumQ22dCDCGADB6AU9DaPR6j82UD3pERql9BBlKEO4IGHYw1QHoCu"
+            + "LtAIqtGawnqYD3SFgPgykF6CfVtp6/55KCaoJyTdsHMBEC05egDQ9rGoA9iBlBsL+1qB5HCQ"
+            + "AEKqPBhgBEjLUF8knyUBjKBDWR3AAyM36osO6U4SwDEolqoD+LWkkxcpnQa/gYmRVUtWPI3k"
+            + "21C0Eb74Ocrh/1THScsTgeRGfSeg6Bvlvd7buH4YPNixiZOWw2V2ORyrOuY30hVfHfDdcgyd"
+            + "PoXGsOwTXlq+E+r6gHIS7UrWJhP4KlUGZGtAxgBOQT60gAuoNYwcjmm6AqW2tMRzLyZokFPc"
+            + "kWframy6X8MIrDngJ90L0KxuiTiOa6KcfkQGyOuk3ozex9P2X/IXiH4/20UfAUPJ0XkSwAi+"
+            + "rC7b89vY7MT5hkwZr7WaFmFuG+lm9JqGZfWhxl2wzcPdBYw1JNMBjBpLAYeLXPwCxfLP6Q4T"
+            + "tBYjrjw1ya+QbHmP7G+55nLI4OuUAkU11d0Zxb0Vnh6z/dj0ginapoVyO64jAgzzEtK57wux"
+            + "zep5Sn3gRKr8oqsHWeHiICEpbsQHSDupQjJVIxO2S4bmwMXVSkrLW5CXV4k1ovF9MPQnVF2Q"
+            + "JBt4tJ12MXgFAuQgdYxyWmPr6BkenfLFWiwri4qLljDGjmyL1DfvJK2UvkegPJlCLNPJtApt"
+            + "a/BOQ7t1UD0SqjV/O8jwc4hmq6A4pb9U+7U3UqrQWQ32Mr1T4IW1gwGqHSo5dOiegnpnpLR+"
+            + "LdFswAlls94RaIXVw6NUuyo0IT5aHIhqJ+HhmwdC6ju7rivZ/YBjMTcQFTaNR7sJ7UbV0+Mo"
+            + "DVn03AnZyPwFrvq9yQWIZYZnmmF53X8QZ8TlMnnQ0opDbvh4/teNUUviNDcSGsKMMZb9aP7a"
+            + "LJPJ6JlydXeeRXuXmS+thMnWkX//xmQVWK1ppuRk5p25Zuv96a+o9z98mZsPxBJ2druGTBC2"
+            + "7yTCFHDbfkkvQJl0NwBqJb0Aq9x3A6BW0guw4oq0cID4LyW9AHlXpYUD5HZLOgFiqr3SggES"
+            + "981KOgGKu6hfzZQBzHsmFOItDyCx8nelUB0diEY7Os4Nh6O/tpRufVbxLubr7zv/x1BAXpm5"
+            + "qbQsSXlmZHPCgG1w6KbTOekPBKSEJeaMrNwNBdzdId2wO6673K6JmWAwGDLEGVMsqRmZuYUW"
+            + "9aUhfl0vAASAABAAAkAACAABIAAEgAAQAAJAAAiA/z3AP08tP8vf9hVuAAAAAElFTkSuQmCC";
+
+    /** 第二张图：数字 7，换图复测用。 */
+    static final String IMAGE_B_BASE64 =
+            "iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAAAAADmVT4XAAACm0lEQVR42u2Z3UtUQRiH5+yu"
+            + "X+WimCkaC4mE1I1ikCAF3RQkFBLSRUQIUZjmt/4VVooSRQQihCAIkhQkKBFKRgWBJLaxtLSy"
+            + "BKIsiyxb+bHe/87NmXeGdyHfufyxM+/DszNz5sxxMiq7zacEQAAEQAAEQAAEQAAEQAAEQAAE"
+            + "QAC8tAcOoX2Xv0AABEAADjtA8ESWAe4FswuQ0+3xhxkr7VcAx73lsaclA8O7mAx47OlYuStO"
+            + "hrYhuTzHugqeYX01qDgN7FTFIan7yroPTMapM8CSgdoVCEI/A5wG5rC+6g2wGrg0D0HRelAx"
+            + "GljB+qrNe30bAEMY5HaxPg3jU5jcrGQFGNnBaTWg0914Em6HkpA0vWE9kDxPkndhKwZ2q2OQ"
+            + "nP3CeiSbipkJMDZQj0+dkxE/p4EF11Ovz89q4MpbCEpiRzmP5auuc899zfqGAA/RX14n64vJ"
+            + "70lMbpezAoz+wxnVrz2GySRMhRKQXHvF+m74ImG4CRka2DsVhaThI+vb8XTUggATA+c+Q1D9"
+            + "w8dp4D3WV/0+VgNXX0NQGivgvCEJu849HZT6dADXLlzQoTgBNl5i0nqcFWDsDw7URxyJdiWT"
+            + "OobjXCde7hANjG/RX8htLMP9mggk5xeJADQDMxFbAogGGpchqFlzOA18WHbtwtT6tFXQjIOU"
+            + "pclXnBQDkVlMOvPJAigAj/YhONKuOAE2JzC5U8IK8CQNgb/X5GitPWvSZTjEDZN7dn0DExvW"
+            + "NiHSRpQ5HYbk4jsTAG0Ds2GrAvQNXFiC4Mw3h9PApyWXAKP62qugBftX/DX72qRpIDqDSVeu"
+            + "mQBNgMd7EBS2KU6AxDgmd4tZAZ6mIAj0GNa39NmOcyMSAAEQAAEQAAEQAAEQAAEQAAEQgP8O"
+            + "4ADjmqorB+8WhgAAAABJRU5ErkJggg==";
+
 
     /** 探测结果。{@code levels} 为空且 {@code error} 非空表示整轮失败。 */
     static final class Report {
@@ -154,7 +186,7 @@ final class CapabilityProbe {
         // 与档位结论互不影响：不支持思考参数的模型也可能能看图，所以六档全被拒绝时
         // 图片这一项照样要探，不能跟着一起作废。
         if (stop == null || !stop.stopped()) {
-            probeVision(rep, url, snap, model);
+            probeVision(rep, url, snap, model, stop);
         }
 
         if (rep.levels.isEmpty()) {
@@ -164,26 +196,57 @@ final class CapabilityProbe {
         return finish(rep, rep.levels, rep.vision, rep.unverifiable);
     }
 
-    /** 图片输入探测：发图、读回复、按内容判定。 */
-    private static void probeVision(Report rep, String url, ProviderInfo snap, String model) {
-        Raw v = post(url, snap.apiKey, visionBody(snap, model));
-        if (v.error != null) {
-            rep.visionNote = "未能判定：" + ProviderTester.explainNetwork(snap, v.error);
+    /**
+     * 图片输入探测：同一句话、换两张图，各问一次。
+     *
+     * <p>一轮答对说明不了模型看到了图 —— 没视觉能力的模型也会顺着问题编数字，
+     * 碰巧一致就是误判。两轮各答对一张，才算支持。
+     */
+    private static void probeVision(Report rep, String url, ProviderInfo snap, String model,
+            Stop stop) {
+        VisionJudge.Round a = askNumber(url, snap, model, IMAGE_A_BASE64,
+                VisionJudge.ANSWER_A, VisionJudge.ANSWER_A_CN);
+        if (a.correct == null) {
+            // 第一轮就断网或端点异常：不硬撑第二轮，记为未能判定
+            rep.visionNote = "未能判定：" + a.note;
             return;
+        }
+        if (Boolean.FALSE.equals(a.correct)) {
+            // 第一张就读错了，不可能是视觉模型，省掉第二次请求
+            rep.vision = Boolean.FALSE;
+            rep.visionNote = a.note;
+            return;
+        }
+        if (stop != null && stop.stopped()) {
+            rep.visionNote = "第二张图未测：已停止";
+            return;
+        }
+        VisionJudge.Round b = askNumber(url, snap, model, IMAGE_B_BASE64,
+                VisionJudge.ANSWER_B, VisionJudge.ANSWER_B_CN);
+        VisionJudge.Result j = VisionJudge.combine(a, b);
+        rep.vision = j.supported;
+        rep.visionNote = j.note;
+    }
+
+    /** 发一张图问数字，返回这一轮的结论；答复里带上端点拒绝、网络失败的原因。 */
+    private static VisionJudge.Round askNumber(String url, ProviderInfo snap, String model,
+            String imageBase64, String answer, String answerCn) {
+        VisionJudge.Round out = new VisionJudge.Round();
+        Raw v = post(url, snap.apiKey, visionBody(snap, model, imageBase64));
+        if (v.error != null) {
+            out.note = ProviderTester.explainNetwork(snap, v.error);
+            return out;
         }
         if (v.httpCode >= 200 && v.httpCode < 300) {
-            VisionJudge.Result j = VisionJudge.judge(v.body);
-            rep.vision = j.supported;
-            rep.visionNote = j.note;
-            return;
+            return VisionJudge.judge(v.body, answer, answerCn);
         }
         if (visionRejection(v.httpCode)) {
-            rep.vision = Boolean.FALSE;
-            rep.visionNote = "端点拒绝：" + ProviderTester.shortError(v.body);
-            return;
+            out.correct = Boolean.FALSE;
+            out.note = "端点拒绝：" + ProviderTester.shortError(v.body);
+            return out;
         }
-        rep.visionNote = "未能判定："
-                + ProviderTester.describeFailure(snap, v.httpCode, v.body, model);
+        out.note = ProviderTester.describeFailure(snap, v.httpCode, v.body, model);
+        return out;
     }
 
     /** 探测收尾：把结论整理成一句人能看懂的备注。 */
@@ -196,9 +259,13 @@ final class CapabilityProbe {
         }
         if (vision != null) {
             if (sb.length() > 0) sb.append("；");
-            sb.append(vision.booleanValue() ? "支持图片输入" : "不支持图片输入");
-            if (!vision.booleanValue() && rep.visionNote.length() > 0) {
-                sb.append("（").append(rep.visionNote).append("）");
+            if (vision.booleanValue()) {
+                sb.append("支持图片输入（两张图均读出数字）");
+            } else {
+                sb.append("不支持图片输入");
+                if (rep.visionNote.length() > 0) {
+                    sb.append("（").append(rep.visionNote).append("）");
+                }
             }
         } else if (rep.visionNote.length() > 0) {
             if (sb.length() > 0) sb.append("；");
@@ -252,7 +319,7 @@ final class CapabilityProbe {
     }
 
     /** 带一张「42」图片的请求体，{@code content} 用 OpenAI 的多模态数组格式。 */
-    static String visionBody(ProviderInfo p, String model) {
+    static String visionBody(ProviderInfo p, String model, String imageBase64) {
         try {
             JSONObject body = baseBody(model, VISION_MAX_TOKENS);
             JSONArray content = new JSONArray();
@@ -263,7 +330,7 @@ final class CapabilityProbe {
             JSONObject img = new JSONObject();
             img.put("type", "image_url");
             JSONObject u = new JSONObject();
-            u.put("url", "data:image/png;base64," + PROBE_IMAGE_BASE64);
+            u.put("url", "data:image/png;base64," + imageBase64);
             img.put("image_url", u);
             content.put(img);
             JSONObject msg = new JSONObject();

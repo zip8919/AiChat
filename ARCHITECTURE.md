@@ -53,8 +53,8 @@
 | `ModelEditActivity` | 模型编辑：提供商下拉、模型 ID / 显示名、视觉与思考开关、连通性测试、单个能力探测 | 不自己判定能力结论（结论由 `CapabilityProbe` 给出，只负责写回字段） |
 | `Endpoint` | 地址拼装纯函数：`join` / `chatUrl` / `modelsUrl` / `modelsUrlCandidates` / `deriveName` / `tidyChatPath` | 不发请求，不读配置 |
 | `ProviderTester` | 连通性探测（`/models` 零 token → 降级 `max_tokens=8` 最小对话）+ 远端模型列表解析 + 错误归类 | 不写 UI，不改配置 |
-| `CapabilityProbe` | 能力探测：逐档测思考档位是否被接受（看状态码，不看回复内容）+ 一张写有「42」的图测图片输入 | 不改配置，不落库（结论由调用方写入 `ModelInfo`） |
-| `VisionJudge` | 图片输入判定：解析回复正文，只有报出图内数字才算支持 | 纯字符串处理，不碰网络与 Android，便于单测 |
+| `CapabilityProbe` | 能力探测：逐档测思考档位是否被接受（看状态码，不看回复内容）+ 换两张不同数字的图各问一次测图片输入 | 不改配置，不落库（结论由调用方写入 `ModelInfo`） |
+| `VisionJudge` | 图片输入判定：解析回复正文，两轮各报出对应图内数字才算支持 | 纯字符串处理，不碰网络与 Android，便于单测 |
 | `ThinkingLevels` | 六档定义与排序、`resolve` 落档、`reasoning_effort` / `thinking_budget` 映射 | 纯函数，不读配置 |
 | `MessageQueue` | 排队发送（每条带原话与附件快照） | 不知道消息内容怎么发 |
 | `AttachmentText` | 附件 → 给模型的正文、卡片摘要、老会话迁移；大小与 token 估算（图片走 `ImageTokens`） | 不读文件，不碰 UI |
@@ -77,7 +77,7 @@
 | 提供商唯一标识 | `ProviderInfo.name` 是模型引用它的外键，改名必须同步 `ModelInfo.provider`（`ProviderEditActivity.save` 已处理） |
 | 思考档位 | 六档 `minimal / low / medium / high / xhigh / max`（`ThinkingLevels.ORDER`）。模型实测可用档位存 `ModelInfo.thinkingLevels`（逗号分隔），空串表示**未探测**，此时一律按全局档位下发，行为与旧版一致 |
 | 落档 | 全局档位不在模型可用集合里时，`ThinkingLevels.resolve` 取最近可用档（上下等距取低档）。入口只有一个：`ChatTransport.resolveThinkingLevel`，主流程与标题生成都走它 |
-| 视觉判定 | 图片探测发一张 128×128 白底黑字「42」的 PNG，提问只回数字。**判据是回复内容，不是状态码**：端点把图片丢掉照样回 200，按状态码判会把无视觉能力的模型标成支持。回复读不出数字即判不支持；读不到正文（空回复、响应残缺）才记「未能判定」，不动用户配置 |
+| 视觉判定 | 图片探测发 128×128 白底黑字的数字图，提问「只回答数字」。**判据是回复内容，不是状态码**：端点把图片丢掉照样回 200，按状态码判会把无视觉能力的模型标成支持。**必须两轮换图**：没有视觉能力的模型看不到图也会编一个数字，单轮单图答对只说明猜中；两轮用同一句话、只换图（93 / 7），两张都答对才算支持，任一轮答错即判不支持。数字按完整数字串比对（`193`、`9.3` 不算命中 `93`）；两轮都读不到正文才记「未能判定」，不动用户配置 |
 | 探测落库 | 视觉与思考档位是两项独立结论：档位全被拒绝时图片输入照样探测、照样写回；`Report.levelsRejected` 表示六档逐个明确被拒，据此把「支持思考」置为关闭 |
 
 ## 动态视图着色

@@ -12,13 +12,32 @@ import org.json.JSONObject;
  * 看到像素。把图片悄悄丢掉、照样正常回话的端点会稳定返回 200，按状态码判就会把
  * 没有视觉能力的模型判成支持。
  *
+ * <p><b>为什么单轮单图也不够</b>：没有视觉能力的模型看不到图也会顺着「图中数字是
+ * 多少」编一个数。只问一次，答对只说明它猜中了，说明不了它看到了。所以判据是
+ * <b>换一张图再问一次，两张图都答对</b>。两轮用同样的话术，只有图片不同。
+ *
  * <p>纯字符串处理，不碰网络与 Android，便于单测。
  */
 final class VisionJudge {
 
-    /** 探测图里写的数字，模型答出它才算真的读到了图。 */
-    static final String ANSWER = "42";
-    static final String ANSWER_CN = "四十二";
+    /** 第一张图里的数字。 */
+    static final String ANSWER_A = "93";
+    static final String ANSWER_A_CN = "九十三";
+    /** 第二张图里的数字。 */
+    static final String ANSWER_B = "7";
+    static final String ANSWER_B_CN = "七";
+
+    /** 单轮结果。{@code correct} 为 null 表示这一轮读不出结论。 */
+    static final class Round {
+        Boolean correct;
+        String note = "";
+    }
+
+    /** 两轮汇总结果。{@code supported} 为 null 表示未能判定。 */
+    static final class Result {
+        Boolean supported;
+        String note = "";
+    }
 
     /** 模型明说看不到图的话术，单独认出来，好让备注说清原因。 */
     private static final String[] NO_IMAGE_WORDS = {
@@ -29,43 +48,83 @@ final class VisionJudge {
             "no image", "not an image", "don't see an image", "do not see an image"
     };
 
-    /** 判定结果。{@code supported} 为 null 表示这一轮读不出结论。 */
-    static final class Result {
-        Boolean supported;
-        String note = "";
-    }
-
     private VisionJudge() {
     }
 
     /**
-     * 按回复内容判定。读不出正文（响应残缺、空回复）时不下结论，
-     * 有正文但对不上数字时判不支持 —— 宁可漏判，也不要把没视觉的模型标成支持。
+     * 两轮汇总。
+     *
+     * <p>任一轮明确答错就判不支持 —— 能看图的模型不会把 93 读成别的东西。
+     * 两轮都读不出正文才记未能判定，此时不动用户配置。
      */
-    static Result judge(String body) {
+    static Result combine(Round a, Round b) {
         Result out = new Result();
+        if (Boolean.FALSE.equals(a.correct) || Boolean.FALSE.equals(b.correct)) {
+            out.supported = Boolean.FALSE;
+            Round bad = Boolean.FALSE.equals(a.correct) ? a : b;
+            out.note = bad.note.length() > 0 ? bad.note : "回复里没有出现图内数字";
+            return out;
+        }
+        if (Boolean.TRUE.equals(a.correct) && Boolean.TRUE.equals(b.correct)) {
+            out.supported = Boolean.TRUE;
+            return out;
+        }
+        out.note = "未能判定：" + (a.correct == null && a.note.length() > 0
+                ? a.note : b.note);
+        return out;
+    }
+
+    /**
+     * 单轮判定：回复里有没有正确报出这一轮图里的数字。
+     *
+     * <p>阿拉伯数字按「完整数字串」比对：{@code 93} 不能出现在 {@code 193}、{@code 9.3}、
+     * {@code 93%} 里面，否则模型答个长度、百分比都会被当成读对了。
+     */
+    static Round judge(String body, String answer, String answerCn) {
+        Round out = new Round();
         String text = replyText(body);
         if (text == null) {
-            out.note = "未能判定：响应里读不到回复正文";
+            out.note = "响应里读不到回复正文";
             return out;
         }
         String t = text.trim();
         if (t.length() == 0) {
-            out.note = "未能判定：回复正文为空";
+            out.note = "回复正文为空";
             return out;
         }
         if (mentionsNoImage(t)) {
-            out.supported = Boolean.FALSE;
+            out.correct = Boolean.FALSE;
             out.note = "模型表示看不到图片";
             return out;
         }
-        if (t.indexOf(ANSWER) >= 0 || t.indexOf(ANSWER_CN) >= 0) {
-            out.supported = Boolean.TRUE;
+        if (containsNumber(t, answer) || t.indexOf(answerCn) >= 0) {
+            out.correct = Boolean.TRUE;
             return out;
         }
-        out.supported = Boolean.FALSE;
-        out.note = "回复里没有出现图内数字";
+        out.correct = Boolean.FALSE;
+        out.note = "回复里没有出现图内数字 " + answer;
         return out;
+    }
+
+    /** 数字串前后不能紧挨着别的数字或小数点，避免 193 / 9.3 / 93.5 命中 93。 */
+    static boolean containsNumber(String text, String number) {
+        if (number == null || number.length() == 0) return false;
+        int from = 0;
+        while (true) {
+            int i = text.indexOf(number, from);
+            if (i < 0) return false;
+            int before = i - 1;
+            int after = i + number.length();
+            boolean beforeOk = before < 0 || !isDigitOrDot(text.charAt(before));
+            boolean afterOk = after >= text.length() || !isDigitOrDot(text.charAt(after));
+            if (beforeOk && afterOk) return true;
+            from = i + 1;
+        }
+    }
+
+    private static boolean isDigitOrDot(char c) {
+        if (c >= '0' && c <= '9') return true;
+        return c == '.' || c == ',' || c == '．' || c == '，';
     }
 
     /** 取 choices[0] 的回复正文；兼容字符串、分块数组与旧式 text 字段。 */

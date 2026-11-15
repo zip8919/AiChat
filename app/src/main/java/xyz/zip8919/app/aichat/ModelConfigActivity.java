@@ -942,7 +942,7 @@ public class ModelConfigActivity extends ThemedActivity {
     /**
      * 批量探测思考档位与图片输入能力。
      *
-     * <p>与连通性测试一样串行：每个模型要发最多 7 次请求，并发会直接把低端机拖住，
+     * <p>与连通性测试一样串行：每个模型要发最多 8 次请求，并发会直接把低端机拖住，
      * 也更容易撞上 429。用户可以随时点同一个按钮停止，停止后已探测到的结论照样落库。
      *
      * @param only 只探这些模型的唯一键；null 表示「当前筛选出来的全部」
@@ -1067,8 +1067,8 @@ public class ModelConfigActivity extends ThemedActivity {
         AcDialog.builder(this)
                 .setTitle("探测能力")
                 .setMessage("将对 " + n + " 个模型逐个探测思考档位与图片输入，"
-                        + "每个模型最多发起 7 次请求，会消耗少量额度。"
-                        + "图片输入会发一张写有数字的图，模型读不出数字即判为不支持。确定开始？")
+                        + "每个模型最多发起 8 次请求，会消耗少量额度。"
+                        + "图片输入会换两张不同数字的图各问一次，都答对才算支持。确定开始？")
                 .setPositiveButton("开始", new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) { runBatchProbe(targets, n); }
                 })
