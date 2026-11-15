@@ -362,6 +362,23 @@ export KEY_ALIAS=mc
 - 产物按 ABI 分包：`app-arm64-v8a` / `app-armeabi-v7a` / `app-x86` / `app-x86_64` + `app-universal`。每个包只含对应 ABI 的一份 `libconscrypt_jni.so`。
 - 本地只构建 debug，**不在本地构建正式包**。
 
+#### 无 Gradle 时的本地构建
+
+Gradle 不可用时用 `tools/build_debug.sh` 手工出包，参数由环境变量给定：
+
+```bash
+REPO_ROOT=<仓库根> ANDROID_HOME=<SDK> LIBS_DIR=<依赖目录> \
+KEYSTORE_PASSWORD=<口令> KEY_ALIAS=mc ./tools/build_debug.sh
+```
+
+脚本固化了三条必须遵守的约束，改脚本时不要破坏：
+
+- **`R.java` 必须由 `aapt2 link --java` 生成**。自己按递增计数器编号会让 ID 类型段错位（`color`=01、`id`=03、`layout`=04、`string`=06），包能编译、能安装，一启动就 `Resources$NotFoundException` 闪退，构建日志里看不出异常。校验用 `tools/dexcheck.py`，它读 dex 里的 R 常量与资源表逐条比对。
+- **`versionCode` / `versionName` / `minSdk` / `targetSdk` 显式传给 `aapt2`**。Gradle 会自动注入，手工 link 不会；缺 `versionCode` 的包系统直接拒装。
+- **`resources.arsc` 以 Stored 存入并 4 字节对齐**，其余条目正常 deflate。`targetSdk>=30` 时系统强制要求前者；全量不压缩会让包大一倍多。
+
+`tools/regression_check.py <源码根>` 做界面文案回归：资源可解析、重名、引用缺失、占位符与实参匹配、转义、字面百分号、菜单是否按文案判断、`Strings` 初始化顺序。
+
 ### 11.7 发布
 
 1. 改 `app/build.gradle`：`versionCode` 单调 +1，`versionName` 按语义化递增。
