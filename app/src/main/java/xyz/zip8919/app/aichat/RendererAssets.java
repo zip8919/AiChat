@@ -11,6 +11,30 @@ final class RendererAssets {
     private RendererAssets() {
     }
 
+    /** 把脚本里的文案占位符换成资源里的文字。页面每次重灌都要调用。 */
+    static String localize(String js) {
+        return js
+                .replace("@@L_COPY@@", Strings.get(R.string.renderer_001))
+                .replace("@@L_COPIED@@", Strings.get(R.string.renderer_002))
+                .replace("@@L_SAVE@@", Strings.get(R.string.renderer_003))
+                .replace("@@L_IMPORT@@", Strings.get(R.string.renderer_004))
+                .replace("@@L_IMPORTED@@", Strings.get(R.string.renderer_005))
+                .replace("@@L_RUN@@", Strings.get(R.string.renderer_006))
+                .replace("@@L_PREVIEW@@", Strings.get(R.string.renderer_007))
+                .replace("@@L_FOLD@@", Strings.get(R.string.renderer_008))
+                .replace("@@L_EXPAND@@", Strings.get(R.string.renderer_009))
+                .replace("@@L_TAP@@", Strings.get(R.string.renderer_010))
+                .replace("@@L_FOLD_EARLIER@@", Strings.get(R.string.renderer_011))
+                .replace("@@L_EARLIER_TOOLS@@", Strings.get(R.string.renderer_012))
+                .replace("@@L_SCROLL_EARLIER@@", Strings.get(R.string.renderer_013))
+                .replace("@@L_EARLIEST@@", Strings.get(R.string.renderer_014))
+                .replace("@@L_RETRY@@", Strings.get(R.string.renderer_015))
+                .replace("@@L_RETRY_IN@@", Strings.get(R.string.renderer_016))
+                .replace("@@L_429_PREFIX@@", Strings.get(R.string.renderer_017))
+                .replace("@@L_429_DEFAULT@@", Strings.get(R.string.renderer_018))
+                .replace("@@L_RETRYING@@", Strings.get(R.string.renderer_019));
+    }
+
     /** 气泡、工具卡片、代码块、表格、错误卡片等全部样式。 */
     static final String CSS =
             "*{margin:0;padding:0;box-sizing:border-box;}" +
@@ -241,19 +265,19 @@ final class RendererAssets {
             "if(pre.firstChild)pre.insertBefore(hd,pre.firstChild);else pre.appendChild(hd);}" +
             "if(pre.querySelector('.copy-btn'))return;" +
             "var btn=document.createElement('button');" +
-            "btn.className='copy-btn';btn.textContent='复制';" +
+            "btn.className='copy-btn';btn.textContent='@@L_COPY@@';" +
             "btn.onclick=function(e){e.stopPropagation();e.preventDefault();" +
             "var code=pre.querySelector('code');" +
             "var text=code?code.textContent:pre.textContent;" +
             "if(window.Android)Android.copyCode(text);" +
-            "btn.textContent='已复制';" +
-            "setTimeout(function(){btn.textContent='复制';},2000);};" +
+            "btn.textContent='@@L_COPIED@@';" +
+            "setTimeout(function(){btn.textContent='@@L_COPY@@';},2000);};" +
             "pre.appendChild(btn);" +
             "var langTag=pre.querySelector('.lang-tag');" +
             "var lang=langTag?langTag.textContent.trim().toLowerCase():'';" +
             "var narrow=(window.innerWidth<320);" +
             "var sbtn=document.createElement('button');" +
-            "sbtn.className='save-btn';sbtn.textContent='保存';" +
+            "sbtn.className='save-btn';sbtn.textContent='@@L_SAVE@@';" +
             "sbtn.onclick=function(e){e.stopPropagation();e.preventDefault();" +
             "var code=pre.querySelector('code');" +
             "var text=code?code.textContent:pre.textContent;" +
@@ -263,18 +287,18 @@ final class RendererAssets {
             "pre.appendChild(sbtn);" +
             "if(lang==='actheme'&&!pre.querySelector('.import-btn')){" +
             "var ibtn=document.createElement('button');" +
-            "ibtn.className='import-btn';ibtn.textContent='导入主题';" +
+            "ibtn.className='import-btn';ibtn.textContent='@@L_IMPORT@@';" +
             "ibtn.onclick=function(e){e.stopPropagation();e.preventDefault();" +
             "var code=pre.querySelector('code');" +
             "var text=code?code.textContent:'';" +
             "if(window.Android)Android.importTheme(text);" +
-            "ibtn.textContent='已导入';" +
-            "setTimeout(function(){ibtn.textContent='导入主题';},2000);};" +
+            "ibtn.textContent='@@L_IMPORTED@@';" +
+            "setTimeout(function(){ibtn.textContent='@@L_IMPORT@@';},2000);};" +
             "pre.appendChild(ibtn);}" +
             "if(langTag){" +
             "if((lang==='js'||lang==='javascript')&&!pre.querySelector('.run-btn')){" +
             "var rbtn=document.createElement('button');" +
-            "rbtn.className='run-btn';rbtn.textContent='运行';" +
+            "rbtn.className='run-btn';rbtn.textContent='@@L_RUN@@';" +
             "rbtn.onclick=function(e){e.stopPropagation();e.preventDefault();" +
             "var code=pre.querySelector('code');" +
             "var text=code?code.textContent:'';" +
@@ -282,7 +306,7 @@ final class RendererAssets {
             "pre.appendChild(rbtn);}" +
             "if((lang==='html'||lang==='svg')&&!pre.querySelector('.preview-btn')){" +
             "var pbtn=document.createElement('button');" +
-            "pbtn.className='preview-btn';pbtn.textContent='预览';" +
+            "pbtn.className='preview-btn';pbtn.textContent='@@L_PREVIEW@@';" +
             "pbtn.onclick=function(e){e.stopPropagation();e.preventDefault();" +
             "var code=pre.querySelector('code');" +
             "var text=code?code.textContent:'';" +
@@ -399,9 +423,9 @@ final class RendererAssets {
             "var live=w[i].getAttribute('data-think-live')==='1'&&window.__inTail(w[i]);" +
             "var open=(m===null)?live:m;" +
             "b.style.display=open?'block':'none';" +
-            "if(open){t.textContent='── 折叠思考 ──';}" +
+            "if(open){t.textContent='@@L_FOLD@@';}" +
             "else{var n=parseInt(t.getAttribute('data-tok'),10);if(!(n>0))n=1;" +
-            "t.textContent='── 展开思考（'+window.fmtTok(n)+' tokens）──';}}};" +
+            "t.textContent='@@L_EXPAND@@'+window.fmtTok(n)+' tokens）──';}}};" +
             // 重复内容不在这里靠 DOM 去重治理：根因在 Java 侧插入工具卡片前
             // 漏了 commitTail，导致同一轮 display 同时留在 tail 又被当增量
             // 追加进 base。已在 ChatStreamRunner 修源头；DOM 侧只负责恢复
@@ -411,12 +435,12 @@ final class RendererAssets {
             "var w=btn.parentNode;var k=w?w.getAttribute('data-think-key'):null;" +
             "var open=b.style.display==='none';" +
             "b.style.display=open?'block':'none';" +
-            "if(open){btn.textContent='── 折叠思考 ──';}" +
+            "if(open){btn.textContent='@@L_FOLD@@';}" +
             "else{" +
             // 数值取渲染时写进 data-tok 的源码估算值；缺失时（老 DOM）退回按可见文本估算
             "var t=parseInt(btn.getAttribute('data-tok'),10);" +
             "if(!(t>0))t=Math.max(1,Math.round(b.textContent.length*2/3));" +
-            "btn.textContent='── 展开思考（'+window.fmtTok(t)+' tokens）──';}" +
+            "btn.textContent='@@L_EXPAND@@'+window.fmtTok(t)+' tokens）──';}" +
             "if(k)window.__thinkOpen[k]=open;};" +
             "window.__toolOpen=window.__toolOpen||{};" +
             "window.applyToolStates=function(root){" +
@@ -433,7 +457,7 @@ final class RendererAssets {
             "if(a)a.textContent='▼';if(hint)hint.textContent='';}" +
             "else{b.style.display='none';" +
             "if(a)a.textContent='▶';" +
-            "if(hint)hint.textContent='（点击展开）';}};" +
+            "if(hint)hint.textContent='@@L_TAP@@';}};" +
             // 每次重绘落地后按 key 恢复思考块展开状态（跨重建不丢）。
             "window.applyThinkingStates(root);" +
             "window.applyToolFold(root);};" +
@@ -473,8 +497,8 @@ final class RendererAssets {
             // 只改需要改的那几张：几百张卡片全量写 display 会让每次追加都重排一遍
             "for(var j=0;j<hidden;j++)cards[j].style.display=open?'':'none';" +
             "for(var k=hidden;k<n;k++)if(cards[k].style.display)cards[k].style.display='';" +
-            "bar.innerHTML=open?('收起更早的 '+hidden+' 条')" +
-            ":('更早的 '+hidden+' 条工具记录 · 点开');}" +
+            "bar.innerHTML=open?('@@L_FOLD_EARLIER@@'.replace('{n}',hidden))" +
+            ":('@@L_EARLIER_TOOLS@@'.replace('{n}',hidden));}" +
             "window.toggleToolFold=function(bar){" +
             "var msg=bar.parentNode;" +
             "while(msg&&msg.nodeType===1){" +
@@ -492,7 +516,7 @@ final class RendererAssets {
             "b.style.display=open?'block':'none';" +
             "var a=h.querySelector('.tool-arrow');var hint=h.querySelector('.tool-hint');" +
             "if(a)a.textContent=open?'▼':'▶';" +
-            "if(hint)hint.textContent=open?'':'（点击展开）';" +
+            "if(hint)hint.textContent=open?'':'@@L_TAP@@';" +
             "if(k)window.__toolOpen[k]=open;};" +
             "window.toggleSources=function(h){" +
             "var b=h.nextElementSibling;if(!b)return;" +
@@ -523,8 +547,8 @@ final class RendererAssets {
             "window.__loadingOlder=false;" +
             "var h=document.getElementById('older-hint');if(!h)return;" +
             "if(remaining>0){window.__olderDone=false;h.style.display='block';" +
-            "h.textContent='上滑加载更早的 '+remaining+' 条消息';}" +
-            "else{window.__olderDone=true;h.style.display='block';h.textContent='已到最早一条';" +
+            "h.textContent='@@L_SCROLL_EARLIER@@'.replace('{n}',remaining);}" +
+            "else{window.__olderDone=true;h.style.display='block';h.textContent='@@L_EARLIEST@@';" +
             "setTimeout(function(){h.style.display='none';},1200);}};" +
             "window.loadOlderNow=function(){" +
             "if(window.__olderDone||window.__loadingOlder)return;" +
@@ -653,13 +677,13 @@ final class RendererAssets {
             "if(c&&c.nextSibling)m.insertBefore(s,c.nextSibling);else m.appendChild(s);}" +
             "var left=Math.max(1,Math.ceil(waitMs/1000));" +
             "var paint=function(){" +
-            "s.innerHTML='<button class=\"retry-btn\" onclick=\"Android.retryNow()\">立即重试</button>'" +
-            "+'<span class=\"retry-text\">'+left+' 秒后重试（'+attempt+'/'+max+'）</span>'" +
+            "s.innerHTML='<button class=\"retry-btn\" onclick=\"Android.retryNow()\">@@L_RETRY@@</button>'" +
+            "+'<span class=\"retry-text\">'+'@@L_RETRY_IN@@'.replace('{n}',left).replace('{a}',attempt).replace('{m}',max)+'</span>'" +
             "+'<div class=\"retry-reason\"></div>';" +
             // 用 textContent 而不是拼进 innerHTML：服务端文案可能带引号/尖括号
             "var r=s.querySelector('.retry-reason');" +
-            "if(r)r.textContent=reason&&reason.length?('HTTP 429：'+reason)" +
-            ":'HTTP 429：请求过于频繁（服务端未返回具体原因）';};" +
+            "if(r)r.textContent=reason&&reason.length?('@@L_429_PREFIX@@'+reason)" +
+            ":'@@L_429_DEFAULT@@';};" +
             "paint();" +
             "if(window.__retryTimer)clearInterval(window.__retryTimer);" +
             "window.__retryTimer=setInterval(function(){" +
@@ -669,8 +693,8 @@ final class RendererAssets {
             "left--;" +
             "var t=s.querySelector('.retry-text');" +
             "if(left<=0){clearInterval(window.__retryTimer);window.__retryTimer=null;" +
-            "if(t)t.textContent='正在重试…';return;}" +
-            "if(t)t.textContent=left+' 秒后重试（'+attempt+'/'+max+'）';},1000);" +
+            "if(t)t.textContent='@@L_RETRYING@@';return;}" +
+            "if(t)t.textContent='@@L_RETRY_IN@@'.replace('{n}',left).replace('{a}',attempt).replace('{m}',max);},1000);" +
             // 卡片插进来本身会顶高内容，不滚就藏在输入栏下面，用户只看到「卡住了」
             "smartScrollToBottom();};" +
             "window.hideRetryCard=function(){" +

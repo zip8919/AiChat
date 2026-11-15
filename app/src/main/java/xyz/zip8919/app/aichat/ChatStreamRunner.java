@@ -252,9 +252,9 @@ final class ChatStreamRunner {
             // 无限重试且永远拿不到最终回答（还重复记账）。
             int usedRounds = 0;
             if (job.isContinue()) {
-                ui.showStatus("正在继续生成...", job.generation, st.trace.toString(), job.aiIndex);
+                ui.showStatus(Strings.get(R.string.chatstreamrunner_001), job.generation, st.trace.toString(), job.aiIndex);
             } else if (job.isResume() && st.trace.length() > 0) {
-                ui.showStatus("正在重新生成...", job.generation, st.trace.toString(), job.aiIndex);
+                ui.showStatus(Strings.get(R.string.chatstreamrunner_002), job.generation, st.trace.toString(), job.aiIndex);
             }
 
             // 跨轮次复用：baseRendered 记录的是「已推到 DOM 的 trace」，
@@ -279,7 +279,7 @@ final class ChatStreamRunner {
                     // 不搬的话，下一轮第一片会把 tail 覆盖成新的增量，
                     // 用户看到的就是「屏幕闪一下，回答少了一截」。
                     renderer.commitTail(st.trace.toString());
-                    ui.showStatus("正在整理搜索结果...", job.generation, st.trace.toString(), job.aiIndex);
+                    ui.showStatus(Strings.get(R.string.chatstreamrunner_003), job.generation, st.trace.toString(), job.aiIndex);
                 }
 
                 JSONObject body = ChatTransport.buildRequestBody(job.modelName, job.provider,
@@ -349,7 +349,7 @@ final class ChatStreamRunner {
                         fallbackTried = true;
                         toolsEnabled = false;
                         conversation = buildConversation(job.systemPrompt);
-                        ui.toast("当前模型不支持工具调用，已按普通对话发送");
+                        ui.toast(Strings.get(R.string.chatstreamrunner_004));
                         ChatTransport.close(conn);
                         conn = null;
                         session.setConnection(null);
@@ -389,13 +389,13 @@ final class ChatStreamRunner {
                     st.errorDetail = ErrorReport.build(job.providerName, job.modelName,
                             job.chatEndpoint, round, code, bodyForReport, null);
                     if (retryCount > 0) {
-                        st.errorDetail += "\n\n已自动重试 " + retryCount + " 次仍失败";
+                        st.errorDetail += Strings.get(R.string.chatstreamrunner_005) + retryCount + Strings.get(R.string.chatstreamrunner_006);
                     }
                     LogUtil.e(TAG, "request failed (round %d): %s", round, st.errorDetail);
                     String failReason = ErrorReport.providerMessage(bodyForReport);
                     if (failReason.length() > 80) failReason = failReason.substring(0, 80) + "…";
                     if (session.isCurrent(job.generation)) {
-                        ui.toast("请求失败: HTTP " + code
+                        ui.toast(Strings.get(R.string.chatstreamrunner_007) + code
                                 + (failReason.length() > 0 ? " · " + failReason : ""));
                     }
                     return;
@@ -499,10 +499,10 @@ final class ChatStreamRunner {
                         st.failed = true;
                         st.errorDetail = ErrorReport.build(job.providerName, job.modelName,
                                 job.chatEndpoint, round, -1, "",
-                                new Exception("工具调用连续 " + MAX_TOOL_ROUNDS + " 轮未结束，已停止"));
+                                new Exception(Strings.get(R.string.chatstreamrunner_008) + MAX_TOOL_ROUNDS + Strings.get(R.string.chatstreamrunner_009)));
                         LogUtil.w(TAG, "tool round limit %d reached, stop looping", MAX_TOOL_ROUNDS);
                         if (session.isCurrent(job.generation)) {
-                            ui.toast("工具调用轮次过多，已停止（已保留已有内容）");
+                            ui.toast(Strings.get(R.string.chatstreamrunner_010));
                         }
                         return;
                     }
@@ -535,7 +535,7 @@ final class ChatStreamRunner {
             LogUtil.e(TAG, "streaming request exception: %s", e.getMessage(), e);
             // 用户主动打断（打断已自增代数）导致的 Socket closed 不算请求失败
             if (session.isCurrent(job.generation)) {
-                ui.toast("请求失败: " + e.getMessage());
+                ui.toast(Strings.get(R.string.chatstreamrunner_011) + e.getMessage());
             } else {
                 LogUtil.i(TAG, "stream exception ignored: interrupted by user");
             }
@@ -651,8 +651,8 @@ final class ChatStreamRunner {
 
         public String unavailableResult() {
             return job.useTavily
-                    ? "{\"error\":\"未配置 Tavily API Key，无法使用联网搜索\"}"
-                    : "{\"error\":\"未配置 DeepSeek API Key，无法使用联网搜索\"}";
+                    ? Strings.get(R.string.chatstreamrunner_012)
+                    : Strings.get(R.string.chatstreamrunner_013);
         }
 
         public boolean visionEnabled() {
@@ -674,8 +674,8 @@ final class ChatStreamRunner {
             if (warnedNoSearchKey) return;
             warnedNoSearchKey = true;
             ui.toast(job.useTavily
-                    ? "未配置 Tavily API Key，联网搜索不可用"
-                    : "未配置 DeepSeek API Key，联网搜索不可用");
+                    ? Strings.get(R.string.chatstreamrunner_014)
+                    : Strings.get(R.string.chatstreamrunner_015));
         }
 
         public void onStatus(String text) {

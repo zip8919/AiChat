@@ -23,7 +23,7 @@
             android:padding="10dp"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="‹ 返回" />
+            android:text="@string/activity_model_config_001" />
 
         <TextView
             android:textSize="17sp"
@@ -33,7 +33,7 @@
             android:layout_width="0dp"
             android:layout_weight="1"
             android:layout_height="wrap_content"
-            android:text="管理模型" />
+            android:text="@string/activity_model_config_002" />
     </LinearLayout>
 
     <LinearLayout
@@ -51,7 +51,7 @@
             android:layout_width="0dp"
             android:layout_weight="1"
             android:layout_height="36dp"
-            android:text="提供商" />
+            android:text="@string/activity_model_config_003" />
 
         <Button
             android:id="@+id/mc_tab_model"
@@ -61,7 +61,7 @@
             android:layout_width="0dp"
             android:layout_weight="1"
             android:layout_height="36dp"
-            android:text="模型" />
+            android:text="@string/activity_model_config_004" />
     </LinearLayout>
 
     <!-- ================= 提供商页 ================= -->
@@ -86,7 +86,7 @@
                 android:layout_width="0dp"
                 android:layout_weight="1"
                 android:layout_height="wrap_content"
-                android:text="新建" />
+                android:text="@string/activity_model_config_005" />
             <Button
                 android:id="@+id/mc_provider_multi"
                 android:textSize="12sp"
@@ -95,7 +95,7 @@
                 android:layout_width="0dp"
                 android:layout_weight="1"
                 android:layout_height="wrap_content"
-                android:text="多选" />
+                android:text="@string/activity_model_config_006" />
         </LinearLayout>
 
         <TextView
@@ -107,7 +107,7 @@
             android:paddingBottom="4dp"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="点击进入编辑，长按查看更多操作。" />
+            android:text="@string/activity_model_config_007" />
 
         <FrameLayout
             android:layout_width="match_parent"
@@ -130,7 +130,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
                 android:visibility="gone"
-                android:text="还没有提供商。\n点上面的「新建」添加一个。" />
+                android:text="@string/activity_model_config_008" />
         </FrameLayout>
 
         <!-- 多选操作条：只在多选态出现，固定底部不随列表滚动 -->
@@ -150,7 +150,7 @@
                 android:textColor="@color/text_secondary"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="已选 0" />
+                android:text="@string/activity_model_config_009" />
             <LinearLayout
                 android:orientation="horizontal"
                 android:layout_marginTop="2dp"
@@ -163,7 +163,7 @@
                     android:layout_width="0dp"
                     android:layout_weight="1"
                     android:layout_height="wrap_content"
-                    android:text="全选" />
+                    android:text="@string/activity_model_config_010" />
                 <Button
                     android:id="@+id/mc_provider_sel_invert"
                     android:textSize="12sp"
@@ -172,7 +172,7 @@
                     android:layout_width="0dp"
                     android:layout_weight="1"
                     android:layout_height="wrap_content"
-                    android:text="反选" />
+                    android:text="@string/activity_model_config_011" />
                 <Button
                     android:id="@+id/mc_provider_sel_delete"
                     android:textSize="12sp"
@@ -181,7 +181,7 @@
                     android:layout_width="0dp"
                     android:layout_weight="1"
                     android:layout_height="wrap_content"
-                    android:text="删除" />
+                    android:text="@string/activity_model_config_012" />
                 <Button
                     android:id="@+id/mc_provider_sel_exit"
                     android:textSize="12sp"
@@ -190,7 +190,7 @@
                     android:layout_width="0dp"
                     android:layout_weight="1"
                     android:layout_height="wrap_content"
-                    android:text="退出" />
+                    android:text="@string/activity_model_config_013" />
             </LinearLayout>
         </LinearLayout>
     </LinearLayout>
@@ -218,7 +218,7 @@
                 android:layout_width="0dp"
                 android:layout_weight="1"
                 android:layout_height="wrap_content"
-                android:text="新建" />
+                android:text="@string/activity_model_config_014" />
             <Button
                 android:id="@+id/mc_model_test_all"
                 android:textSize="12sp"
@@ -227,7 +227,7 @@
                 android:layout_width="0dp"
                 android:layout_weight="1"
                 android:layout_height="wrap_content"
-                android:text="全部测试" />
+                android:text="@string/activity_model_config_015" />
             <Button
                 android:id="@+id/mc_model_multi"
                 android:textSize="12sp"
@@ -236,7 +236,7 @@
                 android:layout_width="0dp"
                 android:layout_weight="1"
                 android:layout_height="wrap_content"
-                android:text="多选" />
+                android:text="@string/activity_model_config_016" />
         </LinearLayout>
 
         <EditText
@@ -245,7 +245,7 @@
             android:singleLine="true"
             android:background="@drawable/edit_text_background"
             android:padding="8dp"
-            android:hint="按显示名、模型 ID 或提供商筛选"
+            android:hint="@string/activity_model_config_017"
             android:layout_marginLeft="12dp"
             android:layout_marginRight="12dp"
             android:layout_marginBottom="4dp"
@@ -280,7 +280,7 @@
                     android:layout_marginLeft="4dp"
                     android:layout_width="wrap_content"
                     android:layout_height="36dp"
-                    android:text="↑ 升序" />
+                    android:text="@string/activity_model_config_018" />
             </LinearLayout>
         </HorizontalScrollView>
 
@@ -316,7 +316,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
                 android:visibility="gone"
-                android:text="没有符合条件的模型。" />
+                android:text="@string/activity_model_config_019" />
         </FrameLayout>
 
         <LinearLayout
@@ -335,7 +335,7 @@
                 android:textColor="@color/text_secondary"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="已选 0" />
+                android:text="@string/activity_model_config_020" />
             <LinearLayout
                 android:orientation="horizontal"
                 android:layout_marginTop="2dp"
@@ -348,7 +348,7 @@
                     android:layout_width="0dp"
                     android:layout_weight="1"
                     android:layout_height="wrap_content"
-                    android:text="全选" />
+                    android:text="@string/activity_model_config_021" />
                 <Button
                     android:id="@+id/mc_model_sel_invert"
                     android:textSize="12sp"
@@ -357,7 +357,7 @@
                     android:layout_width="0dp"
                     android:layout_weight="1"
                     android:layout_height="wrap_content"
-                    android:text="反选" />
+                    android:text="@string/activity_model_config_022" />
                 <Button
                     android:id="@+id/mc_model_sel_test"
                     android:textSize="12sp"
@@ -366,7 +366,7 @@
                     android:layout_width="0dp"
                     android:layout_weight="1"
                     android:layout_height="wrap_content"
-                    android:text="测试" />
+                    android:text="@string/activity_model_config_023" />
                 <Button
                     android:id="@+id/mc_model_sel_delete"
                     android:textSize="12sp"
@@ -375,7 +375,7 @@
                     android:layout_width="0dp"
                     android:layout_weight="1"
                     android:layout_height="wrap_content"
-                    android:text="删除" />
+                    android:text="@string/activity_model_config_024" />
                 <Button
                     android:id="@+id/mc_model_sel_exit"
                     android:textSize="12sp"
@@ -384,7 +384,7 @@
                     android:layout_width="0dp"
                     android:layout_weight="1"
                     android:layout_height="wrap_content"
-                    android:text="退出" />
+                    android:text="@string/activity_model_config_025" />
             </LinearLayout>
         </LinearLayout>
     </LinearLayout>

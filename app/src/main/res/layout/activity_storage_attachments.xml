@@ -20,7 +20,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="使用中 0"/>
+            android:text="@string/activity_storage_attachments_001"/>
         <TextView
             android:id="@+id/att_tab_orphan"
             android:textSize="14sp"
@@ -30,7 +30,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="无引用 0"/>
+            android:text="@string/activity_storage_attachments_002"/>
     </LinearLayout>
 
     <LinearLayout
@@ -76,7 +76,7 @@
             android:padding="6dp"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="多选"/>
+            android:text="@string/activity_storage_attachments_003"/>
         <TextView
             android:id="@+id/att_select_all"
             android:textSize="12sp"
@@ -85,7 +85,7 @@
             android:padding="6dp"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="全选"/>
+            android:text="@string/activity_storage_attachments_004"/>
         <TextView
             android:id="@+id/att_cancel"
             android:textSize="12sp"
@@ -94,7 +94,7 @@
             android:padding="6dp"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="取消"/>
+            android:text="@string/activity_storage_attachments_005"/>
         <TextView
             android:id="@+id/att_delete"
             android:textSize="12sp"
@@ -103,7 +103,7 @@
             android:padding="6dp"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="删除"/>
+            android:text="@string/activity_storage_attachments_006"/>
     </LinearLayout>
 
     <!-- 空态与列表叠在一起：列表为空时若让两者上下排列，

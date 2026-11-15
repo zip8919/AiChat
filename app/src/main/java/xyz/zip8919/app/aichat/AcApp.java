@@ -13,6 +13,7 @@ public class AcApp extends Application {
     @Override
     public void onCreate() {
         super.onCreate();
+        Strings.init(this);
         CrashCatcher.install(this);
     }
 }

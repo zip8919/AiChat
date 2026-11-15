@@ -37,7 +37,7 @@
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:text="统计中…"/>
+                        android:text="@string/activity_storage_001"/>
                     <TextView
                         android:id="@+id/storage_refresh"
                         android:textSize="12sp"
@@ -45,7 +45,7 @@
                         android:padding="6dp"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="刷新"/>
+                        android:text="@string/activity_storage_002"/>
                 </LinearLayout>
                 <TextView
                     android:id="@+id/storage_free"
@@ -54,7 +54,7 @@
                     android:layout_marginTop="2dp"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="正在统计各类数据的占用"/>
+                    android:text="@string/activity_storage_003"/>
                 <xyz.zip8919.app.aichat.StorageBarView
                     android:id="@+id/storage_bar"
                     android:layout_marginTop="12dp"
@@ -73,7 +73,7 @@
                     android:paddingTop="10dp"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="存储位置"/>
+                    android:text="@string/activity_storage_004"/>
             </LinearLayout>
 
             <TextView
@@ -110,7 +110,7 @@
                     android:textColor="@color/text_primary"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="可安全释放"/>
+                    android:text="@string/activity_storage_005"/>
                 <TextView
                     android:id="@+id/storage_clean_sub"
                     android:textSize="12sp"
@@ -126,7 +126,7 @@
                     android:layout_marginTop="10dp"
                     android:layout_width="match_parent"
                     android:layout_height="40dp"
-                    android:text="立即清理"/>
+                    android:text="@string/activity_storage_006"/>
             </LinearLayout>
 
             <TextView
@@ -137,7 +137,7 @@
                 android:layout_marginBottom="6dp"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="最占空间的 10 个文件"/>
+                android:text="@string/activity_storage_007"/>
 
             <LinearLayout
                 android:id="@+id/storage_top"
@@ -155,7 +155,7 @@
                 android:visibility="gone"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="还没有任何数据"/>
+                android:text="@string/activity_storage_008"/>
         </LinearLayout>
     </ScrollView>
 </LinearLayout>

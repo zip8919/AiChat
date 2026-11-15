@@ -78,12 +78,12 @@ final class ViewerExport {
     static void choose(final Activity a, final WebView wv, final int bg,
                        final String tag, final DirectSource direct) {
         if (wv == null) {
-            showFailure(a, "预览尚未就绪，请等内容显示后再导出。");
+            showFailure(a, Strings.get(R.string.viewerexport_001));
             return;
         }
         AcDialog.builder(a)
-                .setTitle("导出为图片 · 选择格式")
-                .setItems(new String[]{"PNG（无损，体积大）", "JPEG（有损，体积小）"},
+                .setTitle(Strings.get(R.string.viewerexport_002))
+                .setItems(new String[]{Strings.get(R.string.viewerexport_003), Strings.get(R.string.viewerexport_004)},
                         new DialogInterface.OnClickListener() {
                             public void onClick(DialogInterface d, int which) {
                                 String src = null;
@@ -93,14 +93,14 @@ final class ViewerExport {
                                 doExport(a, wv, bg, tag, src, which == 1);
                             }
                         })
-                .setNegativeButton("取消", null)
+                .setNegativeButton(Strings.get(R.string.viewerexport_005), null)
                 .show();
     }
 
     private static void doExport(final Activity a, final WebView wv, final int bg,
                                  final String tag, final String direct, final boolean jpeg) {
         final ProgressDialog pd = new ProgressDialog(a);
-        pd.setMessage("正在准备…");
+        pd.setMessage(Strings.get(R.string.viewerexport_006));
         pd.setCancelable(false);
         try {
             pd.show();
@@ -121,15 +121,15 @@ final class ViewerExport {
 
                 Bitmap shot = null;
                 if (src == null) {
-                    pd.setMessage("正在截图…");
+                    pd.setMessage(Strings.get(R.string.viewerexport_007));
                     shot = capture(wv, bg);
                     if (shot == null) {
                         dismissQuietly(pd);
-                        showFailure(a, "截图失败：内容尚未渲染完成，或预览已关闭，请重试。");
+                        showFailure(a, Strings.get(R.string.viewerexport_008));
                         return;
                     }
                 }
-                pd.setMessage("正在编码并保存…");
+                pd.setMessage(Strings.get(R.string.viewerexport_009));
 
                 final Bitmap captured = shot;
                 final String source = src;
@@ -192,7 +192,7 @@ final class ViewerExport {
 
             if (out == null) {
                 if (captured == null) {
-                    r.error = "截图失败：内容尚未渲染完成，请稍后重试。";
+                    r.error = Strings.get(R.string.viewerexport_010);
                     return r;
                 }
                 Bitmap bmp = trimBorder(captured, bg);
@@ -211,7 +211,7 @@ final class ViewerExport {
             }
 
             if (out == null || out.length == 0) {
-                r.error = "图片编码失败，请换个格式重试。";
+                r.error = Strings.get(R.string.viewerexport_011);
                 return r;
             }
 
@@ -219,7 +219,7 @@ final class ViewerExport {
             r.path = StorageManager.getInstance(a.getApplicationContext())
                     .saveExportBytes(r.name, out);
             if (r.path == null) {
-                r.error = "保存失败：exports 目录不可写。\n请检查存储权限，或到「小工具」确认根目录。";
+                r.error = Strings.get(R.string.viewerexport_012);
                 return r;
             }
             // 只记体积，不留字节：结果框存活期间常驻 5~15 MB 的编码后数据，
@@ -234,11 +234,11 @@ final class ViewerExport {
                     r.name, out.length, w, h, r.direct, trimmed, r.path);
             return r;
         } catch (OutOfMemoryError e) {
-            r.error = "图片过大，内存不足，请缩小预览后重试。";
+            r.error = Strings.get(R.string.viewerexport_013);
             return r;
         } catch (Throwable e) {
             LogUtil.w(TAG, "export failed: %s", e.getMessage());
-            r.error = "导出失败：" + e.getMessage();
+            r.error = Strings.get(R.string.viewerexport_014) + e.getMessage();
             return r;
         } finally {
             if (captured != null && !captured.isRecycled()) captured.recycle();
@@ -555,7 +555,7 @@ final class ViewerExport {
         actions.setPadding(0, gap, 0, 0);
 
         Button rename = new Button(a);
-        rename.setText("重命名");
+        rename.setText(Strings.get(R.string.viewerexport_015));
         rename.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 promptRename(a, r, info);
@@ -567,7 +567,7 @@ final class ViewerExport {
         actions.addView(rename, lpRename);
 
         Button open = new Button(a);
-        open.setText("在小工具里打开");
+        open.setText(Strings.get(R.string.viewerexport_016));
         open.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 a.startActivity(new Intent(a, ToolsActivity.class));
@@ -583,9 +583,9 @@ final class ViewerExport {
                 LinearLayout.LayoutParams.WRAP_CONTENT));
 
         final AlertDialog dlg = AcDialog.builder(a)
-                .setTitle("导出成功")
+                .setTitle(Strings.get(R.string.viewerexport_017))
                 .setView(box)
-                .setPositiveButton("关闭", null)
+                .setPositiveButton(Strings.get(R.string.viewerexport_018), null)
                 .create();
         if (thumb != null) {
             dlg.setOnDismissListener(new DialogInterface.OnDismissListener() {
@@ -604,15 +604,15 @@ final class ViewerExport {
 
     /** 结果框正文。重命名后重新调一次即可原地刷新。 */
     private static String buildInfo(Result r) {
-        String mode = r.direct ? "原图直出（无背景）"
-                : (r.trimmed ? "已裁掉周围背景" : "当前可见区域");
+        String mode = r.direct ? Strings.get(R.string.viewerexport_019)
+                : (r.trimmed ? Strings.get(R.string.viewerexport_020) : Strings.get(R.string.viewerexport_021));
         int kb = r.bytes / 1024;
-        return "已保存  " + r.name + "\n"
-                + "尺寸  " + r.width + "×" + r.height + "   格式  " + (r.jpeg ? "JPEG" : "PNG")
-                + "   体积  " + kb + " KB\n"
-                + "来源  " + mode + "\n"
-                + "位置  " + r.path + "\n\n"
-                + (r.direct ? "" : "长内容在新版系统上只导出当前可见区域。");
+        return Strings.get(R.string.viewerexport_022) + r.name + "\n"
+                + Strings.get(R.string.viewerexport_023) + r.width + "×" + r.height + Strings.get(R.string.viewerexport_024) + (r.jpeg ? "JPEG" : "PNG")
+                + Strings.get(R.string.viewerexport_025) + kb + " KB\n"
+                + Strings.get(R.string.viewerexport_026) + mode + "\n"
+                + Strings.get(R.string.viewerexport_027) + r.path + "\n\n"
+                + (r.direct ? "" : Strings.get(R.string.viewerexport_028));
     }
 
     /**
@@ -641,11 +641,11 @@ final class ViewerExport {
                 LinearLayout.LayoutParams.WRAP_CONTENT));
 
         final AlertDialog dlg = AcDialog.builder(a)
-                .setTitle("重命名")
-                .setMessage("只填文件名即可，扩展名 " + ext + " 会自动保留。")
+                .setTitle(Strings.get(R.string.viewerexport_029))
+                .setMessage(Strings.get(R.string.viewerexport_030) + ext + Strings.get(R.string.viewerexport_031))
                 .setView(box)
-                .setPositiveButton("确定", null)
-                .setNegativeButton("取消", null)
+                .setPositiveButton(Strings.get(R.string.viewerexport_032), null)
+                .setNegativeButton(Strings.get(R.string.viewerexport_033), null)
                 .create();
         AcDialog.onShow(dlg, new DialogInterface.OnShowListener() {
             public void onShow(DialogInterface d) {
@@ -654,7 +654,7 @@ final class ViewerExport {
                             public void onClick(View v) {
                                 String name = normalizeName(et.getText().toString(), ext);
                                 if (name == null) {
-                                    et.setError("请填写文件名（不能只填扩展名或 . / ..）");
+                                    et.setError(Strings.get(R.string.viewerexport_034));
                                     return;
                                 }
                                 if (name.equals(r.name)) {
@@ -665,12 +665,12 @@ final class ViewerExport {
                                         .getInstance(a.getApplicationContext());
                                 // 仅大小写变化时 exportExists 会命中自己，不算重名
                                 if (!name.equalsIgnoreCase(r.name) && sm.exportExists(name)) {
-                                    et.setError("已存在同名文件，请换一个");
+                                    et.setError(Strings.get(R.string.viewerexport_035));
                                     return;
                                 }
                                 String path = sm.renameExport(r.name, name);
                                 if (path == null) {
-                                    et.setError("重命名失败：文件可能已被移动或目录不可写");
+                                    et.setError(Strings.get(R.string.viewerexport_036));
                                     return;
                                 }
                                 r.name = name;
@@ -716,9 +716,9 @@ final class ViewerExport {
         if (a.isFinishing() || a.isDestroyed()) return;
         try {
             AcDialog.builder(a)
-                    .setTitle("导出失败")
-                    .setMessage(msg == null ? "未知错误" : msg)
-                    .setPositiveButton("知道了", null)
+                    .setTitle(Strings.get(R.string.viewerexport_037))
+                    .setMessage(msg == null ? Strings.get(R.string.viewerexport_038) : msg)
+                    .setPositiveButton(Strings.get(R.string.viewerexport_039), null)
                     .show();
         } catch (Throwable e) {
             LogUtil.w(TAG, "showFailure failed: %s", e.getMessage());

@@ -69,7 +69,7 @@ public class StatsActivity extends ThemedActivity {
 
         ArrayAdapter<String> adapter = new ArrayAdapter<String>(this,
                 android.R.layout.simple_spinner_item,
-                new String[]{"今日", "本周", "本月", "自定义"});
+                new String[]{Strings.get(R.string.statsactivity_001), Strings.get(R.string.statsactivity_002), Strings.get(R.string.statsactivity_003), Strings.get(R.string.statsactivity_004)});
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         periodSpinner.setAdapter(adapter);
         periodSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
@@ -212,16 +212,16 @@ public class StatsActivity extends ThemedActivity {
 
     private void confirmClear() {
         AcDialog.builder(this)
-                .setTitle("清空统计")
-                .setMessage("将删除本机全部使用统计（含按模型、按服务商的累计数据）。\n"
-                        + "会话内容、设置、导出文件都不受影响。确定继续？")
-                .setPositiveButton("清空", new DialogInterface.OnClickListener() {
+                .setTitle(Strings.get(R.string.statsactivity_005))
+                .setMessage(Strings.get(R.string.statsactivity_006)
+                        + Strings.get(R.string.statsactivity_007))
+                .setPositiveButton(Strings.get(R.string.statsactivity_008), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         UsageStats.get().clear();
                         render();
                     }
                 })
-                .setNegativeButton("取消", null)
+                .setNegativeButton(Strings.get(R.string.statsactivity_009), null)
                 .show();
     }
 
@@ -235,55 +235,55 @@ public class StatsActivity extends ThemedActivity {
         sb.append(dayFmt.format(new Date(s.fromTs))).append(" ~ ")
           .append(dayFmt.format(new Date(s.toTs))).append("\n\n");
 
-        sb.append("会话  ").append(s.convs)
-          .append("    轮次  ").append(s.rounds).append("\n");
-        sb.append("请求  ").append(s.reqs);
-        if (s.retries > 0) sb.append("（其中 429 重试 ").append(s.retries).append(" 次）");
+        sb.append(Strings.get(R.string.statsactivity_010)).append(s.convs)
+          .append(Strings.get(R.string.statsactivity_011)).append(s.rounds).append("\n");
+        sb.append(Strings.get(R.string.statsactivity_012)).append(s.reqs);
+        if (s.retries > 0) sb.append(Strings.get(R.string.statsactivity_013)).append(s.retries).append(Strings.get(R.string.statsactivity_014));
         sb.append("\n");
-        sb.append("工具  ").append(s.toolCalls).append(" 次");
-        if (s.toolFail > 0) sb.append("（失败 ").append(s.toolFail).append(" 次）");
+        sb.append(Strings.get(R.string.statsactivity_015)).append(s.toolCalls).append(Strings.get(R.string.statsactivity_016));
+        if (s.toolFail > 0) sb.append(Strings.get(R.string.statsactivity_017)).append(s.toolFail).append(Strings.get(R.string.statsactivity_018));
         sb.append("\n");
 
         long total = s.pt + s.ct;
         sb.append("Token  ").append(tok(total))
-          .append("（输入 ").append(tok(s.pt))
-          .append(" / 输出 ").append(tok(s.ct))
+          .append(Strings.get(R.string.statsactivity_019)).append(tok(s.pt))
+          .append(Strings.get(R.string.statsactivity_020)).append(tok(s.ct))
           .append("）\n");
         if (s.pt > 0) {
-            sb.append("缓存  ").append(tok(s.cached))
-              .append("（命中 ").append(s.cacheRate()).append("%）\n");
+            sb.append(Strings.get(R.string.statsactivity_021)).append(tok(s.cached))
+              .append(Strings.get(R.string.statsactivity_022)).append(s.cacheRate()).append("%）\n");
         } else {
-            sb.append("缓存  —（本区间没有带用量的请求）\n");
+            sb.append(Strings.get(R.string.statsactivity_023));
         }
         if (s.genMs > 0 && s.ct > 0) {
-            sb.append("速度  ").append(String.format(Locale.US, "%.1f tok/s", s.speed())).append("\n");
+            sb.append(Strings.get(R.string.statsactivity_024)).append(String.format(Locale.US, "%.1f tok/s", s.speed())).append("\n");
         }
         if (s.hasEstimated()) {
             // 中断的回复、端点不返回 usage 的回复都只能估算。单列一行而不是混进总数：
             // 混进去用户对账单时永远差那么一点，且找不到差在哪。
-            sb.append("其中估算  ").append(tok(s.estPt + s.estCt))
-              .append("（来自被打断或端点未返回用量的请求）\n");
+            sb.append(Strings.get(R.string.statsactivity_025)).append(tok(s.estPt + s.estCt))
+              .append(Strings.get(R.string.statsactivity_026));
         }
 
         if (!s.tools.isEmpty()) {
-            sb.append("\n工具明细\n");
+            sb.append(Strings.get(R.string.statsactivity_027));
             for (Map.Entry<String, UsageStats.ToolCount> e : s.tools.entrySet()) {
                 sb.append("  ").append(e.getKey()).append("  ")
-                  .append(e.getValue().calls).append(" 次");
+                  .append(e.getValue().calls).append(Strings.get(R.string.statsactivity_028));
                 if (e.getValue().fail > 0) {
-                    sb.append("（失败 ").append(e.getValue().fail).append("）");
+                    sb.append(Strings.get(R.string.statsactivity_029)).append(e.getValue().fail).append("）");
                 }
                 sb.append("\n");
             }
         }
 
-        sb.append("\n按模型\n");
+        sb.append(Strings.get(R.string.statsactivity_030));
         appendBuckets(sb, s.models);
-        sb.append("\n按服务商\n");
+        sb.append(Strings.get(R.string.statsactivity_031));
         appendBuckets(sb, s.providers);
 
-        sb.append("\n统计从本版安装后开始累计，不回填历史会话。")
-          .append("\n会话数与轮次不按模型拆分：一个会话可能中途切模型。");
+        sb.append(Strings.get(R.string.statsactivity_032))
+          .append(Strings.get(R.string.statsactivity_033));
         statsText.setText(sb.toString());
         LogUtil.d(TAG, "render: period=%d, reqs=%d, models=%d",
                 period, s.reqs, s.models.size());
@@ -302,21 +302,21 @@ public class StatsActivity extends ThemedActivity {
     private void appendBuckets(StringBuilder sb, Map<String, UsageStats.Bucket> map) {
         List<Map.Entry<String, UsageStats.Bucket>> list = UsageStats.sorted(map);
         if (list.isEmpty()) {
-            sb.append("  — 暂无数据\n");
+            sb.append(Strings.get(R.string.statsactivity_034));
             return;
         }
         for (int i = 0; i < list.size(); i++) {
             Map.Entry<String, UsageStats.Bucket> e = list.get(i);
             UsageStats.Bucket b = e.getValue();
             sb.append("  ").append(e.getKey()).append("\n")
-              .append("    ").append(b.reqs).append(" 次请求 · ")
+              .append("    ").append(b.reqs).append(Strings.get(R.string.statsactivity_035))
               .append(tok(b.pt + b.ct)).append(" tokens");
             if (b.pt > 0) {
-                sb.append(" · 输入 ").append(tok(b.pt))
-                  .append(" · 缓存 ").append(b.cacheRate()).append("%");
+                sb.append(Strings.get(R.string.statsactivity_036)).append(tok(b.pt))
+                  .append(Strings.get(R.string.statsactivity_037)).append(b.cacheRate()).append("%");
             }
             if (b.estPt > 0 || b.estCt > 0) {
-                sb.append(" · 含估算");
+                sb.append(Strings.get(R.string.statsactivity_038));
             }
             if (b.genMs > 0 && b.ct > 0) {
                 sb.append(" · ").append(String.format(Locale.US, "%.1f tok/s",
@@ -327,9 +327,9 @@ public class StatsActivity extends ThemedActivity {
     }
 
     private String periodLabel() {
-        if (period == PERIOD_CUSTOM) return "自定义区间";
-        if (period == UsageStats.PERIOD_WEEK) return "本周（周一起算）";
-        if (period == UsageStats.PERIOD_MONTH) return "本月";
-        return "今日";
+        if (period == PERIOD_CUSTOM) return Strings.get(R.string.statsactivity_039);
+        if (period == UsageStats.PERIOD_WEEK) return Strings.get(R.string.statsactivity_040);
+        if (period == UsageStats.PERIOD_MONTH) return Strings.get(R.string.statsactivity_041);
+        return Strings.get(R.string.statsactivity_042);
     }
 }

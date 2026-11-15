@@ -80,13 +80,13 @@ public class ThemeEditActivity extends ThemedActivity {
         descEdit.setText(t.description);
         cssEdit.setText(darkMode ? t.darkCss : t.lightCss);
         title.setText(t.id.length() == 0
-                ? "新建主题" : "编辑主题 · " + t.name);
+                ? Strings.get(R.string.themeeditactivity_001) : Strings.get(R.string.themeeditactivity_002) + t.name);
     }
 
     private void updateModeButtons() {
         // 用「● / ○」文字标记当前套别，不靠颜色，深浅主题下都能辨认
-        btnLight.setText(darkMode ? "○ 浅色" : "● 浅色");
-        btnDark.setText(darkMode ? "● 深色" : "○ 深色");
+        btnLight.setText(darkMode ? Strings.get(R.string.themeeditactivity_003) : Strings.get(R.string.themeeditactivity_004));
+        btnDark.setText(darkMode ? Strings.get(R.string.themeeditactivity_005) : Strings.get(R.string.themeeditactivity_006));
     }
 
     private void collect() {
@@ -180,9 +180,9 @@ public class ThemeEditActivity extends ThemedActivity {
         // 从属性页返回：tokens 变了但界面元素没变。先 collect 保住用户正在输入的 CSS，
         // 再刷新标题（名称可能在别处改过）。
         collect();
-        title.setText(t.id.length() == 0 ? "新建主题" : "编辑主题 · " + t.name);
+        title.setText(t.id.length() == 0 ? Strings.get(R.string.themeeditactivity_007) : Strings.get(R.string.themeeditactivity_008) + t.name);
         // 属性页里的预览是临时的（退出即收回），这里必须讲清楚，否则用户会以为没生效
-        AcToast.show(this, "颜色改动已写入主题，保存后在外观页选中该主题即可生效");
+        AcToast.show(this, Strings.get(R.string.themeeditactivity_009));
     }
 
     private void switchMode(boolean toDark) {
@@ -198,20 +198,20 @@ public class ThemeEditActivity extends ThemedActivity {
     private boolean save() {
         collect();
         String n = t.name == null ? "" : t.name.trim();
-        if (n.length() == 0) { toast("名称不能为空"); return false; }
+        if (n.length() == 0) { toast(Strings.get(R.string.themeeditactivity_010)); return false; }
         t.name = n.length() > 32 ? n.substring(0, 32) : n;
         String id = repo.save(t);
-        if (id == null) { toast("保存失败：存储不可写"); return false; }
+        if (id == null) { toast(Strings.get(R.string.themeeditactivity_011)); return false; }
         t.id = id;
         repo.invalidate();
         snapshot();
         refreshFields();
-        toast("已保存主题「" + t.name + "」");
+        toast(Strings.get(R.string.themeeditactivity_012) + t.name + "」");
         return true;
     }
 
     private void saveAs() {
-        promptName("另存为", t.name + " 副本", new NameCb() {
+        promptName(Strings.get(R.string.themeeditactivity_013), t.name + Strings.get(R.string.themeeditactivity_014), new NameCb() {
             public void onName(String n) {
                 collect();
                 t.name = n;
@@ -219,12 +219,12 @@ public class ThemeEditActivity extends ThemedActivity {
                 t.builtin = false;
                 t.filePath = null;
                 String id = repo.save(t);
-                if (id == null) { toast("另存失败：存储不可写"); return; }
+                if (id == null) { toast(Strings.get(R.string.themeeditactivity_015)); return; }
                 t.id = id;
                 repo.invalidate();
                 snapshot();
                 refreshFields();
-                toast("已另存为「" + n + "」");
+                toast(Strings.get(R.string.themeeditactivity_016) + n + "」");
             }
         });
     }
@@ -238,7 +238,7 @@ public class ThemeEditActivity extends ThemedActivity {
         try {
             startActivityForResult(i, REQ_IMPORT);
         } catch (Throwable e) {
-            toast("无法打开文件选择器");
+            toast(Strings.get(R.string.themeeditactivity_017));
         }
     }
 
@@ -247,27 +247,27 @@ public class ThemeEditActivity extends ThemedActivity {
         super.onActivityResult(req, res, data);
         if (req != REQ_IMPORT || res != RESULT_OK || data == null || data.getData() == null) return;
         final String text = readText(data.getData());
-        if (text == null) { toast("读取失败或文件超过 64KB"); return; }
+        if (text == null) { toast(Strings.get(R.string.themeeditactivity_018)); return; }
         final ThemeValidator.Result vr =
                 ThemeValidator.validate(text, FontRepository.getInstance().installedIds());
         if (vr.blocked || vr.theme == null) {
-            toast("导入失败：" + vr.blockReason);
+            toast(Strings.get(R.string.themeeditactivity_019) + vr.blockReason);
             return;
         }
         confirmOverwrite(new Runnable() {
             public void run() {
                 fillFromTheme(vr.theme);
                 warnIfNeeded(vr);
-                toast("已填入当前编辑区，尚未保存");
+                toast(Strings.get(R.string.themeeditactivity_020));
             }
         });
     }
 
     private void confirmClear() {
         AcDialog.builder(this)
-                .setTitle("清空")
-                .setMessage("清空两套 CSS 与颜色 token？名称、作者会保留。此操作需二次确认。")
-                .setPositiveButton("清空", new DialogInterface.OnClickListener() {
+                .setTitle(Strings.get(R.string.themeeditactivity_021))
+                .setMessage(Strings.get(R.string.themeeditactivity_022))
+                .setPositiveButton(Strings.get(R.string.themeeditactivity_023), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         collect();
                         t.lightCss = "";
@@ -275,10 +275,10 @@ public class ThemeEditActivity extends ThemedActivity {
                         t.lightTokens.clear();
                         t.darkTokens.clear();
                         cssEdit.setText("");
-                        toast("已清空 CSS 与 token");
+                        toast(Strings.get(R.string.themeeditactivity_024));
                     }
                 })
-                .setNegativeButton("取消", null)
+                .setNegativeButton(Strings.get(R.string.themeeditactivity_025), null)
                 .show();
     }
 
@@ -286,11 +286,11 @@ public class ThemeEditActivity extends ThemedActivity {
         ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
         if (cm == null || cm.getPrimaryClip() == null
                 || cm.getPrimaryClip().getItemCount() == 0) {
-            toast("剪贴板为空");
+            toast(Strings.get(R.string.themeeditactivity_026));
             return;
         }
         CharSequence cs = cm.getPrimaryClip().getItemAt(0).getText();
-        if (cs == null) { toast("剪贴板里没有文本"); return; }
+        if (cs == null) { toast(Strings.get(R.string.themeeditactivity_027)); return; }
         // 保留原始文本：解析失败时「作为 CSS 填入」应回填用户真正粘贴的内容。
         // 围栏/解释文字/注释等的统一清洗交给 ThemeValidator → ThemeText.clean()。
         final String text = cs.toString();
@@ -299,15 +299,15 @@ public class ThemeEditActivity extends ThemedActivity {
         if (vr.blocked || vr.theme == null) {
             // 非法内容先确认再覆盖，不静默吞掉
             AcDialog.builder(this)
-                    .setTitle("不是合法的 .actheme")
-                    .setMessage("剪贴板内容无法解析为主题。仍要把它当作当前明暗套的 CSS 文本填入吗？")
-                    .setPositiveButton("作为 CSS 填入", new DialogInterface.OnClickListener() {
+                    .setTitle(Strings.get(R.string.themeeditactivity_028))
+                    .setMessage(Strings.get(R.string.themeeditactivity_029))
+                    .setPositiveButton(Strings.get(R.string.themeeditactivity_030), new DialogInterface.OnClickListener() {
                         public void onClick(DialogInterface d, int w) {
                             cssEdit.setText(text);
-                            toast("已填入 CSS 文本（原始粘贴内容）");
+                            toast(Strings.get(R.string.themeeditactivity_031));
                         }
                     })
-                    .setNegativeButton("取消", null)
+                    .setNegativeButton(Strings.get(R.string.themeeditactivity_032), null)
                     .show();
             return;
         }
@@ -315,19 +315,19 @@ public class ThemeEditActivity extends ThemedActivity {
             public void run() {
                 fillFromTheme(vr.theme);
                 warnIfNeeded(vr);
-                toast("已粘贴并填入当前编辑区");
+                toast(Strings.get(R.string.themeeditactivity_033));
             }
         });
     }
 
     private void confirmOverwrite(final Runnable action) {
         AcDialog.builder(this)
-                .setTitle("覆盖当前编辑内容")
-                .setMessage("导入/粘贴会覆盖当前的名称、作者、描述与两套 CSS，且不会自动落盘。确定继续？")
-                .setPositiveButton("覆盖", new DialogInterface.OnClickListener() {
+                .setTitle(Strings.get(R.string.themeeditactivity_034))
+                .setMessage(Strings.get(R.string.themeeditactivity_035))
+                .setPositiveButton(Strings.get(R.string.themeeditactivity_036), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) { action.run(); }
                 })
-                .setNegativeButton("取消", null)
+                .setNegativeButton(Strings.get(R.string.themeeditactivity_037), null)
                 .show();
     }
 
@@ -356,7 +356,7 @@ public class ThemeEditActivity extends ThemedActivity {
             if (i > 0) sb.append("\n");
             sb.append("· ").append(vr.warnings.get(i));
         }
-        toast("校验提示\n" + sb.toString());
+        toast(Strings.get(R.string.themeeditactivity_038) + sb.toString());
     }
 
     private String readText(Uri uri) {
@@ -390,17 +390,17 @@ public class ThemeEditActivity extends ThemedActivity {
     /** @param initial 非空则回填上次输入：「返回改需求」不该让用户重打一遍 */
     private void startPromptFlow(String initial) {
         final EditText et = new EditText(this);
-        et.setHint("例如：暖白纸墨风、暗色低饱和、适合夜间阅读");
+        et.setHint(Strings.get(R.string.themeeditactivity_039));
         et.setMinLines(2);
         if (initial != null && initial.length() > 0) {
             et.setText(initial);
             et.setSelection(initial.length());
         }
         final AlertDialog d = AcDialog.builder(this)
-                .setTitle("你想要什么样的主题？")
+                .setTitle(Strings.get(R.string.themeeditactivity_040))
                 .setView(et)
-                .setPositiveButton("生成", null)
-                .setNegativeButton("取消", null)
+                .setPositiveButton(Strings.get(R.string.themeeditactivity_041), null)
+                .setNegativeButton(Strings.get(R.string.themeeditactivity_042), null)
                 .create();
         AcDialog.onShow(d, new DialogInterface.OnShowListener() {
             public void onShow(DialogInterface di) {
@@ -408,7 +408,7 @@ public class ThemeEditActivity extends ThemedActivity {
                     public void onClick(View v) {
                         String desc = et.getText().toString().trim();
                         if (desc.length() == 0) {
-                            toast("请先描述想要的主题");
+                            toast(Strings.get(R.string.themeeditactivity_043));
                             return;   // 不 dismiss，空描述不允许继续
                         }
                         d.dismiss();
@@ -446,12 +446,12 @@ public class ThemeEditActivity extends ThemedActivity {
             scroll.requestLayout();
         }
         body.setText(prompt);
-        meta.setText(prompt.length() + " 字 · "
-                + (ThemePromptStore.isCustomized(this) ? "自定义模板" : "内置模板")
-                + " · 占位符已按当前设备填充");
+        meta.setText(prompt.length() + Strings.get(R.string.themeeditactivity_044)
+                + (ThemePromptStore.isCustomized(this) ? Strings.get(R.string.themeeditactivity_045) : Strings.get(R.string.themeeditactivity_046))
+                + Strings.get(R.string.themeeditactivity_047));
 
         final AlertDialog d = AcDialog.builder(this)
-                .setTitle("提示词预览")
+                .setTitle(Strings.get(R.string.themeeditactivity_048))
                 .setView(panel)
                 .create();
 
@@ -464,7 +464,7 @@ public class ThemeEditActivity extends ThemedActivity {
         panel.findViewById(R.id.btn_copy).setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 copyToClipboard(prompt);
-                toast("提示词已复制");
+                toast(Strings.get(R.string.themeeditactivity_049));
             }
         });
         panel.findViewById(R.id.btn_insert).setOnClickListener(new View.OnClickListener() {
@@ -499,8 +499,8 @@ public class ThemeEditActivity extends ThemedActivity {
             return;
         }
         AcDialog.builder(this)
-                .setTitle("有未保存的编辑")
-                .setItems(new String[]{"放弃编辑", "保存并返回", "继续编辑"},
+                .setTitle(Strings.get(R.string.themeeditactivity_050))
+                .setItems(new String[]{Strings.get(R.string.themeeditactivity_051), Strings.get(R.string.themeeditactivity_052), Strings.get(R.string.themeeditactivity_053)},
                         new DialogInterface.OnClickListener() {
                             public void onClick(DialogInterface d, int w) {
                                 if (w == 0) finish();
@@ -526,15 +526,15 @@ public class ThemeEditActivity extends ThemedActivity {
         AcDialog.builder(this)
                 .setTitle(titleText)
                 .setView(et)
-                .setPositiveButton("确定", new DialogInterface.OnClickListener() {
+                .setPositiveButton(Strings.get(R.string.themeeditactivity_054), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         String n = et.getText().toString().trim();
-                        if (n.length() == 0) { toast("名称不能为空"); return; }
+                        if (n.length() == 0) { toast(Strings.get(R.string.themeeditactivity_055)); return; }
                         if (n.length() > 32) n = n.substring(0, 32);
                         cb.onName(n);
                     }
                 })
-                .setNegativeButton("取消", null)
+                .setNegativeButton(Strings.get(R.string.themeeditactivity_056), null)
                 .show();
     }
 

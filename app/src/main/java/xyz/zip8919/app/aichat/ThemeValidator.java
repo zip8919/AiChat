@@ -81,11 +81,11 @@ final class ThemeValidator {
     static Result validate(String text, Set<String> installedFontIds) {
         Result r = new Result();
         if (text == null || text.trim().length() == 0) {
-            return block(r, "文件内容为空");
+            return block(r, Strings.get(R.string.themevalidator_001));
         }
         // 极端大输入先挡掉，避免清洗器被拖垮（正常主题/AI 输出远小于此）
         if (text.getBytes().length > Theme.MAX_FILE_BYTES * 8) {
-            return block(r, "文件超过 512KB");
+            return block(r, Strings.get(R.string.themevalidator_002));
         }
 
         // 统一清洗入口：所有导入路径（代码块一键导入 / 编辑页粘贴 / 文件导入 /
@@ -94,54 +94,54 @@ final class ThemeValidator {
         // 单引号字段、format/version 大小写与类型偏差。详见 ThemeText。
         String json = ThemeText.clean(text);
         if (json.length() == 0) {
-            return block(r, "未找到有效的主题 JSON（内容里没有 { } 主体）");
+            return block(r, Strings.get(R.string.themevalidator_003));
         }
         if (json.getBytes().length > Theme.MAX_FILE_BYTES) {
-            return block(r, "文件超过 64KB");
+            return block(r, Strings.get(R.string.themevalidator_004));
         }
 
         Theme t;
         try {
             t = Theme.parse(json);
         } catch (Exception e) {
-            return block(r, "JSON 非法或不完整：" + shortMsg(e));
+            return block(r, Strings.get(R.string.themevalidator_005) + shortMsg(e));
         }
 
         if (t.version != Theme.VERSION) {
             return block(r, t.version > Theme.VERSION
-                    ? "主题版本高于本应用支持（v" + t.version + "）"
-                    : "缺少或无效的版本号");
+                    ? Strings.get(R.string.themevalidator_006) + t.version + "）"
+                    : Strings.get(R.string.themevalidator_007));
         }
         // AI 生成时常漏写 meta.name 或名字超长。以前一刀切阻断，是「生成的经常
         // 无法导入」的主因之一；改为自动补名/截断 + 警告，保证主题一定能落盘。
         if (t.name == null || t.name.trim().length() == 0) {
-            t.name = "未命名主题";
-            r.warnings.add("缺少 meta.name，已自动命名为「未命名主题」");
+            t.name = Strings.get(R.string.themevalidator_008);
+            r.warnings.add(Strings.get(R.string.themevalidator_009));
         }
         if (t.name.length() > 32) {
             t.name = t.name.substring(0, 32);
-            r.warnings.add("主题名称超过 32 字，已自动截断");
+            r.warnings.add(Strings.get(R.string.themevalidator_010));
         }
         if (!t.hasLight && !t.hasDark) {
-            return block(r, "明暗两套配置都缺失");
+            return block(r, Strings.get(R.string.themevalidator_011));
         }
         if (byteLen(t.lightCss) > Theme.MAX_CSS_BYTES || byteLen(t.darkCss) > Theme.MAX_CSS_BYTES) {
-            return block(r, "CSS 超过 64KB");
+            return block(r, Strings.get(R.string.themevalidator_012));
         }
 
         // 只提供一套 → 警告，另一套回退内置
         if (!t.hasLight || !t.hasDark) {
-            r.warnings.add("只提供了" + (t.hasLight ? "浅色" : "深色") + "配置，另一套将回退内置默认");
+            r.warnings.add(Strings.get(R.string.themevalidator_013) + (t.hasLight ? Strings.get(R.string.themevalidator_014) : Strings.get(R.string.themevalidator_015)) + Strings.get(R.string.themevalidator_016));
         }
 
         // token 白名单 + 颜色值校验
-        sanitizeTokens(t.lightTokens, "浅色", r);
-        sanitizeTokens(t.darkTokens, "深色", r);
+        sanitizeTokens(t.lightTokens, Strings.get(R.string.themevalidator_017), r);
+        sanitizeTokens(t.darkTokens, Strings.get(R.string.themevalidator_018), r);
 
         // 字体引用
         if (installedFontIds != null) {
-            checkFontRef(t.fontUi, "界面字体", installedFontIds, r);
-            checkFontRef(t.fontMono, "等宽字体", installedFontIds, r);
+            checkFontRef(t.fontUi, Strings.get(R.string.themevalidator_019), installedFontIds, r);
+            checkFontRef(t.fontMono, Strings.get(R.string.themevalidator_020), installedFontIds, r);
         }
 
         // CSS 沙箱
@@ -155,7 +155,7 @@ final class ThemeValidator {
             // 「导入失败：Syntax error in regexp pattern」这类裸异常）。
             // 宁可不过滤，也要让主题落盘。
             LogUtil.w(TAG, "sanitizeCss failed, keep raw css", e);
-            r.warnings.add("CSS 预检异常，已跳过过滤直接保留原样式");
+            r.warnings.add(Strings.get(R.string.themevalidator_021));
             sl = new CssSanitized(t.lightCss, 0);
             sd = new CssSanitized(t.darkCss, 0);
         }
@@ -163,8 +163,8 @@ final class ThemeValidator {
         t.darkCss = sd.css;
         r.ignoredCssRules = sl.ignored + sd.ignored;
         if (r.ignoredCssRules > 0) {
-            r.warnings.add("已忽略 " + r.ignoredCssRules
-                    + " 条 CSS 规则（脚本 / 外链 / fixed / 会撑破 258dp 窄屏的声明）");
+            r.warnings.add(Strings.get(R.string.themevalidator_022) + r.ignoredCssRules
+                    + Strings.get(R.string.themevalidator_023));
         }
 
         r.theme = t;
@@ -180,13 +180,13 @@ final class ThemeValidator {
             if (!ThemeTokens.isValid(k)) {
                 it.remove();
                 r.ignoredTokens++;
-                r.warnings.add(label + "：忽略未知 token「" + k + "」");
+                r.warnings.add(label + Strings.get(R.string.themevalidator_024) + k + "」");
                 continue;
             }
             if (!ThemeTokens.isValidColor(v)) {
                 it.remove();
                 r.ignoredTokens++;
-                r.warnings.add(label + "：忽略非法颜色值 " + k + "=" + v);
+                r.warnings.add(label + Strings.get(R.string.themevalidator_025) + k + "=" + v);
             }
         }
     }
@@ -194,7 +194,7 @@ final class ThemeValidator {
     private static void checkFontRef(String ref, String label, Set<String> installed, Result r) {
         if (ref == null || "system".equals(ref) || ref.length() == 0) return;
         if (!installed.contains(ref)) {
-            r.warnings.add(label + "引用的字体「" + ref + "」未安装，将回退系统默认");
+            r.warnings.add(label + Strings.get(R.string.themevalidator_026) + ref + Strings.get(R.string.themevalidator_027));
         }
     }
 

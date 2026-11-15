@@ -19,7 +19,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginBottom="4dp"
-            android:text="编辑主题" />
+            android:text="@string/activity_theme_edit_001" />
 
         <TextView
             android:id="@+id/edit_hint"
@@ -28,7 +28,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginBottom="8dp"
-            android:text="明暗两套 CSS 分别编辑，切换时自动暂存当前一套。" />
+            android:text="@string/activity_theme_edit_002" />
 
         <LinearLayout
             android:orientation="horizontal"
@@ -46,7 +46,7 @@
                 android:layout_width="0dp"
                 android:layout_weight="1"
                 android:layout_height="wrap_content"
-                android:text="● 浅色" />
+                android:text="@string/activity_theme_edit_003" />
             <Button
                 android:id="@+id/btn_mode_dark"
                 android:textSize="12sp"
@@ -58,7 +58,7 @@
                 android:layout_width="0dp"
                 android:layout_weight="1"
                 android:layout_height="wrap_content"
-                android:text="○ 深色" />
+                android:text="@string/activity_theme_edit_004" />
         </LinearLayout>
 
         <TextView
@@ -67,7 +67,7 @@
             android:textColor="@color/text_primary"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="名称（必填，不超过 32 字）" />
+            android:text="@string/activity_theme_edit_005" />
         <EditText
             android:id="@+id/edit_name"
             android:textSize="14sp"
@@ -82,7 +82,7 @@
             android:textColor="@color/text_primary"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="作者" />
+            android:text="@string/activity_theme_edit_006" />
         <EditText
             android:id="@+id/edit_author"
             android:textSize="14sp"
@@ -97,7 +97,7 @@
             android:textColor="@color/text_primary"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="描述" />
+            android:text="@string/activity_theme_edit_007" />
         <EditText
             android:id="@+id/edit_desc"
             android:textSize="14sp"
@@ -113,7 +113,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:text="逐属性编辑（16 色 + 字体）" />
+            android:text="@string/activity_theme_edit_008" />
 
         <TextView
             android:textSize="14sp"
@@ -135,7 +135,7 @@
             android:minHeight="48dp"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:hint="只写颜色与字体规则，不要改布局属性" />
+            android:hint="@string/activity_theme_edit_009" />
 
         <LinearLayout
             android:orientation="horizontal"
@@ -152,7 +152,7 @@
                 android:layout_width="0dp"
                 android:layout_weight="1"
                 android:layout_height="wrap_content"
-                android:text="导入" />
+                android:text="@string/activity_theme_edit_010" />
             <Button
                 android:id="@+id/btn_clear"
                 android:textSize="12sp"
@@ -163,7 +163,7 @@
                 android:layout_width="0dp"
                 android:layout_weight="1"
                 android:layout_height="wrap_content"
-                android:text="清空" />
+                android:text="@string/activity_theme_edit_011" />
             <Button
                 android:id="@+id/btn_paste"
                 android:textSize="12sp"
@@ -174,7 +174,7 @@
                 android:layout_width="0dp"
                 android:layout_weight="1"
                 android:layout_height="wrap_content"
-                android:text="粘贴" />
+                android:text="@string/activity_theme_edit_012" />
             <Button
                 android:id="@+id/btn_save_as"
                 android:textSize="12sp"
@@ -185,7 +185,7 @@
                 android:layout_width="0dp"
                 android:layout_weight="1"
                 android:layout_height="wrap_content"
-                android:text="另存为" />
+                android:text="@string/activity_theme_edit_013" />
         </LinearLayout>
 
         <LinearLayout
@@ -204,7 +204,7 @@
                 android:layout_width="0dp"
                 android:layout_weight="1"
                 android:layout_height="wrap_content"
-                android:text="生成提示词" />
+                android:text="@string/activity_theme_edit_014" />
             <Button
                 android:id="@+id/btn_save"
                 android:textSize="12sp"
@@ -216,7 +216,7 @@
                 android:layout_width="0dp"
                 android:layout_weight="1"
                 android:layout_height="wrap_content"
-                android:text="保存主题" />
+                android:text="@string/activity_theme_edit_015" />
         </LinearLayout>
 
     </LinearLayout>

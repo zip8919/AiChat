@@ -196,7 +196,7 @@ public class ScanActivity extends ThemedActivity {
             LogUtil.d(TAG, "launchSystemScan: wbzc.MainActivity unavailable: %s", e.getMessage());
         }
         LogUtil.w(TAG, "launchSystemScan: no system scan activity found");
-        AcToast.showLong(this, "请手动打开文本摘抄应用扫描");
+        AcToast.showLong(this, Strings.get(R.string.scanactivity_001));
     }
 
     @Override
@@ -204,7 +204,7 @@ public class ScanActivity extends ThemedActivity {
         for (int code : SCAN_KEY_CODES) {
             if (keyCode == code) {
                 LogUtil.d(TAG, "scan key detected: %d", keyCode);
-                AcToast.show(this, "检测到扫描键: " + keyCode);
+                AcToast.show(this, Strings.get(R.string.scanactivity_002) + keyCode);
                 expectingScanResult = true;
                 try {
                     Intent intent = new Intent();
@@ -346,14 +346,14 @@ public class ScanActivity extends ThemedActivity {
 
                         if (items.isEmpty()) {
                             LogUtil.w(TAG, "showExcerptPicker: no excerpts found");
-                            AcToast.showLong(ScanActivity.this, "没有找到摘抄记录，请先在文本摘抄中扫描并保存");
+                            AcToast.showLong(ScanActivity.this, Strings.get(R.string.scanactivity_003));
                             return;
                         }
 
                         String[] labels = new String[items.size()];
                         for (int i = 0; i < items.size(); i++) {
                             ExcerptItem item = items.get(i);
-                            String label = item.title != null ? item.title : "摘抄 #" + item.id;
+                            String label = item.title != null ? item.title : Strings.get(R.string.scanactivity_004) + item.id;
                             // Show first 30 chars of content as preview
                             String preview = item.content;
                             if (preview.length() > 30) preview = preview.substring(0, 30) + "...";
@@ -361,7 +361,7 @@ public class ScanActivity extends ThemedActivity {
                         }
 
                         AcDialog.builder(ScanActivity.this)
-                            .setTitle("选择摘抄记录")
+                            .setTitle(Strings.get(R.string.scanactivity_005))
                             .setItems(labels, new DialogInterface.OnClickListener() {
                                 @Override
                                 public void onClick(DialogInterface dialog, int which) {

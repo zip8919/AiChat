@@ -68,7 +68,7 @@ public class Conversation {
         this.createdAt = now;
         this.updatedAt = this.createdAt;
         this.messages = new ArrayList<Message>();
-        this.title = "新对话";
+        this.title = Strings.get(R.string.conversation_001);
         this.model = "";
         this.systemPrompt = "";
         this.titleGenerated = false;

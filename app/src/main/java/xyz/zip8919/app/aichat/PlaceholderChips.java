@@ -72,7 +72,7 @@ final class PlaceholderChips {
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         TextView lead = new TextView(ctx);
-        lead.setText("点按插入：");
+        lead.setText(Strings.get(R.string.placeholderchips_001));
         lead.setTextSize(11);
         lead.setTextColor(ctx.getResources().getColor(android.R.color.darker_gray));
         LinearLayout.LayoutParams leadLp = new LinearLayout.LayoutParams(

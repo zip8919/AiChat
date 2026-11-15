@@ -329,13 +329,13 @@ public class ConversationManager {
      */
     public void switchConversation(String conversationId, LoadProgress progress) {
         LogUtil.i(TAG, "switchConversation -> %s", conversationId);
-        stage(progress, "校验会话信息", 5);
+        stage(progress, Strings.get(R.string.conversationmanager_001), 5);
         // id 会被拼进文件路径，而它的来源可能是外部 Intent（MainActivity 是
         // exported 的）或手工改过的 JSON。非法 id 一律当作「新会话」处理，
         // 否则一次带 ../ 的 Intent 就能让后续保存覆盖到 conversations 目录之外。
         if (!StorageManager.isValidConversationId(conversationId)) {
             LogUtil.w(TAG, "switchConversation rejected: illegal id '%s'", conversationId);
-            stage(progress, "会话 ID 无效", 100);
+            stage(progress, Strings.get(R.string.conversationmanager_002), 100);
             return;
         }
         this.orphanMessages = null;
@@ -345,16 +345,16 @@ public class ConversationManager {
             if (c.id.equals(conversationId)) { inMemory = c; break; }
         }
         if (inMemory != null) {
-            stage(progress, "读取会话正文", 35);
+            stage(progress, Strings.get(R.string.conversationmanager_003), 35);
             ensureMessagesLoaded(inMemory);
             this.currentConversation = inMemory;
-            stage(progress, "解析消息记录（" + inMemory.messages.size() + " 条）", 70);
+            stage(progress, Strings.get(R.string.conversation_load_parsing, inMemory.messages.size()), 70);
             LogUtil.d(TAG, "switchConversation: found in memory, msgs=%d", inMemory.messages.size());
         } else {
-            stage(progress, "读取会话文件", 30);
+            stage(progress, Strings.get(R.string.conversationmanager_006), 30);
             String content = storageManager.loadConversation(conversationId);
             if (content != null) {
-                stage(progress, "解析消息记录", 55);
+                stage(progress, Strings.get(R.string.conversationmanager_007), 55);
                 Conversation conv = fromJson(content);
                 // 文件里的 id 字段可能与文件名不一致（手工改过、旧版本写错）。
                 // 文件名才是这条会话的身份：不一致时必须纠正，否则之后
@@ -366,19 +366,19 @@ public class ConversationManager {
                 }
                 this.currentConversation = conv;
                 this.conversations.add(0, conv);
-                stage(progress, "解析消息记录（" + conv.messages.size() + " 条）", 75);
+                stage(progress, Strings.get(R.string.conversation_load_parsing, conv.messages.size()), 75);
                 LogUtil.d(TAG, "switchConversation: loaded from disk, msgs=%d", conv.messages.size());
             } else {
                 this.currentConversation = new Conversation(conversationId);
                 this.conversations.add(0, this.currentConversation);
-                stage(progress, "新建空会话", 75);
+                stage(progress, Strings.get(R.string.conversationmanager_010), 75);
                 LogUtil.w(TAG, "switchConversation: '%s' not on disk, created empty", conversationId);
             }
         }
-        stage(progress, "恢复附件与工具记录", 88);
-        stage(progress, "准备界面", 95);
+        stage(progress, Strings.get(R.string.conversationmanager_011), 88);
+        stage(progress, Strings.get(R.string.conversationmanager_012), 95);
         // 这里只代表「数据已就绪」，不是整页加载完成；宿主还要接着跑渲染阶段。
-        stage(progress, "会话数据已就绪", 100);
+        stage(progress, Strings.get(R.string.conversationmanager_013), 100);
     }
 
     private static void stage(LoadProgress p, String label, int percent) {
@@ -664,9 +664,9 @@ public class ConversationManager {
 
     /** A title must never be persisted (or read back) as null/blank/the literal string "null". */
     static String normalizeTitle(String title) {
-        if (title == null) return "新对话";
+        if (title == null) return Strings.get(R.string.conversationmanager_015);
         String t = title.trim();
-        if (t.length() == 0 || "null".equalsIgnoreCase(t)) return "新对话";
+        if (t.length() == 0 || "null".equalsIgnoreCase(t)) return Strings.get(R.string.conversationmanager_015);
         return t;
     }
 

@@ -23,7 +23,7 @@ final class ExportHelper {
     /** 弹出"保存代码"对话框；文件名可编辑，重名走覆盖确认。 */
     static void saveCode(final Activity activity, final String lang, final String code) {
         if (code == null || code.trim().isEmpty()) {
-            AcToast.show(activity, "代码内容为空，无法保存");
+            AcToast.show(activity, Strings.get(R.string.exporthelper_001));
             return;
         }
         final String ext = extForLang(lang);
@@ -33,10 +33,10 @@ final class ExportHelper {
         input.setText("code_" + type + "_" + System.currentTimeMillis());
         input.setSelection(input.getText().length());
         AcDialog.builder(activity)
-                .setTitle("保存代码")
-                .setMessage("文件名（自动追加 ." + ext + "）")
+                .setTitle(Strings.get(R.string.exporthelper_002))
+                .setMessage(Strings.get(R.string.exporthelper_003) + ext + "）")
                 .setView(input)
-                .setPositiveButton("保存", new DialogInterface.OnClickListener() {
+                .setPositiveButton(Strings.get(R.string.exporthelper_004), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         String name = sanitizeName(input.getText().toString());
                         if (name.isEmpty()) {
@@ -50,21 +50,21 @@ final class ExportHelper {
                         write(activity, fileName, lang, code);
                     }
                 })
-                .setNegativeButton("取消", null)
+                .setNegativeButton(Strings.get(R.string.exporthelper_005), null)
                 .show();
     }
 
     private static void confirmOverwrite(final Activity activity, final String fileName,
             final String lang, final String code) {
         AcDialog.builder(activity)
-                .setTitle("文件已存在")
-                .setMessage(fileName + " 已存在，是否覆盖？")
-                .setPositiveButton("覆盖", new DialogInterface.OnClickListener() {
+                .setTitle(Strings.get(R.string.exporthelper_006))
+                .setMessage(fileName + Strings.get(R.string.exporthelper_007))
+                .setPositiveButton(Strings.get(R.string.exporthelper_008), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         write(activity, fileName, lang, code);
                     }
                 })
-                .setNegativeButton("取消", null)
+                .setNegativeButton(Strings.get(R.string.exporthelper_009), null)
                 .show();
     }
 
@@ -72,9 +72,9 @@ final class ExportHelper {
         String path = StorageManager.getInstance().saveExport(fileName, code);
         LogUtil.i(TAG, "saveCode: lang=%s file=%s path=%s", lang, fileName, path);
         if (path == null) {
-            AcToast.show(activity, "保存失败");
+            AcToast.show(activity, Strings.get(R.string.exporthelper_010));
         } else {
-            AcToast.showLong(activity, "已保存到 " + path);
+            AcToast.showLong(activity, Strings.get(R.string.exporthelper_011) + path);
         }
     }
 

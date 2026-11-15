@@ -218,7 +218,7 @@ public class MessageHtmlRenderer {
               .append(esc(AttachmentText.sizeAndTokens(f))).append("</span>")
               .append(cutNote(f))
               .append("</span>")
-              .append("<span class=\"attach-view\">查看 ›</span>")
+              .append(Strings.get(R.string.messagehtmlrenderer_001))
               .append("</div>");
         }
         sb.append("</div>");
@@ -241,11 +241,11 @@ public class MessageHtmlRenderer {
         if (cut < 0) return "";
         int total = f.chars();
         if (cut == 0) {
-            return "<span class=\"attach-cut\">⚠ 超出字符预算，本次未发送正文（共 "
-                    + formatTokens(total) + " 字符）</span>";
+            return Strings.get(R.string.messagehtmlrenderer_002)
+                    + formatTokens(total) + Strings.get(R.string.messagehtmlrenderer_003);
         }
-        return "<span class=\"attach-cut\">⚠ 已截断，仅发送前 " + formatTokens(cut)
-                + " / 共 " + formatTokens(total) + " 字符</span>";
+        return Strings.get(R.string.messagehtmlrenderer_004) + formatTokens(cut)
+                + Strings.get(R.string.messagehtmlrenderer_005) + formatTokens(total) + Strings.get(R.string.messagehtmlrenderer_006);
     }
 
     /**
@@ -297,7 +297,7 @@ public class MessageHtmlRenderer {
         // 明细仍存在 Message.rounds 里，统计页与调试侧照旧可用。
         if (msg.requestCount > 1) {
             if (sb.length() > 0) sb.append(" · ");
-            sb.append(msg.requestCount).append(" 次请求");
+            sb.append(msg.requestCount).append(Strings.get(R.string.messagehtmlrenderer_007));
         }
 
         // 合计 = 这次回复各轮输入累加 + 各轮输出累加。
@@ -311,23 +311,23 @@ public class MessageHtmlRenderer {
         // 「共 32.4k（输入 30.1k（缓存 21.0k · 70%） · 输出 2.3k）」
         StringBuilder io = new StringBuilder();
         if (prompt > 0) {
-            io.append("输入 ");
+            io.append(Strings.get(R.string.messagehtmlrenderer_008));
             if (estimated) io.append('~');
             io.append(formatTokens(prompt));
             if (msg.cachedTokens > 0) {
                 int pct = Math.round(msg.cachedTokens * 100f / prompt);
                 if (hasTotal) {
-                    io.append(" · 缓存 ").append(formatTokens(msg.cachedTokens))
+                    io.append(Strings.get(R.string.messagehtmlrenderer_009)).append(formatTokens(msg.cachedTokens))
                       .append('/').append(pct).append('%');
                 } else {
-                    io.append("（缓存 ").append(formatTokens(msg.cachedTokens))
+                    io.append(Strings.get(R.string.messagehtmlrenderer_010)).append(formatTokens(msg.cachedTokens))
                       .append(" · ").append(pct).append("%）");
                 }
             }
         }
         if (completion > 0) {
             if (io.length() > 0) io.append(" · ");
-            io.append("输出 ");
+            io.append(Strings.get(R.string.messagehtmlrenderer_011));
             if (estimated) io.append('~');
             io.append(formatTokens(completion));
         }
@@ -337,7 +337,7 @@ public class MessageHtmlRenderer {
         if (io.length() > 0) {
             if (sb.length() > 0) sb.append(" · ");
             if (hasTotal) {
-                sb.append("共 ");
+                sb.append(Strings.get(R.string.messagehtmlrenderer_012));
                 if (estimated) sb.append('~');
                 sb.append(formatTokens(prompt + completion));
                 sb.append("（").append(io).append("）");
@@ -363,7 +363,7 @@ public class MessageHtmlRenderer {
         // 以为模型变慢了或者统计漏记了。
         if (interrupted) {
             if (sb.length() > 0) sb.append(" · ");
-            sb.append("已中断");
+            sb.append(Strings.get(R.string.messagehtmlrenderer_013));
         }
 
         // 逐轮明细（1) 8.0k→120 · 2) …）已经去掉：一条回复里工具调用了五六次，
@@ -455,7 +455,7 @@ public class MessageHtmlRenderer {
         StringBuilder sb = new StringBuilder();
         sb.append("<div class=\"sources-block\">");
         sb.append("<div class=\"sources-head\" onclick=\"toggleSources(this);event.stopPropagation();return false;\">")
-          .append("来源（").append(n).append("）<span class=\"src-arrow\">▶</span></div>");
+          .append(Strings.get(R.string.messagehtmlrenderer_014)).append(n).append("）<span class=\"src-arrow\">▶</span></div>");
         sb.append("<div class=\"sources-body\" style=\"display:none\">");
         int shown = 0;
         for (int i = 0; i < sources.size() && shown < n; i++) {
@@ -475,13 +475,13 @@ public class MessageHtmlRenderer {
         if (msg == null || !msg.sendFailed) return "";
         String idx = String.valueOf(index);
         return "<div class=\"error-card\">" +
-               "<div class=\"err-title\">请求失败</div>" +
+               Strings.get(R.string.messagehtmlrenderer_015) +
                "<div class=\"err-summary\">" + esc(errorSummary(msg.errorDetail)) + "</div>" +
                "<div class=\"err-actions\">" +
                "<button class=\"err-btn\" onclick=\"if(window.Android)Android.showErrorDetail('" + idx +
-               "');event.stopPropagation();return false;\">查看详情</button>" +
+               Strings.get(R.string.messagehtmlrenderer_016) +
                "<button class=\"err-btn retry\" onclick=\"if(window.Android)Android.retryFailedUserMessage('" + idx +
-               "');event.stopPropagation();return false;\">重试</button>" +
+               Strings.get(R.string.messagehtmlrenderer_017) +
                "</div></div>";
     }
 
@@ -494,27 +494,27 @@ public class MessageHtmlRenderer {
         // 其他服务商把已生成内容当上下文重新请求。原来的两个重试入口保留，
         // 续写效果不理想或端点不支持时，用户还能从头重来。
         String continueBtn = "<button class=\"err-btn retry\" onclick=\"if(window.Android)Android.continueGeneration('"
-                + idx + "');event.stopPropagation();return false;\">继续生成</button>";
+                + idx + Strings.get(R.string.messagehtmlrenderer_018);
         return "<div class=\"error-card inline\">" +
-               "<div class=\"err-title\">回复中断</div>" +
+               Strings.get(R.string.messagehtmlrenderer_019) +
                "<div class=\"err-summary\">" + esc(errorSummary(msg.errorDetail)) + "</div>" +
                "<div class=\"err-actions\">" +
                "<button class=\"err-btn\" onclick=\"if(window.Android)Android.showErrorDetail('" + idx +
-               "');event.stopPropagation();return false;\">查看详情</button>" +
+               Strings.get(R.string.messagehtmlrenderer_020) +
                continueBtn +
                (canResume
                    ? "<button class=\"err-btn retry\" onclick=\"if(window.Android)Android.retryFailedAssistant('"
-                     + idx + "');event.stopPropagation();return false;\">从出错处重试</button>"
+                     + idx + Strings.get(R.string.messagehtmlrenderer_021)
                    // 没有工具历史（手动中断、首轮就断）：给一个重新回复入口，
                    // 否则这条消息只能看不能动
                    : "<button class=\"err-btn retry\" onclick=\"if(window.Android)Android.retryInterrupted('"
-                     + idx + "');event.stopPropagation();return false;\">重新回复</button>") +
+                     + idx + Strings.get(R.string.messagehtmlrenderer_022)) +
                "</div></div>";
     }
 
     /** 从失败详情里挑一行做卡片摘要：优先 HTTP 状态 + 提供商错误，其次异常消息。 */
     private static String errorSummary(String detail) {
-        if (detail == null || detail.trim().length() == 0) return "请求未完成";
+        if (detail == null || detail.trim().length() == 0) return Strings.get(R.string.messagehtmlrenderer_023);
         String http = "", prov = "", exc = "";
         String[] lines = detail.split("\n");
         for (int i = 0; i < lines.length; i++) {
@@ -534,7 +534,7 @@ public class MessageHtmlRenderer {
         }
         String s = sb.toString();
         if (s.length() > 120) s = s.substring(0, 120) + "…";
-        return s.length() == 0 ? "请求未完成" : s;
+        return s.length() == 0 ? Strings.get(R.string.messagehtmlrenderer_024) : s;
     }
 
     public static String contentToHtml(String text, Context ctx) {
@@ -643,7 +643,7 @@ public class MessageHtmlRenderer {
                     html.append("<div class=\"thinking-wrap\" data-think-key=\"")
                         .append(thinkingKey(thinking)).append("\" data-think-live=\"1\">")
                         .append("<div class=\"thinking-toggle\" data-tok=\"").append(thinkTok)
-                        .append("\" onclick=\"toggleThinking(this)\">── 展开思考（")
+                        .append(Strings.get(R.string.messagehtmlrenderer_025))
                         .append(formatTokens(thinkTok)).append(" tokens）──</div>")
                         .append("<div class=\"thinking-block\" style=\"display:none\">")
                         .append(MarkdownPipeline.render(thinking, ctx))
@@ -661,7 +661,7 @@ public class MessageHtmlRenderer {
                 html.append("<div class=\"thinking-wrap\" data-think-key=\"")
                     .append(thinkingKey(thinking)).append("\" data-think-live=\"0\">")
                     .append("<div class=\"thinking-toggle\" data-tok=\"").append(thinkTok)
-                    .append("\" onclick=\"toggleThinking(this)\">── 展开思考（")
+                    .append(Strings.get(R.string.messagehtmlrenderer_026))
                     .append(formatTokens(thinkTok)).append(" tokens）──</div>")
                     .append("<div class=\"thinking-block\" style=\"display:none\">")
                     .append(MarkdownPipeline.render(thinking, ctx))
@@ -870,9 +870,9 @@ public class MessageHtmlRenderer {
             // 不能返回空串：那等于这张卡片凭空消失，用户会以为「刚才明明有一张卡」。
             // 也不回显 payload——里面是工具结果原文，可能几百 KB，也可能带密钥。
             LogUtil.w(TAG, "renderToolBlock: bad JSON len=%d", payload == null ? 0 : payload.length());
-            return "<div class=\"tool-card\"><div class=\"tool-card-head\">工具结果</div>"
-                    + "<div class=\"tool-error\">结果格式异常，无法显示（"
-                    + (payload == null ? 0 : payload.length()) + " 字符）</div></div>";
+            return Strings.get(R.string.messagehtmlrenderer_027)
+                    + Strings.get(R.string.messagehtmlrenderer_028)
+                    + (payload == null ? 0 : payload.length()) + Strings.get(R.string.messagehtmlrenderer_029);
         }
         String tool = json.optString("tool", "");
         String error = json.optString("error", "");
@@ -893,10 +893,10 @@ public class MessageHtmlRenderer {
         if (error.length() > 0) {
             boolean isLimit = "limit".equals(tool);
             out.append("<div class=\"tool-card-head\">")
-               .append(isLimit ? "工具调用已达上限"
-                       : (isFetch ? "网页抓取失败"
-                       : (isTime ? "获取时间失败"
-                       : (isImageSearch ? "图片搜索失败" : "搜索失败"))))
+               .append(isLimit ? Strings.get(R.string.messagehtmlrenderer_030)
+                       : (isFetch ? Strings.get(R.string.messagehtmlrenderer_031)
+                       : (isTime ? Strings.get(R.string.messagehtmlrenderer_032)
+                       : (isImageSearch ? Strings.get(R.string.messagehtmlrenderer_033) : Strings.get(R.string.messagehtmlrenderer_034)))))
                .append("</div>")
                .append("<div class=\"tool-error\">").append(esc(error)).append("</div>")
                .append("</div>");
@@ -912,7 +912,7 @@ public class MessageHtmlRenderer {
             if (dt.length() > 0) line.append(dt);
             if (wd.length() > 0) { if (line.length() > 0) line.append(' '); line.append(wd); }
             if (tz.length() > 0) { if (line.length() > 0) line.append("（"); line.append(tz).append("）"); }
-            out.append("<div class=\"tool-card-head\">当前时间：")
+            out.append(Strings.get(R.string.messagehtmlrenderer_035))
                .append(esc(line.toString())).append("</div></div>");
             return out.toString();
         }
@@ -920,14 +920,14 @@ public class MessageHtmlRenderer {
         if (isFetch) {
             String title = json.optString("title", "");
             String url = json.optString("url", "");
-            String head = "网页抓取" + (title.length() > 0 ? "：" + esc(title)
+            String head = Strings.get(R.string.messagehtmlrenderer_036) + (title.length() > 0 ? "：" + esc(title)
                     : (url.length() > 0 ? "：" + esc(url) : ""));
             out.append(collapsibleHead(head));
             out.append("<div class=\"tool-body\">");
             appendUrlLine(out, url, "", "");
             String content = json.optString("content", "");
             out.append("<div class=\"tool-fetch-content\">").append(esc(content));
-            if (json.optBoolean("truncated", false)) out.append(" ...（已截断）");
+            if (json.optBoolean("truncated", false)) out.append(Strings.get(R.string.messagehtmlrenderer_037));
             out.append("</div>");
             out.append("</div>");
             out.append("</div>");
@@ -941,13 +941,13 @@ public class MessageHtmlRenderer {
             String query = json.optString("query", "");
             JSONArray imgs = json.optJSONArray("images");
             int n = imgs == null ? 0 : imgs.length();
-            out.append("<div class=\"tool-card-head\">图片搜索")
+            out.append(Strings.get(R.string.messagehtmlrenderer_038))
                .append(query.length() > 0 ? "：" + esc(query) : "")
-               .append("（").append(n).append(" 张）</div>");
+               .append("（").append(n).append(Strings.get(R.string.messagehtmlrenderer_039));
             if (n == 0) {
                 String note = json.optString("note", "");
                 out.append("<div class=\"tool-empty\">")
-                   .append(esc(note.length() > 0 ? note : "没有找到图片")).append("</div>");
+                   .append(esc(note.length() > 0 ? note : Strings.get(R.string.messagehtmlrenderer_040))).append("</div>");
             } else {
                 out.append("<div class=\"tool-imgs\">");
                 for (int i = 0; i < n; i++) {
@@ -980,9 +980,9 @@ public class MessageHtmlRenderer {
         boolean isSearch = tool.length() == 0 || WebSearchTool.TOOL_SEARCH.equals(tool);
         String content = json.optString("content", "");
         String head = isSearch
-                ? "搜索" + (query.length() > 0 ? "：" + esc(query) : "")
-                        + "（" + (count > 0 ? count : n) + " 条）"
-                : "工具结果：" + esc(tool.length() > 0 ? tool : "未知工具")
+                ? Strings.get(R.string.messagehtmlrenderer_041) + (query.length() > 0 ? "：" + esc(query) : "")
+                        + "（" + (count > 0 ? count : n) + Strings.get(R.string.messagehtmlrenderer_042)
+                : Strings.get(R.string.messagehtmlrenderer_043) + esc(tool.length() > 0 ? tool : Strings.get(R.string.messagehtmlrenderer_044))
                         + (query.length() > 0 ? " · " + esc(query) : "");
         out.append(collapsibleHead(head));
         out.append("<div class=\"tool-body\">");
@@ -992,7 +992,7 @@ public class MessageHtmlRenderer {
                .append("</div>");
         } else if (n == 0) {
             out.append("<div class=\"tool-empty\">")
-               .append(isSearch ? "没有找到结果" : "（无输出）").append("</div>");
+               .append(isSearch ? Strings.get(R.string.messagehtmlrenderer_045) : Strings.get(R.string.messagehtmlrenderer_046)).append("</div>");
         } else {
             for (int i = 0; i < n; i++) {
                 JSONObject item = results.optJSONObject(i);
@@ -1023,7 +1023,7 @@ public class MessageHtmlRenderer {
     private static String collapsibleHead(String head) {
         return "<div class=\"tool-card-head tool-head-click\" onclick=\"toggleTool(this)\">"
                 + "<span class=\"tool-arrow\">▶</span> " + head
-                + " <span class=\"tool-hint\">（点击展开）</span></div>";
+                + Strings.get(R.string.messagehtmlrenderer_047);
     }
 
     private static void appendUrlLine(StringBuilder out, String url, String site, String date) {

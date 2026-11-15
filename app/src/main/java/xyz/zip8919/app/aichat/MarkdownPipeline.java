@@ -389,8 +389,9 @@ final class MarkdownPipeline {
     static String buildPage(String bodyHtml, int olderCount) {
         // olderCount = 尚未渲染的更早消息条数；>0 时顶部显示上滑提示
         String hint = olderCount > 0
-                ? "<div id=\"older-hint\" onclick=\"loadOlderNow()\">上滑加载更早的 "
-                        + olderCount + " 条消息</div>"
+                ? "<div id=\"older-hint\" onclick=\"loadOlderNow()\">"
+                        + Strings.get(R.string.renderer_013).replace("{n}", String.valueOf(olderCount))
+                        + "</div>"
                 : "<div id=\"older-hint\" style=\"display:none\"></div>";
 
         // 三段式样式（全局规则 R3）：Chromium 30 不支持 CSS 变量，主题色靠
@@ -409,7 +410,7 @@ final class MarkdownPipeline {
                "</head>\n<body>\n" +
                hint +
                "<div id=\"msgs\">\n" + bodyHtml + "\n</div>\n" +
-               "<script>\n" + RendererAssets.JS + "\n</script>\n" +
+               "<script>\n" + RendererAssets.localize(RendererAssets.JS) + "\n</script>\n" +
                "</body>\n</html>";
     }
     // ---- AST → HTML visitor ----

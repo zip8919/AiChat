@@ -137,8 +137,8 @@ final class ChatHistory {
         if (!official) {
             JSONObject u = new JSONObject();
             u.put("role", "user");
-            u.put("content", "请接着上面已经生成的内容末尾继续输出，直接给出后续正文，"
-                    + "不要重复已生成的部分，也不要添加解释、总结或开场白。");
+            u.put("content", Strings.get(R.string.chathistory_001)
+                    + Strings.get(R.string.chathistory_002));
             msgs.put(u);
         }
         return msgs;
@@ -415,7 +415,7 @@ final class ChatHistory {
                 // 网页抓取：正文太长，留开头即可
                 String content = json.optString("content", "");
                 if (content.length() > FETCH_MAX) {
-                    json.put("content", content.substring(0, FETCH_MAX) + "…（正文已截断）");
+                    json.put("content", content.substring(0, FETCH_MAX) + Strings.get(R.string.chathistory_003));
                 }
                 return fitLimit(json);
             }
@@ -437,7 +437,7 @@ final class ChatHistory {
         } catch (Exception e) {
             // 不是合法 JSON（极少见）：退化为定长截断
             return result.length() <= RESULT_MAX
-                    ? result : result.substring(0, RESULT_MAX) + "…（历史结果已压缩）";
+                    ? result : result.substring(0, RESULT_MAX) + Strings.get(R.string.chathistory_004);
         }
     }
 
@@ -448,7 +448,7 @@ final class ChatHistory {
         try {
             JSONArray results = json.optJSONArray("results");
             if (results == null) {
-                return s.substring(0, RESULT_MAX) + "…（历史结果已压缩）";
+                return s.substring(0, RESULT_MAX) + Strings.get(R.string.chathistory_005);
             }
             JSONArray kept = new JSONArray();
             int total = 0;
@@ -464,10 +464,10 @@ final class ChatHistory {
             JSONObject out = new JSONObject();
             out.put("query", json.optString("query", ""));
             out.put("results", kept);
-            if (dropped > 0) out.put("truncated", "另有 " + dropped + " 条结果未列出");
+            if (dropped > 0) out.put("truncated", Strings.get(R.string.chathistory_006) + dropped + Strings.get(R.string.chathistory_007));
             return out.toString();
         } catch (Exception e) {
-            return s.substring(0, RESULT_MAX) + "…（历史结果已压缩）";
+            return s.substring(0, RESULT_MAX) + Strings.get(R.string.chathistory_008);
         }
     }
 

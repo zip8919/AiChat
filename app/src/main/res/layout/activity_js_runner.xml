@@ -21,7 +21,7 @@
             android:id="@+id/js_back_button"
             android:layout_width="wrap_content"
             android:layout_height="40dp"
-            android:text="返回"
+            android:text="@string/activity_js_runner_001"
             android:textSize="12sp" />
 
         <TextView
@@ -29,7 +29,7 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:gravity="center"
-            android:text="JS 运行器"
+            android:text="@string/activity_js_runner_002"
             android:textColor="#FFFFFF"
             android:textSize="16sp" />
     </LinearLayout>
@@ -45,7 +45,7 @@
             android:layout_width="0dp"
             android:layout_height="40dp"
             android:layout_weight="1"
-            android:text="运行"
+            android:text="@string/activity_js_runner_003"
             android:textSize="12sp" />
 
         <!-- 死循环停不下来，只能销毁 WebView 重来；按钮常驻但空闲时禁用 -->
@@ -54,7 +54,7 @@
             android:layout_width="0dp"
             android:layout_height="40dp"
             android:layout_weight="1"
-            android:text="中止"
+            android:text="@string/activity_js_runner_004"
             android:textSize="12sp" />
 
         <Button
@@ -62,7 +62,7 @@
             android:layout_width="0dp"
             android:layout_height="40dp"
             android:layout_weight="1"
-            android:text="粘贴"
+            android:text="@string/activity_js_runner_005"
             android:textSize="12sp" />
 
         <Button
@@ -70,7 +70,7 @@
             android:layout_width="0dp"
             android:layout_height="40dp"
             android:layout_weight="1"
-            android:text="保存"
+            android:text="@string/activity_js_runner_006"
             android:textSize="12sp" />
     </LinearLayout>
 
@@ -87,7 +87,7 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:padding="4dp"
-            android:text="代码"
+            android:text="@string/activity_js_runner_007"
             android:textColor="#333333"
             android:textSize="12sp" />
 
@@ -95,7 +95,7 @@
             android:id="@+id/js_clear_code_button"
             android:layout_width="wrap_content"
             android:layout_height="36dp"
-            android:text="清空代码"
+            android:text="@string/activity_js_runner_008"
             android:textSize="12sp" />
     </LinearLayout>
 
@@ -104,7 +104,7 @@
         android:layout_width="match_parent"
         android:layout_height="140dp"
         android:gravity="top|start"
-        android:hint="在此输入 JS / HTML / SVG 代码"
+        android:hint="@string/activity_js_runner_009"
         android:inputType="textMultiLine"
         android:textSize="12sp"
         android:background="#F5F5F5"
@@ -126,7 +126,7 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:padding="4dp"
-            android:text="输出 · 未运行"
+            android:text="@string/activity_js_runner_010"
             android:textColor="#333333"
             android:textSize="12sp" />
 
@@ -134,14 +134,14 @@
             android:id="@+id/js_copy_button"
             android:layout_width="wrap_content"
             android:layout_height="36dp"
-            android:text="复制输出"
+            android:text="@string/activity_js_runner_011"
             android:textSize="12sp" />
 
         <Button
             android:id="@+id/js_clear_output_button"
             android:layout_width="wrap_content"
             android:layout_height="36dp"
-            android:text="清空输出"
+            android:text="@string/activity_js_runner_012"
             android:textSize="12sp" />
     </LinearLayout>
 
@@ -166,7 +166,7 @@
         android:layout_height="wrap_content"
         android:background="#EEEEEE"
         android:padding="4dp"
-        android:text="渲染结果"
+        android:text="@string/activity_js_runner_013"
         android:textColor="#333333"
         android:textSize="12sp" />
 

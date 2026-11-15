@@ -117,12 +117,12 @@ final class ViewerController {
                 images.add(info);
             }
         } catch (Exception e) {
-            AcToast.show(activity, "无法加载图片列表");
+            AcToast.show(activity, Strings.get(R.string.viewercontroller_001));
             return;
         }
 
         if (images.isEmpty() || index < 0 || index >= images.size()) {
-            AcToast.show(activity, "图片不可用");
+            AcToast.show(activity, Strings.get(R.string.viewercontroller_002));
             return;
         }
 
@@ -310,7 +310,7 @@ final class ViewerController {
             tableDialog.dismiss();
         }
         if (tableHtml == null || tableHtml.isEmpty()) {
-            AcToast.show(activity, "表格内容为空");
+            AcToast.show(activity, Strings.get(R.string.viewercontroller_003));
             return;
         }
 
@@ -455,7 +455,7 @@ final class ViewerController {
             codeDialog.dismiss();
         }
         if (code == null || code.isEmpty()) {
-            AcToast.show(activity, "代码内容为空");
+            AcToast.show(activity, Strings.get(R.string.viewercontroller_004));
             return;
         }
 
@@ -704,7 +704,7 @@ final class ViewerController {
             docDialog.dismiss();
         }
         if (code == null || code.length() == 0) {
-            AcToast.show(activity, "文件内容为空");
+            AcToast.show(activity, Strings.get(R.string.viewercontroller_005));
             return;
         }
 
@@ -752,7 +752,7 @@ final class ViewerController {
         final boolean canPreview = FileKinds.isPreviewable(docName, docLang);
         final boolean canRun = FileKinds.isRunnable(docLang);
         if (canPreview || canRun) {
-            docPreviewBtn.setText(canRun ? "运行" : "预览");
+            docPreviewBtn.setText(canRun ? Strings.get(R.string.viewercontroller_006) : Strings.get(R.string.viewercontroller_007));
             docPreviewBtn.setVisibility(View.VISIBLE);
             // 预览按钮占的位置要一起让出来，否则标题会压在按钮下面
             titleLp.addRule(RelativeLayout.LEFT_OF, R.id.viewer_preview);
@@ -765,7 +765,7 @@ final class ViewerController {
                         return;
                     }
                     docSourceMode = !docSourceMode;
-                    docPreviewBtn.setText(docSourceMode ? "预览" : "源码");
+                    docPreviewBtn.setText(docSourceMode ? Strings.get(R.string.viewercontroller_008) : Strings.get(R.string.viewercontroller_009));
                     loadDocument();
                 }
             });

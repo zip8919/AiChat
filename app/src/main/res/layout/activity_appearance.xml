@@ -19,7 +19,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginBottom="4dp"
-            android:text="外观" />
+            android:text="@string/activity_appearance_001" />
 
         <!-- 未保存状态提示：CLEAN 时 GONE，不占高度避免布局跳动 -->
         <TextView
@@ -46,7 +46,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="深色模式" />
+                android:text="@string/activity_appearance_002" />
             <Switch
                 android:id="@+id/dark_switch"
                 android:layout_width="wrap_content"
@@ -67,7 +67,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="主题颜色" />
+                android:text="@string/activity_appearance_003" />
             <TextView
                 android:id="@+id/color_info"
                 android:textSize="13sp"
@@ -76,7 +76,7 @@
                 android:padding="6dp"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:tag="主题颜色会作为主色应用到 ActionBar 与消息界面。自定义取色可指定任意颜色；选中内置色或自定义色都会记为「显式覆盖」，优先于主题默认值。"
+                android:tag="@string/activity_appearance_tag_001"
                 android:text="ⓘ" />
             <TextView
                 android:id="@+id/color_custom"
@@ -88,7 +88,7 @@
                 android:singleLine="true"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="＋ 自定义" />
+                android:text="@string/activity_appearance_004" />
         </LinearLayout>
 
         <LinearLayout
@@ -124,7 +124,7 @@
                 android:singleLine="true"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="跟随主题" />
+                android:text="@string/activity_appearance_005" />
         </LinearLayout>
 
         <!-- 16 色 + 字体的逐项编辑入口（二级页，避免主流程被 18 行淹没） -->
@@ -138,7 +138,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginBottom="8dp"
-            android:text="逐属性编辑：16 色调色 + 字体选择 ›" />
+            android:text="@string/activity_appearance_006" />
 
         <!-- 3 显示大小百分比 -->
         <LinearLayout
@@ -154,7 +154,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="显示大小" />
+                android:text="@string/activity_appearance_007" />
             <TextView
                 android:id="@+id/scale_info"
                 android:textSize="13sp"
@@ -163,7 +163,7 @@
                 android:padding="6dp"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:tag="只缩放文字，不改变按钮与布局尺寸。50%~250% 是给移植到其他 DPI 设备用的适配旋钮，本设备已按屏幕适配，默认 100% 无需修改。主题不覆盖此项。"
+                android:tag="@string/activity_appearance_tag_002"
                 android:text="ⓘ" />
         </LinearLayout>
 
@@ -198,7 +198,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:visibility="gone"
-            android:text="当前倍率下部分长文字会换行或省略" />
+            android:text="@string/activity_appearance_008" />
 
         <Button
             android:id="@+id/scale_preview"
@@ -206,7 +206,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:visibility="gone"
-            android:text="预览效果" />
+            android:text="@string/activity_appearance_009" />
 
         <!-- 4 字体大小档位 -->
         <LinearLayout
@@ -222,7 +222,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="字体大小" />
+                android:text="@string/activity_appearance_010" />
             <TextView
                 android:id="@+id/font_size_info"
                 android:textSize="13sp"
@@ -231,7 +231,7 @@
                 android:padding="6dp"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:tag="界面文字的 5 档微调，独立于「显示大小」。显示大小是整体倍率，字体大小是在此基础上再叠加的档位；两者都只作用于原生界面文字，消息页文字只跟随显示大小。"
+                android:tag="@string/activity_appearance_tag_003"
                 android:text="ⓘ" />
         </LinearLayout>
 
@@ -255,7 +255,7 @@
                 android:singleLine="true"
                 android:layout_width="56dp"
                 android:layout_height="wrap_content"
-                android:text="标准" />
+                android:text="@string/activity_appearance_011" />
         </LinearLayout>
 
         <!-- 5 字体选择器 -->
@@ -272,7 +272,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="字体" />
+                android:text="@string/activity_appearance_012" />
             <TextView
                 android:id="@+id/font_follow"
                 android:textSize="12sp"
@@ -283,7 +283,7 @@
                 android:singleLine="true"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="跟随主题" />
+                android:text="@string/activity_appearance_013" />
         </LinearLayout>
 
         <Spinner
@@ -306,7 +306,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="自定义主题" />
+                android:text="@string/activity_appearance_014" />
             <TextView
                 android:id="@+id/theme_info"
                 android:textSize="13sp"
@@ -315,7 +315,7 @@
                 android:padding="6dp"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:tag="覆盖优先级：你手动改过的项 大于 自定义主题 大于 内置默认。选中主题只重置「跟随主题」的项，已手动改过的项会保留。每项旁的「跟随主题」可单项清除覆盖。"
+                android:tag="@string/activity_appearance_tag_004"
                 android:text="ⓘ" />
         </LinearLayout>
 
@@ -342,7 +342,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:visibility="gone"
-            android:text="字体缺失" />
+            android:text="@string/activity_appearance_015" />
 
         <!-- 7 两个管理按钮 -->
         <LinearLayout
@@ -360,7 +360,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="管理字体" />
+                android:text="@string/activity_appearance_016" />
             <Button
                 android:id="@+id/manage_themes"
                 android:textSize="12sp"
@@ -371,7 +371,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="管理自定义主题" />
+                android:text="@string/activity_appearance_017" />
         </LinearLayout>
 
         <Button
@@ -380,7 +380,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
-            android:text="全部跟随主题" />
+            android:text="@string/activity_appearance_018" />
 
         <TextView
             android:id="@+id/save_info"
@@ -391,8 +391,8 @@
             android:padding="6dp"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:tag="临时保存只在本次运行生效，应用被杀或重启后自动回到上次永久保存的外观；永久保存会写入配置文件，重启后仍然保留。两者都不删除已导入的字体与主题文件；重置只回到内置默认，仍需点永久保存才写盘。"
-            android:text="ⓘ 临时与永久保存的区别" />
+            android:tag="@string/activity_appearance_tag_005"
+            android:text="@string/activity_appearance_019" />
 
         <!-- 8 底部三按钮：一行等宽，重置用描边样式在代码里设置 -->
         <LinearLayout
@@ -411,7 +411,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="重置" />
+                android:text="@string/activity_appearance_020" />
             <Button
                 android:id="@+id/btn_temp"
                 android:textSize="12sp"
@@ -422,7 +422,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="临时保存" />
+                android:text="@string/activity_appearance_021" />
             <Button
                 android:id="@+id/btn_permanent"
                 android:textSize="12sp"
@@ -434,7 +434,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="永久保存" />
+                android:text="@string/activity_appearance_022" />
         </LinearLayout>
 
     </LinearLayout>

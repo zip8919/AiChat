@@ -51,14 +51,14 @@ public class ThemeManagerActivity extends ThemedActivity {
         repo = ThemeRepository.getInstance();
         am = AppearanceManager.getInstance(this);
         bindViews();
-        title.setText("管理自定义主题");
-        hint.setText("内置 4 套不可删除。用户主题可导入、新建、复制、导出、预览、编辑；选中后到外观页启用。");
-        btnPrimary.setText("导入");
-        btnSecondary.setText("新建");
-        btnMulti.setText("批量管理");
-        btnAct1.setText("导出");
+        title.setText(Strings.get(R.string.thememanageractivity_001));
+        hint.setText(Strings.get(R.string.thememanageractivity_002));
+        btnPrimary.setText(Strings.get(R.string.thememanageractivity_003));
+        btnSecondary.setText(Strings.get(R.string.thememanageractivity_004));
+        btnMulti.setText(Strings.get(R.string.thememanageractivity_005));
+        btnAct1.setText(Strings.get(R.string.thememanageractivity_006));
         btnAct2.setVisibility(View.GONE);   // 隐藏后两个可见按钮各占一半，不留空档
-        btnAct3.setText("删除");
+        btnAct3.setText(Strings.get(R.string.thememanageractivity_007));
         adapter = new ManagerRowAdapter(this);
         list.setAdapter(adapter);
         wire();
@@ -105,7 +105,7 @@ public class ThemeManagerActivity extends ThemedActivity {
             public void onClick(View v) {
                 selectionMode = !selectionMode;
                 adapter.setSelectionMode(selectionMode);
-                btnMulti.setText(selectionMode ? "退出多选" : "批量管理");
+                btnMulti.setText(selectionMode ? Strings.get(R.string.thememanageractivity_008) : Strings.get(R.string.thememanageractivity_009));
                 refreshSelectionUi();
             }
         });
@@ -115,13 +115,13 @@ public class ThemeManagerActivity extends ThemedActivity {
                 if (r == null || r.header) return;
                 if (r.disabled) {
                     if (r.key == null) return;
-                    toast("该主题文件缺失或版本不兼容");
+                    toast(Strings.get(R.string.thememanageractivity_010));
                     return;
                 }
                 if (selectionMode) {
                     Theme t = findTheme(r.key);
                     if (t != null && t.builtin) {
-                        toast("内置主题不参与批量操作");
+                        toast(Strings.get(R.string.thememanageractivity_011));
                         return;
                     }
                     adapter.toggle(r.key);
@@ -144,12 +144,12 @@ public class ThemeManagerActivity extends ThemedActivity {
         themes.clear();
         themes.addAll(repo.list());
         List<ManagerRowAdapter.Row> rows = new ArrayList<ManagerRowAdapter.Row>();
-        rows.add(ManagerRowAdapter.Row.header("内置主题 · 不可删除"));
+        rows.add(ManagerRowAdapter.Row.header(Strings.get(R.string.thememanageractivity_012)));
         for (int i = 0; i < themes.size(); i++) {
             Theme t = themes.get(i);
             if (t.builtin) rows.add(themeRow(t));
         }
-        rows.add(ManagerRowAdapter.Row.header("我的主题"));
+        rows.add(ManagerRowAdapter.Row.header(Strings.get(R.string.thememanageractivity_013)));
         int user = 0;
         for (int i = 0; i < themes.size(); i++) {
             Theme t = themes.get(i);
@@ -159,8 +159,8 @@ public class ThemeManagerActivity extends ThemedActivity {
             }
         }
         if (user == 0) {
-            rows.add(ManagerRowAdapter.Row.item(null, "还没有自定义主题",
-                    "点上方「导入」或「新建」添加", "", true));
+            rows.add(ManagerRowAdapter.Row.item(null, Strings.get(R.string.thememanageractivity_014),
+                    Strings.get(R.string.thememanageractivity_015), "", true));
         }
         adapter.setRows(rows);
         list.setVisibility(View.VISIBLE);
@@ -170,10 +170,10 @@ public class ThemeManagerActivity extends ThemedActivity {
 
     private ManagerRowAdapter.Row themeRow(Theme t) {
         String badge;
-        if (t.fileMissing) badge = "文件缺失";
-        else if (t.versionIncompatible) badge = "版本不兼容";
-        else if (t.id.equals(am.getThemeId())) badge = "使用中";
-        else badge = t.builtin ? "内置" : "自定义";
+        if (t.fileMissing) badge = Strings.get(R.string.thememanageractivity_016);
+        else if (t.versionIncompatible) badge = Strings.get(R.string.thememanageractivity_017);
+        else if (t.id.equals(am.getThemeId())) badge = Strings.get(R.string.thememanageractivity_073);
+        else badge = t.builtin ? Strings.get(R.string.thememanageractivity_018) : Strings.get(R.string.thememanageractivity_019);
         String sub = (t.author == null ? "" : t.author);
         if (t.description != null && t.description.length() > 0) {
             sub = sub.length() > 0 ? sub + " · " + t.description : t.description;
@@ -184,7 +184,7 @@ public class ThemeManagerActivity extends ThemedActivity {
 
     private void refreshSelectionUi() {
         selectionBar.setVisibility(selectionMode ? View.VISIBLE : View.GONE);
-        selectionCount.setText("已选 " + adapter.checkedKeys().size() + " 个");
+        selectionCount.setText(Strings.get(R.string.thememanageractivity_020) + adapter.checkedKeys().size() + Strings.get(R.string.thememanageractivity_021));
     }
 
     private Theme findTheme(String id) {
@@ -201,14 +201,14 @@ public class ThemeManagerActivity extends ThemedActivity {
         final List<String> labels = new ArrayList<String>();
         final List<Integer> codes = new ArrayList<Integer>();
         if (!t.builtin) {
-            labels.add("重命名"); codes.add(Integer.valueOf(0));
-            labels.add("编辑"); codes.add(Integer.valueOf(1));
+            labels.add(Strings.get(R.string.thememanageractivity_022)); codes.add(Integer.valueOf(0));
+            labels.add(Strings.get(R.string.thememanageractivity_023)); codes.add(Integer.valueOf(1));
         }
-        labels.add("复制"); codes.add(Integer.valueOf(2));
-        labels.add("导出"); codes.add(Integer.valueOf(3));
-        labels.add("预览"); codes.add(Integer.valueOf(4));
+        labels.add(Strings.get(R.string.thememanageractivity_024)); codes.add(Integer.valueOf(2));
+        labels.add(Strings.get(R.string.thememanageractivity_025)); codes.add(Integer.valueOf(3));
+        labels.add(Strings.get(R.string.thememanageractivity_026)); codes.add(Integer.valueOf(4));
         if (!t.builtin) {
-            labels.add("删除"); codes.add(Integer.valueOf(5));
+            labels.add(Strings.get(R.string.thememanageractivity_027)); codes.add(Integer.valueOf(5));
         }
         AcDialog.builder(this)
                 .setTitle(t.name)
@@ -225,38 +225,38 @@ public class ThemeManagerActivity extends ThemedActivity {
                                 }
                             }
                         })
-                .setNegativeButton("取消", null)
+                .setNegativeButton(Strings.get(R.string.thememanageractivity_028), null)
                 .show();
     }
 
     private void promptRename(final Theme t) {
-        promptName("重命名", t.name, new NameCb() {
+        promptName(Strings.get(R.string.thememanageractivity_029), t.name, new NameCb() {
             public void onName(String n) {
                 if (repo.rename(t.id, n)) {
                     repo.invalidate();
                     load();
                 } else {
-                    toast("重命名失败");
+                    toast(Strings.get(R.string.thememanageractivity_030));
                 }
             }
         });
     }
 
     private void promptCopy(final Theme t) {
-        promptName("复制为新主题", t.name + " 副本", new NameCb() {
+        promptName(Strings.get(R.string.thememanageractivity_031), t.name + Strings.get(R.string.thememanageractivity_032), new NameCb() {
             public void onName(String n) {
                 String id = repo.copy(t.id, n);
-                if (id == null) { toast("复制失败"); return; }
+                if (id == null) { toast(Strings.get(R.string.thememanageractivity_033)); return; }
                 repo.invalidate();
                 load();
-                toast("已复制为「" + n + "」");
+                toast(Strings.get(R.string.thememanageractivity_034) + n + "」");
             }
         });
     }
 
     private void doExport(Theme t) {
         String path = repo.export(t.id);
-        toast(path == null ? "导出失败：存储不可写" : "已导出到 " + path);
+        toast(path == null ? Strings.get(R.string.thememanageractivity_035) : Strings.get(R.string.thememanageractivity_036) + path);
     }
 
     private void openEdit(Theme t) {
@@ -272,14 +272,14 @@ public class ThemeManagerActivity extends ThemedActivity {
     }
 
     private void confirmDeleteOne(final Theme t) {
-        String msg = "删除「" + t.name + "」？此操作不可撤销。";
+        String msg = Strings.get(R.string.thememanageractivity_037) + t.name + Strings.get(R.string.thememanageractivity_038);
         if (t.id.equals(am.getThemeId())) {
-            msg += "\n\n这是当前使用的主题，删除后会自动切回「不使用自定义主题」，手动覆盖项保留。";
+            msg += Strings.get(R.string.thememanageractivity_039);
         }
         AcDialog.builder(this)
-                .setTitle("删除主题")
+                .setTitle(Strings.get(R.string.thememanageractivity_040))
                 .setMessage(msg)
-                .setPositiveButton("删除", new DialogInterface.OnClickListener() {
+                .setPositiveButton(Strings.get(R.string.thememanageractivity_041), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         if (t.id.equals(am.getThemeId())) {
                             // 只解绑 themeId：applyPermanent 会把「临时生效」的改动一起写盘
@@ -287,10 +287,10 @@ public class ThemeManagerActivity extends ThemedActivity {
                         }
                         boolean ok = repo.delete(t.id);
                         load();
-                        toast(ok ? "已删除" : "删除失败");
+                        toast(ok ? Strings.get(R.string.thememanageractivity_042) : Strings.get(R.string.thememanageractivity_043));
                     }
                 })
-                .setNegativeButton("取消", null)
+                .setNegativeButton(Strings.get(R.string.thememanageractivity_044), null)
                 .show();
     }
 
@@ -298,17 +298,17 @@ public class ThemeManagerActivity extends ThemedActivity {
 
     private void batchExport() {
         Set<String> keys = new HashSet<String>(adapter.checkedKeys());
-        if (keys.isEmpty()) { toast("请先勾选主题"); return; }
+        if (keys.isEmpty()) { toast(Strings.get(R.string.thememanageractivity_045)); return; }
         int ok = 0;
         for (String id : keys) {
             if (repo.export(id) != null) ok++;
         }
-        toast("已导出 " + ok + " / " + keys.size() + " 个到 exports 目录");
+        toast(Strings.get(R.string.thememanageractivity_046) + ok + " / " + keys.size() + Strings.get(R.string.thememanageractivity_047));
     }
 
     private void confirmBatchDelete() {
         final Set<String> keys = new HashSet<String>(adapter.checkedKeys());
-        if (keys.isEmpty()) { toast("请先勾选主题"); return; }
+        if (keys.isEmpty()) { toast(Strings.get(R.string.thememanageractivity_048)); return; }
         final List<String> deletable = new ArrayList<String>();
         boolean currentHit = false;
         for (String id : keys) {
@@ -317,14 +317,14 @@ public class ThemeManagerActivity extends ThemedActivity {
             deletable.add(id);
             if (id.equals(am.getThemeId())) currentHit = true;
         }
-        if (deletable.isEmpty()) { toast("内置主题不可删除"); return; }
+        if (deletable.isEmpty()) { toast(Strings.get(R.string.thememanageractivity_049)); return; }
         final boolean hit = currentHit;
-        String msg = "删除选中的 " + deletable.size() + " 个用户主题？此操作不可撤销。";
-        if (hit) msg += "\n\n包含当前使用的主题，将自动切回「不使用自定义主题」。";
+        String msg = Strings.get(R.string.thememanageractivity_050) + deletable.size() + Strings.get(R.string.thememanageractivity_051);
+        if (hit) msg += Strings.get(R.string.thememanageractivity_052);
         AcDialog.builder(this)
-                .setTitle("批量删除")
+                .setTitle(Strings.get(R.string.thememanageractivity_053))
                 .setMessage(msg)
-                .setPositiveButton("删除", new DialogInterface.OnClickListener() {
+                .setPositiveButton(Strings.get(R.string.thememanageractivity_054), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         if (hit) {
                             for (String id : deletable) am.detachTheme(id);
@@ -333,12 +333,12 @@ public class ThemeManagerActivity extends ThemedActivity {
                         repo.deleteAll(deletable);
                         selectionMode = false;
                         adapter.setSelectionMode(false);
-                        btnMulti.setText("批量管理");
+                        btnMulti.setText(Strings.get(R.string.thememanageractivity_055));
                         load();
-                        toast("已删除 " + deletable.size() + " 个主题");
+                        toast(Strings.get(R.string.thememanageractivity_056) + deletable.size() + Strings.get(R.string.thememanageractivity_057));
                     }
                 })
-                .setNegativeButton("取消", null)
+                .setNegativeButton(Strings.get(R.string.thememanageractivity_058), null)
                 .show();
     }
 
@@ -351,7 +351,7 @@ public class ThemeManagerActivity extends ThemedActivity {
         try {
             startActivityForResult(i, REQ_IMPORT);
         } catch (Throwable t) {
-            toast("无法打开文件选择器");
+            toast(Strings.get(R.string.thememanageractivity_059));
         }
     }
 
@@ -361,13 +361,13 @@ public class ThemeManagerActivity extends ThemedActivity {
         if (req != REQ_IMPORT || res != RESULT_OK || data == null || data.getData() == null) return;
         final String text = readText(data.getData());
         if (text == null) {
-            toast("读取失败或文件超过 64KB");
+            toast(Strings.get(R.string.thememanageractivity_060));
             return;
         }
         final ThemeValidator.Result vr =
                 ThemeValidator.validate(text, FontRepository.getInstance().installedIds());
         if (vr.blocked || vr.theme == null) {
-            toast("导入失败：" + vr.blockReason);
+            toast(Strings.get(R.string.thememanageractivity_061) + vr.blockReason);
             return;
         }
         final Theme t = vr.theme;
@@ -376,7 +376,7 @@ public class ThemeManagerActivity extends ThemedActivity {
             if (i > 0) warn.append("\n");
             warn.append("· ").append(vr.warnings.get(i));
         }
-        promptName("导入主题", t.name, new NameCb() {
+        promptName(Strings.get(R.string.thememanageractivity_062), t.name, new NameCb() {
             public void onName(String n) {
                 if (hasUserThemeNamed(n)) {
                     confirmImportConflict(t, n, warn.toString());
@@ -389,8 +389,8 @@ public class ThemeManagerActivity extends ThemedActivity {
 
     private void confirmImportConflict(final Theme t, final String name, final String warn) {
         AcDialog.builder(this)
-                .setTitle("已有同名主题")
-                .setItems(new String[]{"仍然导入（允许重名）", "自动改名", "取消"},
+                .setTitle(Strings.get(R.string.thememanageractivity_063))
+                .setItems(new String[]{Strings.get(R.string.thememanageractivity_064), Strings.get(R.string.thememanageractivity_065), Strings.get(R.string.thememanageractivity_066)},
                         new DialogInterface.OnClickListener() {
                             public void onClick(DialogInterface d, int w) {
                                 if (w == 0) finishImport(t, name, warn);
@@ -405,10 +405,10 @@ public class ThemeManagerActivity extends ThemedActivity {
         t.id = "";             // 让 Repository 生成不重复的新 id
         t.builtin = false;
         String id = repo.save(t);
-        if (id == null) { toast("导入失败：存储不可写"); return; }
+        if (id == null) { toast(Strings.get(R.string.thememanageractivity_067)); return; }
         repo.invalidate();
         load();
-        toast(warn.length() > 0 ? "已导入（有校验提示）\n" + warn : "已导入，可在外观页启用");
+        toast(warn.length() > 0 ? Strings.get(R.string.thememanageractivity_068) + warn : Strings.get(R.string.thememanageractivity_069));
     }
 
     private boolean hasUserThemeNamed(String name) {
@@ -464,15 +464,15 @@ public class ThemeManagerActivity extends ThemedActivity {
         AcDialog.builder(this)
                 .setTitle(titleText)
                 .setView(et)
-                .setPositiveButton("确定", new DialogInterface.OnClickListener() {
+                .setPositiveButton(Strings.get(R.string.thememanageractivity_070), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         String n = et.getText().toString().trim();
-                        if (n.length() == 0) { toast("名称不能为空"); return; }
+                        if (n.length() == 0) { toast(Strings.get(R.string.thememanageractivity_071)); return; }
                         if (n.length() > 32) n = n.substring(0, 32);
                         cb.onName(n);
                     }
                 })
-                .setNegativeButton("取消", null)
+                .setNegativeButton(Strings.get(R.string.thememanageractivity_072), null)
                 .show();
     }
 

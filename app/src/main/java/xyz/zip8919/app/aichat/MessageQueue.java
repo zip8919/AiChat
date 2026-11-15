@@ -107,7 +107,7 @@ final class MessageQueue {
         LogUtil.i(TAG, "enqueued: len=%d files=%d pending=%d",
                 text == null ? 0 : text.length(),
                 files == null ? 0 : files.size(), pending.size());
-        AcToast.show(activity, "已排队 " + pending.size() + " 条，将在当前回复结束后发送");
+        AcToast.show(activity, Strings.get(R.string.messagequeue_001) + pending.size() + Strings.get(R.string.messagequeue_002));
     }
 
     /** 本轮回复结束：若队列非空且当前空闲，取出队首发送。 */
@@ -171,13 +171,13 @@ final class MessageQueue {
             bar.setVisibility(View.GONE);
         } else {
             bar.setVisibility(View.VISIBLE);
-            barText.setText("排队 " + n + " 条，将在当前回复结束后依次发送");
+            barText.setText(Strings.get(R.string.messagequeue_003) + n + Strings.get(R.string.messagequeue_004));
         }
     }
 
     void showManager() {
         if (pending.isEmpty()) {
-            AcToast.show(activity, "没有排队中的消息");
+            AcToast.show(activity, Strings.get(R.string.messagequeue_005));
             updateBar();
             return;
         }
@@ -189,21 +189,21 @@ final class MessageQueue {
             String s = qm.text.replace('\n', ' ');
             // 只发附件不写字时 text 是空的：列表里出现「3. 」谁也认不出是哪条
             if (s.length() == 0 && !qm.files.isEmpty()) {
-                s = "[附件] " + qm.files.get(0).name;
-                if (qm.files.size() > 1) s += " 等 " + qm.files.size() + " 个文件";
+                s = Strings.get(R.string.messagequeue_006) + qm.files.get(0).name;
+                if (qm.files.size() > 1) s += Strings.get(R.string.messagequeue_007) + qm.files.size() + Strings.get(R.string.messagequeue_008);
             }
             if (s.length() > 30) s = s.substring(0, 30) + "…";
             items[i] = (i + 1) + ". " + s;
         }
         managerDialog = AcDialog.builder(activity)
-                .setTitle("排队中的消息")
+                .setTitle(Strings.get(R.string.messagequeue_009))
                 .setItems(items, new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int which) {
                         showItemActions(ids[which]);
                     }
                 })
-                .setPositiveButton("关闭", null)
-                .setNeutralButton("全部清空", new DialogInterface.OnClickListener() {
+                .setPositiveButton(Strings.get(R.string.messagequeue_010), null)
+                .setNeutralButton(Strings.get(R.string.messagequeue_011), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int which) {
                         LogUtil.i(TAG, "queue: clear all (%d)", pending.size());
                         pending.clear();
@@ -247,13 +247,13 @@ final class MessageQueue {
         final int index = indexOf(id);
         if (index < 0) {
             LogUtil.i(TAG, "action on id=%d dropped, already sent (pending=%d)", id, pending.size());
-            AcToast.show(activity, "该消息已发送");
+            AcToast.show(activity, Strings.get(R.string.messagequeue_012));
             refreshManager();
             return;
         }
-        final String[] actions = {"上移", "下移", "插队发送（打断当前回复）", "删除"};
+        final String[] actions = {Strings.get(R.string.messagequeue_013), Strings.get(R.string.messagequeue_014), Strings.get(R.string.messagequeue_015), Strings.get(R.string.messagequeue_016)};
         actionsDialog = AcDialog.builder(activity)
-                .setTitle("第 " + (index + 1) + " 条")
+                .setTitle(Strings.get(R.string.messagequeue_017) + (index + 1) + Strings.get(R.string.messagequeue_018))
                 .setItems(actions, new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int which) {
                         actionTaken = true;
@@ -263,7 +263,7 @@ final class MessageQueue {
                         else remove(id);
                     }
                 })
-                .setNegativeButton("取消", null)
+                .setNegativeButton(Strings.get(R.string.messagequeue_019), null)
                 .setOnDismissListener(new DialogInterface.OnDismissListener() {
                     public void onDismiss(DialogInterface d) {
                         actionsDialog = null;
@@ -292,13 +292,13 @@ final class MessageQueue {
     private void move(int id, int delta) {
         int from = indexOf(id);
         if (from < 0) {
-            AcToast.show(activity, "该消息已发送");
+            AcToast.show(activity, Strings.get(R.string.messagequeue_020));
             refreshManager();
             return;
         }
         int to = from + delta;
         if (to < 0 || to >= pending.size()) {
-            AcToast.show(activity, delta < 0 ? "已经在最前" : "已经在最后");
+            AcToast.show(activity, delta < 0 ? Strings.get(R.string.messagequeue_021) : Strings.get(R.string.messagequeue_022));
             return;
         }
         QueuedMessage moved = pending.remove(from);
@@ -311,7 +311,7 @@ final class MessageQueue {
     private void remove(int id) {
         int index = indexOf(id);
         if (index < 0) {
-            AcToast.show(activity, "该消息已发送");
+            AcToast.show(activity, Strings.get(R.string.messagequeue_023));
             refreshManager();
             return;
         }
@@ -321,7 +321,7 @@ final class MessageQueue {
         updateBar();
         refreshManager();
         if (pending.isEmpty()) {
-            AcToast.show(activity, "队列已清空");
+            AcToast.show(activity, Strings.get(R.string.messagequeue_024));
         }
     }
 
@@ -331,7 +331,7 @@ final class MessageQueue {
     private void jump(int id) {
         int index = indexOf(id);
         if (index < 0) {
-            AcToast.show(activity, "该消息已发送");
+            AcToast.show(activity, Strings.get(R.string.messagequeue_025));
             refreshManager();
             return;
         }

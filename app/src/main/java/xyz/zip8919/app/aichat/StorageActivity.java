@@ -62,9 +62,9 @@ public class StorageActivity extends ThemedActivity {
             R.color.storage_conv, R.color.storage_att, R.color.storage_export,
             R.color.storage_temp, R.color.storage_other
     };
-    private final String[] catTitles = {"对话记录", "图片附件", "已保存文件", "临时文件", "其他"};
-    private final String[] catShort = {"对话", "图片", "导出", "临时", "其他"};
-    private final String[] catUnits = {"个", "张", "个", "个", "个"};
+    private final String[] catTitles = {Strings.get(R.string.storageactivity_001), Strings.get(R.string.storageactivity_002), Strings.get(R.string.storageactivity_003), Strings.get(R.string.storageactivity_004), Strings.get(R.string.storageactivity_005)};
+    private final String[] catShort = {Strings.get(R.string.storageactivity_006), Strings.get(R.string.storageactivity_007), Strings.get(R.string.storageactivity_008), Strings.get(R.string.storageactivity_009), Strings.get(R.string.storageactivity_010)};
+    private final String[] catUnits = {Strings.get(R.string.storageactivity_011), Strings.get(R.string.storageactivity_012), Strings.get(R.string.storageactivity_013), Strings.get(R.string.storageactivity_014), Strings.get(R.string.storageactivity_015)};
 
     private StorageReport report;
     private boolean scanning;
@@ -131,8 +131,8 @@ public class StorageActivity extends ThemedActivity {
 
         TextView used = (TextView) findViewById(R.id.storage_used);
         TextView free = (TextView) findViewById(R.id.storage_free);
-        used.setText("统计中…");
-        free.setText("正在统计各类数据的占用");
+        used.setText(Strings.get(R.string.storageactivity_016));
+        free.setText(Strings.get(R.string.storageactivity_017));
         if (categories.getChildCount() == 0) {
             renderPlaceholders();
         }
@@ -159,13 +159,13 @@ public class StorageActivity extends ThemedActivity {
         TextView used = (TextView) findViewById(R.id.storage_used);
         TextView free = (TextView) findViewById(R.id.storage_free);
         if (r.externalMissing && r.usedBytes() == 0) {
-            used.setText("无法读取存储");
-            free.setText("外部存储不可用，请检查后重试");
+            used.setText(Strings.get(R.string.storageactivity_018));
+            free.setText(Strings.get(R.string.storageactivity_019));
         } else {
-            used.setText("已用 " + StorageReport.size(r.usedBytes()));
+            used.setText(Strings.get(R.string.storageactivity_020) + StorageReport.size(r.usedBytes()));
             long total = r.usedBytes() + r.freeBytes;
-            free.setText("可用 " + StorageReport.size(r.freeBytes)
-                    + (total > 0 ? " · 共 " + StorageReport.size(total) : ""));
+            free.setText(Strings.get(R.string.storageactivity_021) + StorageReport.size(r.freeBytes)
+                    + (total > 0 ? Strings.get(R.string.storageactivity_022) + StorageReport.size(total) : ""));
         }
 
         ((StorageBarView) findViewById(R.id.storage_bar)).setData(r.size, r.freeBytes);
@@ -173,21 +173,21 @@ public class StorageActivity extends ThemedActivity {
         TextView warn = (TextView) findViewById(R.id.storage_warn);
         if (r.externalMissing) {
             warn.setVisibility(View.VISIBLE);
-            warn.setText("⚠ 外部存储不可用，以上只统计了内部数据");
+            warn.setText(Strings.get(R.string.storageactivity_023));
         } else if (r.indexIncomplete) {
             warn.setVisibility(View.VISIBLE);
             warn.setText("⚠ " + r.unreadableConversations
-                    + " 个会话无法读取，为避免误删，本次不清理图片");
+                    + Strings.get(R.string.storageactivity_024));
         } else if (r.indexEmpty) {
             warn.setVisibility(View.VISIBLE);
-            warn.setText("⚠ 未能在会话中读到图片引用，图片归属可能不准，已暂停一键清理图片");
+            warn.setText(Strings.get(R.string.storageactivity_025));
         } else {
             warn.setVisibility(View.GONE);
         }
 
         StorageManager sm = StorageManager.getInstance(getApplicationContext());
         TextView path = (TextView) findViewById(R.id.storage_path);
-        path.setText("存储位置：" + (sm.isUsingInternalStorage() ? "内部存储" : "外部存储") + "  ›");
+        path.setText(Strings.get(R.string.storageactivity_026) + (sm.isUsingInternalStorage() ? Strings.get(R.string.storageactivity_027) : Strings.get(R.string.storageactivity_028)) + "  ›");
 
         renderCategories(r);
         renderClean(r);
@@ -200,7 +200,7 @@ public class StorageActivity extends ThemedActivity {
         categories.removeAllViews();
         for (int i = 0; i < catTitles.length; i++) {
             View row = createCategoryRow(i);
-            ((TextView) row.findViewById(R.id.cat_sub)).setText("统计中…");
+            ((TextView) row.findViewById(R.id.cat_sub)).setText(Strings.get(R.string.storageactivity_029));
             categories.addView(row);
         }
     }
@@ -216,13 +216,13 @@ public class StorageActivity extends ThemedActivity {
             StringBuilder sb = new StringBuilder();
             sb.append(StorageReport.size(r.size[i]));
             if (used > 0) {
-                sb.append(" · 占 ").append(Math.round(r.size[i] * 100f / used)).append('%');
+                sb.append(Strings.get(R.string.storageactivity_030)).append(Math.round(r.size[i] * 100f / used)).append('%');
             }
             if (i == StorageReport.CAT_ATTACHMENT && !r.indexIncomplete && r.orphanCount > 0) {
-                sb.append(" · ").append(r.orphanCount).append(" 张无引用");
+                sb.append(" · ").append(r.orphanCount).append(Strings.get(R.string.storageactivity_031));
             }
             if (i == StorageReport.CAT_TEMP && r.cleanableTempSize > 0) {
-                sb.append(" · 可清 ").append(StorageReport.size(r.cleanableTempSize));
+                sb.append(Strings.get(R.string.storageactivity_032)).append(StorageReport.size(r.cleanableTempSize));
             }
             sub.setText(sb.toString());
             count.setText(r.count[i] + " " + catUnits[i]);
@@ -283,22 +283,22 @@ public class StorageActivity extends ThemedActivity {
      */
     private void showTempDetail() {
         if (report == null) return;
-        String msg = "缓存与中间文件共 " + StorageReport.size(report.size[StorageReport.CAT_TEMP])
-                + "，其中 " + StorageReport.size(report.cleanableTempSize)
-                + " 可以清理。\n\n"
-                + "包括：拍照与裁剪的中间图、网页缓存、导入残留与写入中转。\n\n"
-                + "这些都是可再生的中间产物，刚写入还在用的文件会自动跳过。";
+        String msg = Strings.get(R.string.storageactivity_033) + StorageReport.size(report.size[StorageReport.CAT_TEMP])
+                + Strings.get(R.string.storageactivity_034) + StorageReport.size(report.cleanableTempSize)
+                + Strings.get(R.string.storageactivity_035)
+                + Strings.get(R.string.storageactivity_036)
+                + Strings.get(R.string.storageactivity_037);
         AcDialog.builder(this)
-                .setTitle("临时文件")
+                .setTitle(Strings.get(R.string.storageactivity_038))
                 .setMessage(msg)
-                .setPositiveButton("清理", new DialogInterface.OnClickListener() {
+                .setPositiveButton(Strings.get(R.string.storageactivity_039), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         // 从这里进来只清临时文件：用户点的是「临时文件」这张卡，
                         // 顺手把图片也删了属于超出预期的操作
                         doClean(true);
                     }
                 })
-                .setNegativeButton("关闭", null)
+                .setNegativeButton(Strings.get(R.string.storageactivity_040), null)
                 .show();
     }
 
@@ -306,21 +306,21 @@ public class StorageActivity extends ThemedActivity {
         if (report == null) return;
         StringBuilder sb = new StringBuilder();
         if (report.roots.isEmpty()) {
-            sb.append("（无）");
+            sb.append(Strings.get(R.string.storageactivity_041));
         } else {
             for (int i = 0; i < report.roots.size(); i++) {
                 StorageReport.Entry e = report.roots.get(i);
                 if (i > 0) sb.append('\n');
                 sb.append(e.file.getName()).append("  ").append(StorageReport.size(e.bytes));
                 if (e.file.getName().endsWith(".json")) {
-                    sb.append("  （配置与统计，不可清理）");
+                    sb.append(Strings.get(R.string.storageactivity_042));
                 }
             }
         }
         AcDialog.builder(this)
-                .setTitle("其他文件")
+                .setTitle(Strings.get(R.string.storageactivity_043))
                 .setMessage(sb.toString())
-                .setNegativeButton("关闭", null)
+                .setNegativeButton(Strings.get(R.string.storageactivity_044), null)
                 .show();
     }
 
@@ -333,21 +333,21 @@ public class StorageActivity extends ThemedActivity {
             return;
         }
         cleanCard.setVisibility(View.VISIBLE);
-        cleanTitle.setText("可安全释放 " + StorageReport.size(can));
+        cleanTitle.setText(Strings.get(R.string.storageactivity_045) + StorageReport.size(can));
         String sub;
         if (r.indexIncomplete) {
-            sub = "临时文件 " + StorageReport.size(r.cleanableTempSize)
-                    + "（部分会话无法读取，本次不清理图片）";
+            sub = Strings.get(R.string.storageactivity_046) + StorageReport.size(r.cleanableTempSize)
+                    + Strings.get(R.string.storageactivity_047);
         } else if (r.indexEmpty) {
-            sub = "临时文件 " + StorageReport.size(r.cleanableTempSize)
-                    + "（未读到图片引用，本次不清理图片）";
+            sub = Strings.get(R.string.storageactivity_048) + StorageReport.size(r.cleanableTempSize)
+                    + Strings.get(R.string.storageactivity_049);
         } else {
-            sub = "临时文件 " + StorageReport.size(r.cleanableTempSize)
-                    + " + 无引用图片 " + StorageReport.size(r.orphanSize);
+            sub = Strings.get(R.string.storageactivity_050) + StorageReport.size(r.cleanableTempSize)
+                    + Strings.get(R.string.storageactivity_051) + StorageReport.size(r.orphanSize);
         }
         cleanSub.setText(sub);
         cleanBtn.setEnabled(true);
-        cleanBtn.setText("立即清理");
+        cleanBtn.setText(Strings.get(R.string.storageactivity_052));
     }
 
     private void confirmClean() {
@@ -356,25 +356,25 @@ public class StorageActivity extends ThemedActivity {
         if (can <= 0) return;
 
         StringBuilder msg = new StringBuilder();
-        msg.append("将清理临时文件");
+        msg.append(Strings.get(R.string.storageactivity_053));
         if (!report.indexIncomplete && !report.indexEmpty && report.orphanCount > 0) {
-            msg.append("和 ").append(report.orphanCount).append(" 张无引用图片");
+            msg.append(Strings.get(R.string.storageactivity_054)).append(report.orphanCount).append(Strings.get(R.string.storageactivity_055));
         }
-        msg.append("，释放约 ").append(StorageReport.size(can)).append("。\n\n");
+        msg.append(Strings.get(R.string.storageactivity_056)).append(StorageReport.size(can)).append("。\n\n");
         if (report.indexIncomplete) {
-            msg.append("部分会话无法读取，本次只清理临时文件，不删除任何图片。\n\n");
+            msg.append(Strings.get(R.string.storageactivity_057));
         }
-        msg.append("这些文件不属于任何对话，删除后无法恢复。");
+        msg.append(Strings.get(R.string.storageactivity_058));
 
         AcDialog.builder(this)
-                .setTitle("安全清理")
+                .setTitle(Strings.get(R.string.storageactivity_059))
                 .setMessage(msg.toString())
-                .setPositiveButton("清理", new DialogInterface.OnClickListener() {
+                .setPositiveButton(Strings.get(R.string.storageactivity_060), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         doClean(false);
                     }
                 })
-                .setNegativeButton("取消", null)
+                .setNegativeButton(Strings.get(R.string.storageactivity_061), null)
                 .show();
     }
 
@@ -385,7 +385,7 @@ public class StorageActivity extends ThemedActivity {
         if (scanning) return;
         scanning = true;
         cleanBtn.setEnabled(false);
-        cleanBtn.setText("清理中…");
+        cleanBtn.setText(Strings.get(R.string.storageactivity_062));
 
         final boolean skipImages = tempOnly || (report != null
                 && (report.indexIncomplete || report.indexEmpty));
@@ -404,10 +404,10 @@ public class StorageActivity extends ThemedActivity {
                         if (isFinishing() || isDestroyed()) return;
                         String text;
                         if (count == 0) {
-                            text = failed > 0 ? "没有可清理的文件（" + failed + " 个被占用）" : "没有可清理的文件";
+                            text = failed > 0 ? Strings.get(R.string.storageactivity_063) + failed + Strings.get(R.string.storageactivity_064) : Strings.get(R.string.storageactivity_065);
                         } else {
-                            text = "已释放 " + StorageReport.size(bytes) + "，共 " + count + " 个文件";
-                            if (failed > 0) text += "，" + failed + " 个被占用未删除";
+                            text = Strings.get(R.string.storageactivity_066) + StorageReport.size(bytes) + Strings.get(R.string.storageactivity_067) + count + Strings.get(R.string.storageactivity_068);
+                            if (failed > 0) text += "，" + failed + Strings.get(R.string.storageactivity_069);
                         }
                         AcToast.show(StorageActivity.this, text);
                         refresh(true);
@@ -437,7 +437,7 @@ public class StorageActivity extends ThemedActivity {
             ((TextView) row.findViewById(R.id.file_name)).setText(e.file.getName());
             ((TextView) row.findViewById(R.id.file_cat)).setText(
                     StorageReport.categoryName(e.category)
-                            + (e.category == StorageReport.CAT_CONVERSATION ? " · 单个会话" : ""));
+                            + (e.category == StorageReport.CAT_CONVERSATION ? Strings.get(R.string.storageactivity_070) : ""));
             ((TextView) row.findViewById(R.id.file_size)).setText(
                     StorageReport.size(e.bytes) + "  ›");
             FileIconBinder.bind((android.widget.ImageView) row.findViewById(R.id.file_icon), e.file);
@@ -555,30 +555,30 @@ public class StorageActivity extends ThemedActivity {
         TextView intro = new TextView(this);
         intro.setTextSize(13);
         intro.setTextColor(getResources().getColor(R.color.text_secondary));
-        intro.setText("会话、图片、导出都在下面这个数据目录里。"
-                + "把整个目录拷到新手机，历史记录和图片会一起过去。");
+        intro.setText(Strings.get(R.string.storageactivity_071)
+                + Strings.get(R.string.storageactivity_072));
         box.addView(intro, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        addPathRow(box, "数据目录", "会话 / 图片 / 导出",
+        addPathRow(box, Strings.get(R.string.storageactivity_073), Strings.get(R.string.storageactivity_074),
                 sm.getBasePath());
-        addPathRow(box, "附件目录", "图片原件",
+        addPathRow(box, Strings.get(R.string.storageactivity_075), Strings.get(R.string.storageactivity_076),
                 attDir == null ? null : attDir.getAbsolutePath());
-        addPathRow(box, "缓存目录", "系统可随时清理",
+        addPathRow(box, Strings.get(R.string.storageactivity_077), Strings.get(R.string.storageactivity_078),
                 cacheDir == null ? null : cacheDir.getAbsolutePath());
 
         TextView foot = new TextView(this);
         foot.setTextSize(12);
         foot.setTextColor(getResources().getColor(R.color.text_secondary));
         foot.setPadding(0, dp(12), 0, 0);
-        foot.setText("点右侧「复制」把路径放进剪贴板，粘贴到文件管理器的地址栏就能打开。\n"
-                + "旧版本的图片存在应用私有目录，打开应用后会自动迁移到这里，无需 root。");
+        foot.setText(Strings.get(R.string.storageactivity_079)
+                + Strings.get(R.string.storageactivity_080));
         box.addView(foot);
 
         AcDialog.builder(this)
-                .setTitle("存储位置")
+                .setTitle(Strings.get(R.string.storageactivity_081))
                 .setView(box)
-                .setNegativeButton("关闭", null)
+                .setNegativeButton(Strings.get(R.string.storageactivity_082), null)
                 .show();
     }
 
@@ -608,19 +608,19 @@ public class StorageActivity extends ThemedActivity {
         // 路径没有空格，默认不会换行；强制按字符换行，否则长路径会被截掉尾巴，
         // 而尾巴正是「附件在哪个子目录」这个关键信息
         p.setSingleLine(false);
-        p.setText(path == null ? "（不可用）" : path);
+        p.setText(path == null ? Strings.get(R.string.storageactivity_083) : path);
         text.addView(p);
         row.addView(text);
 
         TextView btn = new TextView(this);
-        btn.setText("复制");
+        btn.setText(Strings.get(R.string.storageactivity_084));
         btn.setTextSize(13);
         btn.setTextColor(getResources().getColor(R.color.storage_att));
         btn.setPadding(dp(12), dp(6), dp(4), dp(6));
         btn.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 if (path == null) {
-                    AcToast.show(StorageActivity.this, "路径不可用");
+                    AcToast.show(StorageActivity.this, Strings.get(R.string.storageactivity_085));
                     return;
                 }
                 copy(path);
@@ -635,9 +635,9 @@ public class StorageActivity extends ThemedActivity {
         try {
             ClipboardManager cm = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
             cm.setPrimaryClip(ClipData.newPlainText("path", text));
-            AcToast.show(this, "已复制");
+            AcToast.show(this, Strings.get(R.string.storageactivity_086));
         } catch (Throwable t) {
-            AcToast.show(this, "复制失败");
+            AcToast.show(this, Strings.get(R.string.storageactivity_087));
         }
     }
 

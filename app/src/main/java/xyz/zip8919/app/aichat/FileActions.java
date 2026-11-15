@@ -114,7 +114,7 @@ final class FileActions {
      */
     static void open(Activity a, File f) {
         if (a == null || f == null || !f.isFile()) {
-            AcToast.show(a, "文件不存在");
+            AcToast.show(a, Strings.get(R.string.fileactions_001));
             return;
         }
         String mime = mimeOf(f.getName());
@@ -122,20 +122,20 @@ final class FileActions {
             Intent view = new Intent(Intent.ACTION_VIEW);
             view.setDataAndType(FileActions.uriOf(f), mime);
             view.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            a.startActivity(Intent.createChooser(view, "打开 " + f.getName()));
+            a.startActivity(Intent.createChooser(view, Strings.get(R.string.fileactions_002) + f.getName()));
             LogUtil.i(TAG, "open: %s mime=%s", f.getName(), mime);
         } catch (ActivityNotFoundException e) {
-            AcToast.showLong(a, "没有能打开 " + f.getName() + " 的应用");
+            AcToast.showLong(a, Strings.get(R.string.fileactions_003) + f.getName() + Strings.get(R.string.fileactions_004));
         } catch (Throwable t) {
             LogUtil.w(TAG, "open failed: %s : %s", f.getName(), t.getMessage());
-            AcToast.show(a, "打开失败");
+            AcToast.show(a, Strings.get(R.string.fileactions_005));
         }
     }
 
     /** 分享给其它应用（微信 / 邮件 / 网盘…）。 */
     static void share(Activity a, File f) {
         if (a == null || f == null || !f.isFile()) {
-            AcToast.show(a, "文件不存在");
+            AcToast.show(a, Strings.get(R.string.fileactions_006));
             return;
         }
         String mime = mimeOf(f.getName());
@@ -145,11 +145,11 @@ final class FileActions {
             send.putExtra(Intent.EXTRA_STREAM, FileActions.uriOf(f));
             send.putExtra(Intent.EXTRA_SUBJECT, f.getName());
             send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            a.startActivity(Intent.createChooser(send, "分享 " + f.getName()));
+            a.startActivity(Intent.createChooser(send, Strings.get(R.string.fileactions_007) + f.getName()));
             LogUtil.i(TAG, "share: %s mime=%s", f.getName(), mime);
         } catch (Throwable t) {
             LogUtil.w(TAG, "share failed: %s : %s", f.getName(), t.getMessage());
-            AcToast.show(a, "分享失败");
+            AcToast.show(a, Strings.get(R.string.fileactions_008));
         }
     }
 
@@ -174,7 +174,7 @@ final class FileActions {
                     a.runOnUiThread(new Runnable() {
                         public void run() {
                             if (a.isFinishing() || a.isDestroyed()) return;
-                            AcToast.show(a, "读取失败");
+                            AcToast.show(a, Strings.get(R.string.fileactions_009));
                         }
                     });
                     return;
@@ -279,11 +279,11 @@ final class FileActions {
     static void editText(final Activity a, final File f, final Runnable onSaved) {
         if (a == null || f == null || !f.isFile()) return;
         if (isImage(f.getName())) {
-            AcToast.show(a, "图片不能当文本编辑");
+            AcToast.show(a, Strings.get(R.string.fileactions_010));
             return;
         }
         if (isBinary(f.getName())) {
-            AcToast.show(a, "该类型不是文本文件，不能编辑");
+            AcToast.show(a, Strings.get(R.string.fileactions_011));
             return;
         }
         new Thread(new Runnable() {
@@ -292,7 +292,7 @@ final class FileActions {
                     a.runOnUiThread(new Runnable() {
                         public void run() {
                             if (a.isFinishing() || a.isDestroyed()) return;
-                            AcToast.show(a, "该文件不是文本，不能编辑");
+                            AcToast.show(a, Strings.get(R.string.fileactions_012));
                         }
                     });
                     return;
@@ -302,7 +302,7 @@ final class FileActions {
                     a.runOnUiThread(new Runnable() {
                         public void run() {
                             if (a.isFinishing() || a.isDestroyed()) return;
-                            AcToast.show(a, "该文件不是 UTF-8 文本，编辑后会乱码，已取消");
+                            AcToast.show(a, Strings.get(R.string.fileactions_013));
                         }
                     });
                     return;
@@ -313,7 +313,7 @@ final class FileActions {
                     public void run() {
                         if (a.isFinishing() || a.isDestroyed()) return;
                         if (content == null) {
-                            AcToast.show(a, "读取失败");
+                            AcToast.show(a, Strings.get(R.string.fileactions_014));
                             return;
                         }
                         final android.widget.EditText input = new android.widget.EditText(a);
@@ -323,23 +323,23 @@ final class FileActions {
                         input.setText(content);
                         input.setTextSize(12);
                         AcDialog.builder(a)
-                                .setTitle("编辑 " + f.getName())
+                                .setTitle(Strings.get(R.string.fileactions_015) + f.getName())
                                 .setView(input)
-                                .setPositiveButton("保存", new DialogInterface.OnClickListener() {
+                                .setPositiveButton(Strings.get(R.string.fileactions_016), new DialogInterface.OnClickListener() {
                                     public void onClick(DialogInterface d, int w) {
                                         String ok = StorageManager.getInstance(a.getApplicationContext())
                                                 .saveExport(f.getName(), input.getText().toString());
                                         LogUtil.i(TAG, "editText: save %s ok=%s",
                                                 f.getName(), (ok != null));
                                         if (ok == null) {
-                                            AcToast.show(a, "保存失败");
+                                            AcToast.show(a, Strings.get(R.string.fileactions_017));
                                             return;
                                         }
                                         StorageActivity.invalidateCache();
                                         if (onSaved != null) onSaved.run();
                                     }
                                 })
-                                .setNegativeButton("取消", null)
+                                .setNegativeButton(Strings.get(R.string.fileactions_018), null)
                                 .show();
                     }
                 });
@@ -365,7 +365,7 @@ final class FileActions {
                     public void run() {
                         if (a.isFinishing() || a.isDestroyed()) return;
                         if (content == null) {
-                            AcToast.show(a, "读取失败");
+                            AcToast.show(a, Strings.get(R.string.fileactions_019));
                             return;
                         }
                         String lang = sniffLang(f.getName(), content);
@@ -393,18 +393,18 @@ final class FileActions {
         AlertDialog dialog = AcDialog.builder(a)
                 .setTitle(f.getName() + "  [" + lang + "]")
                 .setView(wv)
-                .setPositiveButton("复制全部", new DialogInterface.OnClickListener() {
+                .setPositiveButton(Strings.get(R.string.fileactions_020), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         android.content.ClipboardManager cm =
                                 (android.content.ClipboardManager) a.getSystemService(
                                         android.content.Context.CLIPBOARD_SERVICE);
                         if (cm != null) {
                             cm.setPrimaryClip(android.content.ClipData.newPlainText("aichat", content));
-                            AcToast.show(a, "已复制到剪贴板");
+                            AcToast.show(a, Strings.get(R.string.fileactions_021));
                         }
                     }
                 })
-                .setNegativeButton("关闭", null)
+                .setNegativeButton(Strings.get(R.string.fileactions_022), null)
                 .create();
         dialog.setOnDismissListener(new DialogInterface.OnDismissListener() {
             public void onDismiss(DialogInterface d) {
@@ -440,7 +440,7 @@ final class FileActions {
     static void previewImage(final Activity a, final File f) {
         // 参数必须 final：匿名内部类要捕获它们（项目按 Java 7 语法编译）
         if (a == null || f == null || !f.isFile()) {
-            AcToast.show(a, "图片不存在");
+            AcToast.show(a, Strings.get(R.string.fileactions_023));
             return;
         }
         new Thread(new Runnable() {
@@ -450,7 +450,7 @@ final class FileActions {
                     public void run() {
                         if (a.isFinishing() || a.isDestroyed()) return;
                         if (uri == null) {
-                            AcToast.showLong(a, "这张图太大，改用「打开方式」查看");
+                            AcToast.showLong(a, Strings.get(R.string.fileactions_024));
                             return;
                         }
                         showImageDialog(a, f, uri);
@@ -515,17 +515,17 @@ final class FileActions {
         AlertDialog dialog = AcDialog.builder(a)
                 .setTitle(f.getName())
                 .setView(wv)
-                .setPositiveButton("打开方式", new DialogInterface.OnClickListener() {
+                .setPositiveButton(Strings.get(R.string.fileactions_025), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         open(a, f);
                     }
                 })
-                .setNeutralButton("分享", new DialogInterface.OnClickListener() {
+                .setNeutralButton(Strings.get(R.string.fileactions_026), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         share(a, f);
                     }
                 })
-                .setNegativeButton("关闭", null)
+                .setNegativeButton(Strings.get(R.string.fileactions_027), null)
                 .create();
         dialog.setOnDismissListener(new DialogInterface.OnDismissListener() {
             public void onDismiss(DialogInterface d) {

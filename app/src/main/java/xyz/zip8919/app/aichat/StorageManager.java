@@ -770,7 +770,7 @@ public class StorageManager {
     }
 
     public String getStorageInfo() {
-        return this.useInternalStorage ? "内部存储: " + this.basePath : "外部存储: " + this.basePath;
+        return this.useInternalStorage ? Strings.get(R.string.storagemanager_001) + this.basePath : Strings.get(R.string.storagemanager_002) + this.basePath;
     }
 
     public boolean isUsingInternalStorage() {

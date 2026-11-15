@@ -90,9 +90,9 @@ final class MarkdownPage {
           .append(ViewerBg.SET_BG_JS)
           .append("</script></head><body><div class=\"doc-wrap\">");
         if (truncated) {
-            sb.append("<div class=\"banner\">文件较大，仅显示前 ")
-              .append(MAX_CHARS / 1024).append("K 字符（共 ")
-              .append(totalChars).append(" 字符）。完整内容仍在消息里，也已发给模型。</div>");
+            sb.append(Strings.get(R.string.markdownpage_001))
+              .append(MAX_CHARS / 1024).append(Strings.get(R.string.markdownpage_002))
+              .append(totalChars).append(Strings.get(R.string.markdownpage_003));
         }
         sb.append(body)
           .append("</div></body></html>");

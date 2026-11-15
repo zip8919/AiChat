@@ -107,7 +107,7 @@ final class AttachmentText {
 
         File(String name, String content, long bytes, String kind, String path,
                 int width, int height, String thumb) {
-            this.name = name == null || name.length() == 0 ? "未命名.txt" : name;
+            this.name = name == null || name.length() == 0 ? Strings.get(R.string.attachmenttext_001) : name;
             this.content = content == null ? "" : content;
             this.bytes = Math.max(0L, bytes);
             this.kind = KIND_IMAGE.equals(kind) ? KIND_IMAGE : KIND_TEXT;
@@ -179,7 +179,7 @@ final class AttachmentText {
         String base = userText == null ? "" : userText;
         if (files == null || files.isEmpty()) return base;
         StringBuilder sb = new StringBuilder(base);
-        if (sb.length() == 0) sb.append("请阅读以下附件。");
+        if (sb.length() == 0) sb.append(Strings.get(R.string.attachmenttext_002));
         // 送模上限按「字符」算，0 表示不截断。只截拼进请求的这份文本，
         // 磁盘与内存里的 AttachmentText.File.content 保持完整——用户把阈值调大后
         // 重发同一条消息，还能拿到全文；改原文等于替用户销毁数据。
@@ -193,30 +193,30 @@ final class AttachmentText {
                 // 图片正文不拼进文字：视觉模式下像素走 image_url 块，这里只留一行
                 // 「有这么一张图」；非视觉模式下明确告诉模型这一轮看不到图，
                 // 免得它对着文件名编内容。图片走自己的字节上限，不占字符预算。
-                sb.append("\n\n[图片附件] ").append(f.name);
+                sb.append(Strings.get(R.string.attachmenttext_003)).append(f.name);
                 String meta = f.imageSize();
                 if (meta.length() > 0) sb.append("（").append(meta).append("）");
                 sb.append(vision
-                        ? "\n（图像内容随本条消息一并提供）"
-                        : "\n（本次为纯文本请求，未包含图像内容）");
+                        ? Strings.get(R.string.attachmenttext_004)
+                        : Strings.get(R.string.attachmenttext_005));
                 continue;
             }
             String body = f.content == null ? "" : f.content;
             int cut = cuts[i];
-            sb.append("\n\n<附件 name=\"").append(f.name).append("\">\n");
+            sb.append(Strings.get(R.string.attachmenttext_006)).append(f.name).append("\">\n");
             if (cut == 0) {
                 // 预算已经用光：仍要把附件标签写出来，否则模型不知道还有这个文件，
                 // 会回答「你只发了一个文件」
-                sb.append("<已截断：原文 ").append(body.length())
-                  .append(" 字符，本请求未发送正文>");
+                sb.append(Strings.get(R.string.attachmenttext_007)).append(body.length())
+                  .append(Strings.get(R.string.attachmenttext_008));
             } else if (cut > 0) {
                 sb.append(body, 0, cut)
-                  .append("\n<已截断：原文 ").append(body.length())
-                  .append(" 字符，仅发送前 ").append(cut).append(" 字符>");
+                  .append(Strings.get(R.string.attachmenttext_009)).append(body.length())
+                  .append(Strings.get(R.string.attachmenttext_010)).append(cut).append(Strings.get(R.string.attachmenttext_011));
             } else {
                 sb.append(body);
             }
-            sb.append("\n</附件>");
+            sb.append(Strings.get(R.string.attachmenttext_012));
         }
         return sb.toString();
     }
@@ -400,7 +400,7 @@ final class AttachmentText {
         if (f.bytes > 0) {
             sb.append(formatBytes(f.bytes)).append(" · ");
         } else {
-            sb.append(f.chars()).append(" 字 · ");
+            sb.append(f.chars()).append(Strings.get(R.string.attachmenttext_013));
         }
         sb.append('~').append(MessageHtmlRenderer.formatTokens(f.tokens())).append(" tokens");
         return sb.toString();
@@ -411,7 +411,7 @@ final class AttachmentText {
         if (files == null || files.isEmpty()) return "";
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < files.size(); i++) {
-            sb.append("\n[附件] ").append(files.get(i).name)
+            sb.append(Strings.get(R.string.attachmenttext_014)).append(files.get(i).name)
               .append("（").append(sizeAndTokens(files.get(i))).append("）");
         }
         return sb.toString();
@@ -427,7 +427,7 @@ final class AttachmentText {
 
     /** 长文件名会把整条附件栏撑爆，超出从中间省略。 */
     static String shortName(String name) {
-        if (name == null || name.length() == 0) return "未命名";
+        if (name == null || name.length() == 0) return Strings.get(R.string.attachmenttext_015);
         if (name.length() <= 18) return name;
         return name.substring(0, 9) + "…" + name.substring(name.length() - 6);
     }

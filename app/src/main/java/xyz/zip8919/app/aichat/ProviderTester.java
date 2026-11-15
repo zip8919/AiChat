@@ -79,7 +79,7 @@ final class ProviderTester {
      * @param p 会先复制一份，测试期间用户改配置不影响这次请求
      */
     static Result testProvider(ProviderInfo p) {
-        if (p == null) return new Result(FAIL, "提供商为空", 0);
+        if (p == null) return new Result(FAIL, Strings.get(R.string.providertester_001), 0);
         ProviderInfo snap = p.copy();
         String baseError = precheck(snap);
         if (baseError != null) return new Result(FAIL, baseError, 0);
@@ -94,8 +94,8 @@ final class ProviderTester {
         }
         if (r.httpCode >= 200 && r.httpCode < 300) {
             int n = countModels(r.body);
-            String extra = n >= 0 ? "，模型 " + n + " 个" : "";
-            return new Result(OK, "连接正常（" + ms + " ms）" + extra, ms);
+            String extra = n >= 0 ? Strings.get(R.string.providertester_002) + n + Strings.get(R.string.providertester_003) : "";
+            return new Result(OK, Strings.get(R.string.providertester_004) + ms + " ms）" + extra, ms);
         }
         // 401/403：Key 问题，换对话端点也一样，不必再试
         if (r.httpCode == 401 || r.httpCode == 403) {
@@ -105,8 +105,8 @@ final class ProviderTester {
         String model = firstConfiguredModel(snap);
         Result chat = testChat(snap, model == null ? "" : model);
         if (chat.ok()) {
-            return new Result(OK, "对话端点可用（" + chat.ms + " ms；/models 返回 HTTP "
-                    + r.httpCode + "，已跳过）" + (model == null ? "，未指定探测模型" : ""), chat.ms);
+            return new Result(OK, Strings.get(R.string.providertester_005) + chat.ms + Strings.get(R.string.providertester_006)
+                    + r.httpCode + Strings.get(R.string.providertester_007) + (model == null ? Strings.get(R.string.providertester_008) : ""), chat.ms);
         }
         return new Result(FAIL, "/models HTTP " + r.httpCode + "；" + chat.message, ms + chat.ms);
     }
@@ -117,19 +117,19 @@ final class ProviderTester {
      * @param modelName 空串时只验证「地址 + Key」（部分端点允许空模型名才用得到）
      */
     static Result testChat(ProviderInfo p, String modelName) {
-        if (p == null) return new Result(FAIL, "提供商为空", 0);
+        if (p == null) return new Result(FAIL, Strings.get(R.string.providertester_009), 0);
         ProviderInfo snap = p.copy();
         String baseError = precheck(snap);
         if (baseError != null) return new Result(FAIL, baseError, 0);
         String model = modelName == null ? "" : modelName.trim();
-        if (model.length() == 0) return new Result(FAIL, "模型 ID 为空", 0);
+        if (model.length() == 0) return new Result(FAIL, Strings.get(R.string.providertester_010), 0);
 
         long t0 = System.currentTimeMillis();
         Raw r = post(Endpoint.chatUrl(snap), snap.apiKey, minimalBody(model));
         long ms = System.currentTimeMillis() - t0;
 
         if (r.error == null && r.httpCode >= 200 && r.httpCode < 300) {
-            return new Result(OK, "可用（" + ms + " ms）", ms);
+            return new Result(OK, Strings.get(R.string.providertester_011) + ms + " ms）", ms);
         }
         return new Result(FAIL, describe(snap, r, ms, model), ms);
     }
@@ -145,7 +145,7 @@ final class ProviderTester {
      * 响应兼容 {@code {"data":[{"id":...}]}}、{@code {"models":[...]}}、纯数组三种。
      */
     static ModelsResult fetchModels(ProviderInfo p) {
-        if (p == null) return new ModelsResult(false, null, "提供商为空");
+        if (p == null) return new ModelsResult(false, null, Strings.get(R.string.providertester_012));
         ProviderInfo snap = p.copy();
         String baseError = precheck(snap);
         if (baseError != null) return new ModelsResult(false, null, baseError);
@@ -167,11 +167,11 @@ final class ProviderTester {
             if (r.httpCode >= 200 && r.httpCode < 300) {
                 List<String> names = parseModels(r.body);
                 if (names == null) {
-                    lastMessage = "返回内容不是可识别的模型列表";
+                    lastMessage = Strings.get(R.string.providertester_013);
                     continue;
                 }
                 LogUtil.i(TAG, "fetchModels ok: %s -> %d models", url, names.size());
-                return new ModelsResult(true, names, "获取到 " + names.size() + " 个模型");
+                return new ModelsResult(true, names, Strings.get(R.string.providertester_014) + names.size() + Strings.get(R.string.providertester_015));
             }
             lastMessage = describe(snap, r, 0, null);
             LogUtil.w(TAG, "fetchModels %s -> HTTP %d", url, r.httpCode);
@@ -181,10 +181,10 @@ final class ProviderTester {
 
     private static String precheck(ProviderInfo p) {
         if (!Endpoint.isHttpUrl(p.apiUrl)) {
-            return "Base URL 不是有效的 http(s) 地址";
+            return Strings.get(R.string.providertester_016);
         }
         if (p.apiKey == null || p.apiKey.trim().length() == 0) {
-            return "未填写 API Key";
+            return Strings.get(R.string.providertester_017);
         }
         return null;
     }
@@ -365,16 +365,16 @@ final class ProviderTester {
         int code = r.httpCode;
         String detail = errorMessage(r.body);
         String suffix = detail.length() > 0 ? "：" + detail : "";
-        if (code == 401) return "HTTP 401 认证失败，请检查 API Key" + suffix;
-        if (code == 403) return "HTTP 403 被拒绝（Key 无权限或该地区受限）" + suffix;
+        if (code == 401) return Strings.get(R.string.providertester_018) + suffix;
+        if (code == 403) return Strings.get(R.string.providertester_019) + suffix;
         if (code == 404) {
-            return "HTTP 404 地址或模型不存在，请检查 Base URL / Chat Path"
-                    + (model == null ? "" : " / 模型 ID") + suffix;
+            return Strings.get(R.string.providertester_020)
+                    + (model == null ? "" : Strings.get(R.string.providertester_021)) + suffix;
         }
-        if (code == 405) return "HTTP 405 该地址不接受此请求方法（可能不是 chat completions 端点）" + suffix;
-        if (code == 429) return "HTTP 429 触发限流或额度不足" + suffix;
-        if (code == 400) return "HTTP 400 请求被拒绝（模型 ID 或参数不被接受）" + suffix;
-        if (code >= 500) return "HTTP " + code + " 服务端错误（对方故障，稍后再试）" + suffix;
+        if (code == 405) return Strings.get(R.string.providertester_022) + suffix;
+        if (code == 429) return Strings.get(R.string.providertester_023) + suffix;
+        if (code == 400) return Strings.get(R.string.providertester_024) + suffix;
+        if (code >= 500) return "HTTP " + code + Strings.get(R.string.providertester_025) + suffix;
         return "HTTP " + code + suffix;
     }
 
@@ -385,36 +385,36 @@ final class ProviderTester {
         boolean local = Endpoint.isLocalHost(p.apiUrl);
         if (lower.contains("unknownhost") || lower.contains("nodename nor servname")
                 || lower.contains("unable to resolve host")) {
-            return "无法解析域名 " + host + "，请检查地址拼写或当前网络";
+            return Strings.get(R.string.providertester_026) + host + Strings.get(R.string.providertester_027);
         }
         if (lower.contains("sockettimeout") || lower.contains("timed out") || lower.contains("timeout")) {
-            return "连接超时（15 秒），对方无响应" + (local ? "；内网地址可能被网络策略拦截" : "");
+            return Strings.get(R.string.providertester_028) + (local ? Strings.get(R.string.providertester_029) : "");
         }
         if (lower.contains("certificate") || lower.contains("certpathvalidator")
                 || lower.contains("trust anchor") || lower.contains("hostname")) {
-            return "证书校验失败（自签证书可在设置里开启「信任所有证书」后重试）";
+            return Strings.get(R.string.providertester_030);
         }
         if (lower.contains("sslexception") || lower.contains("handshake")) {
-            return "TLS 握手失败" + (local ? "；内网地址请确认协议是否为 https" : "，对方可能不支持当前系统可用的加密套件");
+            return Strings.get(R.string.providertester_031) + (local ? Strings.get(R.string.providertester_032) : Strings.get(R.string.providertester_033));
         }
         if (lower.contains("connectexception") || lower.contains("econnrefused")
                 || lower.contains("failed to connect")) {
-            return "无法建立连接（端口未开放或地址不可达）";
+            return Strings.get(R.string.providertester_034);
         }
         if (lower.contains("cleartext") || lower.contains("not permitted")) {
-            return "非 https 地址被系统拦截";
+            return Strings.get(R.string.providertester_035);
         }
         // 兜底也给原始异常，否则日志里对不上
-        return "网络错误：" + TextKit.shorten(r, 120);
+        return Strings.get(R.string.providertester_036) + TextKit.shorten(r, 120);
     }
 
     /** 供调试：把异常类名映射成人话（保留给将来接入 javax.net 的直接调用）。 */
     static String explainThrowable(Throwable t) {
         if (t == null) return "";
-        if (t instanceof UnknownHostException) return "无法解析域名";
-        if (t instanceof SocketTimeoutException) return "连接超时";
-        if (t instanceof CertificateException) return "证书校验失败";
-        if (t instanceof SSLException) return "TLS 握手失败";
+        if (t instanceof UnknownHostException) return Strings.get(R.string.providertester_037);
+        if (t instanceof SocketTimeoutException) return Strings.get(R.string.providertester_038);
+        if (t instanceof CertificateException) return Strings.get(R.string.providertester_039);
+        if (t instanceof SSLException) return Strings.get(R.string.providertester_040);
         return t.getClass().getSimpleName();
     }
 }

@@ -22,7 +22,7 @@
             android:layout_width="0dp"
             android:layout_weight="1"
             android:layout_height="wrap_content"
-            android:text="浅色" />
+            android:text="@string/activity_theme_preview_001" />
         <Button
             android:id="@+id/btn_toggle_source"
             android:textSize="12sp"
@@ -34,7 +34,7 @@
             android:layout_width="0dp"
             android:layout_weight="1"
             android:layout_height="wrap_content"
-            android:text="当前主题" />
+            android:text="@string/activity_theme_preview_002" />
     </LinearLayout>
 
     <ScrollView
@@ -56,7 +56,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginBottom="8dp"
-                android:text="主题预览" />
+                android:text="@string/activity_theme_preview_003" />
 
             <LinearLayout
                 android:id="@+id/pv_card"
@@ -71,7 +71,7 @@
                     android:textStyle="bold"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="组标题卡片" />
+                    android:text="@string/activity_theme_preview_004" />
                 <TextView
                     android:id="@+id/pv_card_text"
                     android:textSize="12sp"
@@ -79,7 +79,7 @@
                     android:ellipsize="end"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="普通说明文字，用于观察次要文字颜色" />
+                    android:text="@string/activity_theme_preview_005" />
             </LinearLayout>
 
             <LinearLayout
@@ -97,7 +97,7 @@
                     android:layout_width="0dp"
                     android:layout_weight="1"
                     android:layout_height="wrap_content"
-                    android:text="普通按钮" />
+                    android:text="@string/activity_theme_preview_006" />
                 <Button
                     android:id="@+id/pv_btn_primary"
                     android:textSize="12sp"
@@ -108,7 +108,7 @@
                     android:layout_width="0dp"
                     android:layout_weight="1"
                     android:layout_height="wrap_content"
-                    android:text="主色按钮" />
+                    android:text="@string/activity_theme_preview_007" />
             </LinearLayout>
 
             <EditText
@@ -118,7 +118,7 @@
                 android:minHeight="48dp"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="输入框示例" />
+                android:text="@string/activity_theme_preview_008" />
 
             <Spinner
                 android:id="@+id/pv_spinner"
@@ -132,7 +132,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:minHeight="48dp"
-                android:text="开关示例" />
+                android:text="@string/activity_theme_preview_009" />
 
             <TextView
                 android:id="@+id/pv_bubble_user"
@@ -142,7 +142,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginBottom="6dp"
-                android:text="用户气泡：这是一条用户发出的消息" />
+                android:text="@string/activity_theme_preview_010" />
 
             <TextView
                 android:id="@+id/pv_bubble_ai"
@@ -152,7 +152,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginBottom="6dp"
-                android:text="AI 气泡：这是一段回复，包含链接与代码块" />
+                android:text="@string/activity_theme_preview_011" />
 
             <TextView
                 android:id="@+id/pv_code"
@@ -163,7 +163,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginBottom="6dp"
-                android:text="val x = 1  // 代码块样例" />
+                android:text="@string/activity_theme_preview_012" />
 
             <TextView
                 android:id="@+id/pv_info"
@@ -172,7 +172,7 @@
                 android:ellipsize="end"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="ⓘ 说明行：主题只覆盖颜色与字体，不改布局" />
+                android:text="@string/activity_theme_preview_013" />
 
         </LinearLayout>
     </ScrollView>
@@ -199,7 +199,7 @@
             android:layout_width="0dp"
             android:layout_weight="1"
             android:layout_height="wrap_content"
-            android:text="应用此主题" />
+            android:text="@string/activity_theme_preview_014" />
         <Button
             android:id="@+id/btn_back"
             android:textSize="12sp"
@@ -210,7 +210,7 @@
             android:layout_width="0dp"
             android:layout_weight="1"
             android:layout_height="wrap_content"
-            android:text="返回" />
+            android:text="@string/activity_theme_preview_015" />
     </LinearLayout>
 
 </LinearLayout>

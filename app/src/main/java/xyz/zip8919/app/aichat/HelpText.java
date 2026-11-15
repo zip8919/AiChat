@@ -13,34 +13,34 @@ final class HelpText {
 
     /** 功能说明。改完 UI 记得回来同步，这里是用户唯一会读的地方。 */
     static String usage() {
-        return "使用说明\n"
-                + "1. 下方输入问题，点右侧纸飞机发送；生成中点方块可停止。\n"
-                + "2. 输入框有内容时，右侧会出现全屏输入按钮，点开可大屏编辑。\n"
-                + "3. 加号按钮可附加文本文件、图片（相册 / 拍照 / 图片链接），\n"
-                + "   选图和拍照会先进裁剪页，可以只截取需要的区域。\n"
-                + "4. 在「模型配置」里勾选「支持图片输入（多模态）」后，图片会随请求发给模型；\n"
-                + "   未勾选时图片只在本机查看，不会转发。\n"
-                + "5. 点消息下方的附件卡片可打开文件：代码带语法高亮，HTML/SVG/Markdown 右上角\n"
-                + "   可切到预览，JS 可点「运行」，图片直接进图片查看器。\n"
-                + "6. 联网搜索支持图片搜索：结果以缩略图显示，点开可看大图；\n"
-                + "   模型支持多模态时会直接看到这些图片。\n"
-                + "7. 长按任意消息可复制、重试、修改、回溯或创建分支。\n"
-                + "8. 消息底部显示时间；AI 消息另显示 token 用量与生成速度，\n"
-                + "   图片按视觉计费口径估算 token。\n"
-                + "9. 设置页可配置模型、联网搜索、429 自动重试、网络请求权限\n"
-                + "   与代码执行提示词。\n"
-                + "10. 联网搜索、模型调用与网络请求需要自行填写 API Key。";
+        return Strings.get(R.string.helptext_001)
+                + Strings.get(R.string.helptext_002)
+                + Strings.get(R.string.helptext_003)
+                + Strings.get(R.string.helptext_004)
+                + Strings.get(R.string.helptext_005)
+                + Strings.get(R.string.helptext_006)
+                + Strings.get(R.string.helptext_007)
+                + Strings.get(R.string.helptext_008)
+                + Strings.get(R.string.helptext_009)
+                + Strings.get(R.string.helptext_010)
+                + Strings.get(R.string.helptext_011)
+                + Strings.get(R.string.helptext_012)
+                + Strings.get(R.string.helptext_013)
+                + Strings.get(R.string.helptext_014)
+                + Strings.get(R.string.helptext_015)
+                + Strings.get(R.string.helptext_016)
+                + Strings.get(R.string.helptext_017);
     }
 
     /** 免责声明。 */
     static String disclaimer() {
-        return "免责声明\n"
-                + "· 模型输出由第三方服务生成，仅供参考，请自行核实。\n"
-                + "· 联网搜索内容版权归原作者所有。\n"
-                + "· API Key 由你自行提供，相应费用与风险由你承担。\n"
-                + "· 开启「允许 AI 发起网络请求」后，模型可代你请求公网地址，\n"
-                + "  请自行确认请求目标可信。\n"
-                + "· 对话内容与密钥只保存在本机，不会上传到任何自有服务器。";
+        return Strings.get(R.string.helptext_018)
+                + Strings.get(R.string.helptext_019)
+                + Strings.get(R.string.helptext_020)
+                + Strings.get(R.string.helptext_021)
+                + Strings.get(R.string.helptext_022)
+                + Strings.get(R.string.helptext_023)
+                + Strings.get(R.string.helptext_024);
     }
 
     /** 首启弹窗用：说明 + 声明。 */

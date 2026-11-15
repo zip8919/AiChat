@@ -207,7 +207,7 @@ final class ThemeRepository {
         if (t.id == null || t.id.length() == 0) {
             t.id = "t" + UUID.randomUUID().toString().substring(0, 8);
         }
-        if (t.name == null || t.name.trim().length() == 0) t.name = "未命名主题";
+        if (t.name == null || t.name.trim().length() == 0) t.name = Strings.get(R.string.themerepository_001);
         try {
             String json = t.toJson();
             String path = themePath(t.id);

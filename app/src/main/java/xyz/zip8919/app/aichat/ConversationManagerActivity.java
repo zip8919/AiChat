@@ -112,7 +112,7 @@ public class ConversationManagerActivity extends ThemedActivity {
         });
         if (!uiState.getBoolean(KEY_TOOLS_HINT_SHOWN, false)) {
             uiState.edit().putBoolean(KEY_TOOLS_HINT_SHOWN, true).apply();
-            AcToast.showLong(this, "常用代码与 JS 运行器在「工具」里");
+            AcToast.showLong(this, Strings.get(R.string.conversationmanageractivity_001));
         }
 
         findViewById(R.id.new_conversation_button).setOnClickListener(new View.OnClickListener() {
@@ -138,19 +138,19 @@ public class ConversationManagerActivity extends ThemedActivity {
                 }
                 if (conversations == null || conversations.isEmpty()) {
                     LogUtil.w(TAG, "click: clear history but list empty");
-                    AcToast.show(ConversationManagerActivity.this, "没有历史记录");
+                    AcToast.show(ConversationManagerActivity.this, Strings.get(R.string.conversationmanageractivity_002));
                     return;
                 }
                 LogUtil.d(TAG, "click: clear history, %d conversations -> confirm dialog", conversations.size());
                 AcDialog.builder(ConversationManagerActivity.this)
-                        .setTitle("清空历史")
-                        .setMessage("确定要清空所有历史对话吗？\n\n此操作不可恢复！")
-                        .setPositiveButton("清空", new DialogInterface.OnClickListener() {
+                        .setTitle(Strings.get(R.string.conversationmanageractivity_003))
+                        .setMessage(Strings.get(R.string.conversationmanageractivity_004))
+                        .setPositiveButton(Strings.get(R.string.conversationmanageractivity_005), new DialogInterface.OnClickListener() {
                             public void onClick(DialogInterface dialog, int which) {
                                 clearAllHistory();
                             }
                         })
-                        .setNegativeButton("取消", null)
+                        .setNegativeButton(Strings.get(R.string.conversationmanageractivity_006), null)
                         .show();
             }
         });
@@ -159,7 +159,7 @@ public class ConversationManagerActivity extends ThemedActivity {
             public void onClick(View v) {
                 if (conversations == null || conversations.isEmpty()) {
                     LogUtil.w(TAG, "click: select mode but list empty");
-                    AcToast.show(ConversationManagerActivity.this, "没有历史记录");
+                    AcToast.show(ConversationManagerActivity.this, Strings.get(R.string.conversationmanageractivity_007));
                     return;
                 }
                 enterSelectionMode();
@@ -178,7 +178,7 @@ public class ConversationManagerActivity extends ThemedActivity {
         sortToggle.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 sortBySize = !sortBySize;
-                sortToggle.setText(sortBySize ? "按时间" : "按体积");
+                sortToggle.setText(sortBySize ? Strings.get(R.string.conversationmanageractivity_008) : Strings.get(R.string.conversationmanageractivity_009));
                 LogUtil.d(TAG, "click: sortBySize=%s", sortBySize);
                 applySort();
             }
@@ -271,8 +271,8 @@ public class ConversationManagerActivity extends ThemedActivity {
             sortToggle.setVisibility(selectionMode ? View.GONE : View.VISIBLE);
         }
         selectionCount.setText(selectionMode
-                ? ("已选 " + (adapter == null ? 0 : adapter.getSelectedCount()) + " / " + conversations.size())
-                : (fromStorage ? "点击查看占用详情，长按更多操作" : "点击多选可批量删除"));
+                ? (Strings.get(R.string.conversationmanageractivity_010) + (adapter == null ? 0 : adapter.getSelectedCount()) + " / " + conversations.size())
+                : (fromStorage ? Strings.get(R.string.conversationmanageractivity_011) : Strings.get(R.string.conversationmanageractivity_012)));
     }
 
     /** 按当前模式排序。作用在副本上，不动 ConversationManager 内部列表。 */
@@ -315,18 +315,18 @@ public class ConversationManagerActivity extends ThemedActivity {
         final List<String> ids = adapter.getSelectedIds();
         if (ids.isEmpty()) {
             LogUtil.w(TAG, "delete selected: nothing selected");
-            AcToast.show(this, "请先选择要删除的对话");
+            AcToast.show(this, Strings.get(R.string.conversationmanageractivity_013));
             return;
         }
         AcDialog.builder(this)
-                .setTitle("删除对话")
-                .setMessage("确定要删除选中的 " + ids.size() + " 个对话吗？\n\n此操作不可恢复！")
-                .setPositiveButton("删除", new DialogInterface.OnClickListener() {
+                .setTitle(Strings.get(R.string.conversationmanageractivity_014))
+                .setMessage(Strings.get(R.string.conversationmanageractivity_015) + ids.size() + Strings.get(R.string.conversationmanageractivity_016))
+                .setPositiveButton(Strings.get(R.string.conversationmanageractivity_017), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface dialog, int which) {
                         deleteSelected(ids);
                     }
                 })
-                .setNegativeButton("取消", null)
+                .setNegativeButton(Strings.get(R.string.conversationmanageractivity_018), null)
                 .show();
     }
 
@@ -344,7 +344,7 @@ public class ConversationManagerActivity extends ThemedActivity {
                     public void run() {
                         if (isFinishing() || isDestroyed()) return;
                         exitSelectionMode();
-                        AcToast.show(ConversationManagerActivity.this, "已删除 " + removed + " 个对话");
+                        AcToast.show(ConversationManagerActivity.this, Strings.get(R.string.conversationmanageractivity_019) + removed + Strings.get(R.string.conversationmanageractivity_020));
                         loadConversations();
                         LogUtil.i(TAG, "deleteSelected done: removed=%d", removed);
                     }
@@ -405,25 +405,25 @@ public class ConversationManagerActivity extends ThemedActivity {
         // 列表项可能只有索引元数据、没有 messages，条数优先取 messageCount
         int count = conv.messageCount > 0 ? conv.messageCount
                 : (conv.messages == null ? 0 : conv.messages.size());
-        String msg = "消息 " + count + " 条\n"
-                + "占用 " + StorageReport.size(conv.fileBytes) + "\n"
-                + "最后更新 " + android.text.format.DateFormat.format("yyyy-MM-dd HH:mm",
+        String msg = Strings.get(R.string.conversationmanageractivity_021) + count + Strings.get(R.string.conversationmanageractivity_022)
+                + Strings.get(R.string.conversationmanageractivity_023) + StorageReport.size(conv.fileBytes) + "\n"
+                + Strings.get(R.string.conversationmanageractivity_024) + android.text.format.DateFormat.format("yyyy-MM-dd HH:mm",
                         conv.updatedAt) + "\n\n"
-                + "删除后该会话的图片若不再被别的会话使用，会在图片附件里变成「无引用」。";
+                + Strings.get(R.string.conversationmanageractivity_025);
         AcDialog.builder(this)
                 .setTitle(ConversationManager.normalizeTitle(conv.title))
                 .setMessage(msg)
-                .setPositiveButton("查看", new DialogInterface.OnClickListener() {
+                .setPositiveButton(Strings.get(R.string.conversationmanageractivity_026), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         openConversation(conv);
                     }
                 })
-                .setNeutralButton("删除", new DialogInterface.OnClickListener() {
+                .setNeutralButton(Strings.get(R.string.conversationmanageractivity_027), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         showDeleteDialog(conv);
                     }
                 })
-                .setNegativeButton("关闭", null)
+                .setNegativeButton(Strings.get(R.string.conversationmanageractivity_028), null)
                 .show();
     }
 
@@ -443,13 +443,13 @@ public class ConversationManagerActivity extends ThemedActivity {
     }
 
     private void showActionDialog(final Conversation conv) {
-        String[] items = {"重命名", "删除"};
+        String[] items = {Strings.get(R.string.conversationmanageractivity_029), Strings.get(R.string.conversationmanageractivity_030)};
         AcDialog.builder(this)
-                .setTitle("对话操作: " + conv.title)
+                .setTitle(Strings.get(R.string.conversationmanageractivity_031) + conv.title)
                 .setItems(items, new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface dialog, int which) {
                         LogUtil.d(TAG, "action dialog: id=%s which=%d (%s)", conv.id, which,
-                                which == 0 ? "重命名" : "删除");
+                                which == 0 ? Strings.get(R.string.conversationmanageractivity_032) : Strings.get(R.string.conversationmanageractivity_033));
                         if (which == 0) {
                             showRenameDialog(conv);
                         } else {
@@ -457,7 +457,7 @@ public class ConversationManagerActivity extends ThemedActivity {
                         }
                     }
                 })
-                .setNegativeButton("取消", null)
+                .setNegativeButton(Strings.get(R.string.conversationmanageractivity_034), null)
                 .show();
     }
 
@@ -467,9 +467,9 @@ public class ConversationManagerActivity extends ThemedActivity {
         input.setSelectAllOnFocus(true);
 
         AcDialog.builder(this)
-                .setTitle("重命名对话")
+                .setTitle(Strings.get(R.string.conversationmanageractivity_035))
                 .setView(input)
-                .setPositiveButton("确定", new DialogInterface.OnClickListener() {
+                .setPositiveButton(Strings.get(R.string.conversationmanageractivity_036), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface dialog, int which) {
                         String newTitle = input.getText().toString().trim();
                         LogUtil.d(TAG, "rename: id=%s newTitle='%s'", conv.id, newTitle);
@@ -489,22 +489,22 @@ public class ConversationManagerActivity extends ThemedActivity {
                                 conversationManager.saveConversationAsync(conv);
                             }
                             adapter.notifyDataSetChanged();
-                            AcToast.show(ConversationManagerActivity.this, "已重命名");
+                            AcToast.show(ConversationManagerActivity.this, Strings.get(R.string.conversationmanageractivity_037));
                             LogUtil.i(TAG, "rename ok: id=%s -> '%s'", conv.id, newTitle);
                         } else {
-                            AcToast.show(ConversationManagerActivity.this, "名称不能为空");
+                            AcToast.show(ConversationManagerActivity.this, Strings.get(R.string.conversationmanageractivity_038));
                         }
                     }
                 })
-                .setNegativeButton("取消", null)
+                .setNegativeButton(Strings.get(R.string.conversationmanageractivity_039), null)
                 .show();
     }
 
     private void showDeleteDialog(final Conversation conv) {
         AcDialog.builder(this)
-                .setTitle("删除对话")
-                .setMessage("确定要删除\"" + conv.title + "\"吗？")
-                .setPositiveButton("删除", new DialogInterface.OnClickListener() {
+                .setTitle(Strings.get(R.string.conversationmanageractivity_040))
+                .setMessage(Strings.get(R.string.conversationmanageractivity_041) + conv.title + Strings.get(R.string.conversationmanageractivity_042))
+                .setPositiveButton(Strings.get(R.string.conversationmanageractivity_043), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface dialog, int which) {
                         LogUtil.i(TAG, "delete confirmed: id=%s title=%s", conv.id, conv.title);
                         // 单条删除同样是重活：attachmentNames 要读整个会话 json（含 base64
@@ -526,14 +526,14 @@ public class ConversationManagerActivity extends ThemedActivity {
                                         }
                                         if (adapter != null) adapter.notifyDataSetChanged();
                                         LogUtil.d(TAG, "delete done: remaining=%d", conversations.size());
-                                        AcToast.show(ConversationManagerActivity.this, "已删除");
+                                        AcToast.show(ConversationManagerActivity.this, Strings.get(R.string.conversationmanageractivity_044));
                                     }
                                 });
                             }
                         }, "aichat-delete-one").start();
                     }
                 })
-                .setNegativeButton("取消", null)
+                .setNegativeButton(Strings.get(R.string.conversationmanageractivity_045), null)
                 .show();
     }
 
@@ -557,7 +557,7 @@ public class ConversationManagerActivity extends ThemedActivity {
                         conversations.clear();
                         adapter.notifyDataSetChanged();
                         LogUtil.i(TAG, "clearAllHistory done: %d remaining", conversations.size());
-                        AcToast.show(ConversationManagerActivity.this, "已清空所有历史对话");
+                        AcToast.show(ConversationManagerActivity.this, Strings.get(R.string.conversationmanageractivity_046));
                     }
                 });
             }

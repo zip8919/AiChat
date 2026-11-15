@@ -90,7 +90,7 @@ public final class UpdateManager {
      * 模板含 {url} 时替换，否则当作前缀直接拼接。
      */
     private static final String[][] BUILTIN = {
-            {"直连 github.com", ""},
+            {Strings.get(R.string.updatemanager_001), ""},
             {"gh-proxy.com", "https://gh-proxy.com/{url}"},
             {"ghfast.top", "https://ghfast.top/{url}"},
             {"ghproxy.link", "https://ghproxy.link/{url}"},
@@ -428,9 +428,9 @@ public final class UpdateManager {
                 ? template.replace("{url}", "https://github.com/x/y") : template;
         try {
             String h = new URL(probe).getHost();
-            return h == null || h.length() == 0 ? "自定义" : h;
+            return h == null || h.length() == 0 ? Strings.get(R.string.updatemanager_002) : h;
         } catch (Exception e) {
-            return "自定义镜像";
+            return Strings.get(R.string.updatemanager_003);
         }
     }
 
@@ -488,7 +488,7 @@ public final class UpdateManager {
                 if (cancelled) {
                     MAIN.post(new Runnable() {
                         public void run() {
-                            if (cb != null) cb.onRelease(null, "已取消");
+                            if (cb != null) cb.onRelease(null, Strings.get(R.string.updatemanager_004));
                         }
                     });
                     return;
@@ -509,7 +509,7 @@ public final class UpdateManager {
                         r = parseRelease(body);
                     }
                 } catch (Throwable t) {
-                    err = cancelled ? "已取消" : "请求失败：" + brief(t);
+                    err = cancelled ? Strings.get(R.string.updatemanager_005) : Strings.get(R.string.updatemanager_006) + brief(t);
                 } finally {
                     closeQuietly(c);
                 }
@@ -526,9 +526,9 @@ public final class UpdateManager {
 
     private static String apiError(HttpURLConnection c, int code) {
         if (code == 403 && "0".equals(c.getHeaderField("X-RateLimit-Remaining"))) {
-            return "GitHub API 限流（未认证 60 次/小时），请稍后再试";
+            return Strings.get(R.string.updatemanager_007);
         }
-        return "GitHub API 返回 " + code;
+        return Strings.get(R.string.updatemanager_008) + code;
     }
 
     private static Release parseRelease(String body) throws Exception {
@@ -754,7 +754,7 @@ public final class UpdateManager {
                 if (cancelled) {
                     MAIN.post(new Runnable() {
                         public void run() {
-                            if (cb != null) cb.onDownloaded(null, "已取消");
+                            if (cb != null) cb.onDownloaded(null, Strings.get(R.string.updatemanager_009));
                         }
                     });
                     return;
@@ -766,9 +766,9 @@ public final class UpdateManager {
                 try {
                     if (!target.getParentFile().isDirectory()
                             && !target.getParentFile().mkdirs()) {
-                        throw new Exception("无法创建下载目录");
+                        throw new Exception(Strings.get(R.string.updatemanager_010));
                     }
-                    if (tmp.exists() && !tmp.delete()) throw new Exception("无法清理临时文件");
+                    if (tmp.exists() && !tmp.delete()) throw new Exception(Strings.get(R.string.updatemanager_011));
                     c = open(url, false);
                     c.setConnectTimeout(8000);
                     c.setReadTimeout(20000);
@@ -784,7 +784,7 @@ public final class UpdateManager {
                     int n;
                     try {
                         while ((n = in.read(buf)) > 0) {
-                            if (cancelled) throw new Exception("已取消");
+                            if (cancelled) throw new Exception(Strings.get(R.string.updatemanager_012));
                             out.write(buf, 0, n);
                             written += n;
                             long now = System.currentTimeMillis();
@@ -799,17 +799,17 @@ public final class UpdateManager {
                         try { out.close(); } catch (Throwable t) {}
                         try { in.close(); } catch (Throwable t) {}
                     }
-                    if (cancelled) throw new Exception("已取消");
+                    if (cancelled) throw new Exception(Strings.get(R.string.updatemanager_013));
                     long expected = expectSize > 0 ? expectSize : total;
                     if (expected > 0 && tmp.length() != expected) {
-                        throw new Exception("文件大小不符，可能被镜像截断或返回错误页");
+                        throw new Exception(Strings.get(R.string.updatemanager_014));
                     }
-                    if (target.exists() && !target.delete()) throw new Exception("无法覆盖旧包");
-                    if (!tmp.renameTo(target)) throw new Exception("写入失败");
+                    if (target.exists() && !target.delete()) throw new Exception(Strings.get(R.string.updatemanager_015));
+                    if (!tmp.renameTo(target)) throw new Exception(Strings.get(R.string.updatemanager_016));
                     done = target;
                     postProgress(cb, written, total > 0 ? total : written);
                 } catch (Throwable t) {
-                    err = cancelled ? "已取消" : brief(t);
+                    err = cancelled ? Strings.get(R.string.updatemanager_017) : brief(t);
                     if (tmp.exists()) tmp.delete();
                 } finally {
                     closeQuietly(c);
@@ -903,7 +903,7 @@ public final class UpdateManager {
         int n;
         while ((n = r.read(buf)) > 0) {
             sb.append(buf, 0, n);
-            if (sb.length() > limit) throw new Exception("响应过大");
+            if (sb.length() > limit) throw new Exception(Strings.get(R.string.updatemanager_018));
         }
         return sb.toString();
     }

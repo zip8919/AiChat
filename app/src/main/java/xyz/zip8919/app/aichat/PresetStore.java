@@ -82,11 +82,11 @@ final class PresetStore {
      * <p>不写成「新预设1」是因为编号从 2 开始更符合中文习惯（第一个就是名字本身）。
      */
     static String nextName(Context ctx) {
-        return nextName(load(ctx), "新预设");
+        return nextName(load(ctx), Strings.get(R.string.presetstore_001));
     }
 
     static String nextName(List<Preset> list, String base) {
-        String b = base == null || base.trim().length() == 0 ? "新预设" : base.trim();
+        String b = base == null || base.trim().length() == 0 ? Strings.get(R.string.presetstore_002) : base.trim();
         if (!contains(list, b, null)) return b;
         for (int n = 2; n < 10000; n++) {
             String cand = b + n;

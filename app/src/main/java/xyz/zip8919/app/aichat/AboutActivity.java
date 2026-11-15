@@ -25,7 +25,7 @@ public class AboutActivity extends ThemedActivity {
         setContentView(R.layout.activity_about);
 
         TextView version = (TextView) findViewById(R.id.about_version);
-        version.setText("版本 " + versionText());
+        version.setText(Strings.get(R.string.aboutactivity_001) + versionText());
 
         Button help = (Button) findViewById(R.id.about_help);
         Button checkUpdate = (Button) findViewById(R.id.about_check_update);
@@ -44,7 +44,7 @@ public class AboutActivity extends ThemedActivity {
         });
         feedback.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
-                AcToast.show(AboutActivity.this, "反馈建议功能待开发");
+                AcToast.show(AboutActivity.this, Strings.get(R.string.aboutactivity_002));
             }
         });
         licenses.setOnClickListener(new View.OnClickListener() {
@@ -62,7 +62,7 @@ public class AboutActivity extends ThemedActivity {
             return info.versionName + " (" + info.versionCode + ")";
         } catch (Exception e) {
             LogUtil.w(TAG, "versionText failed: %s", e.getMessage());
-            return "未知";
+            return Strings.get(R.string.aboutactivity_003);
         }
     }
 
@@ -71,9 +71,9 @@ public class AboutActivity extends ThemedActivity {
      */
     private void showHelp() {
         AcDialog.builder(this)
-                .setTitle("使用说明")
+                .setTitle(Strings.get(R.string.aboutactivity_004))
                 .setMessage(HelpText.full())
-                .setPositiveButton("关闭", new DialogInterface.OnClickListener() {
+                .setPositiveButton(Strings.get(R.string.aboutactivity_005), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         d.dismiss();
                     }
@@ -86,15 +86,15 @@ public class AboutActivity extends ThemedActivity {
      * 具体条款以各项目仓库为准。
      */
     private void showLicenses() {
-        String text = "本应用使用了以下开源组件，版权归各自作者所有，"
-                + "分别按其项目仓库中的许可证发布：\n\n"
+        String text = Strings.get(R.string.aboutactivity_006)
+                + Strings.get(R.string.aboutactivity_007)
                 + "• commonmark-java\n  github.com/commonmark/commonmark-java\n\n"
                 + "• jlatexmath-android\n  github.com/noties/jlatexmath-android\n\n"
                 + "• Conscrypt\n  github.com/google/conscrypt\n";
         AcDialog.builder(this)
-                .setTitle("开源许可")
+                .setTitle(Strings.get(R.string.aboutactivity_008))
                 .setMessage(text)
-                .setPositiveButton("关闭", new DialogInterface.OnClickListener() {
+                .setPositiveButton(Strings.get(R.string.aboutactivity_009), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         d.dismiss();
                     }

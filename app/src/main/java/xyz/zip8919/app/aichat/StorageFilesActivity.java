@@ -88,11 +88,11 @@ public class StorageFilesActivity extends ThemedActivity {
         });
 
         // 按钮文案是「点了会变成什么」，与对话记录页一致
-        sortBtn.setText("按时间");
+        sortBtn.setText(Strings.get(R.string.storagefilesactivity_001));
         sortBtn.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 sortBySize = !sortBySize;
-                sortBtn.setText(sortBySize ? "按时间" : "按体积");
+                sortBtn.setText(sortBySize ? Strings.get(R.string.storagefilesactivity_002) : Strings.get(R.string.storagefilesactivity_003));
                 LogUtil.d(TAG, "click: sortBySize=%s", sortBySize);
                 sort();
                 adapter.notifyDataSetChanged();
@@ -191,12 +191,12 @@ public class StorageFilesActivity extends ThemedActivity {
                         fileMeta.clear();
                         fileMeta.putAll(meta);
                         summary.setText(files.isEmpty()
-                                ? "暂无文件"
-                                : files.size() + " 个文件 · 共 " + StorageReport.size(totalSize));
+                                ? Strings.get(R.string.storagefilesactivity_004)
+                                : files.size() + Strings.get(R.string.storagefilesactivity_005) + StorageReport.size(totalSize));
                         adapter.notifyDataSetChanged();
                         if (files.isEmpty()) {
                             empty.setVisibility(View.VISIBLE);
-                            empty.setText("还没有保存的文件\n对话里导出的图片会出现在这里");
+                            empty.setText(Strings.get(R.string.storagefilesactivity_006));
                         } else {
                             empty.setVisibility(View.GONE);
                         }
@@ -279,9 +279,9 @@ public class StorageFilesActivity extends ThemedActivity {
      */
     private void showMenu(final File f) {
         String[] items = {
-                "查看内容", "预览 / 运行", "编辑",
-                "打开方式（第三方应用）", "分享",
-                "重命名", "删除"
+                Strings.get(R.string.storagefilesactivity_007), Strings.get(R.string.storagefilesactivity_008), Strings.get(R.string.storagefilesactivity_009),
+                Strings.get(R.string.storagefilesactivity_010), Strings.get(R.string.storagefilesactivity_011),
+                Strings.get(R.string.storagefilesactivity_012), Strings.get(R.string.storagefilesactivity_013)
         };
         AcDialog.builder(this)
                 .setTitle(f.getName())
@@ -301,7 +301,7 @@ public class StorageFilesActivity extends ThemedActivity {
                         }
                     }
                 })
-                .setNegativeButton("取消", null)
+                .setNegativeButton(Strings.get(R.string.storagefilesactivity_014), null)
                 .show();
     }
 
@@ -310,9 +310,9 @@ public class StorageFilesActivity extends ThemedActivity {
         input.setText(f.getName());
         input.setSelectAllOnFocus(true);
         AcDialog.builder(this)
-                .setTitle("重命名")
+                .setTitle(Strings.get(R.string.storagefilesactivity_015))
                 .setView(input)
-                .setPositiveButton("确定", new DialogInterface.OnClickListener() {
+                .setPositiveButton(Strings.get(R.string.storagefilesactivity_016), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         String name = input.getText().toString().trim();
                         if (TextUtils.isEmpty(name)) return;
@@ -335,34 +335,34 @@ public class StorageFilesActivity extends ThemedActivity {
                         String renamed = StorageManager.getInstance(getApplicationContext())
                                 .renameExport(f.getName(), name);
                         if (renamed == null) {
-                            AcToast.show(StorageFilesActivity.this, "重命名失败（重名或文件被占用）");
+                            AcToast.show(StorageFilesActivity.this, Strings.get(R.string.storagefilesactivity_017));
                             return;
                         }
                         StorageActivity.invalidateCache();
                         reload();
                     }
                 })
-                .setNegativeButton("取消", null)
+                .setNegativeButton(Strings.get(R.string.storagefilesactivity_018), null)
                 .show();
     }
 
     private void confirmDelete(final File f) {
         AcDialog.builder(this)
-                .setTitle("删除文件")
-                .setMessage("删除 " + f.getName() + "？\n\n"
-                        + StorageReport.size(f.length()) + "，此操作不可恢复。")
-                .setPositiveButton("删除", new DialogInterface.OnClickListener() {
+                .setTitle(Strings.get(R.string.storagefilesactivity_019))
+                .setMessage(Strings.get(R.string.storagefilesactivity_020) + f.getName() + "？\n\n"
+                        + StorageReport.size(f.length()) + Strings.get(R.string.storagefilesactivity_021))
+                .setPositiveButton(Strings.get(R.string.storagefilesactivity_022), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         boolean ok = f.delete();
                         LogUtil.i(TAG, "delete: %s ok=%s", f.getName(), ok);
                         if (!ok) {
-                            AcToast.show(StorageFilesActivity.this, "删除失败，文件可能被占用");
+                            AcToast.show(StorageFilesActivity.this, Strings.get(R.string.storagefilesactivity_023));
                         }
                         StorageActivity.invalidateCache();
                         reload();
                     }
                 })
-                .setNegativeButton("取消", null)
+                .setNegativeButton(Strings.get(R.string.storagefilesactivity_024), null)
                 .show();
     }
 

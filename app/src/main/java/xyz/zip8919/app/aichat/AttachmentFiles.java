@@ -81,7 +81,7 @@ final class AttachmentFiles {
     static AttachmentText.File importImage(Context ctx, Uri uri, String displayName, int maxBytes)
             throws Exception {
         InputStream in = ctx.getContentResolver().openInputStream(uri);
-        if (in == null) throw new Exception("无法打开图片");
+        if (in == null) throw new Exception(Strings.get(R.string.attachmentfiles_001));
         return importStream(ctx, in, displayName, maxBytes);
     }
 
@@ -94,7 +94,7 @@ final class AttachmentFiles {
             int maxBytes) throws Exception {
         File dir = StorageManager.getInstance(ctx).getAttachmentsDir();
         if (dir == null) dir = new File(ctx.getFilesDir(), "attachments");
-        if (!dir.exists() && !dir.mkdirs()) throw new Exception("无法创建附件目录");
+        if (!dir.exists() && !dir.mkdirs()) throw new Exception(Strings.get(R.string.attachmentfiles_002));
         sweepTempFiles(dir);
         File tmp = new File(dir, "tmp-" + System.currentTimeMillis() + ".bin");
 
@@ -109,7 +109,7 @@ final class AttachmentFiles {
                 while ((n = in.read(buf)) > 0) {
                     total += n;
                     if (total > maxBytes) {
-                        throw new Exception("图片超过 " + AttachmentText.formatBytes(maxBytes));
+                        throw new Exception(Strings.get(R.string.attachmentfiles_003) + AttachmentText.formatBytes(maxBytes));
                     }
                     md.update(buf, 0, n);
                     out.write(buf, 0, n);
@@ -128,7 +128,7 @@ final class AttachmentFiles {
 
         if (total == 0) {
             tmp.delete();
-            throw new Exception("图片是空文件");
+            throw new Exception(Strings.get(R.string.attachmentfiles_004));
         }
 
         File target = new File(dir, digest + extensionOf(displayName));
@@ -137,7 +137,7 @@ final class AttachmentFiles {
             tmp.delete();
         } else if (!tmp.renameTo(target)) {
             tmp.delete();
-            throw new Exception("保存图片失败");
+            throw new Exception(Strings.get(R.string.attachmentfiles_005));
         }
 
         // 文件已经落在 attachments 里，但消息还没产生引用：登记成草稿，
@@ -153,7 +153,7 @@ final class AttachmentFiles {
             // 解不出边界说明不是图片（或格式不支持）。删掉刚拷的文件，
             // 不要留一个点开就白屏的附件。
             target.delete();
-            throw new Exception("不是可识别的图片格式");
+            throw new Exception(Strings.get(R.string.attachmentfiles_006));
         }
 
         String thumb = thumbDataUri(target.getAbsolutePath(), w, h);
@@ -297,9 +297,9 @@ final class AttachmentFiles {
      */
     static File stageToCache(Context ctx, Uri uri, int maxBytes) throws Exception {
         InputStream in = ctx.getContentResolver().openInputStream(uri);
-        if (in == null) throw new Exception("无法打开图片");
+        if (in == null) throw new Exception(Strings.get(R.string.attachmentfiles_007));
         File dir = new File(ctx.getCacheDir(), "camera");
-        if (!dir.exists() && !dir.mkdirs()) throw new Exception("无法创建缓存目录");
+        if (!dir.exists() && !dir.mkdirs()) throw new Exception(Strings.get(R.string.attachmentfiles_008));
         File out = new File(dir, "pick-" + System.currentTimeMillis() + ".bin");
         try {
             FileOutputStream fos = new FileOutputStream(out);
@@ -310,7 +310,7 @@ final class AttachmentFiles {
                 while ((n = in.read(buf)) > 0) {
                     total += n;
                     if (total > maxBytes) {
-                        throw new Exception("图片超过 "
+                        throw new Exception(Strings.get(R.string.attachmentfiles_009)
                                 + AttachmentText.formatBytes(maxBytes));
                     }
                     fos.write(buf, 0, n);
@@ -319,7 +319,7 @@ final class AttachmentFiles {
             } finally {
                 try { fos.close(); } catch (Exception ignored) { }
             }
-            if (out.length() == 0) throw new Exception("图片是空文件");
+            if (out.length() == 0) throw new Exception(Strings.get(R.string.attachmentfiles_010));
             return out;
         } catch (Exception e) {
             // 半截文件留在 cache 里只会占地方，下次也读不出图
@@ -342,7 +342,7 @@ final class AttachmentFiles {
         URL url = new URL(urlStr == null ? "" : urlStr.trim());
         String protocol = url.getProtocol();
         if (!"http".equalsIgnoreCase(protocol) && !"https".equalsIgnoreCase(protocol)) {
-            throw new Exception("只支持 http/https 链接");
+            throw new Exception(Strings.get(R.string.attachmentfiles_011));
         }
         HttpURLConnection conn = openFollowingRedirects(url);
         try {
@@ -352,10 +352,10 @@ final class AttachmentFiles {
             String name = nameFromUrl(url, type);
             if (!FileKinds.looksLikeImage(name, type)) {
                 throw new Exception(type == null
-                        ? "这个链接不是图片" : "这个链接不是图片（" + type + "）");
+                        ? Strings.get(R.string.attachmentfiles_012) : Strings.get(R.string.attachmentfiles_013) + type + "）");
             }
             InputStream in = conn.getInputStream();
-            if (in == null) throw new Exception("无法读取图片");
+            if (in == null) throw new Exception(Strings.get(R.string.attachmentfiles_014));
             return importStream(ctx, in, name, maxBytes);
         } finally {
             try { conn.disconnect(); } catch (Exception ignored) { }
@@ -389,14 +389,14 @@ final class AttachmentFiles {
                 String location = conn.getHeaderField("Location");
                 try { conn.disconnect(); } catch (Exception ignored) { }
                 if (location == null || location.length() == 0) {
-                    throw new Exception("重定向缺少目标地址");
+                    throw new Exception(Strings.get(R.string.attachmentfiles_015));
                 }
                 current = new URL(current, location);
                 continue;
             }
             return conn;
         }
-        throw new Exception("重定向次数过多");
+        throw new Exception(Strings.get(R.string.attachmentfiles_016));
     }
 
     /** 从 URL 的路径段取文件名；没有扩展名时按 Content-Type 补一个。 */
@@ -633,15 +633,15 @@ final class AttachmentFiles {
             BitmapFactory.decodeByteArray(data, 0, data.length, bounds);
             int w = bounds.outWidth;
             int h = bounds.outHeight;
-            if (w <= 0 || h <= 0) throw new Exception("这个链接不是可识别的图片");
+            if (w <= 0 || h <= 0) throw new Exception(Strings.get(R.string.attachmentfiles_017));
 
             int target = maxSide > 0 ? maxSide : ImageTokens.apiSide(w, h);
             BitmapFactory.Options o = new BitmapFactory.Options();
             o.inSampleSize = sampleSize(w, h, target);
             bmp = BitmapFactory.decodeByteArray(data, 0, data.length, o);
-            if (bmp == null) throw new Exception("图片解码失败");
+            if (bmp == null) throw new Exception(Strings.get(R.string.attachmentfiles_018));
             String uri = compressToDataUri(bmp, target, 82);
-            if (uri == null) throw new Exception("图片编码失败");
+            if (uri == null) throw new Exception(Strings.get(R.string.attachmentfiles_019));
             return uri;
         } finally {
             if (bmp != null) bmp.recycle();
@@ -711,7 +711,7 @@ final class AttachmentFiles {
         URL url = new URL(urlStr == null ? "" : urlStr.trim());
         String protocol = url.getProtocol();
         if (!"http".equalsIgnoreCase(protocol) && !"https".equalsIgnoreCase(protocol)) {
-            throw new Exception("只支持 http/https 链接");
+            throw new Exception(Strings.get(R.string.attachmentfiles_020));
         }
         HttpURLConnection conn = openFollowingRedirects(url);
         try {
@@ -719,10 +719,10 @@ final class AttachmentFiles {
             if (code != 200) throw new Exception("HTTP " + code);
             String type = conn.getContentType();
             if (type != null && !type.toLowerCase(Locale.US).startsWith("image/")) {
-                throw new Exception("链接不是图片（" + type + "）");
+                throw new Exception(Strings.get(R.string.attachmentfiles_021) + type + "）");
             }
             InputStream in = conn.getInputStream();
-            if (in == null) throw new Exception("无法读取图片");
+            if (in == null) throw new Exception(Strings.get(R.string.attachmentfiles_022));
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             try {
                 byte[] buf = new byte[8192];
@@ -731,7 +731,7 @@ final class AttachmentFiles {
                 while ((n = in.read(buf)) > 0) {
                     total += n;
                     if (total > maxImageBytes()) {
-                        throw new Exception("图片超过 "
+                        throw new Exception(Strings.get(R.string.attachmentfiles_023)
                                 + AttachmentText.formatBytes(maxImageBytes()));
                     }
                     out.write(buf, 0, n);

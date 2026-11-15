@@ -182,7 +182,7 @@ public class ConversationAdapter extends BaseAdapter {
         // 才退回实际列表长度。
         int msgCount = conv.messageCount > 0 ? conv.messageCount
                 : (conv.messages == null ? 0 : conv.messages.size());
-        sub.append(" · ").append(msgCount).append(" 条");
+        sub.append(" · ").append(msgCount).append(Strings.get(R.string.conversationadapter_001));
         if (conv.fileBytes > 0) {
             sub.append(" · ").append(StorageReport.size(conv.fileBytes));
         }

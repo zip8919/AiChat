@@ -149,7 +149,7 @@ final class SseRound {
             } catch (Exception e) {
                 LogUtil.e(TAG, "tool_call#%d arguments incomplete: %s",
                         i, LogUtil.preview(args, 200));
-                r.error = "工具调用参数不完整";
+                r.error = Strings.get(R.string.sseround_001);
                 r.cause = new Exception("tool_call arguments truncated: "
                         + LogUtil.preview(args, 200));
                 return;
@@ -177,8 +177,8 @@ final class SseRound {
             // JSONException 的形式冒到上层：那样错误卡片只有一句 "Expected ..."，
             // 而真正的线索就在响应体里。
             String apiMsg = errorMessageOf(r.rawBody);
-            r.error = apiMsg != null ? apiMsg : "响应解析失败";
-            r.cause = new Exception("非流式响应不是 JSON："
+            r.error = apiMsg != null ? apiMsg : Strings.get(R.string.sseround_002);
+            r.cause = new Exception(Strings.get(R.string.sseround_003)
                     + LogUtil.preview(r.rawBody, 160));
             LogUtil.e(TAG, "non-stream response is not JSON");
             return;
@@ -192,14 +192,14 @@ final class SseRound {
             if (apiMsg != null) {
                 // HTTP 200 + 错误体（余额不足、key 无效、模型下线）：把原话交给用户
                 r.error = apiMsg;
-                r.cause = new Exception("非流式响应是错误体");
+                r.cause = new Exception(Strings.get(R.string.sseround_004));
                 LogUtil.e(TAG, "non-stream body is an error object: %s",
                         LogUtil.preview(apiMsg, 200));
                 return;
             }
             LogUtil.e(TAG, "non-stream response missing choices[0].message");
-            r.error = "响应解析失败";
-            r.cause = new Exception("非流式响应缺少 choices[0].message");
+            r.error = Strings.get(R.string.sseround_005);
+            r.cause = new Exception(Strings.get(R.string.sseround_006));
             return;
         }
 
@@ -220,8 +220,8 @@ final class SseRound {
 
         if (content.length() == 0 && reasoning.length() == 0 && r.toolCalls.length() == 0) {
             LogUtil.e(TAG, "non-stream response has no content and no tool calls");
-            r.error = "响应解析失败";
-            r.cause = new Exception("响应既无 content 也无 tool_calls");
+            r.error = Strings.get(R.string.sseround_007);
+            r.cause = new Exception(Strings.get(R.string.sseround_008));
             return;
         }
         LogUtil.i(TAG, "non-stream: raw=%d content=%d tools=%d",
@@ -378,14 +378,14 @@ final class SseRound {
                         LogUtil.preview(apiMsg, 200));
                 return;
             }
-            r.error = "服务端没有返回任何内容";
+            r.error = Strings.get(R.string.sseround_009);
             if (body.length() > 0) r.rawBody = body;
             r.cause = new Exception("empty SSE stream: no data line received");
             LogUtil.e(TAG, "stream produced no chunks at all");
             return;
         }
         if (r.display.length() == 0 && r.toolCalls.length() == 0) {
-            r.error = "响应解析失败";
+            r.error = Strings.get(R.string.sseround_010);
             r.cause = new Exception("stream has neither text nor tool_calls");
             LogUtil.e(TAG, "stream finished without text or tool calls (chunks=%d)", r.chunks);
             return;

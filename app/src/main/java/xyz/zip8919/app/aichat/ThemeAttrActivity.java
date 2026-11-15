@@ -47,22 +47,22 @@ public class ThemeAttrActivity extends ThemedActivity {
     private static Theme sResumeTheme;
 
     private static final String[][] LABELS = {
-            {ThemeTokens.AC_PRIMARY, "主色", "顶部栏、主按钮、选中态"},
-            {ThemeTokens.AC_PRIMARY_DARK, "主色·深", "按压态、状态栏"},
-            {ThemeTokens.AC_ACCENT, "强调色", "强调文字、引用边"},
-            {ThemeTokens.AC_BG, "页面底色", "整页背景"},
-            {ThemeTokens.AC_SURFACE, "表面色", "卡片、输入框、列表"},
-            {ThemeTokens.AC_TEXT, "主文字", "正文、标题"},
-            {ThemeTokens.AC_TEXT_SECONDARY, "次要文字", "说明、时间戳"},
-            {ThemeTokens.AC_DIVIDER, "分隔线", "列表分割、分区线"},
-            {ThemeTokens.AC_BUBBLE_USER, "用户气泡", "自己发送的消息"},
-            {ThemeTokens.AC_BUBBLE_AI, "AI 气泡", "模型回复"},
-            {ThemeTokens.AC_DANGER, "错误色", "错误卡片、失败提示"},
-            {ThemeTokens.AC_TRACK, "轨道色", "进度条轨道、高亮底"},
-            {ThemeTokens.AC_CODE_BG, "代码底", "代码块背景"},
-            {ThemeTokens.AC_CODE_TEXT, "代码字", "代码块文字"},
-            {ThemeTokens.AC_LINK, "链接色", "超链接"},
-            {ThemeTokens.AC_BORDER, "边框色", "描边、输入框边"},
+            {ThemeTokens.AC_PRIMARY, Strings.get(R.string.themeattractivity_001), Strings.get(R.string.themeattractivity_002)},
+            {ThemeTokens.AC_PRIMARY_DARK, Strings.get(R.string.themeattractivity_003), Strings.get(R.string.themeattractivity_004)},
+            {ThemeTokens.AC_ACCENT, Strings.get(R.string.themeattractivity_005), Strings.get(R.string.themeattractivity_006)},
+            {ThemeTokens.AC_BG, Strings.get(R.string.themeattractivity_007), Strings.get(R.string.themeattractivity_008)},
+            {ThemeTokens.AC_SURFACE, Strings.get(R.string.themeattractivity_009), Strings.get(R.string.themeattractivity_010)},
+            {ThemeTokens.AC_TEXT, Strings.get(R.string.themeattractivity_011), Strings.get(R.string.themeattractivity_012)},
+            {ThemeTokens.AC_TEXT_SECONDARY, Strings.get(R.string.themeattractivity_013), Strings.get(R.string.themeattractivity_014)},
+            {ThemeTokens.AC_DIVIDER, Strings.get(R.string.themeattractivity_015), Strings.get(R.string.themeattractivity_016)},
+            {ThemeTokens.AC_BUBBLE_USER, Strings.get(R.string.themeattractivity_017), Strings.get(R.string.themeattractivity_018)},
+            {ThemeTokens.AC_BUBBLE_AI, Strings.get(R.string.themeattractivity_019), Strings.get(R.string.themeattractivity_020)},
+            {ThemeTokens.AC_DANGER, Strings.get(R.string.themeattractivity_021), Strings.get(R.string.themeattractivity_022)},
+            {ThemeTokens.AC_TRACK, Strings.get(R.string.themeattractivity_023), Strings.get(R.string.themeattractivity_024)},
+            {ThemeTokens.AC_CODE_BG, Strings.get(R.string.themeattractivity_025), Strings.get(R.string.themeattractivity_026)},
+            {ThemeTokens.AC_CODE_TEXT, Strings.get(R.string.themeattractivity_027), Strings.get(R.string.themeattractivity_028)},
+            {ThemeTokens.AC_LINK, Strings.get(R.string.themeattractivity_029), Strings.get(R.string.themeattractivity_030)},
+            {ThemeTokens.AC_BORDER, Strings.get(R.string.themeattractivity_031), Strings.get(R.string.themeattractivity_032)},
     };
 
     private AppearanceManager am;
@@ -146,9 +146,9 @@ public class ThemeAttrActivity extends ThemedActivity {
         TextView title = (TextView) findViewById(R.id.attr_title);
         TextView hint = (TextView) findViewById(R.id.attr_hint);
         if (theme != null) {
-            title.setText("属性 · " + (theme.name == null || theme.name.length() == 0
-                    ? "未命名主题" : theme.name));
-            hint.setText("改动会直接写进主题，并立即预览。返回后记得在主题编辑页点保存。");
+            title.setText(Strings.get(R.string.themeattractivity_033) + (theme.name == null || theme.name.length() == 0
+                    ? Strings.get(R.string.themeattractivity_034) : theme.name));
+            hint.setText(Strings.get(R.string.themeattractivity_035));
         }
 
         buildRows();
@@ -248,8 +248,8 @@ public class ThemeAttrActivity extends ThemedActivity {
     }
 
     private void refreshModeButtons() {
-        btnLight.setText(editingDark ? "○ 浅色" : "● 浅色");
-        btnDark.setText(editingDark ? "● 深色" : "○ 深色");
+        btnLight.setText(editingDark ? Strings.get(R.string.themeattractivity_036) : Strings.get(R.string.themeattractivity_037));
+        btnDark.setText(editingDark ? Strings.get(R.string.themeattractivity_038) : Strings.get(R.string.themeattractivity_039));
     }
 
     // ---- 取值 / 写值（两模式统一入口）----
@@ -313,13 +313,13 @@ public class ThemeAttrActivity extends ThemedActivity {
         list.removeAllViews();
         rows.clear();
 
-        addSection("颜色");
+        addSection(Strings.get(R.string.themeattractivity_040));
         for (int i = 0; i < LABELS.length; i++) {
             addColorRow(LABELS[i][0], LABELS[i][1], LABELS[i][2]);
         }
-        addSection("字体");
-        addFontRow(ThemeTokens.FONT_UI, "界面字体", "正文字体");
-        addFontRow(ThemeTokens.FONT_MONO, "等宽字体", "代码块字体");
+        addSection(Strings.get(R.string.themeattractivity_041));
+        addFontRow(ThemeTokens.FONT_UI, Strings.get(R.string.themeattractivity_042), Strings.get(R.string.themeattractivity_043));
+        addFontRow(ThemeTokens.FONT_MONO, Strings.get(R.string.themeattractivity_044), Strings.get(R.string.themeattractivity_045));
     }
 
     private void addSection(String title) {
@@ -458,15 +458,15 @@ public class ThemeAttrActivity extends ThemedActivity {
 
     private String sourceLabel(String definedValue) {
         if (theme != null) {
-            return definedValue != null ? "主题定义" : "未定义 · 用内置默认";
+            return definedValue != null ? Strings.get(R.string.themeattractivity_046) : Strings.get(R.string.themeattractivity_047);
         }
-        if (definedValue != null) return "已覆盖";
+        if (definedValue != null) return Strings.get(R.string.themeattractivity_048);
         String name = am.getActiveThemeName();
-        return name == null ? "跟随内置默认" : "跟随主题「" + name + "」";
+        return name == null ? Strings.get(R.string.themeattractivity_049) : Strings.get(R.string.themeattractivity_050) + name + "」";
     }
 
     private String fontLabel(String id) {
-        if (id == null || id.length() == 0 || "system".equals(id)) return "系统默认";
+        if (id == null || id.length() == 0 || "system".equals(id)) return Strings.get(R.string.themeattractivity_058);
         List<FontRepository.FontItem> fonts = FontRepository.getInstance().list();
         for (int i = 0; i < fonts.size(); i++) {
             if (id.equals(fonts.get(i).id)) return fonts.get(i).name;
@@ -544,9 +544,9 @@ public class ThemeAttrActivity extends ThemedActivity {
                 setValue(token, hexOf(color[0]));
             }
         };
-        root.addView(labeled("色相", 360, Math.round(hsv[0]), 1, l));
-        root.addView(labeled("饱和度", 100, Math.round(hsv[1] * 100), 2, l));
-        root.addView(labeled("明度", 100, Math.round(hsv[2] * 100), 3, l));
+        root.addView(labeled(Strings.get(R.string.themeattractivity_051), 360, Math.round(hsv[0]), 1, l));
+        root.addView(labeled(Strings.get(R.string.themeattractivity_052), 100, Math.round(hsv[1] * 100), 2, l));
+        root.addView(labeled(Strings.get(R.string.themeattractivity_053), 100, Math.round(hsv[2] * 100), 3, l));
 
         hex.addTextChangedListener(new TextWatcher() {
             public void beforeTextChanged(CharSequence s, int a, int b, int cnt) {}
@@ -565,11 +565,11 @@ public class ThemeAttrActivity extends ThemedActivity {
         });
 
         final AlertDialog d = AcDialog.builder(this)
-                .setTitle("编辑 · " + labelOf(token))
+                .setTitle(Strings.get(R.string.themeattractivity_054) + labelOf(token))
                 .setView(root)
-                .setPositiveButton("确定", null)
-                .setNeutralButton("跟随主题", null)
-                .setNegativeButton("取消", null)
+                .setPositiveButton(Strings.get(R.string.themeattractivity_055), null)
+                .setNeutralButton(Strings.get(R.string.themeattractivity_056), null)
+                .setNegativeButton(Strings.get(R.string.themeattractivity_057), null)
                 .create();
 
         AcDialog.onShow(d, new DialogInterface.OnShowListener() {
@@ -619,7 +619,7 @@ public class ThemeAttrActivity extends ThemedActivity {
     private void openFontPicker(final String token) {
         final List<FontRepository.FontItem> fonts = FontRepository.getInstance().list();
         List<String> items = new ArrayList<String>();
-        items.add("系统默认");
+        items.add(Strings.get(R.string.themeattractivity_058));
         final List<String> ids = new ArrayList<String>();
         ids.add("system");
         for (int i = 0; i < fonts.size(); i++) {
@@ -629,7 +629,7 @@ public class ThemeAttrActivity extends ThemedActivity {
             ids.add(f.id);
         }
         AcDialog.builder(this)
-                .setTitle("选择 · " + labelOf(token))
+                .setTitle(Strings.get(R.string.themeattractivity_059) + labelOf(token))
                 .setItems(items.toArray(new String[items.size()]),
                         new DialogInterface.OnClickListener() {
                             public void onClick(DialogInterface d, int which) {
@@ -637,7 +637,7 @@ public class ThemeAttrActivity extends ThemedActivity {
                                 setValue(token, "system".equals(id) ? null : id);
                             }
                         })
-                .setNegativeButton("取消", null)
+                .setNegativeButton(Strings.get(R.string.themeattractivity_060), null)
                 .show();
     }
 
@@ -647,8 +647,8 @@ public class ThemeAttrActivity extends ThemedActivity {
         for (int i = 0; i < LABELS.length; i++) {
             if (LABELS[i][0].equals(token)) return LABELS[i][1];
         }
-        if (ThemeTokens.FONT_UI.equals(token)) return "界面字体";
-        if (ThemeTokens.FONT_MONO.equals(token)) return "等宽字体";
+        if (ThemeTokens.FONT_UI.equals(token)) return Strings.get(R.string.themeattractivity_042);
+        if (ThemeTokens.FONT_MONO.equals(token)) return Strings.get(R.string.themeattractivity_044);
         return token;
     }
 

@@ -126,11 +126,11 @@ final class StorageReport {
 
     static String categoryName(int category) {
         switch (category) {
-            case CAT_CONVERSATION: return "对话";
-            case CAT_ATTACHMENT: return "图片";
-            case CAT_EXPORT: return "导出";
-            case CAT_TEMP: return "临时";
-            default: return "其他";
+            case CAT_CONVERSATION: return Strings.get(R.string.storagereport_001);
+            case CAT_ATTACHMENT: return Strings.get(R.string.storagereport_002);
+            case CAT_EXPORT: return Strings.get(R.string.storagereport_003);
+            case CAT_TEMP: return Strings.get(R.string.storagereport_004);
+            default: return Strings.get(R.string.storagereport_005);
         }
     }
 

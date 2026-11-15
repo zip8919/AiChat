@@ -257,10 +257,10 @@ final class ToolExecutor {
         try {
             JSONObject text = new JSONObject();
             text.put("type", "text");
-            text.put("text", "以下是刚才图片搜索结果中的前 "
+            text.put("text", Strings.get(R.string.toolexecutor_001)
                     + Math.min(images.length(), MAX_INJECTED_IMAGES)
-                    + " 张图片（已压缩），请结合图像内容回答用户的问题。"
-                    + "其余图片只提供了链接；如果图片与问题无关，请忽略并在回答中说明。");
+                    + Strings.get(R.string.toolexecutor_002)
+                    + Strings.get(R.string.toolexecutor_003));
             parts.put(text);
 
             int added = 0;
