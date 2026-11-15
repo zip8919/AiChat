@@ -34,7 +34,6 @@ AiChat/
 │   ├── workflows/release.yml         # 推送 v* 标签触发构建与发布
 │   └── RELEASE_NOTES.md              # CI 直接读它当 Release 正文
 ├── docs/
-│   ├── regression-checklist.md       # 改动后的回归清单
 │   └── rendering-test-suite.md       # 渲染能力的手测语料
 ├── build.sh / build.bat / build.ps1  # 三平台构建封装
 ├── gradlew / gradlew.bat / gradle/
@@ -337,7 +336,7 @@ ci: Release body 直接读 RELEASE_NOTES.md
 仓库内**没有自动化测试**（`app/src/test` 不存在）。验证靠三条：
 
 1. `./gradlew clean assembleDebug` 必须成功，无新增 warning 级别的资源/清单错误。
-2. `docs/regression-checklist.md` 里与改动相关的条目在真机上过一遍。
+2. 改动涉及的功能在真机上手动过一遍，写在提交信息里。
 3. 纯逻辑类优先在本地 JVM 桩工程里断言（`.test/`，不入库）：`SseRound`、`ToolExecutor`、`StreamRenderer`、`ChatHistory`、`MarkdownPipeline`、`FileKinds`、`ThemeText`、`TextKit`、`Endpoint`、`MessageSanitizer` 都不依赖 Android 运行时，三个桩（`android.util.Log`、`Context`、`Bitmap`）就能跑。`ChatStreamRunner` 依赖 HTTP，不做单测，靠真机回归。
 
 新增纯逻辑类时，尽量让它不碰 `Bitmap` / `Context`，这样才留得住可测性。
@@ -374,7 +373,6 @@ export KEY_ALIAS=mc
 |---|---|---|---|
 | `README.md` | 使用者 | 能做什么、怎么装、怎么用、常见问题 | 实现细节、参数阈值、版本过程、开发备注 |
 | `AGENTS.md` | 改代码的人 / 代理 | 架构、边界、约定、红线 | 面向用户的营销文案 |
-| `docs/regression-checklist.md` | 自测 | 可执行的验证步骤 | 一次性任务记录 |
 | `.github/RELEASE_NOTES.md` | 升级用户 | 本版变更 | 内部重构细节 |
 
 规则：

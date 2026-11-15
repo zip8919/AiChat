@@ -4,8 +4,6 @@
 
 用法：把下面整段内容复制进输入框发给模型，或直接作为一条消息粘贴，逐节目视检查渲染结果。也可以只取某一节做局部验证。
 
-对应回归项见 [regression-checklist.md](regression-checklist.md) 第一、五组。
-
 ---
 
 ## 一、Markdown 基础

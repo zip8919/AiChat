@@ -75,7 +75,7 @@ Tavily 需要在「设置 → Tavily API Key」填密钥；选 DeepSeek 后端�
 
 ## 开发
 
-架构、模块边界、兼容性红线与发布流程见 [AGENTS.md](AGENTS.md)；回归清单见 [docs/regression-checklist.md](docs/regression-checklist.md)。
+架构、模块边界、兼容性红线与发布流程见 [AGENTS.md](AGENTS.md)。
 
 ## 免责声明
 
