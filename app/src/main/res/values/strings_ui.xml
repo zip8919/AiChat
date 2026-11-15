@@ -2085,7 +2085,7 @@
     <string name="dialog_prompt_preview_003">插入输入框</string>
     <string name="dialog_prompt_preview_004">直接发送</string>
     <string name="activity_appearance_tag_001">主题颜色会作为主色应用到 ActionBar 与消息界面。自定义取色可指定任意颜色；选中内置色或自定义色都会记为「显式覆盖」，优先于主题默认值。</string>
-    <string name="activity_appearance_tag_002" formatted="false">只缩放文字，不改变按钮与布局尺寸。50%~250% 是给移植到其他 DPI 设备用的适配旋钮，本设备已按屏幕适配，默认 100% 无需修改。主题不覆盖此项。</string>
+    <string name="activity_appearance_tag_002" formatted="false">只调整文字大小，按钮和布局尺寸不变。可设为 50%~250%，默认 100%，按需要调整即可。主题不会改变这项设置。</string>
     <string name="activity_appearance_tag_003">界面文字的 5 档微调，独立于「显示大小」。显示大小是整体倍率，字体大小是在此基础上再叠加的档位；两者都只作用于原生界面文字，消息页文字只跟随显示大小。</string>
     <string name="activity_appearance_tag_004">覆盖优先级：你手动改过的项 大于 自定义主题 大于 内置默认。选中主题只重置「跟随主题」的项，已手动改过的项会保留。每项旁的「跟随主题」可单项清除覆盖。</string>
     <string name="activity_appearance_tag_005">临时保存只在本次运行生效，应用被杀或重启后自动回到上次永久保存的外观；永久保存会写入配置文件，重启后仍然保留。两者都不删除已导入的字体与主题文件；重置只回到内置默认，仍需点永久保存才写盘。</string>

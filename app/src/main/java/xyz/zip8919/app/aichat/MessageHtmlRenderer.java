@@ -515,15 +515,18 @@ public class MessageHtmlRenderer {
     /** 从失败详情里挑一行做卡片摘要：优先 HTTP 状态 + 提供商错误，其次异常消息。 */
     private static String errorSummary(String detail) {
         if (detail == null || detail.trim().length() == 0) return Strings.get(R.string.messagehtmlrenderer_023);
+        // 标签与 ErrorReport 拼详情用的是同一组资源：改文案时判断会跟着变，
+        // 这里不再写死中文标签，也不再依赖固定的分隔符
+        String httpLabel = Strings.get(R.string.errorreport_007);
+        String provLabel = Strings.get(R.string.errorreport_009);
+        String excLabel = Strings.get(R.string.errorreport_011);
         String http = "", prov = "", exc = "";
         String[] lines = detail.split("\n");
         for (int i = 0; i < lines.length; i++) {
             String l = lines[i].trim();
-            int p = l.indexOf('：');
-            String v = p >= 0 ? l.substring(p + 1).trim() : "";
-            if (l.startsWith("HTTP 状态")) http = v;
-            else if (l.startsWith("提供商错误")) prov = v;
-            else if (l.startsWith("异常消息")) exc = v;
+            if (l.startsWith(httpLabel)) http = l.substring(httpLabel.length()).trim();
+            else if (l.startsWith(provLabel)) prov = l.substring(provLabel.length()).trim();
+            else if (l.startsWith(excLabel)) exc = l.substring(excLabel.length()).trim();
         }
         StringBuilder sb = new StringBuilder();
         if (http.length() > 0) sb.append("HTTP ").append(http);
