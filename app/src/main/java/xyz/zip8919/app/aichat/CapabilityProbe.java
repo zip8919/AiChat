@@ -119,13 +119,12 @@ final class CapabilityProbe {
         }
 
         String url = Endpoint.chatUrl(snap);
-        int rejects = 0;
         int accepts = 0;
 
         // ---- 思考档位，逐档 ----
         for (int i = 0; i < ThinkingLevels.ORDER.size(); i++) {
             if (stop != null && stop.stopped()) {
-                rep.note = "已停止";
+                rep.error = "已停止";
                 return finish(rep, rep.levels, rep.vision, rep.unverifiable);
             }
             String level = ThinkingLevels.ORDER.get(i);
@@ -141,12 +140,12 @@ final class CapabilityProbe {
                 rep.levels.add(level);
                 continue;
             }
-            if (rejects == 0 && !isRejection(r.httpCode)) {
-                // 第一个档位就撞上 401/403/404/429/5xx：不是档位问题，整轮没意义
+            if (!isRejection(r.httpCode)) {
+                // 401/403/404/429/5xx 不是档位问题：后面的档位也是同样的错，
+                // 继续探下去只会把「认证失败」误判成「六档全被拒绝」
                 rep.error = ProviderTester.describeFailure(snap, r.httpCode, r.body, model);
                 return rep;
             }
-            rejects++;
         }
 
         rep.unverifiable = accepts == ThinkingLevels.ORDER.size();
@@ -169,7 +168,7 @@ final class CapabilityProbe {
     private static void probeVision(Report rep, String url, ProviderInfo snap, String model) {
         Raw v = post(url, snap.apiKey, visionBody(snap, model));
         if (v.error != null) {
-            rep.visionNote = "图片输入未能判定：" + ProviderTester.explainNetwork(snap, v.error);
+            rep.visionNote = "未能判定：" + ProviderTester.explainNetwork(snap, v.error);
             return;
         }
         if (v.httpCode >= 200 && v.httpCode < 300) {
@@ -180,10 +179,10 @@ final class CapabilityProbe {
         }
         if (visionRejection(v.httpCode)) {
             rep.vision = Boolean.FALSE;
-            rep.visionNote = "图片输入被拒绝：" + ProviderTester.shortError(v.body);
+            rep.visionNote = "端点拒绝：" + ProviderTester.shortError(v.body);
             return;
         }
-        rep.visionNote = "图片输入未能判定："
+        rep.visionNote = "未能判定："
                 + ProviderTester.describeFailure(snap, v.httpCode, v.body, model);
     }
 
@@ -198,8 +197,10 @@ final class CapabilityProbe {
         if (vision != null) {
             if (sb.length() > 0) sb.append("；");
             sb.append(vision.booleanValue() ? "支持图片输入" : "不支持图片输入");
-        }
-        if (rep.visionNote.length() > 0) {
+            if (!vision.booleanValue() && rep.visionNote.length() > 0) {
+                sb.append("（").append(rep.visionNote).append("）");
+            }
+        } else if (rep.visionNote.length() > 0) {
             if (sb.length() > 0) sb.append("；");
             sb.append(rep.visionNote);
         }

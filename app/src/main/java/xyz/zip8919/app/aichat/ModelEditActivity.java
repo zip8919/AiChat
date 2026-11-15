@@ -299,7 +299,8 @@ public class ModelEditActivity extends ThemedActivity {
             }
         } else if (rep.levelsRejected) {
             thinkingCb.setChecked(false);
-            probedLevels = null;
+            // 空列表（不是 null）：保存时据此清掉旧的档位记录，否则列表还显示早已不可用的档位
+            probedLevels = new ArrayList<String>();
             sb.append("六档全部被拒绝，该模型不接受思考参数，已把思考开关置为关闭。");
         } else {
             // 探到一半断了：开关保持原样，不拿半截结论改配置
@@ -315,7 +316,9 @@ public class ModelEditActivity extends ThemedActivity {
         } else if (rep.visionNote.length() > 0) {
             sb.append("\n").append(rep.visionNote);
         }
-        probeResult.setTextColor(levelsOk && rep.vision != null
+        // 有可用项就按常态色显示，两项都没得出可用结论才标红
+        boolean usable = levelsOk || Boolean.TRUE.equals(rep.vision);
+        probeResult.setTextColor(usable
                 ? ThemeTokens.get(this, ThemeTokens.AC_TEXT_SECONDARY) : 0xFFC62828);
         probeResult.setText(sb.toString());
         LogUtil.i(TAG, "probe %s done: levels=%s vision=%s unverifiable=%s rejected=%s",

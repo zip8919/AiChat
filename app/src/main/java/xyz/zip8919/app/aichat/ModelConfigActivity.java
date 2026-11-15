@@ -1077,6 +1077,7 @@ public class ModelConfigActivity extends ThemedActivity {
     }
 
     private static String probeBadge(CapabilityProbe.Report rep) {
+        if (rep.levelsRejected) return "无思考";
         if (!rep.ok() || rep.levels.isEmpty()) return "✗ 探测失败";
         StringBuilder sb = new StringBuilder();
         String top = ThinkingLevels.highest(rep.levels);

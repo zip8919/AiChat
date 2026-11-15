@@ -46,12 +46,12 @@ final class VisionJudge {
         Result out = new Result();
         String text = replyText(body);
         if (text == null) {
-            out.note = "图片输入未能判定：响应里读不到回复正文";
+            out.note = "未能判定：响应里读不到回复正文";
             return out;
         }
         String t = text.trim();
         if (t.length() == 0) {
-            out.note = "图片输入未能判定：回复正文为空";
+            out.note = "未能判定：回复正文为空";
             return out;
         }
         if (mentionsNoImage(t)) {
