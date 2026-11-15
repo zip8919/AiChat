@@ -1014,12 +1014,17 @@ public class ModelConfigActivity extends ThemedActivity {
                                 public boolean stopped() { return !probing.get(); }
                             });
                     // 结论写回配置：即使后面整体停止，已经探到的也不浪费
+                    // 视觉与档位分开落地：不支持思考参数的模型也可能能看图
+                    if (rep.vision != null) m.supportsVision = rep.vision.booleanValue();
                     if (rep.ok() && !rep.levels.isEmpty()) {
                         m.setLevelList(rep.levels);
                         m.supportsThinking = true;
                         m.levelsUnverifiable = rep.unverifiable;
                         m.probedAt = System.currentTimeMillis();
-                        if (rep.vision != null) m.supportsVision = rep.vision.booleanValue();
+                    } else if (rep.levelsRejected) {
+                        m.setLevelList(null);
+                        m.supportsThinking = false;
+                        m.probedAt = System.currentTimeMillis();
                     }
                     cfg.save();
                     reportBadge(key, probeBadge(rep), !rep.ok() || rep.levels.isEmpty());
@@ -1062,7 +1067,8 @@ public class ModelConfigActivity extends ThemedActivity {
         AcDialog.builder(this)
                 .setTitle("探测能力")
                 .setMessage("将对 " + n + " 个模型逐个探测思考档位与图片输入，"
-                        + "每个模型最多发起 7 次请求，会消耗少量额度。确定开始？")
+                        + "每个模型最多发起 7 次请求，会消耗少量额度。"
+                        + "图片输入会发一张写有数字的图，模型读不出数字即判为不支持。确定开始？")
                 .setPositiveButton("开始", new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) { runBatchProbe(targets, n); }
                 })

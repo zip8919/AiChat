@@ -270,44 +270,57 @@ public class ModelEditActivity extends ThemedActivity {
     }
 
     private void applyProbe(CapabilityProbe.Report rep, String modelId) {
-        if (!rep.ok()) {
+        // 视觉与档位是两项独立结论：档位没探明白，图片输入的结果也照样落地
+        if (rep.vision != null) visionCb.setChecked(rep.vision.booleanValue());
+
+        boolean levelsOk = rep.ok() && !rep.levels.isEmpty();
+        if (!levelsOk && !rep.levelsRejected && rep.vision == null) {
+            // 一档都没得出，也没探到图片：认证、网络或端点不可用，配置不动
             probeResult.setTextColor(0xFFC62828);
             probeResult.setText("探测未完成：" + rep.error);
             LogUtil.w(TAG, "probe %s failed: %s", modelId, rep.error);
             return;
         }
-        if (rep.levels.isEmpty()) {
-            probeResult.setTextColor(0xFFC62828);
-            probeResult.setText("六档全部被拒绝，该模型不接受思考参数，已把思考开关置为关闭。");
+
+        StringBuilder sb = new StringBuilder();
+        if (levelsOk) {
+            probedLevels = new ArrayList<String>(rep.levels);
+            thinkingCb.setChecked(true);
+            sb.append("思考可用：").append(ThinkingLevels.describe(rep.levels));
+            if (rep.unverifiable) {
+                sb.append("\n端点对任何档位都返回成功，无法区分具体档位，六档均视为可用。");
+            }
+            String global = cfg.getThinkingLevel();
+            String actual = ThinkingLevels.resolve(global, probedLevels);
+            if (!actual.equals(global)) {
+                sb.append("\n当前全局档位「").append(ThinkingLevels.label(global))
+                        .append("」不可用，使用时将自动按「").append(ThinkingLevels.label(actual))
+                        .append("」发送。");
+            }
+        } else if (rep.levelsRejected) {
             thinkingCb.setChecked(false);
             probedLevels = null;
-            return;
+            sb.append("六档全部被拒绝，该模型不接受思考参数，已把思考开关置为关闭。");
+        } else {
+            // 探到一半断了：开关保持原样，不拿半截结论改配置
+            sb.append("思考档位未探明：").append(rep.error);
         }
-        probedLevels = new ArrayList<String>(rep.levels);
-        thinkingCb.setChecked(true);
-        StringBuilder sb = new StringBuilder();
-        sb.append("思考可用：").append(ThinkingLevels.describe(rep.levels));
-        if (rep.unverifiable) {
-            sb.append("\n端点对任何档位都返回成功，无法区分具体档位，六档均视为可用。");
-        }
-        String global = cfg.getThinkingLevel();
-        String actual = ThinkingLevels.resolve(global, probedLevels);
-        if (!actual.equals(global)) {
-            sb.append("\n当前全局档位「").append(ThinkingLevels.label(global))
-                    .append("」不可用，使用时将自动按「").append(ThinkingLevels.label(actual))
-                    .append("」发送。");
-        }
+
         if (rep.vision != null) {
-            visionCb.setChecked(rep.vision.booleanValue());
-            sb.append("\n").append(rep.vision.booleanValue()
-                    ? "图片输入可用，已勾选。" : "图片输入不可用，已取消勾选。");
+            boolean ok = rep.vision.booleanValue();
+            sb.append("\n").append(ok ? "图片输入可用，已勾选。" : "图片输入不可用，已取消勾选。");
+            if (!ok && rep.visionNote.length() > 0) {
+                sb.append("判定依据：").append(rep.visionNote).append("。");
+            }
         } else if (rep.visionNote.length() > 0) {
             sb.append("\n").append(rep.visionNote);
         }
-        probeResult.setTextColor(ThemeTokens.get(this, ThemeTokens.AC_TEXT_SECONDARY));
+        probeResult.setTextColor(levelsOk && rep.vision != null
+                ? ThemeTokens.get(this, ThemeTokens.AC_TEXT_SECONDARY) : 0xFFC62828);
         probeResult.setText(sb.toString());
-        LogUtil.i(TAG, "probe %s ok: levels=%s vision=%s unverifiable=%s",
-                modelId, ThinkingLevels.join(probedLevels), rep.vision, rep.unverifiable);
+        LogUtil.i(TAG, "probe %s done: levels=%s vision=%s unverifiable=%s rejected=%s",
+                modelId, ThinkingLevels.join(probedLevels), rep.vision, rep.unverifiable,
+                rep.levelsRejected);
     }
 
     // ---- 保存 / 删除 ----

@@ -34,12 +34,40 @@ final class CapabilityProbe {
     private static final int TIMEOUT_MS = 20000;
     /** 思考档位探测的回复长度上限：只要端点能起来，回答多短都算通过。 */
     private static final int THINKING_MAX_TOKENS = 64;
-    private static final int VISION_MAX_TOKENS = 8;
+    private static final int VISION_MAX_TOKENS = 24;
 
-    /** 1x1 像素 PNG，几十字节，不带任何内容，只用来让 content 数组合法。 */
-    private static final String PIXEL_PNG_BASE64 =
-            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAA"
-            + "DElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC";
+    /** 提问，逼模型直接报数字；判据见 {@link VisionJudge}。 */
+    private static final String VISION_ASK = "图中的数字是多少？只回答数字，不要解释。";
+
+    /**
+     * 探测图：128×128 白底黑字「42」，灰度 PNG，约 1.1 KB。
+     *
+     * <p>以前用 1×1 空白图，只能证明「端点不拒绝图片块」，很多中转会把图片丢掉
+     * 照样回话，于无视觉能力的模型也被判成支持。改成看图报数：读不出数字就是
+     * 没看到图，判定只能靠这条内容校验，不能靠状态码。
+     */
+    private static final String PROBE_IMAGE_BASE64 =
+            "iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAAAAADmVT4XAAAEMklEQVR42u3bWUhUURgA4JnU"
+            + "LKcxN7QpKyoQlcjAwsgpWhQEC7KFQorIVpcoKrOX6kHapKIFsgyhqCjMoqio0ZQyCulBbaGF"
+            + "NgcXRmxGLcchdebvpbme4/3P1dEz14fOfbvnP3Pv59z7n+Uf1IJmZI9RGgEQAAEQAAEQAAEQ"
+            + "AAEQAAH43wG+XrkqNH391tDcbG3vsPd0a/z9A8IjDFExM2cgXbW8d0Z/3tfW1rztQmMRC5LS"
+            + "wmVY5vEIvUgC+wNgLc2M81P2+Swp6aU+wwa0TfQIYDftjx/cCzWlsHdQgA0ajwC7PHhMsZV9"
+            + "n2OiH1zz3pv/YWlu90BpaNvmzdyDk8ltAwByLN5N/yqjRRFw76a3B6APqZ0KAOsO7w+BNekK"
+            + "gKwWFQbhB0VMQGmJKtPA3lYGoDVLnXmo8whjMspsHf7Fg4zzo6PCArVW67uq8h+MThcPhWBz"
+            + "gXICDGYknLav2kmEnHfmMi52HhuKLaHDA/itfSYLOvN90IvNwwArNMMB6PMsaNg0Gp0bO+SA"
+            + "gaYARYD+sI01t13XYld7JAM0B5PxwDhPAL6ZLQqLhQwMUCCbDbe1kWenIj148Re/uxCuEM4P"
+            + "QBq/9h8Hrjwkz1K2DP72huuV0YodJq5DGhv7pWFjEJXLjZDq0ZJM+ShFAAv7PYKt7eTZmUlc"
+            + "B74lSJudfgTFj8mz5Rv5jrzBY+VtARSgYQ8ZCyniPfZHICgKsOUXNUxOUGEXFkI2XiojQyvT"
+            + "uc9+bfKmGAJgziUjYYXc79+CAOb0AWDzbzKiOKYM7ahGHkp8H6CwgoysXcN//XFX3rRovDQQ"
+            + "fddR7+vPf80cByLbODmgWNoZQYadWqqE8v8CznXKmnSrpN3xWSqwXmLz+wbMOrkpT9qcfqFm"
+            + "KoONP8CVIr+//qd7c+raRBUULgfzfwDHn8jbDoS6CxSnqfZNBJzXN3AfWRPO7nbXBz5Ts0Rk"
+            + "O3/AS2Qe0n1yFyic86mACbgDXuiRh3JLqpAU0Gsy4A4oQxJAc1Aq0XwcQ7ZP/cUdcA2rW22U"
+            + "akS9CVTVrgJ4A45h6/HUHglwjApkA2eAMxtLyiRHX5XMnwxM7+QMcKRh919kJ8p01AN4DnwB"
+            + "1kTs/sldwADsBr6AenSnsMwBDEBUF19AnQG7f3oPMACjXgFXQLkerf+5gAXIBa4ANP01R/t3"
+            + "IxaoDq6AE1j6+10FJsDnNXAEOHOwP19vAjZgCMd2dvqvQjfQtaASwGbEusfUg0oAcwzW24hX"
+            + "b7wAqEN/alntAJUATwOxvrudoBLgBlaP055kvq+8AQVY+vvfApUAzp1o3fgZqATA03/ye1AJ"
+            + "gKf/rCZQCWCOxTot7QCVAG/Q9F/fDSoBKtD0z3OBWoDEoV3jtq8yYZnsJ/SEaq/X7tQ9BEAA"
+            + "BEAABEAAtOLffARAAARAAARAAARAAARAAARgpAF/AepxcQuibdtNAAAAAElFTkSuQmCC";
 
     /** 探测结果。{@code levels} 为空且 {@code error} 非空表示整轮失败。 */
     static final class Report {
@@ -49,6 +77,8 @@ final class CapabilityProbe {
         String visionNote = "";
         /** 服务端对所有档位都回 200，档位结论不可区分 */
         boolean unverifiable;
+        /** 六档逐个明确被拒：可以据此认定该模型不吃思考参数 */
+        boolean levelsRejected;
         /** 整轮失败原因（认证、网络、端点不可用）；为空表示至少走完了探测 */
         String error = "";
         /** 失败前的进展描述，列表里直接显示 */
@@ -89,7 +119,6 @@ final class CapabilityProbe {
         }
 
         String url = Endpoint.chatUrl(snap);
-        String firstError = "";
         int rejects = 0;
         int accepts = 0;
 
@@ -120,28 +149,42 @@ final class CapabilityProbe {
             rejects++;
         }
 
-        if (rep.levels.isEmpty()) {
-            rep.error = "六档全部被拒绝，该模型不支持思考参数";
-            return rep;
-        }
         rep.unverifiable = accepts == ThinkingLevels.ORDER.size();
 
         // ---- 图片输入 ----
+        // 与档位结论互不影响：不支持思考参数的模型也可能能看图，所以六档全被拒绝时
+        // 图片这一项照样要探，不能跟着一起作废。
         if (stop == null || !stop.stopped()) {
-            Raw v = post(url, snap.apiKey, visionBody(snap, model));
-            if (v.error != null) {
-                rep.visionNote = "图片输入未能判定：" + ProviderTester.explainNetwork(snap, v.error);
-            } else if (v.httpCode >= 200 && v.httpCode < 300) {
-                rep.vision = Boolean.TRUE;
-            } else if (isRejection(v.httpCode)) {
-                rep.vision = Boolean.FALSE;
-                rep.visionNote = "图片输入被拒绝：" + ProviderTester.shortError(v.body);
-            } else {
-                rep.visionNote = "图片输入未能判定："
-                        + ProviderTester.describeFailure(snap, v.httpCode, v.body, model);
-            }
+            probeVision(rep, url, snap, model);
+        }
+
+        if (rep.levels.isEmpty()) {
+            rep.levelsRejected = true;
+            rep.error = "六档全部被拒绝，该模型不支持思考参数";
         }
         return finish(rep, rep.levels, rep.vision, rep.unverifiable);
+    }
+
+    /** 图片输入探测：发图、读回复、按内容判定。 */
+    private static void probeVision(Report rep, String url, ProviderInfo snap, String model) {
+        Raw v = post(url, snap.apiKey, visionBody(snap, model));
+        if (v.error != null) {
+            rep.visionNote = "图片输入未能判定：" + ProviderTester.explainNetwork(snap, v.error);
+            return;
+        }
+        if (v.httpCode >= 200 && v.httpCode < 300) {
+            VisionJudge.Result j = VisionJudge.judge(v.body);
+            rep.vision = j.supported;
+            rep.visionNote = j.note;
+            return;
+        }
+        if (visionRejection(v.httpCode)) {
+            rep.vision = Boolean.FALSE;
+            rep.visionNote = "图片输入被拒绝：" + ProviderTester.shortError(v.body);
+            return;
+        }
+        rep.visionNote = "图片输入未能判定："
+                + ProviderTester.describeFailure(snap, v.httpCode, v.body, model);
     }
 
     /** 探测收尾：把结论整理成一句人能看懂的备注。 */
@@ -174,6 +217,11 @@ final class CapabilityProbe {
         return code == 400 || code == 422;
     }
 
+    /** 图片请求里，这几个状态码表示「不接受图片」；其余 4xx/5xx 不归因于图片本身。 */
+    private static boolean visionRejection(int code) {
+        return code == 400 || code == 413 || code == 415 || code == 422;
+    }
+
     // ---- 请求体 ----
 
     /**
@@ -202,19 +250,19 @@ final class CapabilityProbe {
         }
     }
 
-    /** 带一张 1x1 图片的请求体，{@code content} 用 OpenAI 的多模态数组格式。 */
+    /** 带一张「42」图片的请求体，{@code content} 用 OpenAI 的多模态数组格式。 */
     static String visionBody(ProviderInfo p, String model) {
         try {
             JSONObject body = baseBody(model, VISION_MAX_TOKENS);
             JSONArray content = new JSONArray();
             JSONObject text = new JSONObject();
             text.put("type", "text");
-            text.put("text", "看图说一个词");
+            text.put("text", VISION_ASK);
             content.put(text);
             JSONObject img = new JSONObject();
             img.put("type", "image_url");
             JSONObject u = new JSONObject();
-            u.put("url", "data:image/png;base64," + PIXEL_PNG_BASE64);
+            u.put("url", "data:image/png;base64," + PROBE_IMAGE_BASE64);
             img.put("image_url", u);
             content.put(img);
             JSONObject msg = new JSONObject();
