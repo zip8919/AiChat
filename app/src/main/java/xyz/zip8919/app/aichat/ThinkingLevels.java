@@ -27,7 +27,7 @@ final class ThinkingLevels {
             "minimal", "low", "medium", "high", "xhigh", "max");
 
     /** 界面文案。键与 {@link #ORDER} 一致，加 off。 */
-    private static final String[] LABELS = {"极低", "低", "中", "高", "很高", "最高"};
+    private static final String[] LABELS = {Strings.get(R.string.thinkinglevels_001), Strings.get(R.string.thinkinglevels_002), Strings.get(R.string.thinkinglevels_003), Strings.get(R.string.thinkinglevels_004), Strings.get(R.string.thinkinglevels_005), Strings.get(R.string.thinkinglevels_006)};
 
     private ThinkingLevels() {
     }

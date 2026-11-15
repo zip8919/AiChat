@@ -119,7 +119,7 @@ class ModelSpinnerAdapter extends BaseAdapter {
             ProviderInfo p = ConfigManager.getInstance().getProvider(m.provider);
             label = p == null ? m.provider : p.label();
         }
-        tv.setText(missing ? "未指定服务商" : label);
+        tv.setText(missing ? Strings.get(R.string.modelspinneradapter_001) : label);
         // 写死 #888888 在深色底上几乎融进背景，必须跟着主题走。
         // 颜色仍是内置默认时保持原值，零回归。
         AppearanceManager am = AppearanceManager.getInstance(tv.getContext());

@@ -391,7 +391,7 @@ final class UsageStats {
     }
 
     private static Bucket bucket(Map<String, Bucket> map, String key) {
-        String k = (key == null || key.length() == 0) ? "未知" : key;
+        String k = (key == null || key.length() == 0) ? Strings.get(R.string.usagestats_001) : key;
         Bucket b = map.get(k);
         if (b == null) {
             b = new Bucket();

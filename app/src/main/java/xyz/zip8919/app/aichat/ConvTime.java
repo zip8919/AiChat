@@ -55,7 +55,7 @@ final class ConvTime {
     /** 拼进 system prompt 末尾的那一行；没时间标时返回空串。 */
     static String promptSuffix(String stamp) {
         if (stamp == null || stamp.length() == 0) return "";
-        return "\n\n本会话首次请求时间：" + stamp;
+        return Strings.get(R.string.convtime_001) + stamp;
     }
 
     /**
@@ -70,14 +70,14 @@ final class ConvTime {
         cal.setTimeInMillis(ts);
         SimpleDateFormat df = new SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US);
         String datePart = df.format(new Date(ts));
-        String[] week = {"日", "一", "二", "三", "四", "五", "六"};
+        String[] week = {Strings.get(R.string.convtime_002), Strings.get(R.string.convtime_003), Strings.get(R.string.convtime_004), Strings.get(R.string.convtime_005), Strings.get(R.string.convtime_006), Strings.get(R.string.convtime_007), Strings.get(R.string.convtime_008)};
         int dow = cal.get(Calendar.DAY_OF_WEEK) - Calendar.SUNDAY;
         if (dow < 0 || dow > 6) dow = 0;
         int offsetMin = cal.getTimeZone().getOffset(ts) / 60000;
         String sign = offsetMin >= 0 ? "+" : "-";
         int abs = Math.abs(offsetMin);
         StringBuilder sb = new StringBuilder(datePart);
-        sb.append(" 星期").append(week[dow]).append("（GMT")
+        sb.append(Strings.get(R.string.convtime_009)).append(week[dow]).append("（GMT")
           .append(sign);
         if (abs % 60 == 0) {
             sb.append(abs / 60);

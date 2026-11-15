@@ -429,11 +429,11 @@ final class FontRepository {
 
     static String addErrorText(int code) {
         switch (code) {
-            case ADD_BAD_EXT: return "格式不支持，仅支持 .ttf / .otf";
-            case ADD_TOO_LARGE: return "文件超过 8MB";
-            case ADD_BAD_FILE: return "字体文件损坏，无法加载";
-            case ADD_WRITE_FAIL: return "存储不可写或空间不足";
-            default: return "未知错误";
+            case ADD_BAD_EXT: return Strings.get(R.string.fontrepository_001);
+            case ADD_TOO_LARGE: return Strings.get(R.string.fontrepository_002);
+            case ADD_BAD_FILE: return Strings.get(R.string.fontrepository_003);
+            case ADD_WRITE_FAIL: return Strings.get(R.string.fontrepository_004);
+            default: return Strings.get(R.string.fontrepository_005);
         }
     }
 

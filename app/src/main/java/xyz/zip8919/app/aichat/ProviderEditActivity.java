@@ -144,7 +144,7 @@ public class ProviderEditActivity extends ThemedActivity {
 
     private void fillFields() {
         if (isNew) {
-            title.setText("新建提供商");
+            title.setText(Strings.get(R.string.providereditactivity_001));
             pathEt.setText("/chat/completions");
             // 新建时名称框本来就是空的，允许域名自动填充
             nameTouched = false;
@@ -188,15 +188,15 @@ public class ProviderEditActivity extends ThemedActivity {
     private void updateNameTip() {
         String nm = nameEt.getText().toString().trim();
         if (nm.length() == 0) {
-            nameTip.setText("留空时会从 Base URL 自动提取二级域名，如 api.example.com → example");
+            nameTip.setText(Strings.get(R.string.providereditactivity_002));
             return;
         }
         if (cfg.isProviderNameTaken(nm, editing)) {
-            nameTip.setText("⚠ 名称「" + nm + "」已被其他提供商占用，请换一个");
+            nameTip.setText(Strings.get(R.string.providereditactivity_003) + nm + Strings.get(R.string.providereditactivity_004));
         } else if (!isNew && editing != null && !nm.equals(editing.name)) {
-            nameTip.setText("⚠ 改名会同步更新引用它的模型");
+            nameTip.setText(Strings.get(R.string.providereditactivity_005));
         } else {
-            nameTip.setText("模型按此名称引用提供商。");
+            nameTip.setText(Strings.get(R.string.providereditactivity_006));
         }
     }
 
@@ -206,19 +206,19 @@ public class ProviderEditActivity extends ThemedActivity {
         String path = pathEt.getText().toString();
         String url = Endpoint.join(base, Endpoint.normalizeChatPath(path));
         if (Endpoint.trim(base).length() == 0) {
-            finalUrl.setText("最终请求地址：（填写 Base URL 后显示）");
+            finalUrl.setText(Strings.get(R.string.providereditactivity_007));
             return;
         }
         StringBuilder sb = new StringBuilder();
-        sb.append("最终请求地址：").append(url);
+        sb.append(Strings.get(R.string.providereditactivity_008)).append(url);
         boolean baseSlash = Endpoint.trim(base).endsWith("/");
         boolean pathSlash = Endpoint.trim(path).startsWith("/");
         if (Endpoint.trim(path).length() > 0 && baseSlash == pathSlash) {
-            sb.append(baseSlash ? "\n（两侧都有斜杠，已自动合并为一个）"
-                    : "\n（两侧都没有斜杠，已自动补上）");
+            sb.append(baseSlash ? Strings.get(R.string.providereditactivity_009)
+                    : Strings.get(R.string.providereditactivity_010));
         }
         if (!Endpoint.isHttpUrl(base)) {
-            sb.append("\n⚠ Base URL 需要以 http:// 或 https:// 开头");
+            sb.append(Strings.get(R.string.providereditactivity_011));
         }
         finalUrl.setText(sb.toString());
     }
@@ -243,17 +243,17 @@ public class ProviderEditActivity extends ThemedActivity {
             name = Endpoint.deriveName(base);
         }
         if (name.length() == 0) {
-            AcToast.show(this, "请填写名称，或先填 Base URL");
+            AcToast.show(this, Strings.get(R.string.providereditactivity_012));
             nameEt.requestFocus();
             return false;
         }
         if (!Endpoint.isHttpUrl(base)) {
-            AcToast.show(this, "Base URL 必须以 http:// 或 https:// 开头");
+            AcToast.show(this, Strings.get(R.string.providereditactivity_013));
             baseEt.requestFocus();
             return false;
         }
         if (cfg.isProviderNameTaken(name, editing)) {
-            AcToast.show(this, "名称已被其他提供商使用：" + name);
+            AcToast.show(this, Strings.get(R.string.providereditactivity_014) + name);
             nameEt.requestFocus();
             return false;
         }
@@ -292,7 +292,7 @@ public class ProviderEditActivity extends ThemedActivity {
                     oldName, name, synced);
         }
         cfg.save();
-        AcToast.show(this, "已保存");
+        AcToast.show(this, Strings.get(R.string.providereditactivity_015));
         LogUtil.i(TAG, "save: name=%s url=%s path=%s final=%s keyLen=%d new=%s",
                 target.name, target.apiUrl, target.chatPath, Endpoint.chatUrl(target),
                 target.apiKey == null ? 0 : target.apiKey.length(), creating);
@@ -313,12 +313,12 @@ public class ProviderEditActivity extends ThemedActivity {
     private void confirmDelete() {
         if (editing == null) return;
         final int models = cfg.modelsOf(editing.name).size();
-        String msg = "确定删除 " + editing.label() + "？"
-                + (models > 0 ? "\n\n其名下的 " + models + " 个模型会一并删除，无法恢复。" : "");
+        String msg = Strings.get(R.string.providereditactivity_016) + editing.label() + "？"
+                + (models > 0 ? Strings.get(R.string.providereditactivity_017) + models + Strings.get(R.string.providereditactivity_018) : "");
         AcDialog.builder(this)
-                .setTitle("删除提供商")
+                .setTitle(Strings.get(R.string.providereditactivity_019))
                 .setMessage(msg)
-                .setPositiveButton("删除", new DialogInterface.OnClickListener() {
+                .setPositiveButton(Strings.get(R.string.providereditactivity_020), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         cfg.getProviders().remove(editing);
                         for (ModelInfo m : cfg.modelsOf(editing.name)) {
@@ -331,11 +331,11 @@ public class ProviderEditActivity extends ThemedActivity {
                         }
                         cfg.save();
                         LogUtil.i(TAG, "delete provider %s (%d models)", editing.name, models);
-                        AcToast.show(ProviderEditActivity.this, "已删除");
+                        AcToast.show(ProviderEditActivity.this, Strings.get(R.string.providereditactivity_021));
                         finish();
                     }
                 })
-                .setNegativeButton("取消", null)
+                .setNegativeButton(Strings.get(R.string.providereditactivity_022), null)
                 .show();
     }
 
@@ -346,17 +346,17 @@ public class ProviderEditActivity extends ThemedActivity {
         if (busy) return;
         final ProviderInfo probe = buildProbe();
         if (!Endpoint.isHttpUrl(probe.apiUrl)) {
-            AcToast.show(this, "请先填写有效的 Base URL");
+            AcToast.show(this, Strings.get(R.string.providereditactivity_023));
             return;
         }
         if (probe.apiKey.trim().length() == 0) {
-            AcToast.show(this, "请先填写 API Key");
+            AcToast.show(this, Strings.get(R.string.providereditactivity_024));
             return;
         }
         busy = true;
         testBtn.setEnabled(false);
-        testBtn.setText("测试中…");
-        testResult.setText("正在测试 " + Endpoint.chatUrl(probe) + " …");
+        testBtn.setText(Strings.get(R.string.providereditactivity_025));
+        testResult.setText(Strings.get(R.string.providereditactivity_026) + Endpoint.chatUrl(probe) + " …");
         new Thread(new Runnable() {
             public void run() {
                 final ProviderTester.Result r = ProviderTester.testProvider(probe);
@@ -365,7 +365,7 @@ public class ProviderEditActivity extends ThemedActivity {
                         busy = false;
                         if (isFinishing()) return;
                         testBtn.setEnabled(true);
-                        testBtn.setText("测试连通性");
+                        testBtn.setText(Strings.get(R.string.providereditactivity_027));
                         testResult.setText((r.ok() ? "✓ " : "✗ ") + r.message);
                         testResult.setTextColor(r.ok() ? 0xFF2E7D32 : 0xFFC62828);
                         LogUtil.i(TAG, "test provider %s -> %s %s",
@@ -406,8 +406,8 @@ public class ProviderEditActivity extends ThemedActivity {
         if (!Endpoint.isHttpUrl(probe.apiUrl)) return;
         busy = true;
         fetchBtn.setEnabled(false);
-        fetchBtn.setText("获取中…");
-        testResult.setText("正在获取模型列表…");
+        fetchBtn.setText(Strings.get(R.string.providereditactivity_028));
+        testResult.setText(Strings.get(R.string.providereditactivity_029));
         new Thread(new Runnable() {
             public void run() {
                 final ProviderTester.ModelsResult r = ProviderTester.fetchModels(probe);
@@ -416,15 +416,15 @@ public class ProviderEditActivity extends ThemedActivity {
                         busy = false;
                         if (isFinishing()) return;
                         fetchBtn.setEnabled(true);
-                        fetchBtn.setText("获取模型列表");
+                        fetchBtn.setText(Strings.get(R.string.providereditactivity_030));
                         if (!r.ok) {
                             testResult.setText("✗ " + r.message);
                             testResult.setTextColor(0xFFC62828);
                             AcDialog.builder(ProviderEditActivity.this)
-                                    .setTitle("获取失败")
-                                    .setMessage(r.message + "\n\n部分中转站不提供 /models 接口，"
-                                            + "可以手动「新建模型」。")
-                                    .setPositiveButton("知道了", null)
+                                    .setTitle(Strings.get(R.string.providereditactivity_031))
+                                    .setMessage(r.message + Strings.get(R.string.providereditactivity_032)
+                                            + Strings.get(R.string.providereditactivity_033))
+                                    .setPositiveButton(Strings.get(R.string.providereditactivity_034), null)
                                     .show();
                             return;
                         }
@@ -448,9 +448,9 @@ public class ProviderEditActivity extends ThemedActivity {
         }
         if (candidates.isEmpty()) {
             AcDialog.builder(this)
-                    .setTitle("无需添加")
-                    .setMessage("该提供商下已有全部 " + remote.size() + " 个模型。")
-                    .setPositiveButton("知道了", null)
+                    .setTitle(Strings.get(R.string.providereditactivity_035))
+                    .setMessage(Strings.get(R.string.providereditactivity_036) + remote.size() + Strings.get(R.string.providereditactivity_037))
+                    .setPositiveButton(Strings.get(R.string.providereditactivity_038), null)
                     .show();
             return;
         }
@@ -458,19 +458,19 @@ public class ProviderEditActivity extends ThemedActivity {
         final String[] labels = new String[candidates.size()];
         for (int i = 0; i < candidates.size(); i++) labels[i] = candidates.get(i);
         AcDialog.builder(this)
-                .setTitle("选择要添加的模型（共 " + candidates.size() + " 个可选）")
+                .setTitle(Strings.get(R.string.providereditactivity_039) + candidates.size() + Strings.get(R.string.providereditactivity_040))
                 .setMultiChoiceItems(labels, checked, new DialogInterface.OnMultiChoiceClickListener() {
                     public void onClick(DialogInterface d, int which, boolean isChecked) {
                         checked[which] = isChecked;
                     }
                 })
-                .setPositiveButton("全部添加", new DialogInterface.OnClickListener() {
+                .setPositiveButton(Strings.get(R.string.providereditactivity_041), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         List<String> all = new ArrayList<String>(candidates);
                         addModels(all);
                     }
                 })
-                .setNeutralButton("添加所选", new DialogInterface.OnClickListener() {
+                .setNeutralButton(Strings.get(R.string.providereditactivity_042), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         List<String> sel = new ArrayList<String>();
                         for (int i = 0; i < candidates.size(); i++) {
@@ -479,14 +479,14 @@ public class ProviderEditActivity extends ThemedActivity {
                         addModels(sel);
                     }
                 })
-                .setNegativeButton("取消", null)
+                .setNegativeButton(Strings.get(R.string.providereditactivity_043), null)
                 .show();
     }
 
     /** 批量加入模型：跳过重名（模型名是全局唯一键），默认带思考开关。 */
     private void addModels(List<String> names) {
         if (editing == null || names.isEmpty()) {
-            AcToast.show(this, "没有选择模型");
+            AcToast.show(this, Strings.get(R.string.providereditactivity_044));
             return;
         }
         int added = 0;
@@ -508,8 +508,8 @@ public class ProviderEditActivity extends ThemedActivity {
         }
         cfg.save();
         refreshModels();
-        String msg = "已添加 " + added + " 个模型";
-        if (skipped > 0) msg += "，跳过 " + skipped + " 个重名";
+        String msg = Strings.get(R.string.providereditactivity_045) + added + Strings.get(R.string.providereditactivity_046);
+        if (skipped > 0) msg += Strings.get(R.string.providereditactivity_047) + skipped + Strings.get(R.string.providereditactivity_048);
         AcToast.show(this, msg);
         LogUtil.i(TAG, "addModels: added=%d skipped=%d provider=%s", added, skipped, editing.name);
     }
@@ -520,20 +520,20 @@ public class ProviderEditActivity extends ThemedActivity {
         if (modelsBox == null) return;
         modelsBox.removeAllViews();
         if (editing == null) {
-            modelsTitle.setText("该提供商的模型（0）");
-            modelsHint.setText("先保存提供商，再添加模型。");
+            modelsTitle.setText(Strings.get(R.string.providereditactivity_049));
+            modelsHint.setText(Strings.get(R.string.providereditactivity_050));
             addModelBtn.setEnabled(false);
             fetchBtn.setEnabled(Endpoint.isHttpUrl(baseEt.getText().toString()));
             return;
         }
         addModelBtn.setEnabled(true);
         fetchBtn.setEnabled(true);
-        modelsHint.setText("点击模型可编辑，长按删除。");
+        modelsHint.setText(Strings.get(R.string.providereditactivity_051));
         final List<ModelInfo> list = cfg.modelsOf(editing.name);
-        modelsTitle.setText("该提供商的模型（" + list.size() + "）");
+        modelsTitle.setText(Strings.get(R.string.providereditactivity_052) + list.size() + "）");
         if (list.isEmpty()) {
             TextView empty = new TextView(this);
-            empty.setText("还没有模型。点「获取模型列表」从接口拉取，或「新建模型」手动添加。");
+            empty.setText(Strings.get(R.string.providereditactivity_053));
             empty.setTextSize(12);
             empty.setTextColor(ThemeTokens.get(this, ThemeTokens.AC_TEXT_SECONDARY));
             empty.setPadding(0, dp(6), 0, dp(6));
@@ -546,7 +546,7 @@ public class ProviderEditActivity extends ThemedActivity {
             StringBuilder sb = new StringBuilder();
             sb.append(m.label());
             if (!m.label().equals(m.name)) sb.append("  ·  ").append(m.name);
-            if (m.supportsVision) sb.append("  ·  视觉");
+            if (m.supportsVision) sb.append(Strings.get(R.string.providereditactivity_054));
             row.setText(sb.toString());
             row.setTextSize(13);
             row.setTextColor(ThemeTokens.get(this, ThemeTokens.AC_TEXT));
@@ -577,7 +577,7 @@ public class ProviderEditActivity extends ThemedActivity {
 
     private void openModelEditor(String modelName) {
         if (editing == null) {
-            AcToast.show(this, "请先保存提供商");
+            AcToast.show(this, Strings.get(R.string.providereditactivity_055));
             return;
         }
         Intent it = new Intent(this, ModelEditActivity.class);
@@ -588,9 +588,9 @@ public class ProviderEditActivity extends ThemedActivity {
 
     private void confirmDeleteModel(final ModelInfo m) {
         AcDialog.builder(this)
-                .setTitle("删除模型")
-                .setMessage("确定删除 " + m.label() + "？")
-                .setPositiveButton("删除", new DialogInterface.OnClickListener() {
+                .setTitle(Strings.get(R.string.providereditactivity_056))
+                .setMessage(Strings.get(R.string.providereditactivity_057) + m.label() + "？")
+                .setPositiveButton(Strings.get(R.string.providereditactivity_058), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         boolean wasDefault = cfg.isDefaultModel(m);
                         cfg.getModels().remove(m);
@@ -600,10 +600,10 @@ public class ProviderEditActivity extends ThemedActivity {
                         }
                         cfg.save();
                         refreshModels();
-                        AcToast.show(ProviderEditActivity.this, "已删除");
+                        AcToast.show(ProviderEditActivity.this, Strings.get(R.string.providereditactivity_059));
                     }
                 })
-                .setNegativeButton("取消", null)
+                .setNegativeButton(Strings.get(R.string.providereditactivity_060), null)
                 .show();
     }
 

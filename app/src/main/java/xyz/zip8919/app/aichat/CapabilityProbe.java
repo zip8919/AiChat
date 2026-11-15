@@ -49,7 +49,7 @@ final class CapabilityProbe {
      * <p>两轮探测用同一句话：靠换图换答案，不靠换问法，避免模型因为提示不同而
      * 给出不同表现。
      */
-    private static final String VISION_ASK = "图中的数字是多少？只回答数字，不要解释。";
+    private static final String VISION_ASK = Strings.get(R.string.capabilityprobe_001);
 
     /**
      * 探测图 A：128×128 白底黑字「93」，灰度 PNG，约 1.4 KB；B 为「7」，约 0.7 KB。
@@ -139,21 +139,21 @@ final class CapabilityProbe {
     static Report probe(ProviderInfo p, String modelName, Stop stop) {
         Report rep = new Report();
         if (p == null) {
-            rep.error = "提供商为空";
+            rep.error = Strings.get(R.string.capabilityprobe_002);
             return rep;
         }
         ProviderInfo snap = p.copy();
         if (!Endpoint.isHttpUrl(snap.apiUrl)) {
-            rep.error = "Base URL 不是有效的 http(s) 地址";
+            rep.error = Strings.get(R.string.capabilityprobe_003);
             return rep;
         }
         if (snap.apiKey == null || snap.apiKey.trim().length() == 0) {
-            rep.error = "未填写 API Key";
+            rep.error = Strings.get(R.string.capabilityprobe_004);
             return rep;
         }
         String model = modelName == null ? "" : modelName.trim();
         if (model.length() == 0) {
-            rep.error = "模型 ID 为空";
+            rep.error = Strings.get(R.string.capabilityprobe_005);
             return rep;
         }
 
@@ -163,7 +163,7 @@ final class CapabilityProbe {
         // ---- 思考档位，逐档 ----
         for (int i = 0; i < ThinkingLevels.ORDER.size(); i++) {
             if (stop != null && stop.stopped()) {
-                rep.error = "已停止";
+                rep.error = Strings.get(R.string.capabilityprobe_006);
                 return finish(rep, rep.levels, rep.vision, rep.unverifiable);
             }
             String level = ThinkingLevels.ORDER.get(i);
@@ -171,7 +171,7 @@ final class CapabilityProbe {
             if (r.error != null) {
                 // 网络层失败：后面的档位也是同样的错，直接收工
                 rep.error = ProviderTester.explainNetwork(snap, r.error);
-                if (rep.levels.size() > 0) rep.note = "已探测 " + rep.levels.size() + " 档后中断";
+                if (rep.levels.size() > 0) rep.note = Strings.get(R.string.capabilityprobe_007) + rep.levels.size() + Strings.get(R.string.capabilityprobe_008);
                 return rep;
             }
             if (r.httpCode >= 200 && r.httpCode < 300) {
@@ -198,7 +198,7 @@ final class CapabilityProbe {
 
         if (rep.levels.isEmpty()) {
             rep.levelsRejected = true;
-            rep.error = "六档全部被拒绝，该模型不支持思考参数";
+            rep.error = Strings.get(R.string.capabilityprobe_009);
         }
         return finish(rep, rep.levels, rep.vision, rep.unverifiable);
     }
@@ -224,13 +224,13 @@ final class CapabilityProbe {
             // 第一张没读出结论：再发一次同一张图，多给一次机会。
             // 模型先想后答时容易「思考用掉额度、正文为空」，一次空回复不足以判死。
             if (stop != null && stop.stopped()) {
-                rep.visionNote = "未能判定：" + a.note;
+                rep.visionNote = Strings.get(R.string.capabilityprobe_010) + a.note;
                 return;
             }
             b = askNumber(url, snap, model, IMAGE_A_BASE64,
                     VisionJudge.ANSWER_A, VisionJudge.ANSWER_A_CN);
             if (b.correct == null) {
-                rep.visionNote = "未能判定：" + (b.note.length() > 0 ? b.note : a.note);
+                rep.visionNote = Strings.get(R.string.capabilityprobe_011) + (b.note.length() > 0 ? b.note : a.note);
                 return;
             }
             rep.vision = b.correct;
@@ -238,7 +238,7 @@ final class CapabilityProbe {
             return;
         }
         if (stop != null && stop.stopped()) {
-            rep.visionNote = "第二张图未测：已停止";
+            rep.visionNote = Strings.get(R.string.capabilityprobe_012);
             return;
         }
         b = askNumber(url, snap, model, IMAGE_B_BASE64,
@@ -262,7 +262,7 @@ final class CapabilityProbe {
         }
         if (visionRejection(v.httpCode)) {
             out.correct = Boolean.FALSE;
-            out.note = "端点拒绝：" + ProviderTester.shortError(v.body);
+            out.note = Strings.get(R.string.capabilityprobe_013) + ProviderTester.shortError(v.body);
             return out;
         }
         out.note = ProviderTester.describeFailure(snap, v.httpCode, v.body, model);
@@ -274,15 +274,15 @@ final class CapabilityProbe {
             boolean unverifiable) {
         StringBuilder sb = new StringBuilder();
         if (levels != null && levels.size() > 0) {
-            sb.append("思考可用：").append(ThinkingLevels.describe(levels));
-            if (unverifiable) sb.append("（端点未校验档位取值，六档均被接受）");
+            sb.append(Strings.get(R.string.capabilityprobe_014)).append(ThinkingLevels.describe(levels));
+            if (unverifiable) sb.append(Strings.get(R.string.capabilityprobe_015));
         }
         if (vision != null) {
             if (sb.length() > 0) sb.append("；");
             if (vision.booleanValue()) {
-                sb.append("支持图片输入（两张图均读出数字）");
+                sb.append(Strings.get(R.string.capabilityprobe_016));
             } else {
-                sb.append("不支持图片输入");
+                sb.append(Strings.get(R.string.capabilityprobe_017));
                 if (rep.visionNote.length() > 0) {
                     sb.append("（").append(rep.visionNote).append("）");
                 }
@@ -420,7 +420,7 @@ final class CapabilityProbe {
     private static Raw post(String url, String apiKey, String body, int timeoutMs) {
         Raw out = new Raw();
         if (body == null) {
-            out.error = "IllegalArgument: 请求体为空";
+            out.error = Strings.get(R.string.capabilityprobe_018);
             return out;
         }
         HttpURLConnection conn = null;

@@ -55,14 +55,14 @@ public class FontManagerActivity extends ThemedActivity {
         repo = FontRepository.getInstance();
         am = AppearanceManager.getInstance(this);
         bindViews();
-        title.setText("管理字体");
-        hint.setText("添加后默认停用，在外观页启用才会出现在选择器里。删除正在使用的字体会先替换引用再删。");
-        btnPrimary.setText("添加字体");
+        title.setText(Strings.get(R.string.fontmanageractivity_001));
+        hint.setText(Strings.get(R.string.fontmanageractivity_002));
+        btnPrimary.setText(Strings.get(R.string.fontmanageractivity_003));
         btnSecondary.setVisibility(View.GONE);
-        btnMulti.setText("批量管理");
-        btnAct1.setText("启用");
-        btnAct2.setText("停用");
-        btnAct3.setText("删除");
+        btnMulti.setText(Strings.get(R.string.fontmanageractivity_004));
+        btnAct1.setText(Strings.get(R.string.fontmanageractivity_005));
+        btnAct2.setText(Strings.get(R.string.fontmanageractivity_006));
+        btnAct3.setText(Strings.get(R.string.fontmanageractivity_007));
         adapter = new ManagerRowAdapter(this);
         list.setAdapter(adapter);
         wire();
@@ -92,7 +92,7 @@ public class FontManagerActivity extends ThemedActivity {
             public void onClick(View v) {
                 selectionMode = !selectionMode;
                 adapter.setSelectionMode(selectionMode);
-                btnMulti.setText(selectionMode ? "退出多选" : "批量管理");
+                btnMulti.setText(selectionMode ? Strings.get(R.string.fontmanageractivity_008) : Strings.get(R.string.fontmanageractivity_009));
                 refreshSelectionUi();
             }
         });
@@ -126,7 +126,7 @@ public class FontManagerActivity extends ThemedActivity {
         List<ManagerRowAdapter.Row> rows = new ArrayList<ManagerRowAdapter.Row>();
         for (int i = 0; i < fonts.size(); i++) {
             FontRepository.FontItem f = fonts.get(i);
-            String state = f.loadFailed ? "加载失败" : (f.enabled ? "已启用" : "已停用");
+            String state = f.loadFailed ? Strings.get(R.string.fontmanageractivity_010) : (f.enabled ? Strings.get(R.string.fontmanageractivity_011) : Strings.get(R.string.fontmanageractivity_012));
             String sub = f.fileName + " · " + (f.sizeBytes / 1024) + "KB · " + state;
             rows.add(ManagerRowAdapter.Row.item(f.id, f.name, sub, state, f.loadFailed));
         }
@@ -134,13 +134,13 @@ public class FontManagerActivity extends ThemedActivity {
         boolean blank = rows.isEmpty();
         list.setVisibility(blank ? View.GONE : View.VISIBLE);
         empty.setVisibility(blank ? View.VISIBLE : View.GONE);
-        empty.setText("还没有字体\n\n点「添加字体」导入 .ttf / .otf（不超过 8MB）\n系统默认字体始终可用");
+        empty.setText(Strings.get(R.string.fontmanageractivity_013));
         refreshSelectionUi();
     }
 
     private void refreshSelectionUi() {
         selectionBar.setVisibility(selectionMode ? View.VISIBLE : View.GONE);
-        selectionCount.setText("已选 " + adapter.checkedKeys().size() + " / " + fonts.size());
+        selectionCount.setText(Strings.get(R.string.fontmanageractivity_014) + adapter.checkedKeys().size() + " / " + fonts.size());
     }
 
     private FontRepository.FontItem findFont(String id) {
@@ -154,10 +154,10 @@ public class FontManagerActivity extends ThemedActivity {
     // ---- 单项操作 ----
 
     private void showSingleActions(final FontRepository.FontItem f) {
-        String toggle = f.enabled ? "停用" : "启用";
+        String toggle = f.enabled ? Strings.get(R.string.fontmanageractivity_015) : Strings.get(R.string.fontmanageractivity_016);
         AcDialog.builder(this)
                 .setTitle(f.name)
-                .setItems(new String[]{"重命名", "预览", toggle, "删除"},
+                .setItems(new String[]{Strings.get(R.string.fontmanageractivity_017), Strings.get(R.string.fontmanageractivity_018), toggle, Strings.get(R.string.fontmanageractivity_019)},
                         new DialogInterface.OnClickListener() {
                             public void onClick(DialogInterface d, int w) {
                                 if (w == 0) promptRename(f);
@@ -168,7 +168,7 @@ public class FontManagerActivity extends ThemedActivity {
                                 } else confirmDeleteOne(f);
                             }
                         })
-                .setNegativeButton("取消", null)
+                .setNegativeButton(Strings.get(R.string.fontmanageractivity_020), null)
                 .show();
     }
 
@@ -178,24 +178,24 @@ public class FontManagerActivity extends ThemedActivity {
         et.setSingleLine(true);
         et.setSelection(et.getText().length());
         AcDialog.builder(this)
-                .setTitle("重命名")
+                .setTitle(Strings.get(R.string.fontmanageractivity_021))
                 .setView(et)
-                .setPositiveButton("保存", new DialogInterface.OnClickListener() {
+                .setPositiveButton(Strings.get(R.string.fontmanageractivity_022), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         String n = et.getText().toString().trim();
-                        if (n.length() == 0) { toast("名称不能为空"); return; }
+                        if (n.length() == 0) { toast(Strings.get(R.string.fontmanageractivity_023)); return; }
                         if (n.length() > 32) n = n.substring(0, 32);
                         repo.rename(f.id, n);
                         load();
                     }
                 })
-                .setNegativeButton("取消", null)
+                .setNegativeButton(Strings.get(R.string.fontmanageractivity_024), null)
                 .show();
     }
 
     private void previewFont(FontRepository.FontItem f) {
         Typeface tf = repo.getTypeface(f.id);
-        if (tf == null) toast("字体加载失败，已回退系统默认");
+        if (tf == null) toast(Strings.get(R.string.fontmanageractivity_025));
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         int pad = dp(16);
@@ -203,7 +203,7 @@ public class FontManagerActivity extends ThemedActivity {
         float[] sizes = {12f, 14f, 20f};
         for (int i = 0; i < sizes.length; i++) {
             TextView tv = new TextView(this);
-            tv.setText("中文 ABC 123  ·  " + (int) sizes[i] + "sp");
+            tv.setText(Strings.get(R.string.fontmanageractivity_026) + (int) sizes[i] + "sp");
             tv.setTextSize(sizes[i]);
             if (tf != null) tv.setTypeface(tf);
             box.addView(tv);
@@ -211,7 +211,7 @@ public class FontManagerActivity extends ThemedActivity {
         AcDialog.builder(this)
                 .setTitle(f.name)
                 .setView(box)
-                .setPositiveButton("关闭", null)
+                .setPositiveButton(Strings.get(R.string.fontmanageractivity_027), null)
                 .show();
     }
 
@@ -221,16 +221,16 @@ public class FontManagerActivity extends ThemedActivity {
             return;
         }
         AcDialog.builder(this)
-                .setTitle("删除字体")
-                .setMessage("删除「" + f.name + "」？此操作不可撤销。")
-                .setPositiveButton("删除", new DialogInterface.OnClickListener() {
+                .setTitle(Strings.get(R.string.fontmanageractivity_028))
+                .setMessage(Strings.get(R.string.fontmanageractivity_029) + f.name + Strings.get(R.string.fontmanageractivity_030))
+                .setPositiveButton(Strings.get(R.string.fontmanageractivity_031), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         repo.delete(f.id);
                         load();
-                        toast("已删除");
+                        toast(Strings.get(R.string.fontmanageractivity_032));
                     }
                 })
-                .setNegativeButton("取消", null)
+                .setNegativeButton(Strings.get(R.string.fontmanageractivity_033), null)
                 .show();
     }
 
@@ -238,7 +238,7 @@ public class FontManagerActivity extends ThemedActivity {
     private void promptReplaceThenDelete(final FontRepository.FontItem f) {
         final List<String> names = new ArrayList<String>();
         final List<String> ids = new ArrayList<String>();
-        names.add("系统默认");
+        names.add(Strings.get(R.string.fontmanageractivity_034));
         ids.add("system");
         for (int i = 0; i < fonts.size(); i++) {
             FontRepository.FontItem o = fonts.get(i);
@@ -248,9 +248,9 @@ public class FontManagerActivity extends ThemedActivity {
             }
         }
         AcDialog.builder(this)
-                .setTitle("字体正在被使用")
-                .setMessage("「" + f.name + "」被当前外观或某个主题引用。先选择替换为哪个字体，"
-                        + "引用会一并改写并保存，然后再删除文件。")
+                .setTitle(Strings.get(R.string.fontmanageractivity_035))
+                .setMessage("「" + f.name + Strings.get(R.string.fontmanageractivity_036)
+                        + Strings.get(R.string.fontmanageractivity_037))
                 .setItems(names.toArray(new String[names.size()]),
                         new DialogInterface.OnClickListener() {
                             public void onClick(DialogInterface d, int w) {
@@ -259,10 +259,10 @@ public class FontManagerActivity extends ThemedActivity {
                                 am.commitFontReferences();
                                 repo.delete(f.id);
                                 load();
-                                toast("引用已改写并保存");
+                                toast(Strings.get(R.string.fontmanageractivity_038));
                             }
                         })
-                .setNegativeButton("取消", null)
+                .setNegativeButton(Strings.get(R.string.fontmanageractivity_039), null)
                 .show();
     }
 
@@ -288,29 +288,29 @@ public class FontManagerActivity extends ThemedActivity {
 
     private void batchSetEnabled(boolean on) {
         Set<String> keys = adapter.checkedKeys();
-        if (keys.isEmpty()) { toast("请先勾选字体"); return; }
+        if (keys.isEmpty()) { toast(Strings.get(R.string.fontmanageractivity_040)); return; }
         // 一次写盘：逐项 setEnabled 会为每个字体整份重写 fonts.json
         repo.setEnabledAll(keys, on);
         load();
-        toast(on ? "已批量启用" : "已批量停用");
+        toast(on ? Strings.get(R.string.fontmanageractivity_041) : Strings.get(R.string.fontmanageractivity_042));
     }
 
     private void confirmBatchDelete() {
         final Set<String> keys = new HashSet<String>(adapter.checkedKeys());
-        if (keys.isEmpty()) { toast("请先勾选字体"); return; }
+        if (keys.isEmpty()) { toast(Strings.get(R.string.fontmanageractivity_043)); return; }
         final List<String> used = new ArrayList<String>();
         for (String id : keys) {
             if (isReferenced(id)) used.add(id);
         }
-        String msg = "删除选中的 " + keys.size() + " 个字体？此操作不可撤销。";
+        String msg = Strings.get(R.string.fontmanageractivity_044) + keys.size() + Strings.get(R.string.fontmanageractivity_045);
         if (!used.isEmpty()) {
-            msg += "\n\n其中 " + used.size()
-                    + " 个正在被引用，将统一替换为系统默认并保存外观配置。";
+            msg += Strings.get(R.string.fontmanageractivity_046) + used.size()
+                    + Strings.get(R.string.fontmanageractivity_047);
         }
         AcDialog.builder(this)
-                .setTitle("批量删除")
+                .setTitle(Strings.get(R.string.fontmanageractivity_048))
                 .setMessage(msg)
-                .setPositiveButton("删除", new DialogInterface.OnClickListener() {
+                .setPositiveButton(Strings.get(R.string.fontmanageractivity_049), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         boolean changed = false;
                         for (String id : used) {
@@ -322,12 +322,12 @@ public class FontManagerActivity extends ThemedActivity {
                         repo.deleteAll(keys);
                         selectionMode = false;
                         adapter.setSelectionMode(false);
-                        btnMulti.setText("批量管理");
+                        btnMulti.setText(Strings.get(R.string.fontmanageractivity_050));
                         load();
-                        toast("已删除 " + keys.size() + " 个字体");
+                        toast(Strings.get(R.string.fontmanageractivity_051) + keys.size() + Strings.get(R.string.fontmanageractivity_052));
                     }
                 })
-                .setNegativeButton("取消", null)
+                .setNegativeButton(Strings.get(R.string.fontmanageractivity_053), null)
                 .show();
     }
 
@@ -340,7 +340,7 @@ public class FontManagerActivity extends ThemedActivity {
         try {
             startActivityForResult(i, REQ_ADD);
         } catch (Throwable t) {
-            toast("无法打开文件选择器");
+            toast(Strings.get(R.string.fontmanageractivity_054));
         }
     }
 
@@ -364,7 +364,7 @@ public class FontManagerActivity extends ThemedActivity {
                     public void run() {
                         if (isFinishing() || isDestroyed()) return;
                         if (bytes == null) {
-                            toast("读取失败或文件超过 8MB");
+                            toast(Strings.get(R.string.fontmanageractivity_055));
                             return;
                         }
                         if (repo.installedIds().contains(stripExt(name))) {
@@ -380,8 +380,8 @@ public class FontManagerActivity extends ThemedActivity {
 
     private void showNameConflict(final String name, final byte[] bytes) {
         AcDialog.builder(this)
-                .setTitle("已有同名字体")
-                .setItems(new String[]{"覆盖", "自动改名", "取消"},
+                .setTitle(Strings.get(R.string.fontmanageractivity_056))
+                .setItems(new String[]{Strings.get(R.string.fontmanageractivity_057), Strings.get(R.string.fontmanageractivity_058), Strings.get(R.string.fontmanageractivity_059)},
                         new DialogInterface.OnClickListener() {
                             public void onClick(DialogInterface d, int w) {
                                 if (w == 0) doAdd(name, bytes);
@@ -401,7 +401,7 @@ public class FontManagerActivity extends ThemedActivity {
                         if (isFinishing() || isDestroyed()) return;
                         if (code == FontRepository.ADD_OK) {
                             load();
-                            toast("已添加，默认停用；到外观页启用后即可选择");
+                            toast(Strings.get(R.string.fontmanageractivity_060));
                         } else {
                             toast(FontRepository.addErrorText(code));
                         }

@@ -27,7 +27,7 @@
                 android:textColor="@color/text_primary"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="逐属性编辑" />
+                android:text="@string/activity_theme_attr_001" />
 
             <TextView
                 android:id="@+id/attr_hint"
@@ -37,7 +37,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="4dp"
                 android:layout_marginBottom="12dp"
-                android:text="改动立即生效。点某一项编辑；编辑面板里的「跟随主题」恢复该项的主题默认值。" />
+                android:text="@string/activity_theme_attr_002" />
 
             <!-- 编辑对象切换：同时会切换全局明暗，保证所见即所得 -->
             <LinearLayout
@@ -50,14 +50,14 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="● 浅色" />
+                    android:text="@string/activity_theme_attr_003" />
                 <Button
                     android:id="@+id/btn_edit_dark"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:layout_marginLeft="8dp"
-                    android:text="○ 深色" />
+                    android:text="@string/activity_theme_attr_004" />
             </LinearLayout>
 
             <LinearLayout
@@ -81,13 +81,13 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="取消" />
+            android:text="@string/activity_theme_attr_005" />
         <Button
             android:id="@+id/btn_attr_apply"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:layout_marginLeft="8dp"
-            android:text="应用" />
+            android:text="@string/activity_theme_attr_006" />
     </LinearLayout>
 </LinearLayout>

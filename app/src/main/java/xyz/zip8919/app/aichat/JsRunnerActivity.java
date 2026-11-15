@@ -96,7 +96,7 @@ public class JsRunnerActivity extends ThemedActivity {
             int n = dotTick % 3;
             String dots = n == 0 ? "." : (n == 1 ? ".." : "...");
             long el = System.currentTimeMillis() - runStartedAt;
-            String head = isMarkup() ? "渲染结果 · ▶ 加载中" : "输出 · ▶ 正在执行";
+            String head = isMarkup() ? Strings.get(R.string.jsrunneractivity_001) : Strings.get(R.string.jsrunneractivity_002);
             setStatus(head + dots + "  " + fmtDuration(el), false);
             ui.postDelayed(this, 400);
         }
@@ -177,7 +177,7 @@ public class JsRunnerActivity extends ThemedActivity {
                 output.setLength(0);
                 outputLines = 1;
                 outputView.setText("");
-                if (state == ST_DONE || state == ST_ERROR) setStatus("输出 · 已清空", false);
+                if (state == ST_DONE || state == ST_ERROR) setStatus(Strings.get(R.string.jsrunneractivity_003), false);
             }
         });
 
@@ -202,8 +202,8 @@ public class JsRunnerActivity extends ThemedActivity {
         if (!code.isEmpty()) {
             runCurrent();
         } else {
-            outputView.setText("（等待运行）");
-            setStatus("输出 · 未运行", false);
+            outputView.setText(Strings.get(R.string.jsrunneractivity_004));
+            setStatus(Strings.get(R.string.jsrunneractivity_005), false);
         }
     }
 
@@ -229,7 +229,7 @@ public class JsRunnerActivity extends ThemedActivity {
                     long ms = System.currentTimeMillis() - runStartedAt;
                     stopTicker();
                     setRunningUi(false);
-                    setStatus("渲染结果 · ✓ 已加载 · " + fmtDuration(ms), false);
+                    setStatus(Strings.get(R.string.jsrunneractivity_006) + fmtDuration(ms), false);
                     return;
                 }
                 // 不再在这里直接报「已完成」：页面加载完只说明同步代码跑过了，
@@ -365,7 +365,7 @@ public class JsRunnerActivity extends ThemedActivity {
     private void runCurrent() {
         final String code = codeInput.getText().toString();
         if (code.trim().isEmpty()) {
-            AcToast.show(this, "请输入要运行的代码");
+            AcToast.show(this, Strings.get(R.string.jsrunneractivity_007));
             return;
         }
         output.setLength(0);
@@ -384,11 +384,11 @@ public class JsRunnerActivity extends ThemedActivity {
         LogUtil.i(TAG, "run: lang=%s len=%d", lang, code.length());
 
         if (isMarkup()) {
-            setStatus("渲染结果 · ▶ 加载中...", false);
+            setStatus(Strings.get(R.string.jsrunneractivity_008), false);
             webView.loadDataWithBaseURL(null, code, "text/html", "UTF-8", null);
             return;
         }
-        setStatus("输出 · ▶ 正在执行...", false);
+        setStatus(Strings.get(R.string.jsrunneractivity_009), false);
         webView.loadDataWithBaseURL(null, buildRunnerHtml(code), "text/html", "UTF-8", null);
     }
 
@@ -402,7 +402,7 @@ public class JsRunnerActivity extends ThemedActivity {
      */
     private void abortRun() {
         if (state != ST_RUNNING) {
-            AcToast.show(this, "当前没有正在运行的程序");
+            AcToast.show(this, Strings.get(R.string.jsrunneractivity_010));
             return;
         }
         long ms = System.currentTimeMillis() - runStartedAt;
@@ -410,8 +410,8 @@ public class JsRunnerActivity extends ThemedActivity {
         runReported = true;
         stopTicker();
         setRunningUi(false);
-        setStatus("输出 · ■ 已中止 · " + fmtDuration(ms), true);
-        appendOutput("[已中止] 用户中止了本次运行");
+        setStatus(Strings.get(R.string.jsrunneractivity_011) + fmtDuration(ms), true);
+        appendOutput(Strings.get(R.string.jsrunneractivity_012));
         ui.removeCallbacks(heartbeat);
         LogUtil.i(TAG, "abortRun after %dms", ms);
         recreateWebView();
@@ -491,7 +491,7 @@ public class JsRunnerActivity extends ThemedActivity {
           .append("console={log:__log,info:__log,warn:__log,error:__log,debug:__log};")
           .append("function alert(m){__log('alert: '+m);}")
           .append("window.onerror=function(m,src,l,c,e){")
-          .append("__reportError(e||m,l?('第'+l+'行'):'');return true;};")
+          .append(Strings.get(R.string.jsrunneractivity_013))
           .append("window.__check=__check;")
           .append("</script>")
           // 用户代码单独一个 script 块：语法错误只会让这一块失效，
@@ -516,13 +516,13 @@ public class JsRunnerActivity extends ThemedActivity {
     private void copyOutput() {
         String text = outputView.getText().toString();
         if (text.isEmpty()) {
-            AcToast.show(this, "没有输出可复制");
+            AcToast.show(this, Strings.get(R.string.jsrunneractivity_014));
             return;
         }
         ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
         if (cm != null) {
             cm.setPrimaryClip(ClipData.newPlainText("aichat", text));
-            AcToast.show(this, "已复制输出");
+            AcToast.show(this, Strings.get(R.string.jsrunneractivity_015));
         }
     }
 
@@ -530,7 +530,7 @@ public class JsRunnerActivity extends ThemedActivity {
         ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
         if (cm == null || !cm.hasPrimaryClip() || cm.getPrimaryClip() == null
                 || cm.getPrimaryClip().getItemCount() == 0) {
-            AcToast.show(this, "剪贴板为空");
+            AcToast.show(this, Strings.get(R.string.jsrunneractivity_016));
             return;
         }
         CharSequence text = cm.getPrimaryClip().getItemAt(0).coerceToText(this);
@@ -542,7 +542,7 @@ public class JsRunnerActivity extends ThemedActivity {
     private void saveToExports() {
         String code = codeInput.getText().toString();
         if (code.trim().isEmpty()) {
-            AcToast.show(this, "代码内容为空，无法保存");
+            AcToast.show(this, Strings.get(R.string.jsrunneractivity_017));
             return;
         }
         // 复用导出扩展名映射：不再把 html/svg 之外的语言（py/go/md…）一律写成 .js
@@ -550,7 +550,7 @@ public class JsRunnerActivity extends ThemedActivity {
         String name = "code_" + System.currentTimeMillis() + "." + ext;
         String path = StorageManager.getInstance().saveExport(name, code);
         LogUtil.i(TAG, "saveToExports: lang=%s path=%s", lang, path);
-        AcToast.show(this, path == null ? "保存失败" : ("已保存到 " + path));
+        AcToast.show(this, path == null ? Strings.get(R.string.jsrunneractivity_018) : (Strings.get(R.string.jsrunneractivity_019) + path));
     }
 
     @Override
@@ -641,21 +641,21 @@ public class JsRunnerActivity extends ThemedActivity {
         setRunningUi(false);
         if (runHadError) {
             state = ST_ERROR;
-            setStatus("输出 · ✗ " + shortError() + " · " + fmtDuration(ms), true);
+            setStatus(Strings.get(R.string.jsrunneractivity_020) + shortError() + " · " + fmtDuration(ms), true);
         } else if (lines == 0) {
             state = ST_DONE;
-            setStatus("输出 · ✓ 已完成，无 console 输出 · " + fmtDuration(ms), false);
-            if (output.length() == 0) outputView.setText("（执行完成，但没有 console.log 输出）");
+            setStatus(Strings.get(R.string.jsrunneractivity_021) + fmtDuration(ms), false);
+            if (output.length() == 0) outputView.setText(Strings.get(R.string.jsrunneractivity_022));
         } else {
             state = ST_DONE;
-            setStatus("输出 · ✓ 已完成 · " + lines + " 行 · " + fmtDuration(ms), false);
+            setStatus(Strings.get(R.string.jsrunneractivity_023) + lines + Strings.get(R.string.jsrunneractivity_024) + fmtDuration(ms), false);
         }
         LogUtil.i(TAG, "run done: lines=%d error=%s elapsed=%dms", lines, runHadError, ms);
     }
 
     /** 状态行只有一行，错误信息截到 26 字，全文仍在输出区。 */
     private String shortError() {
-        String e = firstError == null ? "执行出错" : firstError;
+        String e = firstError == null ? Strings.get(R.string.jsrunneractivity_025) : firstError;
         e = e.replace('\n', ' ').trim();
         if (e.length() > 26) e = e.substring(0, 26) + "…";
         return e;
@@ -688,7 +688,7 @@ public class JsRunnerActivity extends ThemedActivity {
 
     private void setRunningUi(boolean running) {
         if (abortBtn != null) abortBtn.setEnabled(running);
-        if (runBtn != null) runBtn.setText(running ? "重新运行" : "运行");
+        if (runBtn != null) runBtn.setText(running ? Strings.get(R.string.jsrunneractivity_026) : Strings.get(R.string.jsrunneractivity_027));
     }
 
     /** 状态行同时承担「是否运行过」的提示，出错时转红。 */

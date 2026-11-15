@@ -19,7 +19,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="统计范围"/>
+            android:text="@string/activity_stats_001"/>
         <Spinner
             android:id="@+id/stats_period"
             android:layout_width="wrap_content"
@@ -43,7 +43,7 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:minWidth="0dp"
-            android:text="起始日"/>
+            android:text="@string/activity_stats_002"/>
         <TextView
             android:textSize="12sp"
             android:textColor="@color/text_secondary"
@@ -51,7 +51,7 @@
             android:paddingRight="6dp"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="至"/>
+            android:text="@string/activity_stats_003"/>
         <Button
             android:id="@+id/stats_to"
             android:textSize="12sp"
@@ -59,7 +59,7 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:minWidth="0dp"
-            android:text="结束日"/>
+            android:text="@string/activity_stats_004"/>
     </LinearLayout>
 
     <ScrollView
@@ -74,7 +74,7 @@
             android:textIsSelectable="true"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="统计中…"/>
+            android:text="@string/activity_stats_005"/>
     </ScrollView>
 
     <LinearLayout
@@ -88,7 +88,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginRight="8dp"
-            android:text="清空统计"/>
+            android:text="@string/activity_stats_006"/>
         <Button
             android:id="@+id/stats_close"
             android:textColor="@android:color/white"
@@ -96,6 +96,6 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:minWidth="90dp"
-            android:text="关闭"/>
+            android:text="@string/activity_stats_007"/>
     </LinearLayout>
 </LinearLayout>

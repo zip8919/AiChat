@@ -29,7 +29,7 @@
                 android:paddingRight="10dp"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="‹ 返回" />
+                android:text="@string/activity_model_edit_001" />
             <TextView
                 android:id="@+id/me_title"
                 android:textSize="17sp"
@@ -38,7 +38,7 @@
                 android:layout_width="0dp"
                 android:layout_weight="1"
                 android:layout_height="wrap_content"
-                android:text="新建模型" />
+                android:text="@string/activity_model_edit_002" />
         </LinearLayout>
 
         <TextView
@@ -47,7 +47,7 @@
             android:textColor="@color/text_primary"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="提供商" />
+            android:text="@string/activity_model_edit_003" />
         <Spinner
             android:id="@+id/me_provider"
             android:layout_marginTop="2dp"
@@ -68,7 +68,7 @@
             android:textColor="@color/text_primary"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="模型 ID（请求时发给 API 的名称）" />
+            android:text="@string/activity_model_edit_004" />
         <EditText
             android:id="@+id/me_name"
             android:textSize="14sp"
@@ -76,7 +76,7 @@
             android:inputType="text"
             android:background="@drawable/edit_text_background"
             android:padding="10dp"
-            android:hint="如 deepseek-v4-flash"
+            android:hint="@string/activity_model_edit_005"
             android:layout_width="match_parent"
             android:layout_height="wrap_content" />
 
@@ -87,7 +87,7 @@
             android:layout_marginTop="10dp"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="显示名称（可选）" />
+            android:text="@string/activity_model_edit_006" />
         <EditText
             android:id="@+id/me_display_name"
             android:textSize="14sp"
@@ -95,7 +95,7 @@
             android:inputType="text"
             android:background="@drawable/edit_text_background"
             android:padding="10dp"
-            android:hint="界面里显示的名字，留空则显示模型 ID"
+            android:hint="@string/activity_model_edit_007"
             android:layout_width="match_parent"
             android:layout_height="wrap_content" />
 
@@ -104,20 +104,20 @@
             android:layout_marginTop="10dp"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="支持图片输入（多模态）" />
+            android:text="@string/activity_model_edit_008" />
         <TextView
             android:textSize="11sp"
             android:textColor="@color/text_secondary"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="开启后：附加的图片（原图口径）与图片搜索结果（最多 2 张、压缩后约 184 token/张）会随请求发给模型。请确认该模型确实支持 image_url 格式，否则请求会失败。" />
+            android:text="@string/activity_model_edit_009" />
 
         <CheckBox
             android:id="@+id/me_thinking"
             android:layout_marginTop="6dp"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="支持思考模式开关" />
+            android:text="@string/activity_model_edit_010" />
 
         <Button
             android:id="@+id/me_test"
@@ -125,7 +125,7 @@
             android:layout_marginTop="12dp"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="测试连通性" />
+            android:text="@string/activity_model_edit_011" />
         <TextView
             android:id="@+id/me_test_result"
             android:textSize="12sp"
@@ -143,7 +143,7 @@
             android:layout_marginTop="6dp"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="探测思考档位与图片输入" />
+            android:text="@string/activity_model_edit_012" />
         <TextView
             android:id="@+id/me_probe_result"
             android:textSize="12sp"
@@ -161,7 +161,7 @@
             android:layout_marginTop="10dp"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="设为默认模型" />
+            android:text="@string/activity_model_edit_013" />
 
         <LinearLayout
             android:orientation="horizontal"
@@ -176,7 +176,7 @@
                 android:layout_weight="1"
                 android:layout_height="wrap_content"
                 android:visibility="gone"
-                android:text="删除模型" />
+                android:text="@string/activity_model_edit_014" />
             <Button
                 android:id="@+id/me_save"
                 android:textSize="13sp"
@@ -185,7 +185,7 @@
                 android:layout_width="0dp"
                 android:layout_weight="1"
                 android:layout_height="wrap_content"
-                android:text="保存" />
+                android:text="@string/activity_model_edit_015" />
         </LinearLayout>
     </LinearLayout>
 </ScrollView>

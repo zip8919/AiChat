@@ -57,7 +57,7 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:textSize="13sp"
-            android:text="返回改需求" />
+            android:text="@string/dialog_prompt_preview_001" />
 
         <Button
             android:id="@+id/btn_copy"
@@ -65,7 +65,7 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:textSize="13sp"
-            android:text="复制全文" />
+            android:text="@string/dialog_prompt_preview_002" />
     </LinearLayout>
 
     <LinearLayout
@@ -79,7 +79,7 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:textSize="13sp"
-            android:text="插入输入框" />
+            android:text="@string/dialog_prompt_preview_003" />
 
         <Button
             android:id="@+id/btn_send"
@@ -87,6 +87,6 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:textSize="13sp"
-            android:text="直接发送" />
+            android:text="@string/dialog_prompt_preview_004" />
     </LinearLayout>
 </LinearLayout>

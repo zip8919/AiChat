@@ -129,7 +129,7 @@ final class MessageSanitizer {
         try {
             tm.put("role", "tool");
             tm.put("tool_call_id", id);
-            tm.put("content", "{\"error\":\"工具结果缺失，已按空结果补齐\"}");
+            tm.put("content", Strings.get(R.string.messagesanitizer_001));
         } catch (Exception ignored) {
         }
         return tm;

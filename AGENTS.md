@@ -384,6 +384,42 @@ export KEY_ALIAS=mc
 - 主文档只写**当前有效状态**，不写"以前是 X 现在是 Y"的演进过程。
 - 新增或修改阈值时，同步 `Limits` 的注释与本文 §12 的对应条目。
 - 类职责变化时更新 §6；新增"想改 X"的入口时更新 §10。
+- 新增界面文案时的存放位置、命名与写法见 §11.9。
+
+### 11.9 界面文案
+
+**用户能看到、能听到的文字，一律写在资源文件里，代码与布局里不留中文字面量。** 包括 Toast、对话框标题与按钮、列表项、错误提示、空状态、占位符提示、无障碍描述。
+
+存放位置：
+
+| 文案来源 | 写到哪 | 引用方式 |
+|---|---|---|
+| 布局属性（`android:text` / `hint` / `contentDescription` / `title` / `summary` / `textOn` / `textOff`） | `values/strings_ui.xml` | `@string/xxx` |
+| 布局 `android:tag` 里的长说明（点 ⓘ 弹出的解释） | `values/strings_ui.xml` | `@string/xxx` |
+| Activity / 有 `Context` 的类 | `values/strings_ui.xml` | `getString(R.string.xxx)` |
+| 工具类、管理器、适配器等没有 `Context` 的位置 | `values/strings_ui.xml` | `Strings.get(R.string.xxx)` |
+
+命名：`<类名全小写>_<三位序号>`，例如 `settingsactivity_012`。布局迁移出来的条目沿用布局名前缀（`activity_settings_012`、`activity_settings_tag_001`）。编号不回收、不复用；新增条目顺延当前序列的末尾，**不要占用已存在的编号**（`modelconfigactivity_014` 是「 副本」，覆盖会让复制提供商显示成「默认」）。
+
+写法要求：
+
+- **格式化一律用位置参数** `%1$s` / `%1$d`，后续翻译才能调整语序。
+- **一句话就是一条资源**。不要在代码里用 `"前缀" + 变量 + "后缀"` 拼句，也不要拆成多条资源相加——那会让翻译断句。用 `%1$s` 把变量嵌进去。
+- 资源里出现字面百分号（如显示大小 `100%`）且带参数时，加 `formatted="false"`，否则 `aapt2` 直接编译失败。
+- 引号与反斜杠：资源里的 `"` 写 `\"`，换行写 `\n`。**多写一层反斜杠（`\\"`）会让引号在运行时丢失**，JSON 类字符串会坏掉；改完这类资源要在 `aapt2 dump resources` 里核对实际值。
+- 同一句话在不同页面出现时，共用一个资源键（如「取消」），不要每个类各建一条。
+
+不能资源化的三类，**保持字面量并在注释里写明原因**：
+
+| 类型 | 例 |
+|---|---|
+| 解析历史数据的格式标记 | `AttachmentText.TAG_OPEN`、`ConversationManager.LEGACY_SOURCES_HEADER` |
+| 判断分支用的固定值 | `"system".equals(id)`、`case "actheme"` |
+| 提示词正文、工具描述与工具返回给模型的文本 | `ThemePromptStore`、`WebSearchTool`、`TavilyTool`、`HttpRequestTool` |
+
+**改文案时不要动判断逻辑。** 菜单分支、`switch` 判断、`equals` 比较如果依赖显示文字，改文案就会让功能静默失效（附件长按「用其他应用打开」曾因此点不动）。列表回调改用位置下标判断，判断用的固定值放进常量并与显示文案分离。
+
+消息区渲染脚本（`RendererAssets.JS`）里的按钮文字用 `@@L_XXX@@` 占位，由 `RendererAssets.localize()` 在生成页面时替换成 `renderer_0xx` 资源；新增脚本文案时照此加占位符 + 资源 + 映射，不要直接写中文。
 
 ## 12. 兼容性红线
 

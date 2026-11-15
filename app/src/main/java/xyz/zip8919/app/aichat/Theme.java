@@ -41,7 +41,7 @@ final class Theme {
 
     static Theme blank() {
         Theme t = new Theme();
-        t.name = "新建主题";
+        t.name = Strings.get(R.string.theme_001);
         t.hasLight = true;
         t.hasDark = true;
         return t;
@@ -49,15 +49,15 @@ final class Theme {
 
     /** 解析 .actheme 文本。任何结构性错误都抛异常，由 ThemeValidator 定级。 */
     static Theme parse(String text) throws Exception {
-        if (text == null) throw new IllegalArgumentException("内容为空");
+        if (text == null) throw new IllegalArgumentException(Strings.get(R.string.theme_002));
         JSONObject j = new JSONObject(text);
         if (!FORMAT.equals(j.optString("format", ""))) {
-            throw new IllegalArgumentException("format 不是 actheme");
+            throw new IllegalArgumentException(Strings.get(R.string.theme_003));
         }
         Theme t = new Theme();
         t.version = j.optInt("version", -1);
         JSONObject meta = j.optJSONObject("meta");
-        if (meta == null) throw new IllegalArgumentException("缺 meta");
+        if (meta == null) throw new IllegalArgumentException(Strings.get(R.string.theme_004));
         t.name = meta.optString("name", "");
         t.author = meta.optString("author", "");
         t.description = meta.optString("description", "");

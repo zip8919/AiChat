@@ -65,7 +65,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="拖动选框移动，拖四角改大小"
+            android:text="@string/activity_crop_001"
             android:textColor="#FF9E9E9E"
             android:textSize="12sp"/>
 
@@ -74,7 +74,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:background="#00000000"
-            android:text="旋转 90°"
+            android:text="@string/activity_crop_002"
             android:textColor="#FF64B5F6"
             android:textSize="13sp"/>
 

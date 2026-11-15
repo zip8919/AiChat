@@ -44,10 +44,10 @@ public class AppearanceActivity extends ThemedActivity {
 
     /** 内置 10 色（交互方案 3.2）：5 列 x 2 行网格，总宽 222dp，不横滑。 */
     private static final String[][] PALETTE = {
-            {"朱红", "#E53935"}, {"橙", "#FB8C00"}, {"琥珀", "#FDD835"},
-            {"绿", "#43A047"}, {"蓝", "#1E88E5"}, {"靛", "#3949AB"},
-            {"紫", "#8E24AA"}, {"棕", "#6D4C41"}, {"墨黑", "#212121"},
-            {"纸白", "#FAFAFA"}
+            {Strings.get(R.string.appearanceactivity_001), "#E53935"}, {Strings.get(R.string.appearanceactivity_002), "#FB8C00"}, {Strings.get(R.string.appearanceactivity_003), "#FDD835"},
+            {Strings.get(R.string.appearanceactivity_004), "#43A047"}, {Strings.get(R.string.appearanceactivity_005), "#1E88E5"}, {Strings.get(R.string.appearanceactivity_006), "#3949AB"},
+            {Strings.get(R.string.appearanceactivity_007), "#8E24AA"}, {Strings.get(R.string.appearanceactivity_008), "#6D4C41"}, {Strings.get(R.string.appearanceactivity_009), "#212121"},
+            {Strings.get(R.string.appearanceactivity_010), "#FAFAFA"}
     };
     private static final String PAPER_WHITE = "#FAFAFA";
 
@@ -219,11 +219,11 @@ public class AppearanceActivity extends ThemedActivity {
     }
 
     private String colorName(String hex) {
-        if (hex == null) return "自定义";
+        if (hex == null) return Strings.get(R.string.appearanceactivity_011);
         for (int i = 0; i < PALETTE.length; i++) {
             if (PALETTE[i][1].equalsIgnoreCase(hex)) return PALETTE[i][0];
         }
-        return "自定义";
+        return Strings.get(R.string.appearanceactivity_012);
     }
 
     private void refreshColorLabel() {
@@ -231,13 +231,13 @@ public class AppearanceActivity extends ThemedActivity {
         String hex = r.value == null ? "" : r.value;
         String name = colorName(hex);
         if (r.overridden) {
-            colorSelectedTv.setText("已覆盖 · " + name + " " + hex
-                    + (r.themeName != null ? " · 主题为 " + r.themeName : ""));
+            colorSelectedTv.setText(Strings.get(R.string.appearanceactivity_013) + name + " " + hex
+                    + (r.themeName != null ? Strings.get(R.string.appearanceactivity_014) + r.themeName : ""));
         } else if (r.source == ThemeResolver.SOURCE_THEME) {
-            colorSelectedTv.setText("跟随主题 · "
+            colorSelectedTv.setText(Strings.get(R.string.appearanceactivity_015)
                     + (r.themeName == null ? "" : r.themeName) + " · " + name + " " + hex);
         } else {
-            colorSelectedTv.setText("跟随主题 · 内置默认 · " + name + " " + hex);
+            colorSelectedTv.setText(Strings.get(R.string.appearanceactivity_016) + name + " " + hex);
         }
     }
 
@@ -286,7 +286,7 @@ public class AppearanceActivity extends ThemedActivity {
 
         List<AppearanceSpinnerAdapter.Entry> fe =
                 new ArrayList<AppearanceSpinnerAdapter.Entry>();
-        fe.add(new AppearanceSpinnerAdapter.Entry("系统默认", "使用系统 Roboto 字体", "system", false));
+        fe.add(new AppearanceSpinnerAdapter.Entry(Strings.get(R.string.appearanceactivity_017), Strings.get(R.string.appearanceactivity_018), "system", false));
         for (int i = 0; i < fonts.size(); i++) {
             FontRepository.FontItem f = fonts.get(i);
             if (!f.enabled || f.loadFailed) continue;
@@ -300,14 +300,14 @@ public class AppearanceActivity extends ThemedActivity {
         List<AppearanceSpinnerAdapter.Entry> te =
                 new ArrayList<AppearanceSpinnerAdapter.Entry>();
         te.add(new AppearanceSpinnerAdapter.Entry(
-                "不使用自定义主题", "使用内置默认外观", "", false));
-        te.add(new AppearanceSpinnerAdapter.Entry("内置主题", "", null, true));
+                Strings.get(R.string.appearanceactivity_019), Strings.get(R.string.appearanceactivity_020), "", false));
+        te.add(new AppearanceSpinnerAdapter.Entry(Strings.get(R.string.appearanceactivity_021), "", null, true));
         List<Theme> all = allThemes;
         boolean userHeaderAdded = false;
         for (int i = 0; i < all.size(); i++) {
             Theme t = all.get(i);
             if (!t.builtin && !userHeaderAdded) {
-                te.add(new AppearanceSpinnerAdapter.Entry("我的主题", "", null, true));
+                te.add(new AppearanceSpinnerAdapter.Entry(Strings.get(R.string.appearanceactivity_022), "", null, true));
                 userHeaderAdded = true;
             }
             te.add(themeEntry(t));
@@ -330,13 +330,13 @@ public class AppearanceActivity extends ThemedActivity {
         String sub = (t.author == null || t.author.length() == 0) ? "" : t.author;
         boolean bad = t.fileMissing || t.versionIncompatible;
         if (t.fileMissing) {
-            main = main + " [文件缺失]";
-            sub = "不可选，文件已丢失";
+            main = main + Strings.get(R.string.appearanceactivity_023);
+            sub = Strings.get(R.string.appearanceactivity_024);
         } else if (t.versionIncompatible) {
-            main = main + " [版本不兼容]";
-            sub = "不可选，版本不受支持";
+            main = main + Strings.get(R.string.appearanceactivity_025);
+            sub = Strings.get(R.string.appearanceactivity_026);
         } else {
-            sub = (t.builtin ? "内置 · " : "自定义 · ") + sub;
+            sub = (t.builtin ? Strings.get(R.string.appearanceactivity_027) : Strings.get(R.string.appearanceactivity_028)) + sub;
         }
         return new AppearanceSpinnerAdapter.Entry(main, sub, t.id, false, bad);
     }
@@ -425,7 +425,7 @@ public class AppearanceActivity extends ThemedActivity {
                 AppearanceSpinnerAdapter.Entry e = themeAdapter.entryAt(pos);
                 if (e == null || e.header || e.value == null) return;
                 if (e.disabled) {
-                    AcToast.show(AppearanceActivity.this, "该主题文件缺失或版本不兼容，不可选用");
+                    AcToast.show(AppearanceActivity.this, Strings.get(R.string.appearanceactivity_029));
                     return;
                 }
                 if (e.value.equals(am.getThemeId())) return;
@@ -495,14 +495,14 @@ public class AppearanceActivity extends ThemedActivity {
             public void onClick(View v) {
                 am.applyTemp();
                 refreshStatus();
-                AcToast.show(AppearanceActivity.this, "仅本次运行生效，重启后恢复上次保存");
+                AcToast.show(AppearanceActivity.this, Strings.get(R.string.appearanceactivity_030));
             }
         });
         btnPermanent.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 am.applyPermanent();
                 refreshStatus();
-                AcToast.show(AppearanceActivity.this, "已永久保存");
+                AcToast.show(AppearanceActivity.this, Strings.get(R.string.appearanceactivity_031));
             }
         });
 
@@ -522,9 +522,9 @@ public class AppearanceActivity extends ThemedActivity {
         tv.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 AcDialog.builder(AppearanceActivity.this)
-                        .setTitle("说明")
+                        .setTitle(Strings.get(R.string.appearanceactivity_032))
                         .setMessage((String) tag)
-                        .setPositiveButton("知道了", null)
+                        .setPositiveButton(Strings.get(R.string.appearanceactivity_033), null)
                         .show();
             }
         });
@@ -585,10 +585,10 @@ public class AppearanceActivity extends ThemedActivity {
 
     private void refreshStatus() {
         if (am.isTempApplied()) {
-            statusTv.setText("● 临时生效，重启后恢复上次保存");
+            statusTv.setText(Strings.get(R.string.appearanceactivity_034));
             statusTv.setVisibility(View.VISIBLE);
         } else if (am.isDirty()) {
-            statusTv.setText("● 有未保存的改动");
+            statusTv.setText(Strings.get(R.string.appearanceactivity_035));
             statusTv.setVisibility(View.VISIBLE);
         } else {
             statusTv.setVisibility(View.GONE);
@@ -598,21 +598,21 @@ public class AppearanceActivity extends ThemedActivity {
     private void refreshThemeMeta() {
         String id = am.getThemeId();
         if (id.length() == 0) {
-            themeMetaTv.setText("当前：内置默认外观");
+            themeMetaTv.setText(Strings.get(R.string.appearanceactivity_036));
             themeFontMissingTv.setVisibility(View.GONE);
             return;
         }
         Theme t = ThemeRepository.getInstance().find(id);
         if (t == null) {
-            themeMetaTv.setText("当前主题文件缺失，已回退内置默认");
+            themeMetaTv.setText(Strings.get(R.string.appearanceactivity_037));
             themeFontMissingTv.setVisibility(View.GONE);
             return;
         }
         StringBuilder s = new StringBuilder(t.name);
         if (t.author != null && t.author.length() > 0) s.append(" · ").append(t.author);
         if (t.description != null && t.description.length() > 0) s.append(" · ").append(t.description);
-        if (t.fileMissing) s.append(" [文件缺失]");
-        if (t.versionIncompatible) s.append(" [版本不兼容]");
+        if (t.fileMissing) s.append(Strings.get(R.string.appearanceactivity_038));
+        if (t.versionIncompatible) s.append(Strings.get(R.string.appearanceactivity_039));
         themeMetaTv.setText(s.toString());
 
         // 主题只引用系统字体时（绝大多数内置主题）不必去扫字体目录：
@@ -625,14 +625,14 @@ public class AppearanceActivity extends ThemedActivity {
         Set<String> installed = FontRepository.getInstance().installedIds();
         StringBuilder miss = new StringBuilder();
         if (!isSystemRef(t.fontUi) && !installed.contains(t.fontUi)) {
-            miss.append("界面字体 ").append(t.fontUi);
+            miss.append(Strings.get(R.string.appearanceactivity_040)).append(t.fontUi);
         }
         if (!isSystemRef(t.fontMono) && !installed.contains(t.fontMono)) {
             if (miss.length() > 0) miss.append("、");
-            miss.append("等宽字体 ").append(t.fontMono);
+            miss.append(Strings.get(R.string.appearanceactivity_041)).append(t.fontMono);
         }
         if (miss.length() > 0) {
-            themeFontMissingTv.setText("字体缺失：" + miss + "，已回退系统默认");
+            themeFontMissingTv.setText(Strings.get(R.string.appearanceactivity_042) + miss + Strings.get(R.string.appearanceactivity_043));
             themeFontMissingTv.setVisibility(View.VISIBLE);
         } else {
             themeFontMissingTv.setVisibility(View.GONE);
@@ -675,34 +675,34 @@ public class AppearanceActivity extends ThemedActivity {
 
     private void confirmReset() {
         AcDialog.builder(this)
-                .setTitle("重置外观")
-                .setMessage("回到内置默认外观：100% 显示大小、标准字号、浅色模式、不使用自定义主题、全部跟随主题。"
-                        + "已导入的字体与主题文件不会被删除。重置后仍需点「永久保存」才会写入配置。")
-                .setPositiveButton("重置", new DialogInterface.OnClickListener() {
+                .setTitle(Strings.get(R.string.appearanceactivity_044))
+                .setMessage(Strings.get(R.string.appearanceactivity_045)
+                        + Strings.get(R.string.appearanceactivity_046))
+                .setPositiveButton(Strings.get(R.string.appearanceactivity_047), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         am.reset();
                         refreshAll();
                         forceApplyAppearance();
-                        AcToast.show(AppearanceActivity.this, "已重置，尚未写盘");
+                        AcToast.show(AppearanceActivity.this, Strings.get(R.string.appearanceactivity_048));
                     }
                 })
-                .setNegativeButton("取消", null)
+                .setNegativeButton(Strings.get(R.string.appearanceactivity_049), null)
                 .show();
     }
 
     private void confirmFollowAll() {
         AcDialog.builder(this)
-                .setTitle("全部跟随主题")
-                .setMessage("清除浅色与深色两套里的所有手动覆盖项（主色、强调色、界面字体），"
-                        + "改由当前主题或内置默认提供。显示大小、深色模式、所选主题本身不变。")
-                .setPositiveButton("清除覆盖", new DialogInterface.OnClickListener() {
+                .setTitle(Strings.get(R.string.appearanceactivity_050))
+                .setMessage(Strings.get(R.string.appearanceactivity_051)
+                        + Strings.get(R.string.appearanceactivity_052))
+                .setPositiveButton(Strings.get(R.string.appearanceactivity_053), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         am.clearAllExplicit();
                         onUserChange();
-                        AcToast.show(AppearanceActivity.this, "已清除全部手动覆盖");
+                        AcToast.show(AppearanceActivity.this, Strings.get(R.string.appearanceactivity_054));
                     }
                 })
-                .setNegativeButton("取消", null)
+                .setNegativeButton(Strings.get(R.string.appearanceactivity_055), null)
                 .show();
     }
 
@@ -713,8 +713,8 @@ public class AppearanceActivity extends ThemedActivity {
             return;
         }
         AcDialog.builder(this)
-                .setTitle("有未保存的外观改动")
-                .setItems(new String[]{"放弃改动", "临时生效", "保存并返回"},
+                .setTitle(Strings.get(R.string.appearanceactivity_056))
+                .setItems(new String[]{Strings.get(R.string.appearanceactivity_057), Strings.get(R.string.appearanceactivity_058), Strings.get(R.string.appearanceactivity_059)},
                         new DialogInterface.OnClickListener() {
                             public void onClick(DialogInterface d, int which) {
                                 if (which == 0) {
@@ -729,7 +729,7 @@ public class AppearanceActivity extends ThemedActivity {
                                 }
                             }
                         })
-                .setNegativeButton("继续编辑", null)
+                .setNegativeButton(Strings.get(R.string.appearanceactivity_060), null)
                 .show();
     }
 

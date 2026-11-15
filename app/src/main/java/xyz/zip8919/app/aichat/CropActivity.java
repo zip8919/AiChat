@@ -62,7 +62,7 @@ public class CropActivity extends ThemedActivity {
         srcPath = getIntent().getStringExtra(EXTRA_SRC_PATH);
         displayName = getIntent().getStringExtra(EXTRA_NAME);
         if (srcPath == null || srcPath.length() == 0) {
-            AcToast.show(this, "没有可裁剪的图片");
+            AcToast.show(this, Strings.get(R.string.cropactivity_001));
             finish();
             return;
         }
@@ -128,7 +128,7 @@ public class CropActivity extends ThemedActivity {
                     BitmapFactory.decodeFile(srcPath, bounds);
                     srcW = bounds.outWidth;
                     srcH = bounds.outHeight;
-                    if (srcW <= 0 || srcH <= 0) throw new Exception("不是可识别的图片");
+                    if (srcW <= 0 || srcH <= 0) throw new Exception(Strings.get(R.string.cropactivity_002));
 
                     int screen = Math.max(
                             getResources().getDisplayMetrics().widthPixels,
@@ -139,13 +139,13 @@ public class CropActivity extends ThemedActivity {
                     BitmapFactory.Options o = new BitmapFactory.Options();
                     o.inSampleSize = sample;
                     bmp = BitmapFactory.decodeFile(srcPath, o);
-                    if (bmp == null) throw new Exception("图片解码失败");
+                    if (bmp == null) throw new Exception(Strings.get(R.string.cropactivity_003));
                     LogUtil.d("CropActivity", "decoded %dx%d sample=%d -> %dx%d",
                             srcW, srcH, sample, bmp.getWidth(), bmp.getHeight());
                 } catch (Exception e) {
                     err = e.getMessage();
                 } catch (OutOfMemoryError e) {
-                    err = "图片太大，内存不足";
+                    err = Strings.get(R.string.cropactivity_004);
                 }
                 final Bitmap decoded = bmp;
                 final String error = err;
@@ -157,7 +157,7 @@ public class CropActivity extends ThemedActivity {
                             return;
                         }
                         if (decoded == null) {
-                            AcToast.showLong(CropActivity.this, "打开图片失败: " + (error == null ? "未知错误" : error));
+                            AcToast.showLong(CropActivity.this, Strings.get(R.string.cropactivity_005) + (error == null ? Strings.get(R.string.cropactivity_006) : error));
                             finish();
                             return;
                         }
@@ -170,10 +170,10 @@ public class CropActivity extends ThemedActivity {
                         if (Math.max(sourceW, sourceH) < LOW_RES_PX) {
                             TextView head = (TextView) findViewById(R.id.crop_head);
                             if (head != null) {
-                                head.setText(head.getText() + "  ⚠ 低分辨率");
+                                head.setText(head.getText() + Strings.get(R.string.cropactivity_007));
                             }
-                            AcToast.showLong(CropActivity.this, "原图只有 " + sourceW + "×" + sourceH
-                                            + "，放大会模糊。建议从相册选原图，或换系统相机重拍");
+                            AcToast.showLong(CropActivity.this, Strings.get(R.string.cropactivity_008) + sourceW + "×" + sourceH
+                                            + Strings.get(R.string.cropactivity_009));
                         }
                     }
                 });
@@ -202,20 +202,20 @@ public class CropActivity extends ThemedActivity {
                 rotated = Bitmap.createBitmap(current, 0, 0,
                         current.getWidth(), current.getHeight(), matrix, true);
             } catch (OutOfMemoryError e) {
-                AcToast.show(this, "内存不足，无法旋转");
+                AcToast.show(this, Strings.get(R.string.cropactivity_010));
                 return;
             } catch (Exception e) {
-                AcToast.show(this, "旋转失败: " + e.getMessage());
+                AcToast.show(this, Strings.get(R.string.cropactivity_011) + e.getMessage());
                 return;
             }
             if (rotated == null) {
-                AcToast.show(this, "旋转失败");
+                AcToast.show(this, Strings.get(R.string.cropactivity_012));
                 return;
             }
             source = rotated;
             rotationDegrees = (rotationDegrees + 90) % 360;
             cropView.setBitmap(source);
-            rotateBtn.setText("旋转 " + rotationDegrees + "°");
+            rotateBtn.setText(Strings.get(R.string.cropactivity_013) + rotationDegrees + "°");
             // setBitmap 已切到新图，旧图此刻不再被 CropView 引用
             if (!current.isRecycled()) current.recycle();
         }
@@ -225,7 +225,7 @@ public class CropActivity extends ThemedActivity {
         if (source == null) return;
         final Rect rect = cropView.computeCropRect();
         if (rect.width() <= 0 || rect.height() <= 0) {
-            AcToast.show(this, "请先选择裁剪范围");
+            AcToast.show(this, Strings.get(R.string.cropactivity_014));
             return;
         }
         setBusy(true);
@@ -252,7 +252,7 @@ public class CropActivity extends ThemedActivity {
                         }
                     }
                     File dir = new File(getCacheDir(), "camera");
-                    if (!dir.exists() && !dir.mkdirs()) throw new Exception("无法创建缓存目录");
+                    if (!dir.exists() && !dir.mkdirs()) throw new Exception(Strings.get(R.string.cropactivity_015));
                     File out = new File(dir, "crop-" + System.currentTimeMillis() + ".jpg");
                     FileOutputStream fos = new FileOutputStream(out);
                     try {
@@ -261,14 +261,14 @@ public class CropActivity extends ThemedActivity {
                     } finally {
                         try { fos.close(); } catch (Exception ignored) { }
                     }
-                    if (out.length() == 0) throw new Exception("裁剪结果为空");
+                    if (out.length() == 0) throw new Exception(Strings.get(R.string.cropactivity_016));
                     outPath = out.getAbsolutePath();
                     LogUtil.i("CropActivity", "cropped %dx%d -> %s (%d bytes)",
                             rect.width(), rect.height(), out.getName(), out.length());
                 } catch (Exception e) {
                     err = e.getMessage();
                 } catch (OutOfMemoryError e) {
-                    err = "内存不足，请换一张小一点的图";
+                    err = Strings.get(R.string.cropactivity_017);
                 } finally {
                     // 选框拖到四边（等于不裁）时 createBitmap 会直接把 source 原样返回，
                     // 这里若无条件 recycle，就把 CropView 正在画的那张图回收了，
@@ -282,7 +282,7 @@ public class CropActivity extends ThemedActivity {
                         if (isFinishing() || isDestroyed()) return;
                         setBusy(false);
                         if (path == null) {
-                            AcToast.showLong(CropActivity.this, "裁剪失败: " + (error == null ? "未知错误" : error));
+                            AcToast.showLong(CropActivity.this, Strings.get(R.string.cropactivity_018) + (error == null ? Strings.get(R.string.cropactivity_019) : error));
                             return;
                         }
                         returnPath(path);
@@ -305,7 +305,7 @@ public class CropActivity extends ThemedActivity {
         originalBtn.setEnabled(!busy);
         rotateBtn.setEnabled(!busy && source != null);
         if (busy) {
-            progress = ProgressDialog.show(this, null, "正在裁剪…", true, false);
+            progress = ProgressDialog.show(this, null, Strings.get(R.string.cropactivity_020), true, false);
         } else if (progress != null) {
             try { progress.dismiss(); } catch (Exception ignored) { }
             progress = null;

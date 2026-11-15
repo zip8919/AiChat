@@ -75,15 +75,15 @@ public class FullscreenInputActivity extends ThemedActivity {
                 if (len == 0) return;
                 // 这里没有后悔药：主界面清空也先问一句，长文更是如此
                 AcDialog.builder(FullscreenInputActivity.this)
-                        .setTitle("清空输入")
-                        .setMessage("将清空全部 " + len + " 字。清空后无法撤销。")
-                        .setPositiveButton("清空", new DialogInterface.OnClickListener() {
+                        .setTitle(Strings.get(R.string.fullscreeninputactivity_001))
+                        .setMessage(Strings.get(R.string.fullscreeninputactivity_002) + len + Strings.get(R.string.fullscreeninputactivity_003))
+                        .setPositiveButton(Strings.get(R.string.fullscreeninputactivity_004), new DialogInterface.OnClickListener() {
                             public void onClick(DialogInterface d, int w) {
                                 edit.setText("");
                                 edit.requestFocus();
                             }
                         })
-                        .setNegativeButton("取消", null)
+                        .setNegativeButton(Strings.get(R.string.fullscreeninputactivity_005), null)
                         .show();
             }
         });
@@ -119,7 +119,7 @@ public class FullscreenInputActivity extends ThemedActivity {
             if (pendingCount != null) COUNTER.removeCallbacks(pendingCount);
             pendingCount = null;
             int tokens = MessageHtmlRenderer.estimateTokens(edit.getText());
-            counter.setText(len + " 字 · ~"
+            counter.setText(len + Strings.get(R.string.fullscreeninputactivity_006)
                     + MessageHtmlRenderer.formatTokens(tokens) + " tokens");
             return;
         }
@@ -131,7 +131,7 @@ public class FullscreenInputActivity extends ThemedActivity {
                 // 与消息底部同一套估算规则（中英分别计权、代理对算一个宽字符），
                 // 长文输入时先看到大概要花多少，不用发出去再看回执
                 int tokens = MessageHtmlRenderer.estimateTokens(edit.getText());
-                counter.setText(len + " 字 · ~"
+                counter.setText(len + Strings.get(R.string.fullscreeninputactivity_007)
                         + MessageHtmlRenderer.formatTokens(tokens) + " tokens");
             }
         };

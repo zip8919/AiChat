@@ -55,8 +55,8 @@ final class ViewerBg {
     };
 
     static final String[] PRESET_NAMES = {
-        "纯白  #FFFFFF", "米黄  #F5F5DC", "淡绿  #CCE8CF", "浅灰  #EEEEEE",
-        "中灰  #888888", "深灰  #404040", "纯黑  #000000", "深蓝  #1A2733",
+        Strings.get(R.string.viewerbg_001), Strings.get(R.string.viewerbg_002), Strings.get(R.string.viewerbg_003), Strings.get(R.string.viewerbg_004),
+        Strings.get(R.string.viewerbg_005), Strings.get(R.string.viewerbg_006), Strings.get(R.string.viewerbg_007), Strings.get(R.string.viewerbg_008),
     };
 
     /**
@@ -133,11 +133,11 @@ final class ViewerBg {
     static void showPicker(final Activity a, final int current, final Callback cb) {
         final String[] items = new String[PRESET_NAMES.length + 1];
         for (int i = 0; i < PRESET_NAMES.length; i++) {
-            items[i] = (PRESETS[i] == current ? "[当前] " : "") + PRESET_NAMES[i];
+            items[i] = (PRESETS[i] == current ? Strings.get(R.string.viewerbg_009) : "") + PRESET_NAMES[i];
         }
-        items[PRESET_NAMES.length] = "自定义（输入 #RRGGBB）…";
+        items[PRESET_NAMES.length] = Strings.get(R.string.viewerbg_010);
         AcDialog.builder(a)
-                .setTitle("查看器背景色")
+                .setTitle(Strings.get(R.string.viewerbg_011))
                 .setItems(items, new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int which) {
                         if (which < PRESETS.length) {
@@ -147,7 +147,7 @@ final class ViewerBg {
                         }
                     }
                 })
-                .setNegativeButton("取消", null)
+                .setNegativeButton(Strings.get(R.string.viewerbg_012), null)
                 .show();
     }
 
@@ -169,11 +169,11 @@ final class ViewerBg {
         // 覆盖「确定」的默认监听：校验不通过时保留对话框并在输入框上常驻报错，
         // 不用 Toast（一闪而过看不清），也不会像系统默认那样点一下就把框关掉。
         final AlertDialog dlg = AcDialog.builder(a)
-                .setTitle("自定义背景色")
-                .setMessage("输入 6 位十六进制，例如 #F5F5DC\n（字体颜色保持固定，不随背景反色）")
+                .setTitle(Strings.get(R.string.viewerbg_013))
+                .setMessage(Strings.get(R.string.viewerbg_014))
                 .setView(box)
-                .setPositiveButton("确定", null)
-                .setNegativeButton("取消", null)
+                .setPositiveButton(Strings.get(R.string.viewerbg_015), null)
+                .setNegativeButton(Strings.get(R.string.viewerbg_016), null)
                 .create();
         AcDialog.onShow(dlg, new DialogInterface.OnShowListener() {
             public void onShow(DialogInterface di) {
@@ -182,7 +182,7 @@ final class ViewerBg {
                     public void onClick(View v) {
                         Integer c = parse(et.getText().toString());
                         if (c == null) {
-                            et.setError("格式应为 #RRGGBB，例如 #F5F5DC");
+                            et.setError(Strings.get(R.string.viewerbg_017));
                             return;
                         }
                         dlg.dismiss();

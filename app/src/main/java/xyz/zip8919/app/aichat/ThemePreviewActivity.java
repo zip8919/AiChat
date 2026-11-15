@@ -51,11 +51,11 @@ public class ThemePreviewActivity extends ThemedActivity {
         bindViews();
         spinner.setAdapter(new ArrayAdapter<String>(this,
                 android.R.layout.simple_spinner_item,
-                new String[]{"Spinner 选中态"}));
+                new String[]{Strings.get(R.string.themepreviewactivity_001)}));
         int percent = getIntent().getIntExtra("percent", 100);
         this.percent = percent;
         if (percent != 100) {
-            title.setText("主题预览 · 显示 " + percent + "%");
+            title.setText(Strings.get(R.string.themepreviewactivity_002) + percent + "%");
         }
         wire();
         render();
@@ -103,11 +103,11 @@ public class ThemePreviewActivity extends ThemedActivity {
         btnApply.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 if (themeId == null || themeId.length() == 0) {
-                    toast("当前没有自定义主题可应用");
+                    toast(Strings.get(R.string.themepreviewactivity_003));
                     return;
                 }
                 am.setThemeId(themeId);
-                toast("已应用，返回外观页后点保存才会写盘");
+                toast(Strings.get(R.string.themepreviewactivity_004));
                 finish();
             }
         });
@@ -127,8 +127,8 @@ public class ThemePreviewActivity extends ThemedActivity {
     }
 
     private void render() {
-        btnMode.setText(darkMode ? "深色 ⇄" : "浅色 ⇄");
-        btnSource.setText(useTheme ? "当前主题 ⇄" : "内置默认 ⇄");
+        btnMode.setText(darkMode ? Strings.get(R.string.themepreviewactivity_005) : Strings.get(R.string.themepreviewactivity_006));
+        btnSource.setText(useTheme ? Strings.get(R.string.themepreviewactivity_007) : Strings.get(R.string.themepreviewactivity_008));
 
         int bg = getToken(ThemeTokens.AC_BG);
         int surface = getToken(ThemeTokens.AC_SURFACE);
@@ -195,9 +195,9 @@ public class ThemePreviewActivity extends ThemedActivity {
                 + ThemeCssBuilder.hexOf(codeText) + ";padding:6px;white-space:pre-wrap;word-wrap:break-word;}"
                 + "a{color:" + ThemeCssBuilder.hexOf(link) + ";}"
                 + "</style></head><body>"
-                + "<div class='b'>用户：消息气泡在 WebView 里的样子</div>"
-                + "<div>AI：这是一段回复，含 <a href='#'>链接</a> 与代码块。</div>"
-                + "<pre>val x = 1  // 代码块样例</pre>"
+                + Strings.get(R.string.themepreviewactivity_009)
+                + Strings.get(R.string.themepreviewactivity_010)
+                + Strings.get(R.string.themepreviewactivity_011)
                 + "</body></html>";
         webView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null);
     }

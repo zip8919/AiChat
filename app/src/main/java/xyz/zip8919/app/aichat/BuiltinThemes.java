@@ -23,7 +23,7 @@ final class BuiltinThemes {
 
     static List<Theme> list() {
         List<Theme> out = new ArrayList<Theme>();
-        add(out, ID_DEFAULT, "默认", "跟随系统", "与原版一致的 Holo.Light 配色，作为对比基准",
+        add(out, ID_DEFAULT, Strings.get(R.string.builtinthemes_001), Strings.get(R.string.builtinthemes_002), Strings.get(R.string.builtinthemes_003),
                 new String[]{
                         "ac_primary", "#2196F3", "ac_primary_dark", "#1976D2",
                         "ac_accent", "#FF5722", "ac_bg", "#F5F5F5",
@@ -39,7 +39,7 @@ final class BuiltinThemes {
                         "ac_bubble_ai", "#303030", "ac_divider", "#424242"},
                 "");
 
-        add(out, ID_PAPER, "纸墨", "内置", "暖白底 + 深灰字，长时间阅读护眼",
+        add(out, ID_PAPER, Strings.get(R.string.builtinthemes_004), Strings.get(R.string.builtinthemes_005), Strings.get(R.string.builtinthemes_006),
                 new String[]{
                         "ac_primary", "#8D6E63", "ac_primary_dark", "#5D4037",
                         "ac_accent", "#A1887F", "ac_bg", "#FAF6EF",
@@ -55,7 +55,7 @@ final class BuiltinThemes {
                         "ac_bubble_ai", "#2E241F", "ac_divider", "#4E342E"},
                 "body{background:#241C18;color:#EFEBE9;}");
 
-        add(out, ID_NIGHT, "深夜", "内置", "暗色低饱和，夜间弱光下不刺眼",
+        add(out, ID_NIGHT, Strings.get(R.string.builtinthemes_007), Strings.get(R.string.builtinthemes_008), Strings.get(R.string.builtinthemes_009),
                 new String[]{
                         "ac_primary", "#5C6BC0", "ac_primary_dark", "#3949AB",
                         "ac_accent", "#7986CB", "ac_bg", "#ECEFF1",
@@ -71,7 +71,7 @@ final class BuiltinThemes {
                         "ac_bubble_ai", "#1C222B", "ac_divider", "#2C3641"},
                 "body{background:#12161C;color:#CFD8DC;}");
 
-        add(out, ID_CONTRAST, "高对比", "内置", "黑白 + 深色边框，强光下可读",
+        add(out, ID_CONTRAST, Strings.get(R.string.builtinthemes_010), Strings.get(R.string.builtinthemes_011), Strings.get(R.string.builtinthemes_012),
                 new String[]{
                         "ac_primary", "#000000", "ac_primary_dark", "#000000",
                         "ac_accent", "#000000", "ac_bg", "#FFFFFF",

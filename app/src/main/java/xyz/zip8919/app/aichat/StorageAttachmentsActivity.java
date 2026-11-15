@@ -152,7 +152,7 @@ public class StorageAttachmentsActivity extends ThemedActivity {
         selectBtn.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 if (!canDelete()) {
-                    AcToast.show(StorageAttachmentsActivity.this, "部分会话无法读取，暂不能清理图片");
+                    AcToast.show(StorageAttachmentsActivity.this, Strings.get(R.string.storageattachmentsactivity_001));
                     return;
                 }
                 if (showOrphans) {
@@ -160,7 +160,7 @@ public class StorageAttachmentsActivity extends ThemedActivity {
                     selected.clear();
                     render();
                 } else {
-                    AcToast.showLong(StorageAttachmentsActivity.this, "使用中的图片不能在这里删除，请先删除对应会话");
+                    AcToast.showLong(StorageAttachmentsActivity.this, Strings.get(R.string.storageattachmentsactivity_002));
                 }
             }
         });
@@ -221,7 +221,7 @@ public class StorageAttachmentsActivity extends ThemedActivity {
         loading = true;
         adapter.setData(new ArrayList<Item>());
         empty.setVisibility(View.VISIBLE);
-        empty.setText("正在统计…");
+        empty.setText(Strings.get(R.string.storageattachmentsactivity_003));
 
         new Thread(new Runnable() {
             public void run() {
@@ -304,8 +304,8 @@ public class StorageAttachmentsActivity extends ThemedActivity {
     // ---------------------------------------------------------------- 渲染
 
     private void render() {
-        tabUsed.setText("使用中 " + used.size());
-        tabOrphan.setText("无引用 " + orphans.size());
+        tabUsed.setText(Strings.get(R.string.storageattachmentsactivity_004) + used.size());
+        tabOrphan.setText(Strings.get(R.string.storageattachmentsactivity_005) + orphans.size());
         tabUsed.setTextColor(getResources().getColor(
                 showOrphans ? R.color.text_secondary : R.color.storage_att));
         tabOrphan.setTextColor(getResources().getColor(
@@ -327,33 +327,33 @@ public class StorageAttachmentsActivity extends ThemedActivity {
         boolean canSelectAll = selectionMode && showOrphans && !orphans.isEmpty();
         selectAllBtn.setVisibility(canSelectAll ? View.VISIBLE : View.GONE);
         if (canSelectAll) {
-            selectAllBtn.setText(selected.size() >= orphans.size() ? "取消全选" : "全选");
+            selectAllBtn.setText(selected.size() >= orphans.size() ? Strings.get(R.string.storageattachmentsactivity_006) : Strings.get(R.string.storageattachmentsactivity_007));
         }
         cancelBtn.setVisibility(selectionMode ? View.VISIBLE : View.GONE);
         deleteBtn.setVisibility(selectionMode ? View.VISIBLE : View.GONE);
 
         if (incomplete) {
-            hint.setText("部分会话无法读取，暂不能清理图片");
+            hint.setText(Strings.get(R.string.storageattachmentsactivity_008));
         } else if (indexEmpty && showOrphans) {
             // 一条引用都没解析出来却把所有图都归为「无引用」：这更像是索引没对上格式，
             // 而不是用户真的删光了所有会话。必须把话说白，别让人一键清掉历史图片。
-            hint.setText("⚠ 未在任何会话中找到图片引用，请先确认历史消息里的图还能打开再删");
+            hint.setText(Strings.get(R.string.storageattachmentsactivity_009));
         } else if (showOrphans) {
             hint.setText(selectionMode
-                    ? "已选 " + selected.size() + " 张"
-                    : "这些图片不与任何对话关联，可以安全删除");
+                    ? Strings.get(R.string.storageattachmentsactivity_010) + selected.size() + Strings.get(R.string.storageattachmentsactivity_011)
+                    : Strings.get(R.string.storageattachmentsactivity_012));
         } else {
-            hint.setText("仍被对话引用，删除会让消息里的图片无法显示");
+            hint.setText(Strings.get(R.string.storageattachmentsactivity_013));
         }
 
-        deleteBtn.setText("删除" + (selected.size() > 0 ? "(" + selected.size() + ")" : ""));
+        deleteBtn.setText(Strings.get(R.string.storageattachmentsactivity_014) + (selected.size() > 0 ? "(" + selected.size() + ")" : ""));
         deleteBtn.setEnabled(!selected.isEmpty());
 
         if (data.isEmpty()) {
             empty.setVisibility(View.VISIBLE);
             empty.setText(showOrphans
-                    ? "没有无引用的图片\n删除会话后，它用过的图片会出现在这里"
-                    : "还没有图片附件\n对话里发送的图片会保存在这里");
+                    ? Strings.get(R.string.storageattachmentsactivity_015)
+                    : Strings.get(R.string.storageattachmentsactivity_016));
         } else {
             empty.setVisibility(View.GONE);
         }
@@ -399,54 +399,53 @@ public class StorageAttachmentsActivity extends ThemedActivity {
      */
     private void showItemMenu(final Item it) {
         final java.util.ArrayList<String> items = new java.util.ArrayList<String>();
-        items.add("预览大图");
-        items.add("打开方式（第三方应用）");
-        items.add("分享");
-        items.add("详细信息");
+        items.add(Strings.get(R.string.storageattachmentsactivity_017));
+        items.add(Strings.get(R.string.storageattachmentsactivity_018));
+        items.add(Strings.get(R.string.storageattachmentsactivity_019));
+        items.add(Strings.get(R.string.storageattachmentsactivity_020));
         // 索引不完整时「无引用」是不可信的：可能删掉历史消息正在用的图
-        if (it.refs == 0 && canDelete()) items.add("删除");
+        if (it.refs == 0 && canDelete()) items.add(Strings.get(R.string.storageattachmentsactivity_021));
 
         AcDialog.builder(this)
                 .setTitle(it.refs > 0
-                        ? "使用中 · " + it.refs + " 个会话引用"
-                        : "无引用图片")
+                        ? Strings.get(R.string.storageattachmentsactivity_022) + it.refs + Strings.get(R.string.storageattachmentsactivity_023)
+                        : Strings.get(R.string.storageattachmentsactivity_024))
                 .setItems(items.toArray(new String[0]), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int which) {
-                        String label = items.get(which);
-                        if ("预览大图".equals(label)) {
+                        if (which == 0) {
                             FileActions.previewImage(StorageAttachmentsActivity.this, it.file);
-                        } else if (label.startsWith("打开方式")) {
+                        } else if (which == 1) {
                             FileActions.open(StorageAttachmentsActivity.this, it.file);
-                        } else if ("分享".equals(label)) {
+                        } else if (which == 2) {
                             FileActions.share(StorageAttachmentsActivity.this, it.file);
-                        } else if ("详细信息".equals(label)) {
+                        } else if (which == 3) {
                             showDetail(it);
-                        } else if ("删除".equals(label)) {
+                        } else if (which == 4) {
                             selected.clear();
                             selected.add(it.name);
                             deleteSelected();
                         }
                     }
                 })
-                .setNegativeButton("取消", null)
+                .setNegativeButton(Strings.get(R.string.storageattachmentsactivity_025), null)
                 .show();
     }
 
     private void showDetail(final Item it) {
         String sub = it.refs > 0
-                ? "用于 " + it.refs + " 个会话"
-                : "无会话引用";
-        String msg = "文件名：" + it.name + "\n"
-                + "大小：" + StorageReport.size(it.bytes) + "\n"
-                + "保存时间：" + TIME_FMT.format(new Date(it.mtime)) + "\n"
-                + "状态：" + sub + "\n\n"
+                ? Strings.get(R.string.storageattachmentsactivity_026) + it.refs + Strings.get(R.string.storageattachmentsactivity_027)
+                : Strings.get(R.string.storageattachmentsactivity_028);
+        String msg = Strings.get(R.string.storageattachmentsactivity_029) + it.name + "\n"
+                + Strings.get(R.string.storageattachmentsactivity_030) + StorageReport.size(it.bytes) + "\n"
+                + Strings.get(R.string.storageattachmentsactivity_031) + TIME_FMT.format(new Date(it.mtime)) + "\n"
+                + Strings.get(R.string.storageattachmentsactivity_032) + sub + "\n\n"
                 + (it.refs > 0
-                ? "这张图仍被对话引用，删除后消息里的图片会无法显示。"
-                : "这张图不与任何对话关联，可以安全删除。");
+                ? Strings.get(R.string.storageattachmentsactivity_033)
+                : Strings.get(R.string.storageattachmentsactivity_034));
         AcDialog.builder(this)
-                .setTitle(it.refs > 0 ? "使用中的图片" : "无引用图片")
+                .setTitle(it.refs > 0 ? Strings.get(R.string.storageattachmentsactivity_035) : Strings.get(R.string.storageattachmentsactivity_036))
                 .setMessage(msg)
-                .setNegativeButton("关闭", null)
+                .setNegativeButton(Strings.get(R.string.storageattachmentsactivity_037), null)
                 .show();
     }
 
@@ -454,7 +453,7 @@ public class StorageAttachmentsActivity extends ThemedActivity {
 
     private void confirmDelete() {
         if (selected.isEmpty()) {
-            AcToast.show(this, "请先选择要删除的图片");
+            AcToast.show(this, Strings.get(R.string.storageattachmentsactivity_038));
             return;
         }
         long bytes = 0;
@@ -462,15 +461,15 @@ public class StorageAttachmentsActivity extends ThemedActivity {
             if (selected.contains(orphans.get(i).name)) bytes += orphans.get(i).bytes;
         }
         AcDialog.builder(this)
-                .setTitle("删除图片")
-                .setMessage("删除 " + selected.size() + " 张图片？\n\n共 "
-                        + StorageReport.size(bytes) + "，不与任何对话关联。\n此操作不可恢复。")
-                .setPositiveButton("删除", new DialogInterface.OnClickListener() {
+                .setTitle(Strings.get(R.string.storageattachmentsactivity_039))
+                .setMessage(Strings.get(R.string.storageattachmentsactivity_040) + selected.size() + Strings.get(R.string.storageattachmentsactivity_041)
+                        + StorageReport.size(bytes) + Strings.get(R.string.storageattachmentsactivity_042))
+                .setPositiveButton(Strings.get(R.string.storageattachmentsactivity_043), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         deleteSelected();
                     }
                 })
-                .setNegativeButton("取消", null)
+                .setNegativeButton(Strings.get(R.string.storageattachmentsactivity_044), null)
                 .show();
     }
 
@@ -479,7 +478,7 @@ public class StorageAttachmentsActivity extends ThemedActivity {
         final List<String> names = new ArrayList<String>(selected);
         if (names.isEmpty()) return;
         deleteBtn.setEnabled(false);
-        deleteBtn.setText("删除中…");
+        deleteBtn.setText(Strings.get(R.string.storageattachmentsactivity_045));
 
         new Thread(new Runnable() {
             public void run() {
@@ -495,7 +494,7 @@ public class StorageAttachmentsActivity extends ThemedActivity {
                         public void run() {
                             if (isFinishing() || isDestroyed()) return;
                             AcToast.show(StorageAttachmentsActivity.this,
-                                    "会话索引读取失败，已取消删除，请稍后重试");
+                                    Strings.get(R.string.storageattachmentsactivity_046));
                             // 退出多选并重扫：只把按钮文案改回「删除」会让页面停在
                             // 上一次的判定上（仍显示「不与任何对话关联，可安全删除」），
                             // 用户会反复点、每次都被拒。重扫失败时列表会变成
@@ -545,9 +544,9 @@ public class StorageAttachmentsActivity extends ThemedActivity {
                 runOnUiThread(new Runnable() {
                     public void run() {
                         if (isFinishing() || isDestroyed()) return;
-                        AcToast.show(StorageAttachmentsActivity.this, "已删除 " + okCount + " 张，释放 " + StorageReport.size(freed)
-                                        + (failCount > 0 ? "，" + failCount + " 张被占用" : "")
-                                        + (skipCount > 0 ? "，" + skipCount + " 张已被会话引用，已跳过" : ""));
+                        AcToast.show(StorageAttachmentsActivity.this, Strings.get(R.string.storageattachmentsactivity_047) + okCount + Strings.get(R.string.storageattachmentsactivity_048) + StorageReport.size(freed)
+                                        + (failCount > 0 ? "，" + failCount + Strings.get(R.string.storageattachmentsactivity_049) : "")
+                                        + (skipCount > 0 ? "，" + skipCount + Strings.get(R.string.storageattachmentsactivity_050) : ""));
                         exitSelection();
                         // 总览页的缓存已过期，否则返回后仍显示旧数字
                         StorageActivity.invalidateCache();
@@ -611,7 +610,7 @@ public class StorageAttachmentsActivity extends ThemedActivity {
             final Item it = data.get(position);
             h.name.setText(displayName(it.name));
             h.size.setText(StorageReport.size(it.bytes));
-            h.sub.setText((it.refs > 0 ? "用于 " + it.refs + " 个会话" : "无会话引用")
+            h.sub.setText((it.refs > 0 ? Strings.get(R.string.storageattachmentsactivity_051) + it.refs + Strings.get(R.string.storageattachmentsactivity_052) : Strings.get(R.string.storageattachmentsactivity_053))
                     + " · " + TIME_FMT.format(new Date(it.mtime)));
             ThemeRecolor.applyTo(convertView);
 

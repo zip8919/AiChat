@@ -224,12 +224,12 @@ public class ModelConfigActivity extends ThemedActivity {
                     return;
                 }
                 if (cfg.getProviders().isEmpty()) {
-                    AcToast.show(ModelConfigActivity.this, "还没有提供商");
+                    AcToast.show(ModelConfigActivity.this, Strings.get(R.string.modelconfigactivity_001));
                     return;
                 }
                 providerSelection = true;
                 providerAdapter.setSelectionMode(true);
-                providerMulti.setText("退出多选");
+                providerMulti.setText(Strings.get(R.string.modelconfigactivity_002));
                 updateProviderSelectionBar();
             }
         });
@@ -282,13 +282,13 @@ public class ModelConfigActivity extends ThemedActivity {
         if (!providerSelection) return;
         providerSelection = false;
         providerAdapter.setSelectionMode(false);
-        providerMulti.setText("多选");
+        providerMulti.setText(Strings.get(R.string.modelconfigactivity_003));
         providerSelBar.setVisibility(View.GONE);
     }
 
     private void updateProviderSelectionBar() {
         providerSelBar.setVisibility(providerSelection ? View.VISIBLE : View.GONE);
-        providerSelCount.setText("已选 " + providerAdapter.checkedKeys().size() + " 个");
+        providerSelCount.setText(Strings.get(R.string.modelconfigactivity_004) + providerAdapter.checkedKeys().size() + Strings.get(R.string.modelconfigactivity_005));
     }
 
     private void reloadProviders() {
@@ -302,9 +302,9 @@ public class ModelConfigActivity extends ThemedActivity {
             if (!p.label().equals(p.name)) sub.append(p.name).append(" · ");
             sub.append(Endpoint.chatUrl(p));
             String keyState = (p.apiKey == null || p.apiKey.trim().length() == 0)
-                    ? "未填 Key" : "Key ✓";
-            sub.append(" · ").append(keyState).append(" · ").append(count).append(" 个模型");
-            String badge = p.name.equals(def) ? "默认" : "";
+                    ? Strings.get(R.string.modelconfigactivity_006) : "Key ✓";
+            sub.append(" · ").append(keyState).append(" · ").append(count).append(Strings.get(R.string.modelconfigactivity_007));
+            String badge = p.name.equals(def) ? Strings.get(R.string.modelconfigactivity_148) : "";
             rows.add(new ConfigRowAdapter.Row(p.name, p.label(), sub.toString(), badge));
         }
         providerAdapter.setRows(rows);
@@ -330,7 +330,7 @@ public class ModelConfigActivity extends ThemedActivity {
     private void showProviderMenu(final String name) {
         final ProviderInfo p = cfg.getProvider(name);
         if (p == null) return;
-        String[] items = {"编辑", "复制一份", "测试连通性", "新建模型", "删除"};
+        String[] items = {Strings.get(R.string.modelconfigactivity_008), Strings.get(R.string.modelconfigactivity_009), Strings.get(R.string.modelconfigactivity_010), Strings.get(R.string.modelconfigactivity_011), Strings.get(R.string.modelconfigactivity_012)};
         AcDialog.builder(this)
                 .setTitle(p.label())
                 .setItems(items, new DialogInterface.OnClickListener() {
@@ -342,7 +342,7 @@ public class ModelConfigActivity extends ThemedActivity {
                         else confirmDeleteProviders(Collections.singletonList(name));
                     }
                 })
-                .setNegativeButton("取消", null)
+                .setNegativeButton(Strings.get(R.string.modelconfigactivity_013), null)
                 .show();
     }
 
@@ -353,12 +353,12 @@ public class ModelConfigActivity extends ThemedActivity {
     private void duplicateProvider(ProviderInfo src) {
         ProviderInfo cp = src.copy();
         cp.name = nextProviderName(src.name);
-        cp.displayName = src.label() + " 副本";
+        cp.displayName = src.label() + Strings.get(R.string.modelconfigactivity_014);
         cfg.getProviders().add(cp);
         cfg.save();
         reloadProviders();
         refreshProviderFilter();
-        AcToast.show(this, "已复制为 " + cp.label());
+        AcToast.show(this, Strings.get(R.string.modelconfigactivity_015) + cp.label());
         LogUtil.i(TAG, "duplicateProvider: %s -> %s", src.name, cp.name);
     }
 
@@ -374,7 +374,7 @@ public class ModelConfigActivity extends ThemedActivity {
     private void confirmBatchDeleteProviders() {
         Set<String> keys = new HashSet<String>(providerAdapter.checkedKeys());
         if (keys.isEmpty()) {
-            AcToast.show(this, "请先勾选提供商");
+            AcToast.show(this, Strings.get(R.string.modelconfigactivity_016));
             return;
         }
         confirmDeleteProviders(new ArrayList<String>(keys));
@@ -386,19 +386,19 @@ public class ModelConfigActivity extends ThemedActivity {
         int models = 0;
         for (String n : list) models += cfg.modelsOf(n).size();
         StringBuilder sb = new StringBuilder();
-        sb.append(list.size() == 1 ? "确定删除 " : "确定删除选中的 ").append(list.size())
-                .append(" 个提供商？");
-        if (models > 0) sb.append("\n\n其名下的 ").append(models).append(" 个模型会一并删除，无法恢复。");
-        else sb.append("此操作无法恢复。");
+        sb.append(list.size() == 1 ? Strings.get(R.string.modelconfigactivity_017) : Strings.get(R.string.modelconfigactivity_018)).append(list.size())
+                .append(Strings.get(R.string.modelconfigactivity_019));
+        if (models > 0) sb.append(Strings.get(R.string.modelconfigactivity_020)).append(models).append(Strings.get(R.string.modelconfigactivity_021));
+        else sb.append(Strings.get(R.string.modelconfigactivity_022));
         AcDialog.builder(this)
-                .setTitle("删除提供商")
+                .setTitle(Strings.get(R.string.modelconfigactivity_023))
                 .setMessage(sb.toString())
-                .setPositiveButton("删除", new DialogInterface.OnClickListener() {
+                .setPositiveButton(Strings.get(R.string.modelconfigactivity_024), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         deleteProviders(list);
                     }
                 })
-                .setNegativeButton("取消", null)
+                .setNegativeButton(Strings.get(R.string.modelconfigactivity_025), null)
                 .show();
     }
 
@@ -421,8 +421,8 @@ public class ModelConfigActivity extends ThemedActivity {
         reloadProviders();
         refreshProviderFilter();
         reloadModels();
-        AcToast.show(this, "已删除 " + names.size() + " 个提供商、"
-                + modelsRemoved + " 个模型");
+        AcToast.show(this, Strings.get(R.string.modelconfigactivity_026) + names.size() + Strings.get(R.string.modelconfigactivity_027)
+                + modelsRemoved + Strings.get(R.string.modelconfigactivity_028));
         LogUtil.i(TAG, "deleteProviders: %d providers, %d models", names.size(), modelsRemoved);
     }
 
@@ -439,7 +439,7 @@ public class ModelConfigActivity extends ThemedActivity {
 
     /** 列表上的行内测试：结果弹一个对话框说清楚原因。 */
     private void testProviderInline(final ProviderInfo p) {
-        AcToast.show(this, "正在测试 " + p.label() + "…");
+        AcToast.show(this, Strings.get(R.string.modelconfigactivity_029) + p.label() + "…");
         final ProviderInfo snap = p.copy();
         new Thread(new Runnable() {
             public void run() {
@@ -448,9 +448,9 @@ public class ModelConfigActivity extends ThemedActivity {
                     public void run() {
                         if (isFinishing()) return;
                         AcDialog.builder(ModelConfigActivity.this)
-                                .setTitle(snap.label() + (r.ok() ? " · 可用" : " · 不可用"))
+                                .setTitle(snap.label() + (r.ok() ? Strings.get(R.string.modelconfigactivity_030) : Strings.get(R.string.modelconfigactivity_031)))
                                 .setMessage(r.message)
-                                .setPositiveButton("知道了", null)
+                                .setPositiveButton(Strings.get(R.string.modelconfigactivity_032), null)
                                 .show();
                     }
                 });
@@ -471,12 +471,12 @@ public class ModelConfigActivity extends ThemedActivity {
                     return;
                 }
                 if (modelAdapter.getCount() == 0) {
-                    AcToast.show(ModelConfigActivity.this, "当前筛选下没有模型");
+                    AcToast.show(ModelConfigActivity.this, Strings.get(R.string.modelconfigactivity_033));
                     return;
                 }
                 modelSelection = true;
                 modelAdapter.setSelectionMode(true);
-                modelMulti.setText("退出多选");
+                modelMulti.setText(Strings.get(R.string.modelconfigactivity_034));
                 updateModelSelectionBar();
             }
         });
@@ -513,7 +513,7 @@ public class ModelConfigActivity extends ThemedActivity {
                 reloadModels();
             }
         });
-        sortMode.setAdapter(simpleAdapter(new String[]{"自定义顺序", "名称", "提供商", "能力"}));
+        sortMode.setAdapter(simpleAdapter(new String[]{Strings.get(R.string.modelconfigactivity_035), Strings.get(R.string.modelconfigactivity_036), Strings.get(R.string.modelconfigactivity_037), Strings.get(R.string.modelconfigactivity_038)}));
         sortMode.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             public void onItemSelected(AdapterView<?> p, View v, int pos, long id) {
                 sortKind = pos;
@@ -524,14 +524,14 @@ public class ModelConfigActivity extends ThemedActivity {
         sortDir.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 sortAscending = !sortAscending;
-                sortDir.setText(sortAscending ? "↑ 升序" : "↓ 降序");
+                sortDir.setText(sortAscending ? Strings.get(R.string.modelconfigactivity_039) : Strings.get(R.string.modelconfigactivity_040));
                 reloadModels();
             }
         });
         modelTestAll.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 if (probing.get() && !testing.get()) {
-                    AcToast.show(ModelConfigActivity.this, "能力探测进行中，请先停止");
+                    AcToast.show(ModelConfigActivity.this, Strings.get(R.string.modelconfigactivity_041));
                     return;
                 }
                 startBatchTest(null);
@@ -550,7 +550,7 @@ public class ModelConfigActivity extends ThemedActivity {
                     if (m != null && !m.levelsProbed()) keys.add(row.key);
                 }
                 if (keys.isEmpty()) {
-                    AcToast.show(ModelConfigActivity.this, "当前列表里的模型都已探测过");
+                    AcToast.show(ModelConfigActivity.this, Strings.get(R.string.modelconfigactivity_042));
                     return;
                 }
                 startBatchProbe(keys);
@@ -572,11 +572,11 @@ public class ModelConfigActivity extends ThemedActivity {
             public void onClick(View v) {
                 Set<String> keys = new HashSet<String>(modelAdapter.checkedKeys());
                 if (keys.isEmpty()) {
-                    AcToast.show(ModelConfigActivity.this, "请先勾选模型");
+                    AcToast.show(ModelConfigActivity.this, Strings.get(R.string.modelconfigactivity_043));
                     return;
                 }
                 if (probing.get()) {
-                    AcToast.show(ModelConfigActivity.this, "能力探测进行中，请先停止");
+                    AcToast.show(ModelConfigActivity.this, Strings.get(R.string.modelconfigactivity_044));
                     return;
                 }
                 startBatchTest(new ArrayList<String>(keys));
@@ -586,7 +586,7 @@ public class ModelConfigActivity extends ThemedActivity {
             public void onClick(View v) {
                 Set<String> keys = new HashSet<String>(modelAdapter.checkedKeys());
                 if (keys.isEmpty()) {
-                    AcToast.show(ModelConfigActivity.this, "请先勾选模型");
+                    AcToast.show(ModelConfigActivity.this, Strings.get(R.string.modelconfigactivity_045));
                     return;
                 }
                 startBatchProbe(new ArrayList<String>(keys));
@@ -612,7 +612,7 @@ public class ModelConfigActivity extends ThemedActivity {
         final List<String> names = new ArrayList<String>();
         names.add("");
         List<String> labels = new ArrayList<String>();
-        labels.add("全部提供商");
+        labels.add(Strings.get(R.string.modelconfigactivity_046));
         for (ProviderInfo p : cfg.getProviders()) {
             names.add(p.name);
             labels.add(p.label());
@@ -665,17 +665,17 @@ public class ModelConfigActivity extends ThemedActivity {
             StringBuilder sub = new StringBuilder();
             sub.append(m.name);
             sub.append(" · ").append(cfg.providerLabel(m.provider));
-            if (m.supportsVision) sub.append(" · 视觉");
+            if (m.supportsVision) sub.append(Strings.get(R.string.modelconfigactivity_047));
             if (m.levelsProbed()) {
                 // 探测过的按实测档位显示，未探测的沿用「无思考」的手动标记
-                sub.append(" · 思考 ").append(ThinkingLevels.describe(m.levelList()));
-                if (m.levelsUnverifiable) sub.append("(未校验)");
+                sub.append(Strings.get(R.string.modelconfigactivity_048)).append(ThinkingLevels.describe(m.levelList()));
+                if (m.levelsUnverifiable) sub.append(Strings.get(R.string.modelconfigactivity_049));
             } else if (!m.supportsThinking) {
-                sub.append(" · 无思考");
+                sub.append(Strings.get(R.string.modelconfigactivity_050));
             }
             String badge;
-            if (cfg.isDefaultModel(m)) badge = "默认";
-            else if (m.supportsVision) badge = "视觉";
+            if (cfg.isDefaultModel(m)) badge = Strings.get(R.string.modelconfigactivity_051);
+            else if (m.supportsVision) badge = Strings.get(R.string.modelconfigactivity_052);
             else badge = "";
             // 行键用唯一键：同名不同提供商的两条要能分别勾选、分别打开编辑页
             rows.add(new ConfigRowAdapter.Row(m.key(), m.label(), sub.toString(), badge));
@@ -683,8 +683,8 @@ public class ModelConfigActivity extends ThemedActivity {
         modelAdapter.setRows(rows);
         boolean has = !rows.isEmpty();
         modelEmpty.setVisibility(has ? View.GONE : View.VISIBLE);
-        modelEmpty.setText(src.isEmpty() ? "还没有模型。\n点上面的「新建」添加一个。"
-                : "没有符合条件的模型，试试换个筛选条件。");
+        modelEmpty.setText(src.isEmpty() ? Strings.get(R.string.modelconfigactivity_053)
+                : Strings.get(R.string.modelconfigactivity_054));
         modelList.setVisibility(has ? View.VISIBLE : View.GONE);
         updateModelSelectionBar();
         LogUtil.d(TAG, "reloadModels: shown=%d total=%d filter='%s' q='%s' sort=%d/%s",
@@ -723,13 +723,13 @@ public class ModelConfigActivity extends ThemedActivity {
         if (!modelSelection) return;
         modelSelection = false;
         modelAdapter.setSelectionMode(false);
-        modelMulti.setText("多选");
+        modelMulti.setText(Strings.get(R.string.modelconfigactivity_055));
         modelSelBar.setVisibility(View.GONE);
     }
 
     private void updateModelSelectionBar() {
         modelSelBar.setVisibility(modelSelection ? View.VISIBLE : View.GONE);
-        modelSelCount.setText("已选 " + modelAdapter.checkedKeys().size() + " 个");
+        modelSelCount.setText(Strings.get(R.string.modelconfigactivity_056) + modelAdapter.checkedKeys().size() + Strings.get(R.string.modelconfigactivity_057));
     }
 
     private void openModelEditor(String modelName, String presetProvider) {
@@ -742,7 +742,7 @@ public class ModelConfigActivity extends ThemedActivity {
     private void showModelMenu(final String name) {
         final ModelInfo m = cfg.getModel(name);
         if (m == null) return;
-        String[] items = {"编辑", "测试连通性", "设为默认模型", "复制一份", "删除"};
+        String[] items = {Strings.get(R.string.modelconfigactivity_058), Strings.get(R.string.modelconfigactivity_059), Strings.get(R.string.modelconfigactivity_060), Strings.get(R.string.modelconfigactivity_061), Strings.get(R.string.modelconfigactivity_062)};
         AcDialog.builder(this)
                 .setTitle(m.label())
                 .setItems(items, new DialogInterface.OnClickListener() {
@@ -754,7 +754,7 @@ public class ModelConfigActivity extends ThemedActivity {
                         else confirmDeleteModels(Collections.singletonList(name));
                     }
                 })
-                .setNegativeButton("取消", null)
+                .setNegativeButton(Strings.get(R.string.modelconfigactivity_063), null)
                 .show();
     }
 
@@ -769,11 +769,11 @@ public class ModelConfigActivity extends ThemedActivity {
                 break;
             }
         }
-        cp.displayName = src.label() + " 副本";
+        cp.displayName = src.label() + Strings.get(R.string.modelconfigactivity_064);
         cfg.getModels().add(cp);
         cfg.save();
         reloadModels();
-        AcToast.show(this, "已复制为 " + cp.label());
+        AcToast.show(this, Strings.get(R.string.modelconfigactivity_065) + cp.label());
     }
 
     private void setDefault(String key) {
@@ -782,7 +782,7 @@ public class ModelConfigActivity extends ThemedActivity {
         cfg.save();
         reloadModels();
         reloadProviders();
-        AcToast.show(this, "默认模型已设为 " + (m == null ? key : m.label()));
+        AcToast.show(this, Strings.get(R.string.modelconfigactivity_066) + (m == null ? key : m.label()));
         LogUtil.i(TAG, "setDefault: %s", key);
     }
 
@@ -798,7 +798,7 @@ public class ModelConfigActivity extends ThemedActivity {
     private void confirmBatchDeleteModels() {
         Set<String> keys = new HashSet<String>(modelAdapter.checkedKeys());
         if (keys.isEmpty()) {
-            AcToast.show(this, "请先勾选模型");
+            AcToast.show(this, Strings.get(R.string.modelconfigactivity_067));
             return;
         }
         confirmDeleteModels(new ArrayList<String>(keys));
@@ -808,15 +808,15 @@ public class ModelConfigActivity extends ThemedActivity {
         if (names == null || names.isEmpty()) return;
         final List<String> list = new ArrayList<String>(names);
         StringBuilder sb = new StringBuilder();
-        sb.append("确定删除").append(list.size() == 1 ? " " : "选中的 ")
-                .append(list.size()).append(" 个模型？");
+        sb.append(Strings.get(R.string.modelconfigactivity_068)).append(list.size() == 1 ? " " : Strings.get(R.string.modelconfigactivity_069))
+                .append(list.size()).append(Strings.get(R.string.modelconfigactivity_070));
         if (containsDefaultModel(list)) {
-            sb.append("\n\n包含当前默认模型，删除后会自动切换到第一个可用模型。");
+            sb.append(Strings.get(R.string.modelconfigactivity_071));
         }
         AcDialog.builder(this)
-                .setTitle("删除模型")
+                .setTitle(Strings.get(R.string.modelconfigactivity_072))
                 .setMessage(sb.toString())
-                .setPositiveButton("删除", new DialogInterface.OnClickListener() {
+                .setPositiveButton(Strings.get(R.string.modelconfigactivity_073), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         int n = 0;
                         for (String name : list) {
@@ -831,11 +831,11 @@ public class ModelConfigActivity extends ThemedActivity {
                         exitModelSelection();
                         reloadModels();
                         reloadProviders();
-                        AcToast.show(ModelConfigActivity.this, "已删除 " + n + " 个模型");
+                        AcToast.show(ModelConfigActivity.this, Strings.get(R.string.modelconfigactivity_074) + n + Strings.get(R.string.modelconfigactivity_075));
                         LogUtil.i(TAG, "deleteModels: %d", n);
                     }
                 })
-                .setNegativeButton("取消", null)
+                .setNegativeButton(Strings.get(R.string.modelconfigactivity_076), null)
                 .show();
     }
 
@@ -854,8 +854,8 @@ public class ModelConfigActivity extends ThemedActivity {
             testing.set(false);
             ui.post(new Runnable() {
                 public void run() {
-                    modelTestAll.setText("全部测试");
-                    modelStatus.setText("已停止（已测 " + testBatchDone + " / " + testBatchTotal + "）");
+                    modelTestAll.setText(Strings.get(R.string.modelconfigactivity_077));
+                    modelStatus.setText(Strings.get(R.string.modelconfigactivity_078) + testBatchDone + " / " + testBatchTotal + "）");
                 }
             });
             return;
@@ -870,14 +870,14 @@ public class ModelConfigActivity extends ThemedActivity {
             }
         }
         if (targets.isEmpty()) {
-            AcToast.show(this, "没有可测试的模型");
+            AcToast.show(this, Strings.get(R.string.modelconfigactivity_079));
             return;
         }
         testing.set(true);
         testBatchTotal = targets.size();
         testBatchDone = 0;
-        modelTestAll.setText("停止测试");
-        modelStatus.setText("测试中 0 / " + testBatchTotal + "…");
+        modelTestAll.setText(Strings.get(R.string.modelconfigactivity_080));
+        modelStatus.setText(Strings.get(R.string.modelconfigactivity_081) + testBatchTotal + "…");
         final AtomicInteger fail = new AtomicInteger(0);
         final List<String> failures = Collections.synchronizedList(new ArrayList<String>());
 
@@ -890,13 +890,13 @@ public class ModelConfigActivity extends ThemedActivity {
                     if (m == null) continue;
                     final ProviderInfo p = cfg.getProvider(m.provider);
                     if (p == null) {
-                        reportBadge(name, "无提供商", true);
-                        failures.add(cfg.modelLabel(name) + "：提供商不存在");
+                        reportBadge(name, Strings.get(R.string.modelconfigactivity_082), true);
+                        failures.add(cfg.modelLabel(name) + Strings.get(R.string.modelconfigactivity_083));
                         fail.incrementAndGet();
                     } else {
-                        reportBadge(name, "测试中…", false);
+                        reportBadge(name, Strings.get(R.string.modelconfigactivity_084), false);
                         final ProviderTester.Result r = ProviderTester.testChat(p, m.name);
-                        reportBadge(name, r.ok() ? "✓ " + r.ms + "ms" : "✗ 失败", !r.ok());
+                        reportBadge(name, r.ok() ? "✓ " + r.ms + "ms" : Strings.get(R.string.modelconfigactivity_085), !r.ok());
                         if (!r.ok()) {
                             fail.incrementAndGet();
                             failures.add(m.label() + "：" + r.message);
@@ -907,7 +907,7 @@ public class ModelConfigActivity extends ThemedActivity {
                     ui.post(new Runnable() {
                         public void run() {
                             if (testing.get()) {
-                                modelStatus.setText("测试中 " + done + " / " + testBatchTotal + "…");
+                                modelStatus.setText(Strings.get(R.string.modelconfigactivity_086) + done + " / " + testBatchTotal + "…");
                             }
                         }
                     });
@@ -916,10 +916,10 @@ public class ModelConfigActivity extends ThemedActivity {
                 testing.set(false);
                 ui.post(new Runnable() {
                     public void run() {
-                        modelTestAll.setText("全部测试");
+                        modelTestAll.setText(Strings.get(R.string.modelconfigactivity_087));
                         if (isFinishing()) return;
-                        modelStatus.setText((stopped ? "已停止" : "测试完成")
-                                + "：共 " + testBatchTotal + " 个，失败 " + fail.get() + " 个");
+                        modelStatus.setText((stopped ? Strings.get(R.string.modelconfigactivity_088) : Strings.get(R.string.modelconfigactivity_089))
+                                + Strings.get(R.string.modelconfigactivity_090) + testBatchTotal + Strings.get(R.string.modelconfigactivity_091) + fail.get() + Strings.get(R.string.modelconfigactivity_092));
                         showTestSummary(failures, fail.get(), stopped);
                     }
                 });
@@ -952,14 +952,14 @@ public class ModelConfigActivity extends ThemedActivity {
             probing.set(false);
             ui.post(new Runnable() {
                 public void run() {
-                    modelProbe.setText("探测能力（当前列表）");
-                    modelStatus.setText("已停止（已探测 " + probeDone + " / " + probeTotal + "）");
+                    modelProbe.setText(Strings.get(R.string.modelconfigactivity_093));
+                    modelStatus.setText(Strings.get(R.string.modelconfigactivity_094) + probeDone + " / " + probeTotal + "）");
                 }
             });
             return;
         }
         if (testing.get()) {
-            AcToast.show(this, "连通性测试进行中，请先停止");
+            AcToast.show(this, Strings.get(R.string.modelconfigactivity_095));
             return;
         }
         final List<String> targets = new ArrayList<String>();
@@ -972,7 +972,7 @@ public class ModelConfigActivity extends ThemedActivity {
             }
         }
         if (targets.isEmpty()) {
-            AcToast.show(this, "没有可探测的模型");
+            AcToast.show(this, Strings.get(R.string.modelconfigactivity_096));
             return;
         }
         int valid = 0;
@@ -988,8 +988,8 @@ public class ModelConfigActivity extends ThemedActivity {
         probing.set(true);
         probeTotal = validTotal;
         probeDone = 0;
-        modelProbe.setText("停止探测");
-        modelStatus.setText("探测中 0 / " + probeTotal + "…");
+        modelProbe.setText(Strings.get(R.string.modelconfigactivity_097));
+        modelStatus.setText(Strings.get(R.string.modelconfigactivity_098) + probeTotal + "…");
         final AtomicInteger fail = new AtomicInteger(0);
         final List<String> details = Collections.synchronizedList(new ArrayList<String>());
 
@@ -1002,13 +1002,13 @@ public class ModelConfigActivity extends ThemedActivity {
                     if (m == null) continue;
                     final ProviderInfo p = cfg.getProvider(m.provider);
                     if (p == null) {
-                        reportBadge(key, "无提供商", true);
-                        details.add(m.label() + "：提供商不存在");
+                        reportBadge(key, Strings.get(R.string.modelconfigactivity_099), true);
+                        details.add(m.label() + Strings.get(R.string.modelconfigactivity_100));
                         fail.incrementAndGet();
                         probeDone++;
                         continue;
                     }
-                    reportBadge(key, "探测中…", false);
+                    reportBadge(key, Strings.get(R.string.modelconfigactivity_101), false);
                     final CapabilityProbe.Report rep = CapabilityProbe.probe(p, m.name,
                             new CapabilityProbe.Stop() {
                                 public boolean stopped() { return !probing.get(); }
@@ -1030,7 +1030,7 @@ public class ModelConfigActivity extends ThemedActivity {
                     reportBadge(key, probeBadge(rep), !rep.ok() || rep.levels.isEmpty());
                     if (!rep.ok() || rep.levels.isEmpty()) {
                         fail.incrementAndGet();
-                        details.add(m.label() + "：" + (rep.ok() ? "六档全部被拒绝" : rep.error));
+                        details.add(m.label() + "：" + (rep.ok() ? Strings.get(R.string.modelconfigactivity_102) : rep.error));
                     }
                     probeDone++;
                     final int done = probeDone;
@@ -1038,7 +1038,7 @@ public class ModelConfigActivity extends ThemedActivity {
                         public void run() {
                             if (isFinishing()) return;
                             if (probing.get()) {
-                                modelStatus.setText("探测中 " + done + " / " + probeTotal + "…");
+                                modelStatus.setText(Strings.get(R.string.modelconfigactivity_103) + done + " / " + probeTotal + "…");
                             }
                             // 每完成一个就刷一次行文案，「思考 低·高」当场可见
                             reloadModels();
@@ -1049,10 +1049,10 @@ public class ModelConfigActivity extends ThemedActivity {
                 probing.set(false);
                 ui.post(new Runnable() {
                     public void run() {
-                        modelProbe.setText("探测能力（当前列表）");
+                        modelProbe.setText(Strings.get(R.string.modelconfigactivity_104));
                         if (isFinishing()) return;
-                        modelStatus.setText((stopped ? "探测已停止" : "探测完成")
-                                + "：共 " + probeTotal + " 个，失败 " + fail.get() + " 个");
+                        modelStatus.setText((stopped ? Strings.get(R.string.modelconfigactivity_148) : Strings.get(R.string.modelconfigactivity_149))
+                                + Strings.get(R.string.modelconfigactivity_107) + probeTotal + Strings.get(R.string.modelconfigactivity_108) + fail.get() + Strings.get(R.string.modelconfigactivity_109));
                         reloadModels();
                         showProbeSummary(details, fail.get(), stopped);
                     }
@@ -1065,80 +1065,80 @@ public class ModelConfigActivity extends ThemedActivity {
     /** 探测要发真实请求，先讲清代价再执行。 */
     private void confirmProbeCost(final int n, final List<String> targets) {
         AcDialog.builder(this)
-                .setTitle("探测能力")
-                .setMessage("将对 " + n + " 个模型逐个探测思考档位与图片输入，"
-                        + "每个模型最多发起 8 次请求，会消耗少量额度。"
-                        + "图片输入会换两张不同数字的图各问一次，都答对才算支持。确定开始？")
-                .setPositiveButton("开始", new DialogInterface.OnClickListener() {
+                .setTitle(Strings.get(R.string.modelconfigactivity_110))
+                .setMessage(Strings.get(R.string.modelconfigactivity_111) + n + Strings.get(R.string.modelconfigactivity_112)
+                        + Strings.get(R.string.modelconfigactivity_113)
+                        + Strings.get(R.string.modelconfigactivity_114))
+                .setPositiveButton(Strings.get(R.string.modelconfigactivity_115), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) { runBatchProbe(targets, n); }
                 })
-                .setNegativeButton("取消", null)
+                .setNegativeButton(Strings.get(R.string.modelconfigactivity_116), null)
                 .show();
     }
 
     private static String probeBadge(CapabilityProbe.Report rep) {
-        if (rep.levelsRejected) return "无思考";
-        if (!rep.ok() || rep.levels.isEmpty()) return "✗ 探测失败";
+        if (rep.levelsRejected) return Strings.get(R.string.modelconfigactivity_117);
+        if (!rep.ok() || rep.levels.isEmpty()) return Strings.get(R.string.modelconfigactivity_118);
         StringBuilder sb = new StringBuilder();
         String top = ThinkingLevels.highest(rep.levels);
-        sb.append("思考 ").append(ThinkingLevels.label(top));
-        if (Boolean.TRUE.equals(rep.vision)) sb.append(" · 视觉");
+        sb.append(Strings.get(R.string.modelconfigactivity_119)).append(ThinkingLevels.label(top));
+        if (Boolean.TRUE.equals(rep.vision)) sb.append(" · ").append(Strings.get(R.string.modelconfigactivity_149));
         return sb.toString();
     }
 
     private void showProbeSummary(List<String> details, int failCount, boolean stopped) {
         StringBuilder sb = new StringBuilder();
-        sb.append(stopped ? "探测已停止。" : "探测完成。");
-        sb.append("共 ").append(probeTotal).append(" 个模型，失败 ")
-                .append(failCount).append(" 个。");
-        sb.append("\n\n列表里已按实测结果显示可用的思考档位与图片输入。");
+        sb.append(stopped ? Strings.get(R.string.modelconfigactivity_120) : Strings.get(R.string.modelconfigactivity_121));
+        sb.append(Strings.get(R.string.modelconfigactivity_122)).append(probeTotal).append(Strings.get(R.string.modelconfigactivity_123))
+                .append(failCount).append(Strings.get(R.string.modelconfigactivity_124));
+        sb.append(Strings.get(R.string.modelconfigactivity_125));
         List<String> copy;
         synchronized (details) {
             copy = new ArrayList<String>(details);
         }
         if (!copy.isEmpty()) {
-            sb.append("\n\n失败明细：\n");
+            sb.append(Strings.get(R.string.modelconfigactivity_126));
             int limit = Math.min(copy.size(), 10);
             for (int i = 0; i < limit; i++) {
                 sb.append("· ").append(copy.get(i)).append("\n");
             }
             if (copy.size() > limit) {
-                sb.append("…… 其余 ").append(copy.size() - limit).append(" 个请在列表中查看\n");
+                sb.append(Strings.get(R.string.modelconfigactivity_127)).append(copy.size() - limit).append(Strings.get(R.string.modelconfigactivity_128));
             }
         }
         AcDialog.builder(this)
-                .setTitle("能力探测结果")
+                .setTitle(Strings.get(R.string.modelconfigactivity_129))
                 .setMessage(sb.toString())
-                .setPositiveButton("知道了", null)
+                .setPositiveButton(Strings.get(R.string.modelconfigactivity_130), null)
                 .show();
     }
 
     private void showTestSummary(List<String> failures, int failCount, boolean stopped) {
         StringBuilder sb = new StringBuilder();
-        sb.append(stopped ? "测试已停止。" : "测试完成。");
-        sb.append("共 ").append(testBatchTotal).append(" 个模型，失败 ")
-                .append(failCount).append(" 个。");
+        sb.append(stopped ? Strings.get(R.string.modelconfigactivity_131) : Strings.get(R.string.modelconfigactivity_132));
+        sb.append(Strings.get(R.string.modelconfigactivity_133)).append(testBatchTotal).append(Strings.get(R.string.modelconfigactivity_134))
+                .append(failCount).append(Strings.get(R.string.modelconfigactivity_135));
         List<String> copy;
         synchronized (failures) {
             copy = new ArrayList<String>(failures);
         }
         if (!copy.isEmpty()) {
-            sb.append("\n\n失败明细：\n");
+            sb.append(Strings.get(R.string.modelconfigactivity_136));
             int limit = Math.min(copy.size(), 12);
             for (int i = 0; i < limit; i++) {
                 sb.append("· ").append(copy.get(i)).append("\n");
             }
             if (copy.size() > limit) {
-                sb.append("…… 其余 ").append(copy.size() - limit)
-                        .append(" 条请在列表徽标上查看\n");
+                sb.append(Strings.get(R.string.modelconfigactivity_137)).append(copy.size() - limit)
+                        .append(Strings.get(R.string.modelconfigactivity_138));
             }
         } else if (!stopped) {
-            sb.append("\n全部可用。");
+            sb.append(Strings.get(R.string.modelconfigactivity_139));
         }
         AcDialog.builder(this)
-                .setTitle("模型连通性")
+                .setTitle(Strings.get(R.string.modelconfigactivity_140))
                 .setMessage(sb.toString())
-                .setPositiveButton("知道了", null)
+                .setPositiveButton(Strings.get(R.string.modelconfigactivity_141), null)
                 .show();
     }
 
@@ -1147,21 +1147,21 @@ public class ModelConfigActivity extends ThemedActivity {
     private void testModelInline(final ModelInfo m, final String name) {
         final ProviderInfo p = cfg.getProvider(m.provider);
         if (p == null) {
-            AcToast.show(this, "该模型没有关联的提供商");
+            AcToast.show(this, Strings.get(R.string.modelconfigactivity_142));
             return;
         }
-        AcToast.show(this, "正在测试 " + m.label() + "…");
+        AcToast.show(this, Strings.get(R.string.modelconfigactivity_143) + m.label() + "…");
         new Thread(new Runnable() {
             public void run() {
                 final ProviderTester.Result r = ProviderTester.testChat(p, m.name);
                 ui.post(new Runnable() {
                     public void run() {
                         if (isFinishing()) return;
-                        modelAdapter.setBadge(name, r.ok() ? "✓ " + r.ms + "ms" : "✗ 失败", !r.ok());
+                        modelAdapter.setBadge(name, r.ok() ? "✓ " + r.ms + "ms" : Strings.get(R.string.modelconfigactivity_144), !r.ok());
                         AcDialog.builder(ModelConfigActivity.this)
-                                .setTitle(m.label() + (r.ok() ? " · 可用" : " · 不可用"))
+                                .setTitle(m.label() + (r.ok() ? Strings.get(R.string.modelconfigactivity_145) : Strings.get(R.string.modelconfigactivity_146)))
                                 .setMessage(r.message)
-                                .setPositiveButton("知道了", null)
+                                .setPositiveButton(Strings.get(R.string.modelconfigactivity_147), null)
                                 .show();
                     }
                 });

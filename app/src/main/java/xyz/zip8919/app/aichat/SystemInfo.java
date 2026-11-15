@@ -21,7 +21,7 @@ final class SystemInfo {
     /** 例如 "4.4.2"。 */
     static String androidVersion() {
         String v = Build.VERSION.RELEASE;
-        return isBlank(v) ? "未知" : v.trim();
+        return isBlank(v) ? Strings.get(R.string.systeminfo_001) : v.trim();
     }
 
     /** 例如 "19"。 */
@@ -35,9 +35,9 @@ final class SystemInfo {
      */
     static String webviewVersion(Context ctx) {
         String ua = webviewUserAgent(ctx);
-        if (isBlank(ua)) return "未知";
+        if (isBlank(ua)) return Strings.get(R.string.systeminfo_002);
         int at = ua.indexOf("Chrome/");
-        if (at < 0) return "未知";
+        if (at < 0) return Strings.get(R.string.systeminfo_003);
         int start = at + "Chrome/".length();
         int end = start;
         while (end < ua.length()) {
@@ -48,7 +48,7 @@ final class SystemInfo {
                 break;
             }
         }
-        return end > start ? "Chrome " + ua.substring(start, end) : "未知";
+        return end > start ? "Chrome " + ua.substring(start, end) : Strings.get(R.string.systeminfo_004);
     }
 
     /**
@@ -84,7 +84,7 @@ final class SystemInfo {
     static String deviceModel() {
         String brand = Build.MANUFACTURER;
         String model = Build.MODEL;
-        if (isBlank(model)) return isBlank(brand) ? "未知" : brand.trim();
+        if (isBlank(model)) return isBlank(brand) ? Strings.get(R.string.systeminfo_005) : brand.trim();
         if (isBlank(brand) || model.toLowerCase().startsWith(brand.toLowerCase())) {
             return model.trim();
         }
@@ -93,16 +93,16 @@ final class SystemInfo {
 
     /** 例如 "1.8.0"。 */
     static String appVersion(Context ctx) {
-        if (ctx == null) return "未知";
+        if (ctx == null) return Strings.get(R.string.systeminfo_006);
         if (cachedAppVersion != null) return cachedAppVersion;
         try {
             PackageInfo info = ctx.getPackageManager()
                     .getPackageInfo(ctx.getPackageName(), 0);
-            cachedAppVersion = info.versionName == null ? "未知" : info.versionName;
+            cachedAppVersion = info.versionName == null ? Strings.get(R.string.systeminfo_007) : info.versionName;
             return cachedAppVersion;
         } catch (Exception e) {
             LogUtil.w("SystemInfo", "appVersion failed: %s", e.getMessage());
-            return "未知";
+            return Strings.get(R.string.systeminfo_008);
         }
     }
 
@@ -170,12 +170,12 @@ final class SystemInfo {
                 }
             } else {
                 // 没有 Context 就退成「未知」，而不是把 {screen} 原样留在提示词里
-                if (out.indexOf("{screen}") >= 0) out = out.replace("{screen}", "未知");
-                if (out.indexOf("{density}") >= 0) out = out.replace("{density}", "未知");
+                if (out.indexOf("{screen}") >= 0) out = out.replace("{screen}", Strings.get(R.string.systeminfo_023));
+                if (out.indexOf("{density}") >= 0) out = out.replace("{density}", Strings.get(R.string.systeminfo_023));
             }
         }
         out = replaceIfPresent(out, "{brand}",
-                isBlank(Build.MANUFACTURER) ? "未知" : Build.MANUFACTURER.trim());
+                isBlank(Build.MANUFACTURER) ? Strings.get(R.string.systeminfo_009) : Build.MANUFACTURER.trim());
         out = replaceIfPresent(out, "{cpu_abi}", cpuAbi());
         if (out.indexOf("{locale}") >= 0) {
             out = out.replace("{locale}", java.util.Locale.getDefault().toString());
@@ -183,7 +183,7 @@ final class SystemInfo {
 
         // ---- 应用类 ----
         if (out.indexOf("{app_package}") >= 0) {
-            out = out.replace("{app_package}", ctx == null ? "未知" : ctx.getPackageName());
+            out = out.replace("{app_package}", ctx == null ? Strings.get(R.string.systeminfo_023) : ctx.getPackageName());
         }
         if (out.indexOf("{free_storage}") >= 0) {
             out = out.replace("{free_storage}", freeStorage(ctx));
@@ -214,12 +214,12 @@ final class SystemInfo {
 
     /** 固定输出「星期X」，不跟随系统语言——英文系统上 EEEE 会变成 Friday。 */
     private static String weekday(long ts) {
-        String[] names = {"日", "一", "二", "三", "四", "五", "六"};
+        String[] names = {Strings.get(R.string.systeminfo_010), Strings.get(R.string.systeminfo_011), Strings.get(R.string.systeminfo_012), Strings.get(R.string.systeminfo_013), Strings.get(R.string.systeminfo_014), Strings.get(R.string.systeminfo_015), Strings.get(R.string.systeminfo_016)};
         java.util.Calendar c = java.util.Calendar.getInstance();
         c.setTimeInMillis(ts);
         int i = c.get(java.util.Calendar.DAY_OF_WEEK) - java.util.Calendar.SUNDAY;
         if (i < 0 || i > 6) i = 0;
-        return "星期" + names[i];
+        return Strings.get(R.string.systeminfo_017) + names[i];
     }
 
     /** 例如 {@code GMT+8} / {@code GMT+5:30}。 */
@@ -238,31 +238,31 @@ final class SystemInfo {
                     && Build.SUPPORTED_ABIS.length > 0) {
                 return Build.SUPPORTED_ABIS[0];
             }
-            return isBlank(Build.CPU_ABI) ? "未知" : Build.CPU_ABI;
+            return isBlank(Build.CPU_ABI) ? Strings.get(R.string.systeminfo_018) : Build.CPU_ABI;
         } catch (Throwable t) {
-            return "未知";
+            return Strings.get(R.string.systeminfo_019);
         }
     }
 
     /** 应用私有目录所在分区的剩余空间，例如 {@code 3.2 GB}。 */
     private static String freeStorage(Context ctx) {
-        if (ctx == null) return "未知";
+        if (ctx == null) return Strings.get(R.string.systeminfo_020);
         try {
             java.io.File dir = ctx.getFilesDir();
-            if (dir == null) return "未知";
+            if (dir == null) return Strings.get(R.string.systeminfo_021);
             // File.getUsableSpace() 是 API 21 才加的，4.4 上抛 NoSuchMethodError
             // 被下面 catch 吞掉 → {free_storage} 恒为「未知」。StatFs 的长整型
             // 取值方法从 API 18（本项目 minSdk）就有。
             android.os.StatFs stat = new android.os.StatFs(dir.getAbsolutePath());
             long free = stat.getAvailableBlocksLong() * stat.getBlockSizeLong();
-            if (free <= 0) return "未知";
+            if (free <= 0) return Strings.get(R.string.systeminfo_022);
             if (free >= 1024L * 1024L * 1024L) {
                 return String.format(java.util.Locale.US, "%.1f GB",
                         free / (1024.0 * 1024.0 * 1024.0));
             }
             return String.format(java.util.Locale.US, "%.0f MB", free / (1024.0 * 1024.0));
         } catch (Throwable t) {
-            return "未知";
+            return Strings.get(R.string.systeminfo_023);
         }
     }
 }

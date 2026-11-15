@@ -143,11 +143,11 @@ final class ToolCalls {
     static String limitNotice(int maxPerRound) {
         try {
             JSONObject json = new JSONObject();
-            json.put("error", "每轮工具调用上限为 " + maxPerRound + "，本次调用未执行");
-            json.put("limit_notice", "请基于已执行结果继续回答，或直接给出最终回答。");
+            json.put("error", Strings.get(R.string.toolcalls_001) + maxPerRound + Strings.get(R.string.toolcalls_002));
+            json.put("limit_notice", Strings.get(R.string.toolcalls_003));
             return json.toString();
         } catch (Exception e) {
-            return "{\"error\":\"每轮工具调用已超上限，本次调用未执行\"}";
+            return Strings.get(R.string.toolcalls_004);
         }
     }
 
@@ -160,10 +160,10 @@ final class ToolCalls {
     static String abortNotice() {
         try {
             JSONObject json = new JSONObject();
-            json.put("error", "本轮已被用户中止，该调用未执行");
+            json.put("error", Strings.get(R.string.toolcalls_005));
             return json.toString();
         } catch (Exception e) {
-            return "{\"error\":\"本轮已中止\"}";
+            return Strings.get(R.string.toolcalls_006);
         }
     }
 
@@ -175,7 +175,7 @@ final class ToolCalls {
         try {
             JSONObject display = new JSONObject();
             display.put("tool", "limit");
-            display.put("error", "本轮工具调用已达上限（" + maxPerRound + "），这条调用未执行");
+            display.put("error", Strings.get(R.string.toolcalls_007) + maxPerRound + Strings.get(R.string.toolcalls_008));
             return WebSearchTool.TRACE_START + display.toString() + WebSearchTool.TRACE_END;
         } catch (Exception e) {
             return "";
@@ -185,23 +185,23 @@ final class ToolCalls {
     /** 工具执行期间显示在气泡里的状态文案。 */
     static String statusText(String name, JSONObject args) {
         if (WebSearchTool.TOOL_TIME.equals(name)) {
-            return "正在获取当前时间...";
+            return Strings.get(R.string.toolcalls_009);
         }
         if (WebSearchTool.TOOL_SEARCH.equals(name)) {
             String query = args == null ? "" : args.optString("query", "");
-            return query.length() > 0 ? "正在联网搜索：" + TextKit.shorten(query, 60) : "正在联网搜索...";
+            return query.length() > 0 ? Strings.get(R.string.toolcalls_010) + TextKit.shorten(query, 60) : Strings.get(R.string.toolcalls_011);
         }
         if (WebSearchTool.TOOL_FETCH.equals(name)) {
             String url = args == null ? "" : args.optString("url", "");
-            return url.length() > 0 ? "正在读取网页：" + TextKit.shorten(url, 60) : "正在读取网页...";
+            return url.length() > 0 ? Strings.get(R.string.toolcalls_012) + TextKit.shorten(url, 60) : Strings.get(R.string.toolcalls_013);
         }
         if (HttpRequestTool.TOOL_HTTP.equals(name)) {
             String url = args == null ? "" : args.optString("url", "");
             String method = args == null ? "GET" : args.optString("method", "GET");
             return url.length() > 0
-                    ? "正在请求：" + method.toUpperCase(java.util.Locale.US) + " " + TextKit.shorten(url, 60)
-                    : "正在发起请求...";
+                    ? Strings.get(R.string.toolcalls_014) + method.toUpperCase(java.util.Locale.US) + " " + TextKit.shorten(url, 60)
+                    : Strings.get(R.string.toolcalls_015);
         }
-        return "正在调用工具：" + TextKit.shorten(name, 40);
+        return Strings.get(R.string.toolcalls_016) + TextKit.shorten(name, 40);
     }
 }

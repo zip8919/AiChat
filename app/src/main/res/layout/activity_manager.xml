@@ -14,7 +14,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginBottom="4dp"
-        android:text="管理" />
+        android:text="@string/activity_manager_001" />
 
     <TextView
         android:id="@+id/manager_hint"
@@ -41,7 +41,7 @@
             android:layout_width="0dp"
             android:layout_weight="1"
             android:layout_height="wrap_content"
-            android:text="添加" />
+            android:text="@string/activity_manager_002" />
         <Button
             android:id="@+id/btn_secondary"
             android:textSize="12sp"
@@ -53,7 +53,7 @@
             android:layout_width="0dp"
             android:layout_weight="1"
             android:layout_height="wrap_content"
-            android:text="新建" />
+            android:text="@string/activity_manager_003" />
         <Button
             android:id="@+id/btn_multi"
             android:textSize="12sp"
@@ -65,7 +65,7 @@
             android:layout_width="0dp"
             android:layout_weight="1"
             android:layout_height="wrap_content"
-            android:text="批量管理" />
+            android:text="@string/activity_manager_004" />
     </LinearLayout>
 
     <FrameLayout
@@ -101,7 +101,7 @@
             android:textColor="@color/text_secondary"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="已选 0" />
+            android:text="@string/activity_manager_005" />
         <LinearLayout
             android:orientation="horizontal"
             android:layout_width="match_parent"
@@ -117,7 +117,7 @@
                 android:layout_width="0dp"
                 android:layout_weight="1"
                 android:layout_height="wrap_content"
-                android:text="操作一" />
+                android:text="@string/activity_manager_006" />
             <Button
                 android:id="@+id/btn_act2"
                 android:textSize="12sp"
@@ -129,7 +129,7 @@
                 android:layout_width="0dp"
                 android:layout_weight="1"
                 android:layout_height="wrap_content"
-                android:text="操作二" />
+                android:text="@string/activity_manager_007" />
             <Button
                 android:id="@+id/btn_act3"
                 android:textSize="12sp"
@@ -141,7 +141,7 @@
                 android:layout_width="0dp"
                 android:layout_weight="1"
                 android:layout_height="wrap_content"
-                android:text="操作三" />
+                android:text="@string/activity_manager_008" />
         </LinearLayout>
     </LinearLayout>
 

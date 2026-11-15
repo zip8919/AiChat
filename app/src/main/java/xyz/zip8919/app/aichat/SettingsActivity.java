@@ -96,18 +96,12 @@ public class SettingsActivity extends ThemedActivity {
     private static final int DEFAULT_VISION_MAX_PX = 1600;
     private static final int DEFAULT_VISION_MAX_IMAGES = 3;
     private static final String DEFAULT_TITLE_MODEL = "Qwen/Qwen3.5-397B-A17B";
-    private static final String DEFAULT_TITLE_PROMPT = "你是一个标题生成助手。根据用户消息生成3-15字标题。只输出标题本身，禁止输出任何其他文字、解释、标点或换行。";
+    private static final String DEFAULT_TITLE_PROMPT = Strings.get(R.string.settingsactivity_001);
     /**
      * 默认环境提示词。原来硬编码在 ToolsActivity 里写死「Android 4.4 / Chromium 30」，
      * 换台机器就是错的；这里改成占位符，运行时按真实设备填充。
      */
-    private static final String DEFAULT_JS_ENV_PROMPT =
-            "我在一个 Android {android} (API {api}) 的 WebView 里运行 JavaScript，"
-            + "运行环境是 {webview} 内核，不支持 ES6 及以上语法"
-            + "（不能用 let/const、箭头函数、模板字符串、class、Promise、"
-            + "扩展运算符、async/await、for...of）。"
-            + "为避免中文编码问题，请把所有中文文本写成 \\uXXXX 转义形式。"
-            + "只输出一个 ```js 代码块，代码用 var 声明变量，可直接运行并输出结果。";
+    private static final String DEFAULT_JS_ENV_PROMPT = Strings.get(R.string.js_env_prompt_default);
 
     private SharedPreferences prefs;
     private EditText systemPromptEdit, titlePromptEdit;
@@ -164,20 +158,20 @@ public class SettingsActivity extends ThemedActivity {
         findViewById(R.id.clear_system_prompt_button).setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 if (systemPromptEdit.getText().length() == 0) {
-                    AcToast.show(SettingsActivity.this, "系统提示词已为空");
+                    AcToast.show(SettingsActivity.this, Strings.get(R.string.settingsactivity_008));
                     return;
                 }
                 final int len = systemPromptEdit.getText().length();
                 AcDialog.builder(SettingsActivity.this)
-                        .setTitle("清空系统提示词")
-                        .setMessage("将清空全部 " + len + " 字。清空后无法撤销，需点「保存」才会写盘。")
-                        .setPositiveButton("清空", new DialogInterface.OnClickListener() {
+                        .setTitle(Strings.get(R.string.settingsactivity_009))
+                        .setMessage(Strings.get(R.string.settingsactivity_010) + len + Strings.get(R.string.settingsactivity_011))
+                        .setPositiveButton(Strings.get(R.string.settingsactivity_012), new DialogInterface.OnClickListener() {
                             public void onClick(DialogInterface d, int w) {
                                 systemPromptEdit.setText("");
-                                AcToast.show(SettingsActivity.this, "已清空，点保存生效");
+                                AcToast.show(SettingsActivity.this, Strings.get(R.string.settingsactivity_013));
                             }
                         })
-                        .setNegativeButton("取消", null)
+                        .setNegativeButton(Strings.get(R.string.settingsactivity_014), null)
                         .show();
             }
         });
@@ -223,7 +217,7 @@ public class SettingsActivity extends ThemedActivity {
         tavilyKeyEdit = (EditText) findViewById(R.id.tavily_key_edit);
         ArrayAdapter<String> backendAdapter = new ArrayAdapter<String>(this,
                 android.R.layout.simple_spinner_item,
-                new String[]{"Tavily（免费）", "DeepSeek"});
+                new String[]{Strings.get(R.string.settingsactivity_015), "DeepSeek"});
         backendAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         searchBackendSpinner.setAdapter(backendAdapter);
         saveButton = (Button) findViewById(R.id.save_button);
@@ -311,21 +305,21 @@ public class SettingsActivity extends ThemedActivity {
         httpAllowPrivateSwitch.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
             public void onCheckedChanged(CompoundButton b, boolean checked) {
                 if (bindingSwitches || !checked) return;
-                confirmRisk("允许访问内网地址",
-                        "开启后，AI 可以通过 http_request 访问 192.168.x.x、127.0.0.1、"
-                                + "169.254.169.254 等地址。\n\n"
-                                + "风险：路由器管理页、NAS 文件、云主机元数据凭证都可能被读到，"
-                                + "而请求结果会原样发给模型服务商。",
+                confirmRisk(Strings.get(R.string.settingsactivity_016),
+                        Strings.get(R.string.settingsactivity_017)
+                                + Strings.get(R.string.settingsactivity_018)
+                                + Strings.get(R.string.settingsactivity_019)
+                                + Strings.get(R.string.settingsactivity_020),
                         b);
             }
         });
         trustAllCertsSwitch.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
             public void onCheckedChanged(CompoundButton b, boolean checked) {
                 if (bindingSwitches || !checked) return;
-                confirmRisk("信任所有 HTTPS 证书",
-                        "开启后不再校验证书与主机名，任何中间人都能解密你与服务器之间的流量，"
-                                + "包括 API Key 和全部对话内容。\n\n"
-                                + "仅建议在访问自签证书的内网服务时临时开启。",
+                confirmRisk(Strings.get(R.string.settingsactivity_021),
+                        Strings.get(R.string.settingsactivity_022)
+                                + Strings.get(R.string.settingsactivity_023)
+                                + Strings.get(R.string.settingsactivity_024),
                         b);
             }
         });
@@ -343,8 +337,8 @@ public class SettingsActivity extends ThemedActivity {
         AcDialog.builder(this)
                 .setTitle(title)
                 .setMessage(message)
-                .setPositiveButton("我已了解，继续开启", null)
-                .setNegativeButton("取消", new DialogInterface.OnClickListener() {
+                .setPositiveButton(Strings.get(R.string.settingsactivity_025), null)
+                .setNegativeButton(Strings.get(R.string.settingsactivity_026), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         target.setChecked(false);
                     }
@@ -422,9 +416,9 @@ public class SettingsActivity extends ThemedActivity {
                     Object detail = v.getTag();
                     if (detail == null) return;
                     AcDialog.builder(SettingsActivity.this)
-                            .setTitle("说明")
+                            .setTitle(Strings.get(R.string.settingsactivity_027))
                             .setMessage(detail.toString())
-                            .setPositiveButton("知道了", null)
+                            .setPositiveButton(Strings.get(R.string.settingsactivity_028), null)
                             .show();
                 }
             });
@@ -553,18 +547,18 @@ public class SettingsActivity extends ThemedActivity {
             return;
         }
         AcDialog.builder(this)
-                .setTitle("系统提示词已修改")
-                .setMessage("系统提示词位于每次请求的最前面。改动会让服务端的前缀缓存"
-                        + "从改动位置起失效——下一次请求的整段上下文按未命中计费，"
-                        + "之后随着对话继续才会逐步恢复。\n\n"
-                        + "如果只是想让模型知道当前时间，优先用最后一条消息里的时间提示，"
-                        + "而不是把时间写进系统提示词。")
-                .setPositiveButton("保存并接受", new DialogInterface.OnClickListener() {
+                .setTitle(Strings.get(R.string.settingsactivity_029))
+                .setMessage(Strings.get(R.string.settingsactivity_030)
+                        + Strings.get(R.string.settingsactivity_031)
+                        + Strings.get(R.string.settingsactivity_032)
+                        + Strings.get(R.string.settingsactivity_033)
+                        + Strings.get(R.string.settingsactivity_034))
+                .setPositiveButton(Strings.get(R.string.settingsactivity_035), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         doSaveSettings();
                     }
                 })
-                .setNegativeButton("取消", null)
+                .setNegativeButton(Strings.get(R.string.settingsactivity_036), null)
                 .show();
     }
 
@@ -703,7 +697,7 @@ public class SettingsActivity extends ThemedActivity {
         LogUtil.ENABLED = logEnabled;
         LogUtil.i(TAG, "saveSettings: prefs committed, logging %s", logEnabled ? "enabled" : "DISABLED");
 
-        AcToast.show(this, "设置已保存");
+        AcToast.show(this, Strings.get(R.string.settingsactivity_037));
         finish();
     }
 
@@ -718,7 +712,7 @@ public class SettingsActivity extends ThemedActivity {
         if (balanceProvider == null) balanceProvider = configManager.getProvider("DeepSeek");
         if (balanceProvider == null || balanceProvider.apiKey == null || balanceProvider.apiKey.isEmpty()) {
             LogUtil.w(TAG, "queryBalance aborted: provider=%s", balanceProvider == null ? "null" : "empty key");
-            AcToast.show(this, "未配置可查询余额的提供商 API Key");
+            AcToast.show(this, Strings.get(R.string.settingsactivity_038));
             return;
         }
         final ProviderInfo dsProvider = balanceProvider;
@@ -726,7 +720,7 @@ public class SettingsActivity extends ThemedActivity {
         LogUtil.i(TAG, "queryBalance: provider=%s url=%s keyLen=%d", dsProvider.name, dsProvider.apiUrl, dsProvider.apiKey.length());
 
         balanceButton.setEnabled(false);
-        balanceButton.setText("查询中...");
+        balanceButton.setText(Strings.get(R.string.settingsactivity_039));
 
         new Thread(new Runnable() {
             public void run() {
@@ -739,29 +733,29 @@ public class SettingsActivity extends ThemedActivity {
 
                         if (result == null) {
                             LogUtil.w(TAG, "queryBalance: result is null");
-                            AcToast.show(SettingsActivity.this, "查询失败");
+                            AcToast.show(SettingsActivity.this, Strings.get(R.string.settingsactivity_040));
                             return;
                         }
 
                         try {
                             JSONObject json = new JSONObject(result);
                             StringBuilder sb = new StringBuilder();
-                            sb.append("账户可用: ").append(json.optBoolean("is_available", false) ? "是" : "否").append("\n\n");
+                            sb.append(Strings.get(R.string.settingsactivity_041)).append(json.optBoolean("is_available", false) ? Strings.get(R.string.settingsactivity_042) : Strings.get(R.string.settingsactivity_043)).append("\n\n");
 
                             org.json.JSONArray infos = json.optJSONArray("balance_infos");
                             if (infos != null && infos.length() > 0) {
                                 JSONObject info = infos.getJSONObject(0);
-                                sb.append("货币: ").append(info.optString("currency", "CNY")).append("\n");
-                                sb.append("总余额: ").append(info.optString("total_balance", "0")).append("\n");
-                                sb.append("充值余额: ").append(info.optString("topped_up_balance", "0")).append("\n");
-                                sb.append("赠送余额: ").append(info.optString("granted_balance", "0")).append("\n");
+                                sb.append(Strings.get(R.string.settingsactivity_071)).append(info.optString("currency", "CNY")).append("\n");
+                                sb.append(Strings.get(R.string.settingsactivity_072)).append(info.optString("total_balance", "0")).append("\n");
+                                sb.append(Strings.get(R.string.settingsactivity_073)).append(info.optString("topped_up_balance", "0")).append("\n");
+                                sb.append(Strings.get(R.string.settingsactivity_074)).append(info.optString("granted_balance", "0")).append("\n");
                             }
                             LogUtil.i(TAG, "queryBalance OK: %s", sb.toString().replace("\n", " | "));
 
                             AcDialog.builder(SettingsActivity.this)
-                                    .setTitle(dsProvider.label() + " 余额")
+                                    .setTitle(dsProvider.label() + Strings.get(R.string.settingsactivity_044))
                                     .setMessage(sb.toString())
-                                    .setPositiveButton("确定", null)
+                                    .setPositiveButton(Strings.get(R.string.settingsactivity_045), null)
                                     .show();
                         } catch (Exception e) {
                             // 把原始响应摘要一并带出来：4.4 上余额「解析错误」多为
@@ -771,7 +765,7 @@ public class SettingsActivity extends ThemedActivity {
                                     + " body=" + LogUtil.preview(result, 800), e);
                             String brief = result.trim();
                             if (brief.length() > 60) brief = TextKit.cut(brief, 60) + "…";
-                            AcToast.show(SettingsActivity.this, "余额返回异常: " + brief);
+                            AcToast.show(SettingsActivity.this, Strings.get(R.string.settingsactivity_046) + brief);
                         }
                     }
                 });
@@ -799,7 +793,7 @@ public class SettingsActivity extends ThemedActivity {
         android.widget.TextView sub =
                 (android.widget.TextView) findViewById(R.id.theme_prompt_entry_sub);
         if (sub == null) return;
-        sub.setText(ThemePromptStore.isCustomized(this) ? "自定义" : "内置默认");
+        sub.setText(ThemePromptStore.isCustomized(this) ? Strings.get(R.string.settingsactivity_047) : Strings.get(R.string.settingsactivity_048));
     }
 
     /** 外观入口副标题显示当前主题名（实现方案 Q1）；12sp 单行超长省略。 */
@@ -810,12 +804,12 @@ public class SettingsActivity extends ThemedActivity {
         try {
             AppearanceManager am = AppearanceManager.getInstance(this);
             String name = am.getActiveThemeName();
-            String text = (name == null || name.length() == 0) ? "内置默认" : name;
-            if (am.isDark()) text = text + " · 深色";
+            String text = (name == null || name.length() == 0) ? Strings.get(R.string.settingsactivity_049) : name;
+            if (am.isDark()) text = text + Strings.get(R.string.settingsactivity_050);
             sub.setText(text);
         } catch (Throwable t) {
             // 外观系统异常不能拖垮设置页，最坏情况副标题显示内置默认
-            sub.setText("内置默认");
+            sub.setText(Strings.get(R.string.settingsactivity_051));
         }
     }
 
@@ -829,7 +823,7 @@ public class SettingsActivity extends ThemedActivity {
         if (storageEntrySize == null) return;
         StorageReport cached = StorageActivity.cachedReport();
         if (cached != null) {
-            storageEntrySize.setText("已用 " + StorageReport.size(cached.usedBytes()));
+            storageEntrySize.setText(Strings.get(R.string.settingsactivity_052) + StorageReport.size(cached.usedBytes()));
             return;
         }
         // 反复进出设置页时避免叠起多个扫描线程
@@ -839,7 +833,7 @@ public class SettingsActivity extends ThemedActivity {
         new Thread(new Runnable() {
             public void run() {
                 final StorageReport r = StorageScanner.scan(getApplicationContext());
-                final String text = "已用 " + StorageReport.size(r.usedBytes());
+                final String text = Strings.get(R.string.settingsactivity_053) + StorageReport.size(r.usedBytes());
                 runOnUiThread(new Runnable() {
                     public void run() {
                         storageScanning = false;
@@ -1080,7 +1074,7 @@ public class SettingsActivity extends ThemedActivity {
     private void refreshPresetSpinner() {
         presetList = PresetStore.load(this);
         List<String> names = new ArrayList<String>();
-        names.add("(不选择)");
+        names.add(Strings.get(R.string.settingsactivity_054));
         for (PresetStore.Preset p : presetList) names.add(p.name);
         ArrayAdapter<String> adapter = new ArrayAdapter<String>(this,
                 android.R.layout.simple_spinner_item, names);
@@ -1111,26 +1105,26 @@ public class SettingsActivity extends ThemedActivity {
         final String prompt = presetPrompt == null ? "" : presetPrompt.trim();
         if (prompt.length() == 0) {
             LogUtil.w(TAG, "promptSavePreset aborted: prompt empty");
-            AcToast.show(this, "系统提示词为空");
+            AcToast.show(this, Strings.get(R.string.settingsactivity_055));
             return;
         }
         List<PresetStore.Preset> list = PresetStore.load(this);
         if (list.size() >= PresetStore.MAX_PRESETS) {
-            AcToast.show(this, "最多" + PresetStore.MAX_PRESETS + "个预设");
+            AcToast.show(this, Strings.get(R.string.settingsactivity_056) + PresetStore.MAX_PRESETS + Strings.get(R.string.settingsactivity_057));
             return;
         }
         final EditText input = new EditText(this);
-        input.setHint("预设名称");
+        input.setHint(Strings.get(R.string.settingsactivity_058));
         input.setSingleLine(true);
-        input.setText(PresetStore.nextName(list, "新预设"));
+        input.setText(PresetStore.nextName(list, Strings.get(R.string.settingsactivity_059)));
         input.setSelection(input.getText().length());
 
         final android.app.AlertDialog dlg = AcDialog.builder(this)
-                .setTitle("保存为预设")
-                .setMessage("将保存当前系统提示词（" + prompt.length() + " 字）")
+                .setTitle(Strings.get(R.string.settingsactivity_060))
+                .setMessage(Strings.get(R.string.settingsactivity_061) + prompt.length() + Strings.get(R.string.settingsactivity_062))
                 .setView(input)
-                .setPositiveButton("保存", null)
-                .setNegativeButton("取消", null)
+                .setPositiveButton(Strings.get(R.string.settingsactivity_063), null)
+                .setNegativeButton(Strings.get(R.string.settingsactivity_064), null)
                 .create();
         AcDialog.onShow(dlg, new android.content.DialogInterface.OnShowListener() {
             public void onShow(android.content.DialogInterface dialog) {
@@ -1140,22 +1134,22 @@ public class SettingsActivity extends ThemedActivity {
                             public void onClick(View v) {
                                 String name = input.getText().toString().trim();
                                 if (name.length() == 0) {
-                                    AcToast.show(SettingsActivity.this, "名称不能为空");
+                                    AcToast.show(SettingsActivity.this, Strings.get(R.string.settingsactivity_065));
                                     return;
                                 }
                                 List<PresetStore.Preset> cur = PresetStore.load(SettingsActivity.this);
                                 if (PresetStore.contains(cur, name, null)) {
-                                    AcToast.show(SettingsActivity.this, "名称已存在：" + name);
+                                    AcToast.show(SettingsActivity.this, Strings.get(R.string.settingsactivity_066) + name);
                                     return;
                                 }
                                 if (cur.size() >= PresetStore.MAX_PRESETS) {
                                     AcToast.show(SettingsActivity.this,
-                                            "最多" + PresetStore.MAX_PRESETS + "个预设");
+                                            Strings.get(R.string.settingsactivity_067) + PresetStore.MAX_PRESETS + Strings.get(R.string.settingsactivity_068));
                                     return;
                                 }
                                 cur.add(new PresetStore.Preset(name, prompt));
                                 if (!PresetStore.save(SettingsActivity.this, cur)) {
-                                    AcToast.show(SettingsActivity.this, "保存失败");
+                                    AcToast.show(SettingsActivity.this, Strings.get(R.string.settingsactivity_069));
                                     return;
                                 }
                                 LogUtil.i(TAG, "savePreset: '%s' (%d chars), total=%d",
@@ -1163,7 +1157,7 @@ public class SettingsActivity extends ThemedActivity {
                                 appliedPresetName = name;
                                 refreshPresetSpinner();
                                 dlg.dismiss();
-                                AcToast.show(SettingsActivity.this, "已保存：" + name);
+                                AcToast.show(SettingsActivity.this, Strings.get(R.string.settingsactivity_070) + name);
                             }
                         });
             }

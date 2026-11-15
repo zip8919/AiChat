@@ -29,32 +29,32 @@
             android:layout_marginBottom="24dp"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="版本 --"/>
+            android:text="@string/activity_about_001"/>
 
         <Button
             android:id="@+id/about_help"
-            android:text="使用说明"
+            android:text="@string/activity_about_002"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginBottom="10dp"/>
 
         <Button
             android:id="@+id/about_check_update"
-            android:text="检查更新"
+            android:text="@string/activity_about_003"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginBottom="10dp"/>
 
         <Button
             android:id="@+id/about_feedback"
-            android:text="反馈建议"
+            android:text="@string/activity_about_004"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginBottom="10dp"/>
 
         <Button
             android:id="@+id/about_licenses"
-            android:text="开源许可"
+            android:text="@string/activity_about_005"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginBottom="24dp"/>
@@ -65,7 +65,7 @@
             android:lineSpacingExtra="3dp"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="本应用为本地客户端，对话内容与 API Key 均保存在设备上，不会上传到任何自有服务器。模型输出与联网搜索结果由第三方服务提供。"/>
+            android:text="@string/activity_about_006"/>
 
         <TextView
             android:textSize="11sp"

@@ -80,7 +80,7 @@ final class TraceKit {
      */
     private static String trimNote() {
         return WebSearchTool.TRACE_START
-                + "{\"tool\":\"" + TRIM_TOOL + "\",\"note\":\"更早的工具调用记录因内容过长已收起\"}"
+                + "{\"tool\":\"" + TRIM_TOOL + Strings.get(R.string.tracekit_001)
                 + WebSearchTool.TRACE_END;
     }
 

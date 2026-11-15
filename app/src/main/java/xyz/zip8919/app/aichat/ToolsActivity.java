@@ -150,9 +150,9 @@ public class ToolsActivity extends ThemedActivity {
         findViewById(R.id.tools_tpl_dom).setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 loadTemplate("var d = document.createElement('div');\n"
-                        + "d.textContent = 'DOM 就绪：' + document.title;\n"
+                        + Strings.get(R.string.toolsactivity_001)
                         + "document.body.appendChild(d);\n"
-                        + "console.log('已插入一个 div');");
+                        + Strings.get(R.string.toolsactivity_002));
             }
         });
         findViewById(R.id.tools_tpl_timer).setOnClickListener(new View.OnClickListener() {
@@ -250,11 +250,11 @@ public class ToolsActivity extends ThemedActivity {
 
     private void showEnvSheet() {
         final String[] items = {
-                "复制提示词 — 贴到别的 AI 里",
-                "插入到输入框 — 先改再用",
-                "直接发送给 AI — 回聊天页发出"};
+                Strings.get(R.string.toolsactivity_003),
+                Strings.get(R.string.toolsactivity_004),
+                Strings.get(R.string.toolsactivity_005)};
         AcDialog.builder(this)
-                .setTitle("给 AI 的环境说明")
+                .setTitle(Strings.get(R.string.toolsactivity_006))
                 .setItems(items, new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int which) {
                         if (which == 0) {
@@ -266,7 +266,7 @@ public class ToolsActivity extends ThemedActivity {
                         }
                     }
                 })
-                .setNegativeButton("取消", null)
+                .setNegativeButton(Strings.get(R.string.toolsactivity_007), null)
                 .show();
     }
 
@@ -408,7 +408,7 @@ public class ToolsActivity extends ThemedActivity {
 
     private void enterSelectionMode() {
         if (files.isEmpty()) {
-            AcToast.show(this, "没有可用的已保存代码");
+            AcToast.show(this, Strings.get(R.string.toolsactivity_008));
             return;
         }
         selectionMode = true;
@@ -452,7 +452,7 @@ public class ToolsActivity extends ThemedActivity {
         selectButton.setVisibility(View.GONE);
         selectionCancelButton.setVisibility(selectionMode ? View.VISIBLE : View.GONE);
         if (selectionMode) {
-            selectionCount.setText("已选 " + selectedFileCount() + " / " + files.size());
+            selectionCount.setText(Strings.get(R.string.toolsactivity_009) + selectedFileCount() + " / " + files.size());
         }
     }
 
@@ -483,18 +483,18 @@ public class ToolsActivity extends ThemedActivity {
     private void confirmDeleteSelectedFiles() {
         final List<File> selected = getSelectedFiles();
         if (selected.isEmpty()) {
-            AcToast.show(this, "请先选择要删除的代码");
+            AcToast.show(this, Strings.get(R.string.toolsactivity_010));
             return;
         }
         AcDialog.builder(this)
-                .setTitle("删除代码")
-                .setMessage("确定要删除选中的 " + selected.size() + " 个文件吗？\n\n此操作不可恢复！")
-                .setPositiveButton("删除", new DialogInterface.OnClickListener() {
+                .setTitle(Strings.get(R.string.toolsactivity_011))
+                .setMessage(Strings.get(R.string.toolsactivity_012) + selected.size() + Strings.get(R.string.toolsactivity_013))
+                .setPositiveButton(Strings.get(R.string.toolsactivity_014), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         deleteSelectedFiles(selected);
                     }
                 })
-                .setNegativeButton("取消", null)
+                .setNegativeButton(Strings.get(R.string.toolsactivity_015), null)
                 .show();
     }
 
@@ -506,7 +506,7 @@ public class ToolsActivity extends ThemedActivity {
             }
         }
         LogUtil.i(TAG, "deleteSelectedFiles: %d/%d ok", ok, selected.size());
-        AcToast.show(this, "已删除 " + ok + " 个文件");
+        AcToast.show(this, Strings.get(R.string.toolsactivity_016) + ok + Strings.get(R.string.toolsactivity_017));
         StorageActivity.invalidateCache();
         selectionMode = false;
         checkedNames.clear();   // 同上：不清会被下一轮多选继承，导致误删
@@ -519,7 +519,7 @@ public class ToolsActivity extends ThemedActivity {
         // 图片文件不能走文本菜单：readFile 会把 PNG/JPEG 字节按 UTF-8 解成乱码，
         // 编辑再保存更是直接把图片写坏。给图片单独一条「预览 / 重命名 / 删除」。
         if (isImageFile(f)) {
-            final String[] imgItems = {"预览图片", "打开方式", "分享", "重命名", "删除"};
+            final String[] imgItems = {Strings.get(R.string.toolsactivity_018), Strings.get(R.string.toolsactivity_019), Strings.get(R.string.toolsactivity_020), Strings.get(R.string.toolsactivity_021), Strings.get(R.string.toolsactivity_022)};
             AcDialog.builder(this)
                     .setTitle(f.getName())
                     .setItems(imgItems, new DialogInterface.OnClickListener() {
@@ -534,13 +534,13 @@ public class ToolsActivity extends ThemedActivity {
                             }
                         }
                     })
-                    .setNegativeButton("取消", null)
+                    .setNegativeButton(Strings.get(R.string.toolsactivity_023), null)
                     .show();
             return;
         }
         final String[] items = {
-                "查看 / 复制内容", "重命名", "编辑", "预览 / 运行",
-                "打开方式（第三方应用）", "分享", "删除"
+                Strings.get(R.string.toolsactivity_024), Strings.get(R.string.toolsactivity_025), Strings.get(R.string.toolsactivity_026), Strings.get(R.string.toolsactivity_027),
+                Strings.get(R.string.toolsactivity_028), Strings.get(R.string.toolsactivity_029), Strings.get(R.string.toolsactivity_030)
         };
         AcDialog.builder(this)
                 .setTitle(f.getName())
@@ -558,7 +558,7 @@ public class ToolsActivity extends ThemedActivity {
                         }
                     }
                 })
-                .setNegativeButton("取消", null)
+                .setNegativeButton(Strings.get(R.string.toolsactivity_031), null)
                 .show();
     }
 
@@ -575,7 +575,7 @@ public class ToolsActivity extends ThemedActivity {
             this.mtime = f.lastModified();
             this.len = f.length();
             this.label = f.getName() + "\n" + len + " B"
-                    + (isImageFile(f) ? "  [图片]" : "");
+                    + (isImageFile(f) ? Strings.get(R.string.toolsactivity_032) : "");
         }
     }
 
@@ -601,7 +601,7 @@ public class ToolsActivity extends ThemedActivity {
     /** 三个文本入口的兜底：万一图片文件绕过菜单（如外部调用），不把字节当文本读。 */
     private boolean guardImage(File f) {
         if (!isImageFile(f)) return false;
-        AcToast.show(this, "图片请用「预览图片」查看");
+        AcToast.show(this, Strings.get(R.string.toolsactivity_033));
         previewImage(f);
         return true;
     }
@@ -620,34 +620,34 @@ public class ToolsActivity extends ThemedActivity {
         input.setText(f.getName());
         input.setSelection(input.getText().length());
         AcDialog.builder(this)
-                .setTitle("重命名")
+                .setTitle(Strings.get(R.string.toolsactivity_034))
                 .setView(input)
-                .setPositiveButton("确定", new DialogInterface.OnClickListener() {
+                .setPositiveButton(Strings.get(R.string.toolsactivity_035), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         final String name = ExportHelper.sanitizeName(input.getText().toString());
                         if (name.isEmpty()) {
-                            AcToast.show(ToolsActivity.this, "文件名不能为空");
+                            AcToast.show(ToolsActivity.this, Strings.get(R.string.toolsactivity_036));
                             return;
                         }
                         final File target = new File(exportsDir(), name);
                         if (!target.equals(f) && target.exists()) {
                             // rename(2) 会静默覆盖已存在的目标文件，先确认避免数据丢失
                             AcDialog.builder(ToolsActivity.this)
-                                    .setTitle("文件已存在")
-                                    .setMessage(name + " 已存在，是否覆盖？")
-                                    .setPositiveButton("覆盖", new DialogInterface.OnClickListener() {
+                                    .setTitle(Strings.get(R.string.toolsactivity_037))
+                                    .setMessage(name + Strings.get(R.string.toolsactivity_038))
+                                    .setPositiveButton(Strings.get(R.string.toolsactivity_039), new DialogInterface.OnClickListener() {
                                         public void onClick(DialogInterface d2, int w2) {
                                             performRename(f, target, name);
                                         }
                                     })
-                                    .setNegativeButton("取消", null)
+                                    .setNegativeButton(Strings.get(R.string.toolsactivity_040), null)
                                     .show();
                             return;
                         }
                         performRename(f, target, name);
                     }
                 })
-                .setNegativeButton("取消", null)
+                .setNegativeButton(Strings.get(R.string.toolsactivity_041), null)
                 .show();
     }
 
@@ -655,7 +655,7 @@ public class ToolsActivity extends ThemedActivity {
         boolean ok = f.renameTo(target);
         LogUtil.i(TAG, "renameFile: %s -> %s ok=%s", f.getName(), name, ok);
         if (!ok) {
-            AcToast.show(ToolsActivity.this, "重命名失败");
+            AcToast.show(ToolsActivity.this, Strings.get(R.string.toolsactivity_042));
         }
         refreshFiles();
     }
@@ -676,20 +676,20 @@ public class ToolsActivity extends ThemedActivity {
 
     private void deleteFile(final File f) {
         AcDialog.builder(this)
-                .setTitle("删除 " + f.getName() + " ?")
-                .setPositiveButton("删除", new DialogInterface.OnClickListener() {
+                .setTitle(Strings.get(R.string.toolsactivity_043) + f.getName() + " ?")
+                .setPositiveButton(Strings.get(R.string.toolsactivity_044), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         boolean ok = f.delete();
                         LogUtil.i(TAG, "deleteFile: %s ok=%s", f.getName(), ok);
                         if (!ok) {
-                            AcToast.show(ToolsActivity.this, "删除失败");
+                            AcToast.show(ToolsActivity.this, Strings.get(R.string.toolsactivity_045));
                         }
                         // 导出目录变了，存储管理页的缓存作废，否则返回后仍显示旧体积
                         StorageActivity.invalidateCache();
                         refreshFiles();
                     }
                 })
-                .setNegativeButton("取消", null)
+                .setNegativeButton(Strings.get(R.string.toolsactivity_046), null)
                 .show();
     }
 
@@ -722,7 +722,7 @@ public class ToolsActivity extends ThemedActivity {
 
     private void pickFileIntoInput() {
         if (files.isEmpty()) {
-            AcToast.show(this, "没有可用的已保存代码");
+            AcToast.show(this, Strings.get(R.string.toolsactivity_047));
             return;
         }
         final String[] names = new String[files.size()];
@@ -730,7 +730,7 @@ public class ToolsActivity extends ThemedActivity {
             names[i] = files.get(i).getName();
         }
         AcDialog.builder(this)
-                .setTitle("选择代码文件")
+                .setTitle(Strings.get(R.string.toolsactivity_048))
                 .setItems(names, new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int which) {
                         final File picked = files.get(which);
@@ -753,19 +753,19 @@ public class ToolsActivity extends ThemedActivity {
                         }, "aichat-pickFile").start();
                     }
                 })
-                .setNegativeButton("取消", null)
+                .setNegativeButton(Strings.get(R.string.toolsactivity_049), null)
                 .show();
     }
 
     private void pasteIntoInput() {
         ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
         if (cm == null || !cm.hasPrimaryClip() || cm.getPrimaryClip() == null) {
-            AcToast.show(this, "剪贴板为空");
+            AcToast.show(this, Strings.get(R.string.toolsactivity_050));
             return;
         }
         ClipData clip = cm.getPrimaryClip();
         if (clip.getItemCount() == 0) {
-            AcToast.show(this, "剪贴板为空");
+            AcToast.show(this, Strings.get(R.string.toolsactivity_051));
             return;
         }
         CharSequence text = clip.getItemAt(0).coerceToText(this);
@@ -775,7 +775,7 @@ public class ToolsActivity extends ThemedActivity {
 
     private void runJs(String code) {
         if (code == null || code.trim().isEmpty()) {
-            AcToast.show(this, "请输入要运行的 JS 代码");
+            AcToast.show(this, Strings.get(R.string.toolsactivity_052));
             return;
         }
         LogUtil.i(TAG, "runJs: len=%d", code.length());
@@ -801,7 +801,7 @@ public class ToolsActivity extends ThemedActivity {
 
     private void sendEnvPrompt(boolean send) {
         LogUtil.i(TAG, "sendEnvPrompt: send=%s", send);
-        AcToast.show(this, send ? "已发送环境提示词" : "已插入环境提示词");
+        AcToast.show(this, send ? Strings.get(R.string.toolsactivity_053) : Strings.get(R.string.toolsactivity_054));
         startActivity(MainActivity.newPromptIntent(this, envPrompt(), send));
         finish();
     }
@@ -810,7 +810,7 @@ public class ToolsActivity extends ThemedActivity {
         ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
         if (cm != null) {
             cm.setPrimaryClip(ClipData.newPlainText("aichat", text));
-            AcToast.show(this, "已复制到剪贴板");
+            AcToast.show(this, Strings.get(R.string.toolsactivity_055));
         }
     }
 }

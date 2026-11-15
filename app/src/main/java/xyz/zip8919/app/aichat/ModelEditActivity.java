@@ -111,7 +111,7 @@ public class ModelEditActivity extends ThemedActivity {
         List<String> labels = new ArrayList<String>();
         providerKeys.clear();
         providerKeys.add("");
-        labels.add("（未指定提供商）");
+        labels.add(Strings.get(R.string.modeleditactivity_001));
         for (ProviderInfo p : cfg.getProviders()) {
             providerKeys.add(p.name);
             labels.add(p.label());
@@ -124,7 +124,7 @@ public class ModelEditActivity extends ThemedActivity {
 
     private void fillFields() {
         if (editing == null) {
-            title.setText("新建模型");
+            title.setText(Strings.get(R.string.modeleditactivity_002));
             deleteBtn.setVisibility(View.GONE);
             thinkingCb.setChecked(true);
             selectProvider(presetProvider);
@@ -138,8 +138,8 @@ public class ModelEditActivity extends ThemedActivity {
             selectProvider(editing.provider);
             if (editing.levelsProbed()) {
                 probedLevels = editing.levelList();
-                probeResult.setText("上次探测：思考可用 " + ThinkingLevels.describe(probedLevels)
-                        + (editing.levelsUnverifiable ? "（端点未校验档位取值）" : ""));
+                probeResult.setText(Strings.get(R.string.modeleditactivity_003) + ThinkingLevels.describe(probedLevels)
+                        + (editing.levelsUnverifiable ? Strings.get(R.string.modeleditactivity_004) : ""));
             }
         }
         updateDefaultButton();
@@ -150,7 +150,7 @@ public class ModelEditActivity extends ThemedActivity {
         if (defaultBtn == null) return;
         boolean isDefault = editing != null && cfg.isDefaultModel(editing);
         defaultBtn.setEnabled(!isDefault);
-        defaultBtn.setText(isDefault ? "当前为默认模型" : "设为默认模型");
+        defaultBtn.setText(isDefault ? Strings.get(R.string.modeleditactivity_005) : Strings.get(R.string.modeleditactivity_006));
     }
 
     private void selectProvider(String key) {
@@ -173,12 +173,12 @@ public class ModelEditActivity extends ThemedActivity {
         String key = selectedProvider();
         ProviderInfo p = key.length() == 0 ? null : cfg.getProvider(key);
         if (p == null) {
-            providerInfo.setText("未选择提供商，模型无法发送请求");
+            providerInfo.setText(Strings.get(R.string.modeleditactivity_007));
             return;
         }
         String url = Endpoint.chatUrl(p);
         String keyState = (p.apiKey == null || p.apiKey.trim().length() == 0)
-                ? "；未填 Key" : "";
+                ? Strings.get(R.string.modeleditactivity_008) : "";
         providerInfo.setText(url + keyState);
     }
 
@@ -189,23 +189,23 @@ public class ModelEditActivity extends ThemedActivity {
         if (busy) return;
         String model = nameEt.getText().toString().trim();
         if (model.length() == 0) {
-            AcToast.show(this, "请先填写模型 ID");
+            AcToast.show(this, Strings.get(R.string.modeleditactivity_009));
             return;
         }
         String key = selectedProvider();
         ProviderInfo p = key.length() == 0 ? null : cfg.getProvider(key);
         if (p == null) {
-            AcToast.show(this, "请先选择提供商");
+            AcToast.show(this, Strings.get(R.string.modeleditactivity_010));
             return;
         }
         if (p.apiKey == null || p.apiKey.trim().length() == 0) {
-            AcToast.show(this, "该提供商还没填 API Key");
+            AcToast.show(this, Strings.get(R.string.modeleditactivity_011));
             return;
         }
         busy = true;
         testBtn.setEnabled(false);
-        testBtn.setText("测试中…");
-        testResult.setText("正在请求 " + Endpoint.chatUrl(p) + " …");
+        testBtn.setText(Strings.get(R.string.modeleditactivity_012));
+        testResult.setText(Strings.get(R.string.modeleditactivity_013) + Endpoint.chatUrl(p) + " …");
         final ProviderInfo snap = p.copy();
         final String modelId = model;
         new Thread(new Runnable() {
@@ -216,7 +216,7 @@ public class ModelEditActivity extends ThemedActivity {
                         busy = false;
                         if (isFinishing()) return;
                         testBtn.setEnabled(true);
-                        testBtn.setText("测试连通性");
+                        testBtn.setText(Strings.get(R.string.modeleditactivity_014));
                         testResult.setText((r.ok() ? "✓ " : "✗ ") + r.message);
                         testResult.setTextColor(r.ok() ? 0xFF2E7D32 : 0xFFC62828);
                         LogUtil.i(TAG, "test model %s@%s -> %s %s", modelId,
@@ -234,23 +234,23 @@ public class ModelEditActivity extends ThemedActivity {
         if (busy) return;
         String model = nameEt.getText().toString().trim();
         if (model.length() == 0) {
-            AcToast.show(this, "请先填写模型 ID");
+            AcToast.show(this, Strings.get(R.string.modeleditactivity_015));
             return;
         }
         String key = selectedProvider();
         ProviderInfo p = key.length() == 0 ? null : cfg.getProvider(key);
         if (p == null) {
-            AcToast.show(this, "请先选择提供商");
+            AcToast.show(this, Strings.get(R.string.modeleditactivity_016));
             return;
         }
         if (p.apiKey == null || p.apiKey.trim().length() == 0) {
-            AcToast.show(this, "该提供商还没填 API Key");
+            AcToast.show(this, Strings.get(R.string.modeleditactivity_017));
             return;
         }
         busy = true;
         probeBtn.setEnabled(false);
-        probeBtn.setText("探测中…");
-        probeResult.setText("正在逐档请求，共 6 档，可能需要十几秒…");
+        probeBtn.setText(Strings.get(R.string.modeleditactivity_018));
+        probeResult.setText(Strings.get(R.string.modeleditactivity_019));
         final ProviderInfo snap = p.copy();
         final String modelId = model;
         new Thread(new Runnable() {
@@ -261,7 +261,7 @@ public class ModelEditActivity extends ThemedActivity {
                         busy = false;
                         if (isFinishing()) return;
                         probeBtn.setEnabled(true);
-                        probeBtn.setText("探测思考档位与图片输入");
+                        probeBtn.setText(Strings.get(R.string.modeleditactivity_020));
                         applyProbe(rep, modelId);
                     }
                 });
@@ -277,7 +277,7 @@ public class ModelEditActivity extends ThemedActivity {
         if (!levelsOk && !rep.levelsRejected && rep.vision == null) {
             // 一档都没得出，也没探到图片：认证、网络或端点不可用，配置不动
             probeResult.setTextColor(0xFFC62828);
-            probeResult.setText("探测未完成：" + rep.error);
+            probeResult.setText(Strings.get(R.string.modeleditactivity_021) + rep.error);
             LogUtil.w(TAG, "probe %s failed: %s", modelId, rep.error);
             return;
         }
@@ -286,39 +286,39 @@ public class ModelEditActivity extends ThemedActivity {
         if (levelsOk) {
             probedLevels = new ArrayList<String>(rep.levels);
             thinkingCb.setChecked(true);
-            sb.append("思考可用：").append(ThinkingLevels.describe(rep.levels));
+            sb.append(Strings.get(R.string.modeleditactivity_022)).append(ThinkingLevels.describe(rep.levels));
             if (rep.unverifiable) {
-                sb.append("\n端点对任何档位都返回成功，无法区分具体档位，六档均视为可用。");
+                sb.append(Strings.get(R.string.modeleditactivity_023));
             }
             String global = cfg.getThinkingLevel();
             String actual = ThinkingLevels.resolve(global, probedLevels);
             if (!actual.equals(global)) {
-                sb.append("\n当前全局档位「").append(ThinkingLevels.label(global))
-                        .append("」不可用，使用时将自动按「").append(ThinkingLevels.label(actual))
-                        .append("」发送。");
+                sb.append(Strings.get(R.string.modeleditactivity_024)).append(ThinkingLevels.label(global))
+                        .append(Strings.get(R.string.modeleditactivity_025)).append(ThinkingLevels.label(actual))
+                        .append(Strings.get(R.string.modeleditactivity_026));
             }
         } else if (rep.levelsRejected) {
             thinkingCb.setChecked(false);
             // 空列表（不是 null）：保存时据此清掉旧的档位记录，否则列表还显示早已不可用的档位
             probedLevels = new ArrayList<String>();
-            sb.append("六档全部被拒绝，该模型不接受思考参数，已把思考开关置为关闭。");
+            sb.append(Strings.get(R.string.modeleditactivity_027));
         } else {
             // 探到一半断了：开关保持原样，不拿半截结论改配置
-            sb.append("思考档位未探明：").append(rep.error);
+            sb.append(Strings.get(R.string.modeleditactivity_028)).append(rep.error);
         }
 
         if (rep.vision != null) {
             boolean ok = rep.vision.booleanValue();
             sb.append("\n").append(ok
-                    ? "图片输入可用，测试图都读出了数字，已勾选。"
-                    : "图片输入不可用，已取消勾选。");
+                    ? Strings.get(R.string.modeleditactivity_029)
+                    : Strings.get(R.string.modeleditactivity_030));
             if (!ok && rep.visionNote.length() > 0) {
-                sb.append("判定依据：").append(rep.visionNote).append("。");
+                sb.append(Strings.get(R.string.modeleditactivity_031)).append(rep.visionNote).append("。");
             }
         } else if (rep.visionNote.length() > 0) {
             // 图片这一项没得出明确结论：勾选状态保持原样，并把出路写清楚
             sb.append("\n").append(rep.visionNote)
-                    .append("。可再探测一次；仍无结论时，请按实际使用效果手动设置「支持图片输入」。");
+                    .append(Strings.get(R.string.modeleditactivity_032));
         }
         // 有可用项就按常态色显示，两项都没得出可用结论才标红
         boolean usable = levelsOk || Boolean.TRUE.equals(rep.vision);
@@ -348,20 +348,20 @@ public class ModelEditActivity extends ThemedActivity {
         String display = displayEt.getText().toString().trim();
         String provider = selectedProvider();
         if (name.length() == 0) {
-            AcToast.show(this, "模型 ID 不能为空");
+            AcToast.show(this, Strings.get(R.string.modeleditactivity_033));
             nameEt.requestFocus();
             return;
         }
         if (provider.length() == 0) {
-            AcToast.show(this, "请选择提供商");
+            AcToast.show(this, Strings.get(R.string.modeleditactivity_034));
             return;
         }
         if (cfg.getProvider(provider) == null) {
-            AcToast.show(this, "提供商不存在：" + provider);
+            AcToast.show(this, Strings.get(R.string.modeleditactivity_035) + provider);
             return;
         }
         if (cfg.isModelNameTaken(provider, name, editing)) {
-            AcToast.show(this, "该提供商下已有同名模型：" + name);
+            AcToast.show(this, Strings.get(R.string.modeleditactivity_036) + name);
             nameEt.requestFocus();
             return;
         }
@@ -396,7 +396,7 @@ public class ModelEditActivity extends ThemedActivity {
         }
         // 默认模型的变更必须在这里落盘：上面的 setDefaultModel 只动内存
         cfg.save();
-        AcToast.show(this, makeDefault ? "已保存，并设为默认模型" : "已保存");
+        AcToast.show(this, makeDefault ? Strings.get(R.string.modeleditactivity_037) : Strings.get(R.string.modeleditactivity_038));
         LogUtil.i(TAG, "save: %s@%s vision=%s thinking=%s new=%s",
                 target.name, target.provider, target.supportsVision,
                 target.supportsThinking, creating);
@@ -406,9 +406,9 @@ public class ModelEditActivity extends ThemedActivity {
     private void confirmDelete() {
         if (editing == null) return;
         AcDialog.builder(this)
-                .setTitle("删除模型")
-                .setMessage("确定删除 " + editing.label() + "？")
-                .setPositiveButton("删除", new DialogInterface.OnClickListener() {
+                .setTitle(Strings.get(R.string.modeleditactivity_039))
+                .setMessage(Strings.get(R.string.modeleditactivity_040) + editing.label() + "？")
+                .setPositiveButton(Strings.get(R.string.modeleditactivity_041), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         boolean wasDefault = cfg.isDefaultModel(editing);
                         cfg.getModels().remove(editing);
@@ -420,11 +420,11 @@ public class ModelEditActivity extends ThemedActivity {
                         }
                         cfg.save();
                         LogUtil.i(TAG, "delete model %s", editing.name);
-                        AcToast.show(ModelEditActivity.this, "已删除");
+                        AcToast.show(ModelEditActivity.this, Strings.get(R.string.modeleditactivity_042));
                         finish();
                     }
                 })
-                .setNegativeButton("取消", null)
+                .setNegativeButton(Strings.get(R.string.modeleditactivity_043), null)
                 .show();
     }
 }

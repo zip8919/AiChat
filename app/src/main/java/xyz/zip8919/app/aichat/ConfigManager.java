@@ -123,7 +123,7 @@ public class ConfigManager {
 
         // 商汤日日新 provider
         ProviderInfo sn = new ProviderInfo();
-        sn.name = "商汤日日新";
+        sn.name = Strings.get(R.string.configmanager_001);
         sn.apiKey = snKey;
         sn.apiUrl = "https://token.sensenova.cn";
         sn.chatPath = "/v1/chat/completions";
@@ -133,7 +133,7 @@ public class ConfigManager {
         providers.add(sn);
 
         // Models
-        addModel("deepseek-v4-flash", "商汤日日新", true);
+        addModel("deepseek-v4-flash", Strings.get(R.string.configmanager_002), true);
         addModel("deepseek-flash", "DeepSeek", true);
         addModel("deepseek-v4-pro", "DeepSeek", true);
 

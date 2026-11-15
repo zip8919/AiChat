@@ -90,12 +90,12 @@ final class AppearanceState {
      */
     static AppearanceState parse(String text) throws Exception {
         if (text == null || text.trim().length() == 0) {
-            throw new IllegalArgumentException("appearance.json 为空");
+            throw new IllegalArgumentException(Strings.get(R.string.appearancestate_001));
         }
         JSONObject j = new JSONObject(text);
         int sc = j.optInt("schema", -1);
         if (sc != SCHEMA) {
-            throw new IllegalArgumentException("不支持的 schema=" + sc);
+            throw new IllegalArgumentException(Strings.get(R.string.appearancestate_002) + sc);
         }
         AppearanceState s = new AppearanceState();
         s.dark = j.optBoolean("dark", false);

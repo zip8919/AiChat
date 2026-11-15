@@ -19,7 +19,7 @@ final class ScalePolicy {
 
     /** 字号 5 档系数：小 / 偏小 / 标准 / 偏大 / 大。 */
     private static final float[] STEP_FACTOR = {0.85f, 0.925f, 1.0f, 1.1f, 1.2f};
-    private static final String[] STEP_LABEL = {"小", "偏小", "标准", "偏大", "大"};
+    private static final String[] STEP_LABEL = {Strings.get(R.string.scalepolicy_001), Strings.get(R.string.scalepolicy_002), Strings.get(R.string.scalepolicy_003), Strings.get(R.string.scalepolicy_004), Strings.get(R.string.scalepolicy_005)};
 
     private ScalePolicy() {
     }

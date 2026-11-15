@@ -31,7 +31,7 @@ final class TitleGenerator {
     static void applyFallback(ConversationManager cm, Conversation conv, String firstMessage) {
         if (conv == null || conv.titleGenerated) return;
         String cur = conv.title == null ? "" : conv.title.trim();
-        if (cur.length() > 0 && !"新对话".equals(cur)) {
+        if (cur.length() > 0 && !Strings.get(R.string.conversation_001).equals(cur)) {
             LogUtil.d(TAG, "applyFallback skipped: title already '%s'", cur);
             return;
         }
@@ -76,7 +76,7 @@ final class TitleGenerator {
                     List<Message> msgs = new ArrayList<Message>();
                     msgs.add(new Message(Message.ROLE_SYSTEM, titlePrompt));
                     msgs.add(new Message(Message.ROLE_USER,
-                            "根据以上要求，为以下对话生成标题：\n" + firstMessage));
+                            Strings.get(R.string.titlegenerator_001) + firstMessage));
 
                     long t0 = System.currentTimeMillis();
                     ApiClient.CallResult result = ApiClient.callWithError(provider,

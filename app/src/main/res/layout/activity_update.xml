@@ -13,7 +13,7 @@
         android:layout_height="wrap_content">
 
         <TextView
-            android:text="版本更新"
+            android:text="@string/activity_update_001"
             android:textSize="15sp"
             android:textStyle="bold"
             android:textColor="@color/text_primary"
@@ -22,7 +22,7 @@
 
         <TextView
             android:id="@+id/update_status"
-            android:text="正在检查更新…"
+            android:text="@string/activity_update_002"
             android:textSize="12sp"
             android:textColor="@color/text_secondary"
             android:lineSpacingExtra="2dp"
@@ -38,7 +38,7 @@
 
             <Button
                 android:id="@+id/btn_refresh"
-                android:text="重新检查"
+                android:text="@string/activity_update_003"
                 android:textSize="12sp"
                 android:minHeight="40dp"
                 android:layout_weight="1"
@@ -48,7 +48,7 @@
 
             <Button
                 android:id="@+id/btn_notes"
-                android:text="更新说明"
+                android:text="@string/activity_update_004"
                 android:textSize="12sp"
                 android:minHeight="40dp"
                 android:layout_weight="1"
@@ -65,7 +65,7 @@
 
             <TextView
                 android:id="@+id/update_asset"
-                android:text="将下载：—"
+                android:text="@string/activity_update_005"
                 android:textSize="11sp"
                 android:textColor="@color/text_secondary"
                 android:singleLine="true"
@@ -76,7 +76,7 @@
 
             <Button
                 android:id="@+id/btn_switch_asset"
-                android:text="切换包"
+                android:text="@string/activity_update_006"
                 android:textSize="11sp"
                 android:minHeight="36dp"
                 android:paddingLeft="8dp"
@@ -96,7 +96,7 @@
         android:layout_height="wrap_content">
 
         <TextView
-            android:text="下载镜像"
+            android:text="@string/activity_update_007"
             android:textSize="13sp"
             android:textStyle="bold"
             android:textColor="@color/text_primary"
@@ -106,7 +106,7 @@
 
         <Button
             android:id="@+id/btn_probe"
-            android:text="测速"
+            android:text="@string/activity_update_008"
             android:textSize="11sp"
             android:minHeight="36dp"
             android:paddingLeft="8dp"
@@ -117,7 +117,7 @@
 
         <Button
             android:id="@+id/btn_add"
-            android:text="自定义"
+            android:text="@string/activity_update_009"
             android:textSize="11sp"
             android:minHeight="36dp"
             android:paddingLeft="8dp"
@@ -140,7 +140,7 @@
 
         <CheckBox
             android:id="@+id/probe_parallel_check"
-            android:text="并行测速"
+            android:text="@string/activity_update_010"
             android:textSize="11sp"
             android:textColor="@color/text_secondary"
             android:checked="true"
@@ -150,7 +150,7 @@
 
         <Button
             android:id="@+id/btn_probe_concurrency"
-            android:text="并发 6"
+            android:text="@string/activity_update_011"
             android:textSize="11sp"
             android:minHeight="32dp"
             android:paddingLeft="8dp"
@@ -160,7 +160,7 @@
     </LinearLayout>
 
     <TextView
-        android:text="测速会下载并校验 release 内的测速文件，边测边按延迟实时排序、不可用垫底，并实时跟随最快源；并行默认开（1～64 并发）；长按加速源可单测 / 编辑 / 移除"
+        android:text="@string/activity_update_012"
         android:textSize="10sp"
         android:textColor="@color/text_secondary"
         android:paddingLeft="12dp"
@@ -181,7 +181,7 @@
 
         <EditText
             android:id="@+id/custom_input"
-            android:hint="https://域名/{url}"
+            android:hint="@string/activity_update_013"
             android:textSize="11sp"
             android:singleLine="true"
             android:inputType="textUri"
@@ -194,7 +194,7 @@
 
         <Button
             android:id="@+id/btn_custom_ok"
-            android:text="添加"
+            android:text="@string/activity_update_014"
             android:textSize="11sp"
             android:minHeight="36dp"
             android:layout_width="wrap_content"
@@ -232,7 +232,7 @@
 
         <TextView
             android:id="@+id/update_progress_text"
-            android:text="选一个镜像后点下载"
+            android:text="@string/activity_update_015"
             android:textSize="11sp"
             android:textColor="@color/text_secondary"
             android:singleLine="true"
@@ -243,7 +243,7 @@
 
         <Button
             android:id="@+id/btn_action"
-            android:text="下载"
+            android:text="@string/activity_update_016"
             android:textSize="13sp"
             android:minHeight="44dp"
             android:layout_width="match_parent"

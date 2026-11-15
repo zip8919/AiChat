@@ -130,7 +130,7 @@ public class PresetManagerActivity extends ThemedActivity {
         TextView meta = new TextView(this);
         meta.setTextSize(11);
         meta.setTextColor(ThemeTokens.get(this, ThemeTokens.AC_TEXT_SECONDARY));
-        meta.setText((p.prompt == null ? 0 : p.prompt.length()) + " 字");
+        meta.setText((p.prompt == null ? 0 : p.prompt.length()) + Strings.get(R.string.presetmanageractivity_001));
         box.addView(meta);
 
         android.widget.ScrollView sc = new android.widget.ScrollView(this);
@@ -151,17 +151,17 @@ public class PresetManagerActivity extends ThemedActivity {
         AcDialog.builder(this)
                 .setTitle(p.name)
                 .setView(box)
-                .setPositiveButton("应用", new android.content.DialogInterface.OnClickListener() {
+                .setPositiveButton(Strings.get(R.string.presetmanageractivity_002), new android.content.DialogInterface.OnClickListener() {
                     public void onClick(android.content.DialogInterface d, int w) {
                         applyPreset(p);
                     }
                 })
-                .setNeutralButton("修改", new android.content.DialogInterface.OnClickListener() {
+                .setNeutralButton(Strings.get(R.string.presetmanageractivity_003), new android.content.DialogInterface.OnClickListener() {
                     public void onClick(android.content.DialogInterface d, int w) {
                         editPreset(pos);
                     }
                 })
-                .setNegativeButton("取消", null)
+                .setNegativeButton(Strings.get(R.string.presetmanageractivity_004), null)
                 .show();
     }
 
@@ -171,7 +171,7 @@ public class PresetManagerActivity extends ThemedActivity {
         data.putExtra(EXTRA_APPLY_PROMPT, p.prompt == null ? "" : p.prompt);
         data.putExtra(EXTRA_APPLY_NAME, p.name == null ? "" : p.name);
         setResult(RESULT_OK, data);
-        AcToast.show(this, "已应用到系统提示词");
+        AcToast.show(this, Strings.get(R.string.presetmanageractivity_005));
         finish();
     }
 
@@ -179,19 +179,19 @@ public class PresetManagerActivity extends ThemedActivity {
 
     private void createPreset(String presetPrompt) {
         if (presets.size() >= PresetStore.MAX_PRESETS) {
-            AcToast.show(this, "最多" + PresetStore.MAX_PRESETS + "个预设");
+            AcToast.show(this, Strings.get(R.string.presetmanageractivity_006) + PresetStore.MAX_PRESETS + Strings.get(R.string.presetmanageractivity_007));
             return;
         }
         editNew(presetPrompt == null ? "" : presetPrompt.trim());
     }
 
     private void editNew(String initialPrompt) {
-        final String name = PresetStore.nextName(presets, "新预设");
+        final String name = PresetStore.nextName(presets, Strings.get(R.string.presetmanageractivity_008));
         editing = null;
         showEditDialog(name, initialPrompt, new EditSink() {
             public boolean onSave(String newName, String newPrompt) {
                 if (presets.size() >= PresetStore.MAX_PRESETS) {
-                    AcToast.show(PresetManagerActivity.this, "最多" + PresetStore.MAX_PRESETS + "个预设");
+                    AcToast.show(PresetManagerActivity.this, Strings.get(R.string.presetmanageractivity_009) + PresetStore.MAX_PRESETS + Strings.get(R.string.presetmanageractivity_010));
                     return false;
                 }
                 presets.add(new PresetStore.Preset(newName, newPrompt));
@@ -213,7 +213,7 @@ public class PresetManagerActivity extends ThemedActivity {
         }, new Runnable() {
             public void run() {
                 presets.remove(p);
-                if (persist()) AcToast.show(PresetManagerActivity.this, "已删除");
+                if (persist()) AcToast.show(PresetManagerActivity.this, Strings.get(R.string.presetmanageractivity_011));
             }
         });
     }
@@ -240,14 +240,14 @@ public class PresetManagerActivity extends ThemedActivity {
         box.setPadding(pad, dp(8), pad, 0);
 
         final EditText nameEt = new EditText(this);
-        nameEt.setHint("预设名称");
+        nameEt.setHint(Strings.get(R.string.presetmanageractivity_012));
         nameEt.setSingleLine(true);
         nameEt.setText(initialName == null ? "" : initialName);
         nameEt.setSelection(nameEt.getText().length());
         box.addView(nameEt);
 
         final EditText promptEt = new EditText(this);
-        promptEt.setHint("提示词内容");
+        promptEt.setHint(Strings.get(R.string.presetmanageractivity_013));
         promptEt.setMinLines(5);
         promptEt.setMaxLines(10);
         promptEt.setGravity(android.view.Gravity.TOP | android.view.Gravity.START);
@@ -261,11 +261,11 @@ public class PresetManagerActivity extends ThemedActivity {
         box.addView(promptEt);
 
         final android.app.AlertDialog dlg = AcDialog.builder(this)
-                .setTitle(onDelete == null ? "新建预设" : "修改预设")
+                .setTitle(onDelete == null ? Strings.get(R.string.presetmanageractivity_014) : Strings.get(R.string.presetmanageractivity_015))
                 .setView(box)
-                .setPositiveButton("保存", null)
-                .setNegativeButton("取消", null)
-                .setNeutralButton(onDelete == null ? null : "删除", null)
+                .setPositiveButton(Strings.get(R.string.presetmanageractivity_016), null)
+                .setNegativeButton(Strings.get(R.string.presetmanageractivity_017), null)
+                .setNeutralButton(onDelete == null ? null : Strings.get(R.string.presetmanageractivity_018), null)
                 .create();
         final PresetStore.Preset self = editing;
         AcDialog.onShow(dlg, new android.content.DialogInterface.OnShowListener() {
@@ -277,15 +277,15 @@ public class PresetManagerActivity extends ThemedActivity {
                                 String nm = nameEt.getText().toString().trim();
                                 String pr = promptEt.getText().toString().trim();
                                 if (nm.length() == 0) {
-                                    AcToast.show(PresetManagerActivity.this, "名称不能为空");
+                                    AcToast.show(PresetManagerActivity.this, Strings.get(R.string.presetmanageractivity_019));
                                     return;
                                 }
                                 if (pr.length() == 0) {
-                                    AcToast.show(PresetManagerActivity.this, "提示词内容不能为空");
+                                    AcToast.show(PresetManagerActivity.this, Strings.get(R.string.presetmanageractivity_020));
                                     return;
                                 }
                                 if (PresetStore.contains(presets, nm, self)) {
-                                    AcToast.show(PresetManagerActivity.this, "名称已存在：" + nm);
+                                    AcToast.show(PresetManagerActivity.this, Strings.get(R.string.presetmanageractivity_021) + nm);
                                     return;
                                 }
                                 if (sink.onSave(nm, pr)) {
@@ -309,21 +309,21 @@ public class PresetManagerActivity extends ThemedActivity {
 
     private void confirmDelete(final Runnable doDelete) {
         AcDialog.builder(this)
-                .setTitle("删除预设")
-                .setMessage("删除后无法恢复，确定吗？")
-                .setPositiveButton("删除", new android.content.DialogInterface.OnClickListener() {
+                .setTitle(Strings.get(R.string.presetmanageractivity_022))
+                .setMessage(Strings.get(R.string.presetmanageractivity_023))
+                .setPositiveButton(Strings.get(R.string.presetmanageractivity_024), new android.content.DialogInterface.OnClickListener() {
                     public void onClick(android.content.DialogInterface d, int w) {
                         doDelete.run();
                     }
                 })
-                .setNegativeButton("取消", null)
+                .setNegativeButton(Strings.get(R.string.presetmanageractivity_025), null)
                 .show();
     }
 
     private boolean persist() {
         boolean ok = PresetStore.save(this, presets);
         if (!ok) {
-            AcToast.show(this, "保存失败，请检查存储空间");
+            AcToast.show(this, Strings.get(R.string.presetmanageractivity_026));
         }
         reload();
         return ok;
@@ -354,7 +354,7 @@ public class PresetManagerActivity extends ThemedActivity {
             TextView prev = (TextView) v.findViewById(R.id.preset_row_preview);
             name.setText(item.name);
             String prompt = item.prompt == null ? "" : item.prompt;
-            prev.setText(TextUtils.isEmpty(prompt) ? "（空）"
+            prev.setText(TextUtils.isEmpty(prompt) ? Strings.get(R.string.presetmanageractivity_027)
                     : TextKit.shorten(prompt.replace('\n', ' '), 60));
             return v;
         }

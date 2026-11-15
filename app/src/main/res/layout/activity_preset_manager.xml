@@ -24,7 +24,7 @@
             android:padding="10dp"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="‹ 返回" />
+            android:text="@string/activity_preset_manager_001" />
 
         <TextView
             android:textSize="17sp"
@@ -34,7 +34,7 @@
             android:layout_width="0dp"
             android:layout_weight="1"
             android:layout_height="wrap_content"
-            android:text="提示词预设" />
+            android:text="@string/activity_preset_manager_002" />
     </LinearLayout>
 
     <TextView
@@ -46,7 +46,7 @@
         android:paddingBottom="8dp"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="点击任意一项查看内容，可应用、修改或取消。最多 20 个。" />
+        android:text="@string/activity_preset_manager_003" />
 
     <LinearLayout
         android:orientation="horizontal"
@@ -62,7 +62,7 @@
             android:layout_width="0dp"
             android:layout_weight="1"
             android:layout_height="wrap_content"
-            android:text="新建预设" />
+            android:text="@string/activity_preset_manager_004" />
         <Button
             android:id="@+id/preset_save_current"
             android:textSize="13sp"
@@ -71,7 +71,7 @@
             android:layout_width="0dp"
             android:layout_weight="1"
             android:layout_height="wrap_content"
-            android:text="保存当前提示词" />
+            android:text="@string/activity_preset_manager_005" />
     </LinearLayout>
 
     <FrameLayout
@@ -96,6 +96,6 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:visibility="gone"
-            android:text="还没有预设。\n在设置页点「保存当前为预设」，或点上面的「新建预设」。" />
+            android:text="@string/activity_preset_manager_006" />
     </FrameLayout>
 </LinearLayout>

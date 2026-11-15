@@ -80,11 +80,11 @@ final class SourcePage {
           .append(ViewerBg.SET_BG_JS)
           .append("</script></head><body><div class=\"doc-wrap\">");
         if (truncated) {
-            sb.append("<div class=\"banner\">文件较大，仅显示前 ")
-              .append(MAX_DISPLAY_CHARS / 1024).append("K 字符（共 ")
-              .append(safe.length()).append(" 字符）。完整内容仍在消息里，也已发给模型。</div>");
+            sb.append(Strings.get(R.string.sourcepage_001))
+              .append(MAX_DISPLAY_CHARS / 1024).append(Strings.get(R.string.sourcepage_002))
+              .append(safe.length()).append(Strings.get(R.string.sourcepage_003));
         } else if (!highlight && shown.length() > 0 && lang != null && lang.length() > 0) {
-            sb.append("<div class=\"banner\">文件较大，已关闭语法高亮以保证滑动流畅。</div>");
+            sb.append(Strings.get(R.string.sourcepage_004));
         }
         sb.append("<pre><code>").append(body).append("</code></pre>")
           .append("</div></body></html>");

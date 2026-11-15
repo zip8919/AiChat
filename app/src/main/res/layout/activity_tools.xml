@@ -19,7 +19,7 @@
             android:id="@+id/tools_back_button"
             android:layout_width="wrap_content"
             android:layout_height="40dp"
-            android:text="返回"
+            android:text="@string/activity_tools_001"
             android:textSize="12sp" />
 
         <TextView
@@ -27,7 +27,7 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:gravity="center"
-            android:text="小工具"
+            android:text="@string/activity_tools_002"
             android:textColor="#FFFFFF"
             android:textSize="16sp"
             android:textStyle="bold" />
@@ -46,7 +46,7 @@
             android:layout_width="0dp"
             android:layout_height="36dp"
             android:layout_weight="1"
-            android:text="代码库"
+            android:text="@string/activity_tools_003"
             android:textSize="13sp"
             android:textColor="#FFFFFF"
             android:background="#2196F3" />
@@ -57,7 +57,7 @@
             android:layout_height="36dp"
             android:layout_weight="1"
             android:layout_marginLeft="4dp"
-            android:text="运行器"
+            android:text="@string/activity_tools_004"
             android:textSize="13sp"
             android:textColor="#333333"
             android:background="#FFFFFF" />
@@ -104,7 +104,7 @@
                     android:paddingRight="8dp"
                     android:layout_width="wrap_content"
                     android:layout_height="36dp"
-                    android:text="多选"/>
+                    android:text="@string/activity_tools_005"/>
                 <Button
                     android:id="@+id/tools_selection_cancel_button"
                     android:textSize="12sp"
@@ -115,7 +115,7 @@
                     android:visibility="gone"
                     android:layout_width="wrap_content"
                     android:layout_height="36dp"
-                    android:text="取消"/>
+                    android:text="@string/activity_tools_006"/>
             </LinearLayout>
             <LinearLayout
                 android:id="@+id/tools_selection_actions"
@@ -132,7 +132,7 @@
                     android:layout_width="0dp"
                     android:layout_height="36dp"
                     android:layout_weight="1"
-                    android:text="全选"/>
+                    android:text="@string/activity_tools_007"/>
                 <Button
                     android:id="@+id/tools_selection_invert_button"
                     android:textSize="12sp"
@@ -142,7 +142,7 @@
                     android:layout_height="36dp"
                     android:layout_weight="1"
                     android:layout_marginLeft="4dp"
-                    android:text="反选"/>
+                    android:text="@string/activity_tools_008"/>
             </LinearLayout>
         </LinearLayout>
 
@@ -159,7 +159,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="已保存代码"
+                android:text="@string/activity_tools_009"
                 android:textSize="14sp"
                 android:textStyle="bold"/>
             <Button
@@ -168,7 +168,7 @@
                 android:layout_height="36dp"
                 android:paddingLeft="10dp"
                 android:paddingRight="10dp"
-                android:text="多选"
+                android:text="@string/activity_tools_010"
                 android:textSize="12sp"/>
         </LinearLayout>
 
@@ -193,7 +193,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:gravity="center"
-                android:text="还没有保存的代码"
+                android:text="@string/activity_tools_011"
                 android:textSize="13sp"
                 android:textColor="@color/text_secondary"/>
             <TextView
@@ -202,7 +202,7 @@
                 android:gravity="center"
                 android:layout_marginTop="2dp"
                 android:layout_marginBottom="8dp"
-                android:text="选一个模板试试，或回聊天页让 AI 写一段"
+                android:text="@string/activity_tools_012"
                 android:textSize="12sp"
                 android:textColor="@color/text_secondary"/>
             <Button
@@ -216,14 +216,14 @@
                 android:layout_width="match_parent"
                 android:layout_height="40dp"
                 android:layout_marginTop="4dp"
-                android:text="DOM 操作"
+                android:text="@string/activity_tools_013"
                 android:textSize="12sp"/>
             <Button
                 android:id="@+id/tools_tpl_timer"
                 android:layout_width="match_parent"
                 android:layout_height="40dp"
                 android:layout_marginTop="4dp"
-                android:text="定时器示例"
+                android:text="@string/activity_tools_014"
                 android:textSize="12sp"/>
         </LinearLayout>
     </LinearLayout>
@@ -259,7 +259,7 @@
                         android:layout_width="0dp"
                         android:layout_height="40dp"
                         android:layout_weight="1"
-                        android:text="选择文件"
+                        android:text="@string/activity_tools_015"
                         android:textSize="11sp" />
 
                     <Button
@@ -268,7 +268,7 @@
                         android:layout_height="40dp"
                         android:layout_weight="1"
                         android:layout_marginLeft="4dp"
-                        android:text="粘贴"
+                        android:text="@string/activity_tools_016"
                         android:textSize="11sp" />
 
                     <Button
@@ -277,7 +277,7 @@
                         android:layout_height="40dp"
                         android:layout_weight="1"
                         android:layout_marginLeft="4dp"
-                        android:text="清空"
+                        android:text="@string/activity_tools_017"
                         android:textSize="11sp" />
                 </LinearLayout>
 
@@ -289,14 +289,14 @@
                     android:gravity="top|start"
                     android:textSize="11sp"
                     android:background="#FAFAFA"
-                    android:hint="在此输入或粘贴 JS 代码" />
+                    android:hint="@string/activity_tools_018" />
 
                 <Button
                     android:id="@+id/tools_js_run_button"
                     android:layout_width="match_parent"
                     android:layout_height="44dp"
                     android:layout_marginTop="6dp"
-                    android:text="运行"
+                    android:text="@string/activity_tools_019"
                     android:textSize="13sp" />
 
                 <!-- 环境提示词：三个动作收进底部弹层，这里只留一行入口 -->
@@ -314,7 +314,7 @@
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:text="给 AI 的环境说明"
+                        android:text="@string/activity_tools_020"
                         android:textSize="14sp"
                         android:textColor="@color/text_primary"/>
                     <TextView
@@ -344,6 +344,6 @@
             android:background="@android:color/white"
             android:layout_width="match_parent"
             android:layout_height="44dp"
-            android:text="删除选中"/>
+            android:text="@string/activity_tools_021"/>
     </LinearLayout>
 </LinearLayout>

@@ -80,26 +80,26 @@ final class ColorPickerDialog {
             public void onStopTrackingTouch(SeekBar s) {}
         };
 
-        root.addView(labeled(a, "色相", 360, Math.round(hsv[0]), 1, listener));
-        root.addView(labeled(a, "饱和度", 100, Math.round(hsv[1] * 100), 2, listener));
-        root.addView(labeled(a, "明度", 100, Math.round(hsv[2] * 100), 3, listener));
+        root.addView(labeled(a, Strings.get(R.string.colorpickerdialog_001), 360, Math.round(hsv[0]), 1, listener));
+        root.addView(labeled(a, Strings.get(R.string.colorpickerdialog_002), 100, Math.round(hsv[1] * 100), 2, listener));
+        root.addView(labeled(a, Strings.get(R.string.colorpickerdialog_003), 100, Math.round(hsv[2] * 100), 3, listener));
 
         refresh.run();
 
         AcDialog.builder(a)
-                .setTitle("自定义颜色")
+                .setTitle(Strings.get(R.string.colorpickerdialog_004))
                 .setView(root)
-                .setPositiveButton("使用", new DialogInterface.OnClickListener() {
+                .setPositiveButton(Strings.get(R.string.colorpickerdialog_005), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         String hex = ThemeCssBuilder.hexOf(color[0]);
                         // 高亮色（低饱和 + 高明度）作强调色时需配深字，给一次明确提示
                         if (cur[1] < 0.25f && cur[2] > 0.8f) {
-                            AcToast.showLong(a, "这是浅色，作强调色时请配深色文字");
+                            AcToast.showLong(a, Strings.get(R.string.colorpickerdialog_006));
                         }
                         if (cb != null) cb.onPicked(hex);
                     }
                 })
-                .setNegativeButton("取消", null)
+                .setNegativeButton(Strings.get(R.string.colorpickerdialog_007), null)
                 .show();
     }
 

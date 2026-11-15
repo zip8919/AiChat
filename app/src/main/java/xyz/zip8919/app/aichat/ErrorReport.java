@@ -25,24 +25,24 @@ final class ErrorReport {
             int httpCode, String responseBody, Exception e) {
         StringBuilder sb = new StringBuilder();
         SimpleDateFormat fmt = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US);
-        sb.append("时间：").append(fmt.format(new Date())).append('\n');
-        sb.append("提供商：").append(providerName == null ? "-" : providerName).append('\n');
-        sb.append("模型：").append(modelName == null ? "-" : modelName).append('\n');
-        sb.append("端点：").append(endpoint == null ? "-" : endpoint).append('\n');
-        sb.append("轮次：第 ").append(round + 1).append(" 轮\n");
+        sb.append(Strings.get(R.string.errorreport_001)).append(fmt.format(new Date())).append('\n');
+        sb.append(Strings.get(R.string.errorreport_002)).append(providerName == null ? "-" : providerName).append('\n');
+        sb.append(Strings.get(R.string.errorreport_003)).append(modelName == null ? "-" : modelName).append('\n');
+        sb.append(Strings.get(R.string.errorreport_004)).append(endpoint == null ? "-" : endpoint).append('\n');
+        sb.append(Strings.get(R.string.errorreport_005)).append(round + 1).append(Strings.get(R.string.errorreport_006));
         if (httpCode > 0) {
-            sb.append("HTTP 状态：").append(httpCode).append('\n');
+            sb.append(Strings.get(R.string.errorreport_007)).append(httpCode).append('\n');
         } else {
-            sb.append("HTTP 状态：未收到响应\n");
+            sb.append(Strings.get(R.string.errorreport_008));
         }
         String providerMsg = providerMessage(responseBody);
         if (providerMsg.length() > 0) {
-            sb.append("提供商错误：").append(providerMsg).append('\n');
+            sb.append(Strings.get(R.string.errorreport_009)).append(providerMsg).append('\n');
         }
         if (e != null) {
-            sb.append("异常类型：").append(e.getClass().getName()).append('\n');
+            sb.append(Strings.get(R.string.errorreport_010)).append(e.getClass().getName()).append('\n');
             String msg = e.getMessage();
-            sb.append("异常消息：").append(msg == null || msg.length() == 0 ? "(空)" : msg).append('\n');
+            sb.append(Strings.get(R.string.errorreport_011)).append(msg == null || msg.length() == 0 ? Strings.get(R.string.errorreport_012) : msg).append('\n');
         }
         String hint = sslHint(e);
         if (hint.length() > 0) {
@@ -51,7 +51,7 @@ final class ErrorReport {
         if (responseBody != null && responseBody.trim().length() > 0) {
             String body = responseBody.length() > BODY_PREVIEW
                     ? TextKit.cut(responseBody, BODY_PREVIEW) + "…" : responseBody;
-            sb.append("\n响应体（前 ").append(BODY_PREVIEW).append(" 字）：\n").append(body);
+            sb.append(Strings.get(R.string.errorreport_013)).append(BODY_PREVIEW).append(Strings.get(R.string.errorreport_014)).append(body);
         }
         return sb.toString();
     }
@@ -69,8 +69,8 @@ final class ErrorReport {
         for (int depth = 0; t != null && depth < 6; depth++) {
             String n = t.getClass().getName();
             if (n.indexOf("SSL") >= 0 || n.indexOf("Cert") >= 0) {
-                return "提示：TLS 证书校验失败。老系统（Android 4.x）的根证书库可能不认该站点的证书。"
-                        + "确认端点可信后，可在「设置 → 信任所有 HTTPS 证书」中临时开启再试。";
+                return Strings.get(R.string.errorreport_015)
+                        + Strings.get(R.string.errorreport_016);
             }
             t = t.getCause();
         }

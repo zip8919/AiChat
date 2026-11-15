@@ -22,10 +22,10 @@ final class VisionJudge {
 
     /** 第一张图里的数字。 */
     static final String ANSWER_A = "93";
-    static final String ANSWER_A_CN = "九十三";
+    static final String ANSWER_A_CN = Strings.get(R.string.visionjudge_001);
     /** 第二张图里的数字。 */
     static final String ANSWER_B = "7";
-    static final String ANSWER_B_CN = "七";
+    static final String ANSWER_B_CN = Strings.get(R.string.visionjudge_002);
 
     /** 单轮结果。{@code correct} 为 null 表示这一轮读不出结论。 */
     static final class Round {
@@ -41,9 +41,9 @@ final class VisionJudge {
 
     /** 模型明说看不到图的话术，单独认出来，好让备注说清原因。 */
     private static final String[] NO_IMAGE_WORDS = {
-            "看不到", "看不见", "无法查看", "无法看到", "无法识别图片", "无法读取图片",
-            "没有图片", "没有收到图片", "未收到图片", "没有提供图片", "请提供图片", "请上传图片",
-            "不是图片", "不是一个图片",
+            Strings.get(R.string.visionjudge_003), Strings.get(R.string.visionjudge_004), Strings.get(R.string.visionjudge_005), Strings.get(R.string.visionjudge_006), Strings.get(R.string.visionjudge_007), Strings.get(R.string.visionjudge_008),
+            Strings.get(R.string.visionjudge_009), Strings.get(R.string.visionjudge_010), Strings.get(R.string.visionjudge_011), Strings.get(R.string.visionjudge_012), Strings.get(R.string.visionjudge_013), Strings.get(R.string.visionjudge_014),
+            Strings.get(R.string.visionjudge_015), Strings.get(R.string.visionjudge_016),
             "cannot see", "can't see", "can not see", "unable to see", "not able to see",
             "no image", "not an image", "don't see an image", "do not see an image"
     };
@@ -62,7 +62,7 @@ final class VisionJudge {
         if (Boolean.FALSE.equals(a.correct) || Boolean.FALSE.equals(b.correct)) {
             out.supported = Boolean.FALSE;
             Round bad = Boolean.FALSE.equals(a.correct) ? a : b;
-            out.note = bad.note.length() > 0 ? bad.note : "回复里没有出现图内数字";
+            out.note = bad.note.length() > 0 ? bad.note : Strings.get(R.string.visionjudge_017);
             return out;
         }
         if (Boolean.TRUE.equals(a.correct) && Boolean.TRUE.equals(b.correct)) {
@@ -83,17 +83,17 @@ final class VisionJudge {
         Round out = new Round();
         String text = replyText(body);
         if (text == null) {
-            out.note = "响应里读不到回复正文";
+            out.note = Strings.get(R.string.visionjudge_018);
             return out;
         }
         String t = text.trim();
         if (t.length() == 0) {
-            out.note = "回复正文为空";
+            out.note = Strings.get(R.string.visionjudge_019);
             return out;
         }
         if (mentionsNoImage(t)) {
             out.correct = Boolean.FALSE;
-            out.note = "模型表示看不到图片";
+            out.note = Strings.get(R.string.visionjudge_020);
             return out;
         }
         if (containsNumber(t, answer) || t.indexOf(answerCn) >= 0) {
@@ -101,7 +101,7 @@ final class VisionJudge {
             return out;
         }
         out.correct = Boolean.FALSE;
-        out.note = "回复里没有出现图内数字 " + answer;
+        out.note = Strings.get(R.string.visionjudge_021) + answer;
         return out;
     }
 

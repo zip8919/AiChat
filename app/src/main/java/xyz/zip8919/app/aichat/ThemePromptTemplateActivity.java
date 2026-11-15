@@ -28,7 +28,7 @@ public class ThemePromptTemplateActivity extends ThemedActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_theme_prompt);
-        setTitle("主题生成提示词");
+        setTitle(Strings.get(R.string.themeprompttemplateactivity_001));
 
         templateEdit = (EditText) findViewById(R.id.template_edit);
         btnReset = (Button) findViewById(R.id.btn_reset);
@@ -58,13 +58,13 @@ public class ThemePromptTemplateActivity extends ThemedActivity {
         String text = templateEdit.getText().toString();
         if (text.trim().length() == 0) {
             ThemePromptStore.reset(this);
-            toast("已恢复内置默认模板");
+            toast(Strings.get(R.string.themeprompttemplateactivity_002));
         } else {
             if (text.indexOf("{desc}") < 0) {
                 // 不是错误，只是容易踩：允许保存，但把后果说清楚
-                toast("已保存。模板没有 {desc}，需求会自动追加到末尾");
+                toast(Strings.get(R.string.themeprompttemplateactivity_003));
             } else {
-                toast("已保存");
+                toast(Strings.get(R.string.themeprompttemplateactivity_004));
             }
             ThemePromptStore.setTemplate(this, text);
         }
@@ -74,18 +74,18 @@ public class ThemePromptTemplateActivity extends ThemedActivity {
 
     private void confirmReset() {
         AcDialog.builder(this)
-                .setTitle("恢复默认模板")
-                .setMessage("将丢弃当前编辑内容，恢复内置默认模板。已保存的主题不受影响。")
-                .setPositiveButton("恢复", new DialogInterface.OnClickListener() {
+                .setTitle(Strings.get(R.string.themeprompttemplateactivity_005))
+                .setMessage(Strings.get(R.string.themeprompttemplateactivity_006))
+                .setPositiveButton(Strings.get(R.string.themeprompttemplateactivity_007), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         ThemePromptStore.reset(ThemePromptTemplateActivity.this);
                         original = ThemePromptStore.defaultTemplate();
                         templateEdit.setText(original);
                         templateEdit.setSelection(0);
-                        toast("已恢复内置默认");
+                        toast(Strings.get(R.string.themeprompttemplateactivity_008));
                     }
                 })
-                .setNegativeButton("取消", null)
+                .setNegativeButton(Strings.get(R.string.themeprompttemplateactivity_009), null)
                 .show();
     }
 
@@ -101,8 +101,8 @@ public class ThemePromptTemplateActivity extends ThemedActivity {
             return;
         }
         AcDialog.builder(this)
-                .setTitle("有未保存的修改")
-                .setItems(new String[]{"放弃修改", "保存并返回", "继续编辑"},
+                .setTitle(Strings.get(R.string.themeprompttemplateactivity_010))
+                .setItems(new String[]{Strings.get(R.string.themeprompttemplateactivity_011), Strings.get(R.string.themeprompttemplateactivity_012), Strings.get(R.string.themeprompttemplateactivity_013)},
                         new DialogInterface.OnClickListener() {
                             public void onClick(DialogInterface d, int w) {
                                 if (w == 0) finish();
