@@ -16,9 +16,10 @@ import android.widget.TextView;
 /**
  * 关于页。版本号、开源许可、使用说明，「检查更新」（跳 {@link UpdateActivity}）与「反馈建议」入口。
  *
- * <p>反馈建议给三条路：发邮件、提 Issue、在线反馈中心，全部交给系统已装应用处理，
- * 应用自己不联网、不上传任何内容。设备上没有邮件应用或打不开网页时，弹窗把地址或
- * 链接显示出来，可复制后手动处理，不静默失败。
+ * <p>反馈建议给三条路：发邮件、提 Issue、应用内反馈中心。前两条交给系统已装应用处理；
+ * 第三条进 {@link FeedbackActivity}，输入、选文件、提交全在应用内完成，不再跳浏览器。
+ * 设备上没有邮件应用或打不开网页时，弹窗把地址或链接显示出来，可复制后手动处理，
+ * 不静默失败。
  */
 public class AboutActivity extends ThemedActivity {
 
@@ -127,12 +128,28 @@ public class AboutActivity extends ThemedActivity {
                         } else if (which == 1) {
                             openUrl(ISSUES_URL);
                         } else {
-                            openUrl(FEEDBACK_URL);
+                            openFeedbackCenter();
                         }
                     }
                 })
                 .setNegativeButton(Strings.get(R.string.aboutactivity_013), null)
                 .show();
+    }
+
+    /**
+     * 反馈中心是应用内的原生页面：标题、描述、联系方式都用原生输入框填，附件走系统
+     * 文件选择器，提交由 {@link FeedbackApi} 直接打反馈中心接口。旧版本这里跳浏览器，
+     * 在词典笔上要么没有浏览器、要么输入体验极差。
+     *
+     * <p>启动失败只可能是包内 Activity 被误删，仍兜底打开网页，不让入口变成死路。
+     */
+    private void openFeedbackCenter() {
+        try {
+            startActivity(new Intent(AboutActivity.this, FeedbackActivity.class));
+        } catch (Exception e) {
+            LogUtil.w(TAG, "openFeedbackCenter failed: %s", e.getMessage());
+            openUrl(FEEDBACK_URL);
+        }
     }
 
     /**

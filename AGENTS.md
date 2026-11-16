@@ -286,7 +286,8 @@ Android/data/xyz.zip8919.app.aichat/files/
 | 存储占用分类与清理 | `StorageScanner` / `StorageReport` / `StorageCleaner` |
 | 会话列表加载慢 | `ConversationIndex` |
 | 版本更新与镜像测速 | `UpdateManager` + `UpdateActivity` |
-| 反馈建议的三个入口 | `AboutActivity.showFeedback`（邮件 / Issue / 在线反馈中心） |
+| 反馈建议的三个入口 | `AboutActivity.showFeedback`（邮件 / Issue / 应用内反馈中心） |
+| 应用内反馈的列表、新建、详情 | `FeedbackActivity` / `FeedbackComposeActivity` / `FeedbackDetailActivity`，网络在 `FeedbackApi`，状态色在 `FeedbackUi` |
 
 ## 11. 开发规范
 

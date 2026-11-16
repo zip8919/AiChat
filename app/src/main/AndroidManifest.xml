@@ -106,6 +106,25 @@
             android:configChanges="screenSize|orientation|keyboardHidden"/>
 
         <activity
+            android:label="@string/feedbackactivity_001"
+            android:name="xyz.zip8919.app.aichat.FeedbackActivity"
+            android:exported="false"
+            android:configChanges="screenSize|orientation|keyboardHidden"/>
+
+        <activity
+            android:label="@string/feedbackcomposeactivity_001"
+            android:name="xyz.zip8919.app.aichat.FeedbackComposeActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize"
+            android:configChanges="screenSize|orientation|keyboardHidden"/>
+
+        <activity
+            android:label="@string/feedbackdetailactivity_001"
+            android:name="xyz.zip8919.app.aichat.FeedbackDetailActivity"
+            android:exported="false"
+            android:configChanges="screenSize|orientation|keyboardHidden"/>
+
+        <activity
             android:label="版本更新"
             android:name="xyz.zip8919.app.aichat.UpdateActivity"
             android:exported="false"
