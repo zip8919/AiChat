@@ -35,6 +35,10 @@ AiChat/
 │   └── RELEASE_NOTES.md              # CI 直接读它当 Release 正文
 ├── docs/
 │   └── rendering-test-suite.md       # 渲染能力的手测语料
+├── tools/
+│   ├── build_debug.sh                # 无 Gradle 时的手工出包
+│   ├── dexcheck.py                   # dex 里 R 常量与资源表比对
+│   └── regression_check.py           # 界面文案回归检查
 ├── build.sh / build.bat / build.ps1  # 三平台构建封装
 ├── gradlew / gradlew.bat / gradle/
 ├── README.md / AGENTS.md / LICENSE
