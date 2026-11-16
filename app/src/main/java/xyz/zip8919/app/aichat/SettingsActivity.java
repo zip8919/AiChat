@@ -96,12 +96,13 @@ public class SettingsActivity extends ThemedActivity {
     private static final int DEFAULT_VISION_MAX_PX = 1600;
     private static final int DEFAULT_VISION_MAX_IMAGES = 3;
     private static final String DEFAULT_TITLE_MODEL = "Qwen/Qwen3.5-397B-A17B";
-    private static final String DEFAULT_TITLE_PROMPT = Strings.get(R.string.settingsactivity_001);
+    /** 默认标题提示词。存资源 id，静态字段取值会早于 Strings.init。 */
+    private static final int DEFAULT_TITLE_PROMPT_ID = R.string.settingsactivity_001;
     /**
      * 默认环境提示词。原来硬编码在 ToolsActivity 里写死「Android 4.4 / Chromium 30」，
      * 换台机器就是错的；这里改成占位符，运行时按真实设备填充。
      */
-    private static final String DEFAULT_JS_ENV_PROMPT = Strings.get(R.string.js_env_prompt_default);
+    private static final int DEFAULT_JS_ENV_PROMPT_ID = R.string.js_env_prompt_default;
 
     private SharedPreferences prefs;
     private EditText systemPromptEdit, titlePromptEdit;
@@ -420,7 +421,7 @@ public class SettingsActivity extends ThemedActivity {
 
     private void loadSettings() {
         systemPromptEdit.setText(prefs.getString(KEY_SYSTEM_PROMPT, ""));
-        titlePromptEdit.setText(prefs.getString(KEY_TITLE_PROMPT, DEFAULT_TITLE_PROMPT));
+        titlePromptEdit.setText(prefs.getString(KEY_TITLE_PROMPT, Strings.get(DEFAULT_TITLE_PROMPT_ID)));
         autoTitleSwitch.setChecked(prefs.getBoolean(KEY_AUTO_TITLE_ENABLED, true));
         quickScanSwitch.setChecked(prefs.getBoolean(KEY_QUICK_SCAN_ENABLED, false));
         webSearchSwitch.setChecked(prefs.getBoolean(KEY_WEB_SEARCH_ENABLED, true));
@@ -460,7 +461,7 @@ public class SettingsActivity extends ThemedActivity {
                 KEY_VISION_MAX_PX, DEFAULT_VISION_MAX_PX)));
         visionMaxImagesEdit.setText(String.valueOf(intPref(
                 KEY_VISION_MAX_IMAGES, DEFAULT_VISION_MAX_IMAGES)));
-        jsEnvPromptEdit.setText(prefs.getString(KEY_JS_ENV_PROMPT, DEFAULT_JS_ENV_PROMPT));
+        jsEnvPromptEdit.setText(prefs.getString(KEY_JS_ENV_PROMPT, Strings.get(DEFAULT_JS_ENV_PROMPT_ID)));
         logSwitch.setChecked(prefs.getBoolean(KEY_LOG_ENABLED, true));
         realtimeRenderSwitch.setChecked(prefs.getBoolean(KEY_REALTIME_RENDER, false));
         streamSwitch.setChecked(prefs.getBoolean(KEY_STREAM_ENABLED, true));
@@ -587,7 +588,7 @@ public class SettingsActivity extends ThemedActivity {
 
         // 代码执行提示词留空等于恢复默认，避免用户删光后拿到一句空提示
         String jsEnvPrompt = jsEnvPromptEdit.getText().toString().trim();
-        if (jsEnvPrompt.length() == 0) jsEnvPrompt = DEFAULT_JS_ENV_PROMPT;
+        if (jsEnvPrompt.length() == 0) jsEnvPrompt = Strings.get(DEFAULT_JS_ENV_PROMPT_ID);
         editor.putString(KEY_JS_ENV_PROMPT, jsEnvPrompt);
 
         // 每轮工具调用上限：空值 / 非数字 / 越界一律回退，绝不把非法值写进配置
@@ -1013,9 +1014,9 @@ public class SettingsActivity extends ThemedActivity {
      */
     public static String getJsEnvPrompt(Context context) {
         SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, 0);
-        String template = prefs.getString(KEY_JS_ENV_PROMPT, DEFAULT_JS_ENV_PROMPT);
+        String template = prefs.getString(KEY_JS_ENV_PROMPT, Strings.get(DEFAULT_JS_ENV_PROMPT_ID));
         if (template == null || template.trim().length() == 0) {
-            template = DEFAULT_JS_ENV_PROMPT;
+            template = Strings.get(DEFAULT_JS_ENV_PROMPT_ID);
         }
         return SystemInfo.fillPlaceholders(template, context);
     }
@@ -1023,8 +1024,8 @@ public class SettingsActivity extends ThemedActivity {
     /** 未填充占位符的原始模板，设置页回填用。 */
     public static String getJsEnvPromptTemplate(Context context) {
         SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, 0);
-        String v = prefs.getString(KEY_JS_ENV_PROMPT, DEFAULT_JS_ENV_PROMPT);
-        return v == null || v.trim().length() == 0 ? DEFAULT_JS_ENV_PROMPT : v;
+        String v = prefs.getString(KEY_JS_ENV_PROMPT, Strings.get(DEFAULT_JS_ENV_PROMPT_ID));
+        return v == null || v.trim().length() == 0 ? Strings.get(DEFAULT_JS_ENV_PROMPT_ID) : v;
     }
 
     public static String getTitleModel(Context context) {
@@ -1048,7 +1049,7 @@ public class SettingsActivity extends ThemedActivity {
     public static String getTitlePrompt(Context context) {
         SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, 0);
         return SystemInfo.fillPlaceholders(
-                prefs.getString(KEY_TITLE_PROMPT, DEFAULT_TITLE_PROMPT), context);
+                prefs.getString(KEY_TITLE_PROMPT, Strings.get(DEFAULT_TITLE_PROMPT_ID)), context);
     }
 
     // ---- Presets ----

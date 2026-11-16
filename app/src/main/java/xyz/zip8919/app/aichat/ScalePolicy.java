@@ -19,7 +19,10 @@ final class ScalePolicy {
 
     /** 字号 5 档系数：小 / 偏小 / 标准 / 偏大 / 大。 */
     private static final float[] STEP_FACTOR = {0.85f, 0.925f, 1.0f, 1.1f, 1.2f};
-    private static final String[] STEP_LABEL = {Strings.get(R.string.scalepolicy_001), Strings.get(R.string.scalepolicy_002), Strings.get(R.string.scalepolicy_003), Strings.get(R.string.scalepolicy_004), Strings.get(R.string.scalepolicy_005)};
+    /** 五档的界面文案资源。存 id 而不是取好的字符串，避免静态初始化早于 Strings.init。 */
+    private static final int[] STEP_LABEL_IDS = {
+            R.string.scalepolicy_001, R.string.scalepolicy_002, R.string.scalepolicy_003,
+            R.string.scalepolicy_004, R.string.scalepolicy_005};
 
     private ScalePolicy() {
     }
@@ -30,7 +33,7 @@ final class ScalePolicy {
     }
 
     static String stepLabel(int step) {
-        return STEP_LABEL[AppearanceState.clampStep(step)];
+        return Strings.get(STEP_LABEL_IDS[AppearanceState.clampStep(step)]);
     }
 
     /** 原生界面文字的实际 sp。 */

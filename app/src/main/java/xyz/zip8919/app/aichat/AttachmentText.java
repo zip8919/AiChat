@@ -435,10 +435,21 @@ final class AttachmentText {
     // ---------------------------------------------------------------- 老会话迁移
 
     private static final String TAG_OPEN = "<附件 name=\"";
-    private static final String TAG_NAME_END = Strings.get(R.string.attachmenttext_006);
+    /**
+     * 文件名的结束标记。
+     *
+     * <p>老会话里存的就是这几个字节，属于解析历史数据的格式标记，**不能进资源文件**：
+     * 一旦被当成界面文案改写或翻译，{@link #parseApiText} 就找不到名字结束位置，
+     * 迁移会静默失效。
+     */
+    private static final String TAG_NAME_END = "\">\n";
     private static final String TAG_CLOSE = "\n</附件>";
-    /** 1.8.2 及以前 content 里那行摘要的前缀。 */
-    private static final String LEGACY_SUMMARY_HEAD = Strings.get(R.string.attachmenttext_018);
+    /**
+     * 1.8.2 及以前 content 里那行摘要的前缀。
+     *
+     * <p>同样是历史数据里的固定文本，不进资源文件。
+     */
+    private static final String LEGACY_SUMMARY_HEAD = "[附件] ";
     private static final String LEGACY_SUMMARY = "\n\n" + LEGACY_SUMMARY_HEAD;
 
     /**

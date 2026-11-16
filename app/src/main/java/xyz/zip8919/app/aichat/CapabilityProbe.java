@@ -48,8 +48,11 @@ final class CapabilityProbe {
      *
      * <p>两轮探测用同一句话：靠换图换答案，不靠换问法，避免模型因为提示不同而
      * 给出不同表现。
+     *
+     * <p>这是发给模型的文本，不属于界面文案，所以不进资源文件（与工具描述、系统
+     * 提示词同一类），也避免静态字段在 {@code Strings} 初始化之前取不到值。
      */
-    private static final String VISION_ASK = Strings.get(R.string.capabilityprobe_001);
+    private static final String VISION_ASK = "图中的数字是多少？只回答数字，不要解释。";
 
     /**
      * 探测图 A：128×128 白底黑字「93」，灰度 PNG，约 1.4 KB；B 为「7」，约 0.7 KB。
@@ -216,7 +219,7 @@ final class CapabilityProbe {
         if (Boolean.FALSE.equals(a.correct)) {
             // 第一张就读错了，不可能是视觉模型，省掉第二次请求
             rep.vision = Boolean.FALSE;
-            rep.visionNote = a.note;
+            rep.visionNote = roundReason(a);
             return;
         }
         VisionJudge.Round b;
@@ -224,17 +227,17 @@ final class CapabilityProbe {
             // 第一张没读出结论：再发一次同一张图，多给一次机会。
             // 模型先想后答时容易「思考用掉额度、正文为空」，一次空回复不足以判死。
             if (stop != null && stop.stopped()) {
-                rep.visionNote = Strings.get(R.string.capabilityprobe_010) + a.note;
+                rep.visionNote = Strings.get(R.string.capabilityprobe_010, roundReason(a));
                 return;
             }
             b = askNumber(url, snap, model, IMAGE_A_BASE64,
                     VisionJudge.ANSWER_A, VisionJudge.ANSWER_A_CN);
             if (b.correct == null) {
-                rep.visionNote = Strings.get(R.string.capabilityprobe_011) + (b.note.length() > 0 ? b.note : a.note);
+                rep.visionNote = Strings.get(R.string.capabilityprobe_010, roundReason(b));
                 return;
             }
             rep.vision = b.correct;
-            rep.visionNote = b.correct.booleanValue() ? "" : b.note;
+            rep.visionNote = b.correct.booleanValue() ? "" : roundReason(b);
             return;
         }
         if (stop != null && stop.stopped()) {
@@ -245,7 +248,39 @@ final class CapabilityProbe {
                 VisionJudge.ANSWER_B, VisionJudge.ANSWER_B_CN);
         VisionJudge.Result j = VisionJudge.combine(a, b);
         rep.vision = j.supported;
-        rep.visionNote = j.note;
+        rep.visionNote = resultReason(j);
+    }
+
+    /**
+     * 把单轮的原因翻成人话。
+     *
+     * <p>调用方自己写的说明（网络失败、端点拒绝）优先，它比原因码具体。
+     */
+    private static String roundReason(VisionJudge.Round r) {
+        if (r.note != null && r.note.length() > 0) return r.note;
+        return reasonText(r.reason, r.arg);
+    }
+
+    /** 把两轮汇总的原因翻成人话。 */
+    private static String resultReason(VisionJudge.Result r) {
+        if (r.note != null && r.note.length() > 0) return r.note;
+        return reasonText(r.reason, r.arg);
+    }
+
+    /** 原因码到界面文案。{@link VisionJudge} 只给码，文字在这里取。 */
+    private static String reasonText(int reason, String arg) {
+        switch (reason) {
+            case VisionJudge.REASON_NO_BODY:
+                return Strings.get(R.string.capabilityprobe_019);
+            case VisionJudge.REASON_EMPTY:
+                return Strings.get(R.string.capabilityprobe_020);
+            case VisionJudge.REASON_NO_IMAGE:
+                return Strings.get(R.string.capabilityprobe_021);
+            case VisionJudge.REASON_NO_DIGIT:
+                return Strings.get(R.string.capabilityprobe_022, arg);
+            default:
+                return "";
+        }
     }
 
     /** 发一张图问数字，返回这一轮的结论；答复里带上端点拒绝、网络失败的原因。 */
@@ -262,7 +297,8 @@ final class CapabilityProbe {
         }
         if (visionRejection(v.httpCode)) {
             out.correct = Boolean.FALSE;
-            out.note = Strings.get(R.string.capabilityprobe_013) + ProviderTester.shortError(v.body);
+            out.note = Strings.get(R.string.capabilityprobe_013,
+                    ProviderTester.shortError(v.body));
             return out;
         }
         out.note = ProviderTester.describeFailure(snap, v.httpCode, v.body, model);
@@ -274,7 +310,7 @@ final class CapabilityProbe {
             boolean unverifiable) {
         StringBuilder sb = new StringBuilder();
         if (levels != null && levels.size() > 0) {
-            sb.append(Strings.get(R.string.capabilityprobe_014)).append(ThinkingLevels.describe(levels));
+            sb.append(Strings.get(R.string.capabilityprobe_014, ThinkingLevels.describe(levels)));
             if (unverifiable) sb.append(Strings.get(R.string.capabilityprobe_015));
         }
         if (vision != null) {

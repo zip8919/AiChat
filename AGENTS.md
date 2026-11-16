@@ -178,7 +178,7 @@ Android/data/xyz.zip8919.app.aichat/files/
 | `PresetStore` | 提示词预设存取（上限 20，重名自动编号） | 不碰 UI，不认识 SettingsActivity |
 | `ProviderTester` | 连通性探测 + 远端模型列表解析 + 错误归类 | 不写 UI，不改配置 |
 | `CapabilityProbe` | 能力探测：逐档测思考档位是否被接受（看状态码）+ 换两张不同数字的图各问一次测图片输入 | 不改配置，不落库（结论由调用方写回 `ModelInfo`） |
-| `VisionJudge` | 图片输入判定：解析回复正文，两轮各读对应图内数字，两张都读对才算支持 | 纯字符串处理，不碰网络与 Android |
+| `VisionJudge` | 图片输入判定：解析回复正文，两轮各读对应图内数字，两张都读对才算支持 | 只给结论与原因码，不产出界面文字；不碰网络、资源与 Android |
 | `ThinkingLevels` | 六档定义与排序、`resolve` 落档、`reasoning_effort` / `thinking_budget` 映射 | 纯函数，不读配置 |
 | `AppearanceManager` | 外观系统唯一门面，working / committed 双态 | 不直接落盘，不做 View 变换 |
 | `ThemeApplier` | 窗口、字号、字体注入 | 不做颜色反查（那是 `ThemeRecolor`） |
@@ -347,7 +347,7 @@ ci: Release body 直接读 RELEASE_NOTES.md
 
 1. `./gradlew clean assembleDebug` 必须成功，无新增 warning 级别的资源/清单错误。
 2. 改动涉及的功能在真机上手动过一遍，写在提交信息里。
-3. 纯逻辑类优先在本地 JVM 桩工程里断言（`.test/`，不入库）：`SseRound`、`ToolExecutor`、`StreamRenderer`、`ChatHistory`、`MarkdownPipeline`、`FileKinds`、`ThemeText`、`TextKit`、`Endpoint`、`MessageSanitizer` 都不依赖 Android 运行时，三个桩（`android.util.Log`、`Context`、`Bitmap`）就能跑。`ChatStreamRunner` 依赖 HTTP，不做单测，靠真机回归。
+3. 纯逻辑类优先在本地 JVM 桩工程里断言（`.test/`，不入库）：`SseRound`、`ToolExecutor`、`StreamRenderer`、`ChatHistory`、`MarkdownPipeline`、`FileKinds`、`ThemeText`、`TextKit`、`Endpoint`、`MessageSanitizer`、`VisionJudge` 都不依赖 Android 运行时，三个桩（`android.util.Log`、`Context`、`Bitmap`）就能跑。`ChatStreamRunner` 依赖 HTTP，不做单测，靠真机回归。
 
 新增纯逻辑类时，尽量让它不碰 `Bitmap` / `Context`，这样才留得住可测性。
 
@@ -462,9 +462,12 @@ KEYSTORE_PASSWORD=<口令> KEY_ALIAS=mc ./tools/build_debug.sh
 |---|---|
 | 解析历史数据的格式标记 | `AttachmentText.TAG_OPEN`、`ConversationManager.LEGACY_SOURCES_HEADER` |
 | 判断分支用的固定值 | `"system".equals(id)`、`case "actheme"` |
-| 提示词正文、工具描述与工具返回给模型的文本 | `ThemePromptStore`、`WebSearchTool`、`TavilyTool`、`HttpRequestTool` |
+| 提示词正文、工具描述与工具返回给模型的文本 | `ThemePromptStore`、`WebSearchTool`、`TavilyTool`、`HttpRequestTool`、`CapabilityProbe.VISION_ASK` |
+| 判定与匹配用的字面量 | `VisionJudge.ANSWER_A_CN`「九十三」、`VisionJudge.NO_IMAGE_WORDS`「看不到 / 无法识别图片」、各种 `equals` 与 `indexOf` 的比对值 |
 
 **改文案时不要动判断逻辑。** 菜单分支、`switch` 判断、`equals` 比较如果依赖显示文字，改文案就会让功能静默失效（附件长按「用其他应用打开」曾因此点不动）。列表回调改用位置下标判断，判断用的固定值放进常量并与显示文案分离。
+
+判定与解析用的字面量比显示文案更危险：改的是「文案」，坏的是功能，而且不报错。已经踩过两次 —— `AttachmentText.TAG_NAME_END` 是历史附件格式的解析标记，被当成界面文案迁进资源后值变成别的字符串，1.8.2 及以前的老会话附件全部迁移失败；`VisionJudge` 的答案字面量同样不适合放资源，将来加多语言时翻译一次判定就废。这类值一律留在代码里并写明原因。
 
 消息区渲染脚本（`RendererAssets.JS`）里的按钮文字用 `@@L_XXX@@` 占位，由 `RendererAssets.localize()` 在生成页面时替换成 `renderer_0xx` 资源；新增脚本文案时照此加占位符 + 资源 + 映射，不要直接写中文。
 

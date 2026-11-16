@@ -26,8 +26,15 @@ final class ThinkingLevels {
     static final List<String> ORDER = Arrays.asList(
             "minimal", "low", "medium", "high", "xhigh", "max");
 
-    /** 界面文案。键与 {@link #ORDER} 一致，加 off。 */
-    private static final String[] LABELS = {Strings.get(R.string.thinkinglevels_001), Strings.get(R.string.thinkinglevels_002), Strings.get(R.string.thinkinglevels_003), Strings.get(R.string.thinkinglevels_004), Strings.get(R.string.thinkinglevels_005), Strings.get(R.string.thinkinglevels_006)};
+    /**
+     * 六档的界面文案资源，键与 {@link #ORDER} 一致。
+     *
+     * <p>存资源 id 而不是取好的字符串：静态字段的取值发生在类初始化时，早于
+     * {@code AcApp.onCreate} 里的 {@code Strings.init}，直接取会拿到空指针。
+     */
+    private static final int[] LABEL_IDS = {
+            R.string.thinkinglevels_001, R.string.thinkinglevels_002, R.string.thinkinglevels_003,
+            R.string.thinkinglevels_004, R.string.thinkinglevels_005, R.string.thinkinglevels_006};
 
     private ThinkingLevels() {
     }
@@ -45,7 +52,7 @@ final class ThinkingLevels {
     /** 中文档位名，用于列表与结果提示。未知值原样返回。 */
     static String label(String level) {
         int i = indexOf(level);
-        if (i >= 0) return LABELS[i];
+        if (i >= 0) return Strings.get(LABEL_IDS[i]);
         return level == null ? "" : level;
     }
 

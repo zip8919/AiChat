@@ -16,34 +16,66 @@ import org.json.JSONObject;
  * 多少」编一个数。只问一次，答对只说明它猜中了，说明不了它看到了。所以判据是
  * <b>换一张图再问一次，两张图都答对</b>。两轮用同样的话术，只有图片不同。
  *
- * <p>纯字符串处理，不碰网络与 Android，便于单测。
+ * <p><b>只判不译</b>：本类只给结论（{@code correct} / {@code supported}）和原因码
+ * （{@code REASON_*}），不产出人话。原因码翻成界面文字由调用方做。这样本类不碰
+ * {@code Context}、不碰资源，纯粹是字符串与 JSON 处理，能在 JVM 里直接断言。
+ *
+ * <p><b>这里的字面量故意硬编码</b>：图内数字的中文写法、模型说「看不到图」的话术，
+ * 都是判定依据而不是界面文案。它们一旦被当成文案改写或翻译，判定就会静默失效
+ * （把「九十三」改成「93」、把「看不到」译成英文都会改变判定结果），所以不放进
+ * {@code strings_ui.xml}。
  */
 final class VisionJudge {
 
     /** 第一张图里的数字。 */
     static final String ANSWER_A = "93";
-    static final String ANSWER_A_CN = Strings.get(R.string.visionjudge_001);
+    /** 同一个数字的中文写法：模型用汉字作答时也要认。 */
+    static final String ANSWER_A_CN = "九十三";
     /** 第二张图里的数字。 */
     static final String ANSWER_B = "7";
-    static final String ANSWER_B_CN = Strings.get(R.string.visionjudge_002);
+    /** 「7」的中文写法。 */
+    static final String ANSWER_B_CN = "七";
+
+    /** 没有原因可报。 */
+    static final int REASON_NONE = 0;
+    /** 响应里读不到回复正文。 */
+    static final int REASON_NO_BODY = 1;
+    /** 回复正文为空。 */
+    static final int REASON_EMPTY = 2;
+    /** 模型表示看不到图片。 */
+    static final int REASON_NO_IMAGE = 3;
+    /** 回复里没有出现图内数字。 */
+    static final int REASON_NO_DIGIT = 4;
 
     /** 单轮结果。{@code correct} 为 null 表示这一轮读不出结论。 */
     static final class Round {
         Boolean correct;
+        /** 判定原因，取值 {@code REASON_*}。 */
+        int reason = REASON_NONE;
+        /** 原因要用的参数：答错时是图内数字。 */
+        String arg = "";
+        /**
+         * 调用方自己补的说明（网络失败、端点拒绝）。
+         *
+         * <p>本类从不填写这个字段，留着是为了让调用方在同一次传递里带上自己的原因，
+         * 不必再包一层类型。
+         */
         String note = "";
     }
 
     /** 两轮汇总结果。{@code supported} 为 null 表示未能判定。 */
     static final class Result {
         Boolean supported;
+        int reason = REASON_NONE;
+        String arg = "";
         String note = "";
     }
 
     /** 模型明说看不到图的话术，单独认出来，好让备注说清原因。 */
     private static final String[] NO_IMAGE_WORDS = {
-            Strings.get(R.string.visionjudge_003), Strings.get(R.string.visionjudge_004), Strings.get(R.string.visionjudge_005), Strings.get(R.string.visionjudge_006), Strings.get(R.string.visionjudge_007), Strings.get(R.string.visionjudge_008),
-            Strings.get(R.string.visionjudge_009), Strings.get(R.string.visionjudge_010), Strings.get(R.string.visionjudge_011), Strings.get(R.string.visionjudge_012), Strings.get(R.string.visionjudge_013), Strings.get(R.string.visionjudge_014),
-            Strings.get(R.string.visionjudge_015), Strings.get(R.string.visionjudge_016),
+            "看不到", "看不见", "无法查看", "无法看到", "无法识别图片", "无法读取图片",
+            "没有图片", "没有收到图片", "未收到图片", "没有提供图片", "请提供图片", "请上传图片",
+            "不是图片", "不是一个图片",
             "cannot see", "can't see", "can not see", "unable to see", "not able to see",
             "no image", "not an image", "don't see an image", "do not see an image"
     };
@@ -55,21 +87,34 @@ final class VisionJudge {
      * 两轮汇总。
      *
      * <p>任一轮明确答错就判不支持 —— 能看图的模型不会把 93 读成别的东西。
-     * 两轮都读不出正文才记未能判定（备注以「未能判定」开头），此时不动用户配置。
+     * 两轮都读不出正文才记未能判定，此时不动用户配置。
      */
     static Result combine(Round a, Round b) {
         Result out = new Result();
         if (Boolean.FALSE.equals(a.correct) || Boolean.FALSE.equals(b.correct)) {
             out.supported = Boolean.FALSE;
             Round bad = Boolean.FALSE.equals(a.correct) ? a : b;
-            out.note = bad.note.length() > 0 ? bad.note : Strings.get(R.string.visionjudge_017);
+            // 没有具体原因时按「没读对」报，不然界面只剩一句「不支持」说不清为什么
+            out.reason = bad.reason != REASON_NONE ? bad.reason : REASON_NO_DIGIT;
+            out.arg = bad.arg;
+            out.note = bad.note;
             return out;
         }
         if (Boolean.TRUE.equals(a.correct) && Boolean.TRUE.equals(b.correct)) {
             out.supported = Boolean.TRUE;
             return out;
         }
-        out.note = a.correct == null && a.note.length() > 0 ? a.note : b.note;
+        // 至少一轮没读出结论：优先带上有依据的那一轮，两次都空就随便取一个
+        Round miss = null;
+        if (a.correct == null && (a.reason != REASON_NONE || a.note.length() > 0)) {
+            miss = a;
+        } else if (b.correct == null && (b.reason != REASON_NONE || b.note.length() > 0)) {
+            miss = b;
+        }
+        if (miss == null) miss = a.correct == null ? a : b;
+        out.reason = miss.reason;
+        out.arg = miss.arg;
+        out.note = miss.note;
         return out;
     }
 
@@ -83,17 +128,17 @@ final class VisionJudge {
         Round out = new Round();
         String text = replyText(body);
         if (text == null) {
-            out.note = Strings.get(R.string.visionjudge_018);
+            out.reason = REASON_NO_BODY;
             return out;
         }
         String t = text.trim();
         if (t.length() == 0) {
-            out.note = Strings.get(R.string.visionjudge_019);
+            out.reason = REASON_EMPTY;
             return out;
         }
         if (mentionsNoImage(t)) {
             out.correct = Boolean.FALSE;
-            out.note = Strings.get(R.string.visionjudge_020);
+            out.reason = REASON_NO_IMAGE;
             return out;
         }
         if (containsNumber(t, answer) || t.indexOf(answerCn) >= 0) {
@@ -101,7 +146,8 @@ final class VisionJudge {
             return out;
         }
         out.correct = Boolean.FALSE;
-        out.note = Strings.get(R.string.visionjudge_021, answer);
+        out.reason = REASON_NO_DIGIT;
+        out.arg = answer;
         return out;
     }
 
