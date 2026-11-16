@@ -358,7 +358,7 @@ public class ModelConfigActivity extends ThemedActivity {
         cfg.save();
         reloadProviders();
         refreshProviderFilter();
-        AcToast.show(this, Strings.get(R.string.modelconfigactivity_015) + cp.label());
+        AcToast.show(this, Strings.get(R.string.modelconfigactivity_015, cp.label()));
         LogUtil.i(TAG, "duplicateProvider: %s -> %s", src.name, cp.name);
     }
 
@@ -421,8 +421,7 @@ public class ModelConfigActivity extends ThemedActivity {
         reloadProviders();
         refreshProviderFilter();
         reloadModels();
-        AcToast.show(this, Strings.get(R.string.modelconfigactivity_026) + names.size() + Strings.get(R.string.modelconfigactivity_027)
-                + modelsRemoved + Strings.get(R.string.modelconfigactivity_028));
+        AcToast.show(this, Strings.get(R.string.modelconfigactivity_026, names.size(), modelsRemoved));
         LogUtil.i(TAG, "deleteProviders: %d providers, %d models", names.size(), modelsRemoved);
     }
 
@@ -439,7 +438,7 @@ public class ModelConfigActivity extends ThemedActivity {
 
     /** 列表上的行内测试：结果弹一个对话框说清楚原因。 */
     private void testProviderInline(final ProviderInfo p) {
-        AcToast.show(this, Strings.get(R.string.modelconfigactivity_029) + p.label() + "…");
+        AcToast.show(this, Strings.get(R.string.modelconfigactivity_029, p.label()));
         final ProviderInfo snap = p.copy();
         new Thread(new Runnable() {
             public void run() {
@@ -773,7 +772,7 @@ public class ModelConfigActivity extends ThemedActivity {
         cfg.getModels().add(cp);
         cfg.save();
         reloadModels();
-        AcToast.show(this, Strings.get(R.string.modelconfigactivity_065) + cp.label());
+        AcToast.show(this, Strings.get(R.string.modelconfigactivity_065, cp.label()));
     }
 
     private void setDefault(String key) {
@@ -782,7 +781,7 @@ public class ModelConfigActivity extends ThemedActivity {
         cfg.save();
         reloadModels();
         reloadProviders();
-        AcToast.show(this, Strings.get(R.string.modelconfigactivity_066) + (m == null ? key : m.label()));
+        AcToast.show(this, Strings.get(R.string.modelconfigactivity_066, m == null ? key : m.label()));
         LogUtil.i(TAG, "setDefault: %s", key);
     }
 
@@ -855,7 +854,7 @@ public class ModelConfigActivity extends ThemedActivity {
             ui.post(new Runnable() {
                 public void run() {
                     modelTestAll.setText(Strings.get(R.string.modelconfigactivity_077));
-                    modelStatus.setText(Strings.get(R.string.modelconfigactivity_078) + testBatchDone + " / " + testBatchTotal + "）");
+                    modelStatus.setText(Strings.get(R.string.modelconfigactivity_078, testBatchDone, testBatchTotal));
                 }
             });
             return;
@@ -877,7 +876,7 @@ public class ModelConfigActivity extends ThemedActivity {
         testBatchTotal = targets.size();
         testBatchDone = 0;
         modelTestAll.setText(Strings.get(R.string.modelconfigactivity_080));
-        modelStatus.setText(Strings.get(R.string.modelconfigactivity_081) + testBatchTotal + "…");
+        modelStatus.setText(Strings.get(R.string.modelconfigactivity_081, testBatchTotal));
         final AtomicInteger fail = new AtomicInteger(0);
         final List<String> failures = Collections.synchronizedList(new ArrayList<String>());
 
@@ -891,7 +890,7 @@ public class ModelConfigActivity extends ThemedActivity {
                     final ProviderInfo p = cfg.getProvider(m.provider);
                     if (p == null) {
                         reportBadge(name, Strings.get(R.string.modelconfigactivity_082), true);
-                        failures.add(cfg.modelLabel(name) + Strings.get(R.string.modelconfigactivity_083));
+                        failures.add(Strings.get(R.string.modelconfigactivity_083, cfg.modelLabel(name)));
                         fail.incrementAndGet();
                     } else {
                         reportBadge(name, Strings.get(R.string.modelconfigactivity_084), false);
@@ -907,7 +906,7 @@ public class ModelConfigActivity extends ThemedActivity {
                     ui.post(new Runnable() {
                         public void run() {
                             if (testing.get()) {
-                                modelStatus.setText(Strings.get(R.string.modelconfigactivity_086) + done + " / " + testBatchTotal + "…");
+                                modelStatus.setText(Strings.get(R.string.modelconfigactivity_086, done, testBatchTotal));
                             }
                         }
                     });
@@ -918,8 +917,8 @@ public class ModelConfigActivity extends ThemedActivity {
                     public void run() {
                         modelTestAll.setText(Strings.get(R.string.modelconfigactivity_087));
                         if (isFinishing()) return;
-                        modelStatus.setText((stopped ? Strings.get(R.string.modelconfigactivity_088) : Strings.get(R.string.modelconfigactivity_089))
-                                + Strings.get(R.string.modelconfigactivity_090) + testBatchTotal + Strings.get(R.string.modelconfigactivity_091) + fail.get() + Strings.get(R.string.modelconfigactivity_092));
+                        modelStatus.setText(Strings.get(stopped ? R.string.modelconfigactivity_088 : R.string.modelconfigactivity_089,
+                                testBatchTotal, fail.get()));
                         showTestSummary(failures, fail.get(), stopped);
                     }
                 });
@@ -953,7 +952,7 @@ public class ModelConfigActivity extends ThemedActivity {
             ui.post(new Runnable() {
                 public void run() {
                     modelProbe.setText(Strings.get(R.string.modelconfigactivity_093));
-                    modelStatus.setText(Strings.get(R.string.modelconfigactivity_094) + probeDone + " / " + probeTotal + "）");
+                    modelStatus.setText(Strings.get(R.string.modelconfigactivity_094, probeDone, probeTotal));
                 }
             });
             return;
@@ -989,7 +988,7 @@ public class ModelConfigActivity extends ThemedActivity {
         probeTotal = validTotal;
         probeDone = 0;
         modelProbe.setText(Strings.get(R.string.modelconfigactivity_097));
-        modelStatus.setText(Strings.get(R.string.modelconfigactivity_098) + probeTotal + "…");
+        modelStatus.setText(Strings.get(R.string.modelconfigactivity_098, probeTotal));
         final AtomicInteger fail = new AtomicInteger(0);
         final List<String> details = Collections.synchronizedList(new ArrayList<String>());
 
@@ -1003,7 +1002,7 @@ public class ModelConfigActivity extends ThemedActivity {
                     final ProviderInfo p = cfg.getProvider(m.provider);
                     if (p == null) {
                         reportBadge(key, Strings.get(R.string.modelconfigactivity_099), true);
-                        details.add(m.label() + Strings.get(R.string.modelconfigactivity_100));
+                        details.add(Strings.get(R.string.modelconfigactivity_100, m.label()));
                         fail.incrementAndGet();
                         probeDone++;
                         continue;
@@ -1038,7 +1037,7 @@ public class ModelConfigActivity extends ThemedActivity {
                         public void run() {
                             if (isFinishing()) return;
                             if (probing.get()) {
-                                modelStatus.setText(Strings.get(R.string.modelconfigactivity_103) + done + " / " + probeTotal + "…");
+                                modelStatus.setText(Strings.get(R.string.modelconfigactivity_103, done, probeTotal));
                             }
                             // 每完成一个就刷一次行文案，「思考 低·高」当场可见
                             reloadModels();
@@ -1051,8 +1050,8 @@ public class ModelConfigActivity extends ThemedActivity {
                     public void run() {
                         modelProbe.setText(Strings.get(R.string.modelconfigactivity_104));
                         if (isFinishing()) return;
-                        modelStatus.setText((stopped ? Strings.get(R.string.modelconfigactivity_148) : Strings.get(R.string.modelconfigactivity_149))
-                                + Strings.get(R.string.modelconfigactivity_107) + probeTotal + Strings.get(R.string.modelconfigactivity_108) + fail.get() + Strings.get(R.string.modelconfigactivity_109));
+                        modelStatus.setText(Strings.get(stopped ? R.string.modelconfigactivity_150 : R.string.modelconfigactivity_151,
+                                probeTotal, fail.get()));
                         reloadModels();
                         showProbeSummary(details, fail.get(), stopped);
                     }
@@ -1066,9 +1065,7 @@ public class ModelConfigActivity extends ThemedActivity {
     private void confirmProbeCost(final int n, final List<String> targets) {
         AcDialog.builder(this)
                 .setTitle(Strings.get(R.string.modelconfigactivity_110))
-                .setMessage(Strings.get(R.string.modelconfigactivity_111) + n + Strings.get(R.string.modelconfigactivity_112)
-                        + Strings.get(R.string.modelconfigactivity_113)
-                        + Strings.get(R.string.modelconfigactivity_114))
+                .setMessage(Strings.get(R.string.modelconfigactivity_111, n))
                 .setPositiveButton(Strings.get(R.string.modelconfigactivity_115), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) { runBatchProbe(targets, n); }
                 })
@@ -1150,7 +1147,7 @@ public class ModelConfigActivity extends ThemedActivity {
             AcToast.show(this, Strings.get(R.string.modelconfigactivity_142));
             return;
         }
-        AcToast.show(this, Strings.get(R.string.modelconfigactivity_143) + m.label() + "…");
+        AcToast.show(this, Strings.get(R.string.modelconfigactivity_143, m.label()));
         new Thread(new Runnable() {
             public void run() {
                 final ProviderTester.Result r = ProviderTester.testChat(p, m.name);

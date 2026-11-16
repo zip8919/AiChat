@@ -157,7 +157,8 @@ public class CropActivity extends ThemedActivity {
                             return;
                         }
                         if (decoded == null) {
-                            AcToast.showLong(CropActivity.this, Strings.get(R.string.cropactivity_005) + (error == null ? Strings.get(R.string.cropactivity_006) : error));
+                            AcToast.showLong(CropActivity.this, Strings.get(R.string.cropactivity_005,
+                                    error == null ? Strings.get(R.string.cropactivity_006) : error));
                             finish();
                             return;
                         }
@@ -172,8 +173,7 @@ public class CropActivity extends ThemedActivity {
                             if (head != null) {
                                 head.setText(head.getText() + Strings.get(R.string.cropactivity_007));
                             }
-                            AcToast.showLong(CropActivity.this, Strings.get(R.string.cropactivity_008) + sourceW + "×" + sourceH
-                                            + Strings.get(R.string.cropactivity_009));
+                            AcToast.showLong(CropActivity.this, Strings.get(R.string.cropactivity_008, sourceW, sourceH));
                         }
                     }
                 });
@@ -205,7 +205,7 @@ public class CropActivity extends ThemedActivity {
                 AcToast.show(this, Strings.get(R.string.cropactivity_010));
                 return;
             } catch (Exception e) {
-                AcToast.show(this, Strings.get(R.string.cropactivity_011) + e.getMessage());
+                AcToast.show(this, Strings.get(R.string.cropactivity_011, e.getMessage()));
                 return;
             }
             if (rotated == null) {
@@ -215,7 +215,7 @@ public class CropActivity extends ThemedActivity {
             source = rotated;
             rotationDegrees = (rotationDegrees + 90) % 360;
             cropView.setBitmap(source);
-            rotateBtn.setText(Strings.get(R.string.cropactivity_013) + rotationDegrees + "°");
+            rotateBtn.setText(Strings.get(R.string.cropactivity_013, rotationDegrees));
             // setBitmap 已切到新图，旧图此刻不再被 CropView 引用
             if (!current.isRecycled()) current.recycle();
         }
@@ -282,7 +282,8 @@ public class CropActivity extends ThemedActivity {
                         if (isFinishing() || isDestroyed()) return;
                         setBusy(false);
                         if (path == null) {
-                            AcToast.showLong(CropActivity.this, Strings.get(R.string.cropactivity_018) + (error == null ? Strings.get(R.string.cropactivity_019) : error));
+                            AcToast.showLong(CropActivity.this, Strings.get(R.string.cropactivity_018,
+                                    error == null ? Strings.get(R.string.cropactivity_006) : error));
                             return;
                         }
                         returnPath(path);

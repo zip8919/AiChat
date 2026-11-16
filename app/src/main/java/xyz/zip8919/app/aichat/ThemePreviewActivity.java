@@ -55,7 +55,7 @@ public class ThemePreviewActivity extends ThemedActivity {
         int percent = getIntent().getIntExtra("percent", 100);
         this.percent = percent;
         if (percent != 100) {
-            title.setText(Strings.get(R.string.themepreviewactivity_002) + percent + "%");
+            title.setText(Strings.get(R.string.themepreviewactivity_002, percent));
         }
         wire();
         render();

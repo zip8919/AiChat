@@ -395,8 +395,9 @@ final class ChatStreamRunner {
                     String failReason = ErrorReport.providerMessage(bodyForReport);
                     if (failReason.length() > 80) failReason = failReason.substring(0, 80) + "…";
                     if (session.isCurrent(job.generation)) {
-                        ui.toast(Strings.get(R.string.chatstreamrunner_007) + code
-                                + (failReason.length() > 0 ? " · " + failReason : ""));
+                        ui.toast(failReason.length() > 0
+                                ? Strings.get(R.string.chatstreamrunner_016, code, failReason)
+                                : Strings.get(R.string.chatstreamrunner_007, code));
                     }
                     return;
                 }
@@ -535,7 +536,7 @@ final class ChatStreamRunner {
             LogUtil.e(TAG, "streaming request exception: %s", e.getMessage(), e);
             // 用户主动打断（打断已自增代数）导致的 Socket closed 不算请求失败
             if (session.isCurrent(job.generation)) {
-                ui.toast(Strings.get(R.string.chatstreamrunner_011) + e.getMessage());
+                ui.toast(Strings.get(R.string.chatstreamrunner_011, e.getMessage()));
             } else {
                 LogUtil.i(TAG, "stream exception ignored: interrupted by user");
             }

@@ -204,7 +204,7 @@ public class ScanActivity extends ThemedActivity {
         for (int code : SCAN_KEY_CODES) {
             if (keyCode == code) {
                 LogUtil.d(TAG, "scan key detected: %d", keyCode);
-                AcToast.show(this, Strings.get(R.string.scanactivity_002) + keyCode);
+                AcToast.show(this, Strings.get(R.string.scanactivity_002, keyCode));
                 expectingScanResult = true;
                 try {
                     Intent intent = new Intent();
@@ -353,7 +353,7 @@ public class ScanActivity extends ThemedActivity {
                         String[] labels = new String[items.size()];
                         for (int i = 0; i < items.size(); i++) {
                             ExcerptItem item = items.get(i);
-                            String label = item.title != null ? item.title : Strings.get(R.string.scanactivity_004) + item.id;
+                            String label = item.title != null ? item.title : Strings.get(R.string.scanactivity_004, item.id);
                             // Show first 30 chars of content as preview
                             String preview = item.content;
                             if (preview.length() > 30) preview = preview.substring(0, 30) + "...";

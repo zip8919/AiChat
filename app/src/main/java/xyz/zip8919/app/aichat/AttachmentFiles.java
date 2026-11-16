@@ -109,7 +109,7 @@ final class AttachmentFiles {
                 while ((n = in.read(buf)) > 0) {
                     total += n;
                     if (total > maxBytes) {
-                        throw new Exception(Strings.get(R.string.attachmentfiles_003) + AttachmentText.formatBytes(maxBytes));
+                        throw new Exception(Strings.get(R.string.attachmentfiles_003, AttachmentText.formatBytes(maxBytes)));
                     }
                     md.update(buf, 0, n);
                     out.write(buf, 0, n);
@@ -352,7 +352,7 @@ final class AttachmentFiles {
             String name = nameFromUrl(url, type);
             if (!FileKinds.looksLikeImage(name, type)) {
                 throw new Exception(type == null
-                        ? Strings.get(R.string.attachmentfiles_012) : Strings.get(R.string.attachmentfiles_013) + type + "）");
+                        ? Strings.get(R.string.attachmentfiles_012) : Strings.get(R.string.attachmentfiles_013, type));
             }
             InputStream in = conn.getInputStream();
             if (in == null) throw new Exception(Strings.get(R.string.attachmentfiles_014));
@@ -719,7 +719,7 @@ final class AttachmentFiles {
             if (code != 200) throw new Exception("HTTP " + code);
             String type = conn.getContentType();
             if (type != null && !type.toLowerCase(Locale.US).startsWith("image/")) {
-                throw new Exception(Strings.get(R.string.attachmentfiles_021) + type + "）");
+                throw new Exception(Strings.get(R.string.attachmentfiles_021, type));
             }
             InputStream in = conn.getInputStream();
             if (in == null) throw new Exception(Strings.get(R.string.attachmentfiles_022));

@@ -104,12 +104,12 @@ final class ThemeValidator {
         try {
             t = Theme.parse(json);
         } catch (Exception e) {
-            return block(r, Strings.get(R.string.themevalidator_005) + shortMsg(e));
+            return block(r, Strings.get(R.string.themevalidator_005, shortMsg(e)));
         }
 
         if (t.version != Theme.VERSION) {
             return block(r, t.version > Theme.VERSION
-                    ? Strings.get(R.string.themevalidator_006) + t.version + "）"
+                    ? Strings.get(R.string.themevalidator_006, t.version)
                     : Strings.get(R.string.themevalidator_007));
         }
         // AI 生成时常漏写 meta.name 或名字超长。以前一刀切阻断，是「生成的经常
@@ -131,7 +131,9 @@ final class ThemeValidator {
 
         // 只提供一套 → 警告，另一套回退内置
         if (!t.hasLight || !t.hasDark) {
-            r.warnings.add(Strings.get(R.string.themevalidator_013) + (t.hasLight ? Strings.get(R.string.themevalidator_014) : Strings.get(R.string.themevalidator_015)) + Strings.get(R.string.themevalidator_016));
+            r.warnings.add(t.hasLight
+                    ? Strings.get(R.string.themevalidator_027, Strings.get(R.string.themevalidator_014))
+                    : Strings.get(R.string.themevalidator_027, Strings.get(R.string.themevalidator_015)));
         }
 
         // token 白名单 + 颜色值校验
@@ -163,8 +165,7 @@ final class ThemeValidator {
         t.darkCss = sd.css;
         r.ignoredCssRules = sl.ignored + sd.ignored;
         if (r.ignoredCssRules > 0) {
-            r.warnings.add(Strings.get(R.string.themevalidator_022) + r.ignoredCssRules
-                    + Strings.get(R.string.themevalidator_023));
+            r.warnings.add(Strings.get(R.string.themevalidator_022, r.ignoredCssRules));
         }
 
         r.theme = t;
@@ -180,13 +181,13 @@ final class ThemeValidator {
             if (!ThemeTokens.isValid(k)) {
                 it.remove();
                 r.ignoredTokens++;
-                r.warnings.add(label + Strings.get(R.string.themevalidator_024) + k + "」");
+                r.warnings.add(Strings.get(R.string.themevalidator_024, label, k));
                 continue;
             }
             if (!ThemeTokens.isValidColor(v)) {
                 it.remove();
                 r.ignoredTokens++;
-                r.warnings.add(label + Strings.get(R.string.themevalidator_025) + k + "=" + v);
+                r.warnings.add(Strings.get(R.string.themevalidator_025, label, k, v));
             }
         }
     }

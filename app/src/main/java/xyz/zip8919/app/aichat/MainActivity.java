@@ -1019,7 +1019,8 @@ public class MainActivity extends ThemedActivity {
                     public void run() {
                         if (f == null) {
                             LogUtil.w(TAG, "stageImageForCrop failed: %s", error);
-                            AcToast.showLong(MainActivity.this, Strings.get(R.string.mainactivity_013) + (error == null ? Strings.get(R.string.mainactivity_014) : error));
+                            AcToast.showLong(MainActivity.this, Strings.get(R.string.mainactivity_013,
+                                    error == null ? Strings.get(R.string.mainactivity_014) : error));
                             return;
                         }
                         startCrop(f.getAbsolutePath(), displayName);
@@ -1090,7 +1091,8 @@ public class MainActivity extends ThemedActivity {
                     public void run() {
                         if (loaded == null) {
                             LogUtil.w(TAG, "importImageUrl failed: %s", error);
-                            AcToast.showLong(MainActivity.this, Strings.get(R.string.mainactivity_021) + (error == null ? Strings.get(R.string.mainactivity_022) : error));
+                            AcToast.showLong(MainActivity.this, Strings.get(R.string.mainactivity_021,
+                                    error == null ? Strings.get(R.string.mainactivity_014) : error));
                             return;
                         }
                         // 链接下载的图片同样进裁剪页，与拍照/相册统一一条路
@@ -1138,7 +1140,8 @@ public class MainActivity extends ThemedActivity {
                     public void run() {
                         if (loaded == null) {
                             LogUtil.w(TAG, "importTextFile failed: %s", error);
-                            AcToast.showLong(MainActivity.this, Strings.get(R.string.mainactivity_023) + (error == null ? Strings.get(R.string.mainactivity_024) : error));
+                            AcToast.showLong(MainActivity.this, Strings.get(R.string.mainactivity_023,
+                                    error == null ? Strings.get(R.string.mainactivity_014) : error));
                             return;
                         }
                         addAttachment(fileName, loaded.text, loaded.bytes);
@@ -1189,7 +1192,8 @@ public class MainActivity extends ThemedActivity {
                     public void run() {
                         if (loaded == null) {
                             LogUtil.w(TAG, "importImageFile failed: %s", error);
-                            AcToast.showLong(MainActivity.this, Strings.get(R.string.mainactivity_027) + (error == null ? Strings.get(R.string.mainactivity_028) : error));
+                            AcToast.showLong(MainActivity.this, Strings.get(R.string.mainactivity_027,
+                                    error == null ? Strings.get(R.string.mainactivity_014) : error));
                             return;
                         }
                         addAttachment(loaded);
@@ -1242,7 +1246,7 @@ public class MainActivity extends ThemedActivity {
         }
         pendingAttachments.add(f);
         refreshAttachmentBar();
-        AcToast.show(this, Strings.get(R.string.mainactivity_034) + f.name + "（" + AttachmentText.sizeAndTokens(f) + "）");
+        AcToast.show(this, Strings.get(R.string.mainactivity_034, f.name, AttachmentText.sizeAndTokens(f)));
     }
 
     /** 重建附件条。条目少（≤5），每次全量重建比维护增删便宜。 */
@@ -1289,7 +1293,7 @@ public class MainActivity extends ThemedActivity {
             chip.setPadding(pad10, pad4, pad10, pad4);
             chip.setSingleLine(false);
             chip.setMaxLines(2);
-            chip.setContentDescription(Strings.get(R.string.mainactivity_035) + a.name);
+            chip.setContentDescription(Strings.get(R.string.mainactivity_035, a.name));
             // 图片附件在输入框上方直接给缩略图：thumb 是导入时生成的 data URI，
             // 解码失败就退回原来的纯文字卡片，绝不让整条附件挂掉。
             if (a.isImage() && a.thumb.length() > 0) {
@@ -1380,14 +1384,13 @@ public class MainActivity extends ThemedActivity {
             while ((n = in.read(buf)) > 0) {
                 total += n;
                 if (total > maxBytes) {
-                    throw new Exception(Strings.get(R.string.mainactivity_037) + AttachmentText.formatBytes(maxBytes));
+                    throw new Exception(Strings.get(R.string.mainactivity_037, AttachmentText.formatBytes(maxBytes)));
                 }
                 bos.write(buf, 0, n);
             }
             byte[] data = bos.toByteArray();
             if (looksBinary(data)) {
-                throw new Exception(Strings.get(R.string.mainactivity_038)
-                        + Strings.get(R.string.mainactivity_039));
+                throw new Exception(Strings.get(R.string.mainactivity_038));
             }
             String utf8 = new String(data, "UTF-8");
             if (utf8.indexOf('\uFFFD') < 0) return new LoadedText(utf8, total);
@@ -1447,8 +1450,7 @@ public class MainActivity extends ThemedActivity {
                 AcDialog.builder(MainActivity.this)
                         .setTitle(Strings.get(R.string.mainactivity_040))
                         .setMessage(hasAttachment
-                                ? Strings.get(R.string.mainactivity_041) + pendingAttachments.size()
-                                        + Strings.get(R.string.mainactivity_042)
+                                ? Strings.get(R.string.mainactivity_041, pendingAttachments.size())
                                 : Strings.get(R.string.mainactivity_043))
                         .setPositiveButton(Strings.get(R.string.mainactivity_044), new DialogInterface.OnClickListener() {
                             public void onClick(DialogInterface d, int w) {
@@ -1743,7 +1745,7 @@ public class MainActivity extends ThemedActivity {
                             if (content.indexOf("[thinking]") >= 0 && content.indexOf("[/thinking]") < 0) {
                                 content = content + "[/thinking]";
                             }
-                            lastMsg.content = content + Strings.get(R.string.mainactivity_052);
+                            lastMsg.content = Strings.get(R.string.mainactivity_052, content);
                             // 中断也是一种「未完成」：给这条消息挂上重试入口，
                             // 否则用户只能重新打字，已生成的内容无法续上
                             lastMsg.sendFailed = true;
@@ -2441,7 +2443,7 @@ public class MainActivity extends ThemedActivity {
                 startActivityForResult(new Intent(this, ScanActivity.class), REQUEST_SCAN);
             } catch (Exception e) {
                 LogUtil.e(TAG, "launch ScanActivity failed", e);
-                AcToast.showLong(this, Strings.get(R.string.mainactivity_072) + e.getMessage());
+                AcToast.showLong(this, Strings.get(R.string.mainactivity_072, e.getMessage()));
             }
         }
     }
@@ -3437,7 +3439,7 @@ public class MainActivity extends ThemedActivity {
                             AcToast.show(MainActivity.this, Strings.get(R.string.mainactivity_081));
                         } catch (Exception e2) {
                             LogUtil.e(TAG, "copyCode failed entirely: " + e2.getMessage(), e2);
-                            AcToast.show(MainActivity.this, Strings.get(R.string.mainactivity_082) + e2.getMessage());
+                            AcToast.show(MainActivity.this, Strings.get(R.string.mainactivity_082, e2.getMessage()));
                         }
                     }
                 }
@@ -3723,7 +3725,8 @@ public class MainActivity extends ThemedActivity {
                                 public void run() {
                                     if (viewer == null) return;
                                     if (data == null) {
-                                        AcToast.showLong(MainActivity.this, Strings.get(R.string.mainactivity_091) + (error == null ? Strings.get(R.string.mainactivity_092) : error));
+                                        AcToast.showLong(MainActivity.this, Strings.get(R.string.mainactivity_091,
+                                            error == null ? Strings.get(R.string.mainactivity_014) : error));
                                         return;
                                     }
                                     try {
@@ -3813,7 +3816,7 @@ public class MainActivity extends ThemedActivity {
                         ThemeValidator.Result vr = ThemeValidator.validate(
                                 text, FontRepository.getInstance().installedIds());
                         if (vr.blocked || vr.theme == null) {
-                            AcToast.showLong(MainActivity.this, Strings.get(R.string.mainactivity_094) + vr.blockReason);
+                            AcToast.showLong(MainActivity.this, Strings.get(R.string.mainactivity_094, vr.blockReason));
                             return;
                         }
                         // 名称补名/截断已在 ThemeValidator 统一处理（自动补名 + 警告）
@@ -3828,11 +3831,11 @@ public class MainActivity extends ThemedActivity {
                         ThemeRepository.getInstance().invalidate();
                         String tip = vr.warnings.isEmpty()
                                 ? Strings.get(R.string.mainactivity_096, t.name)
-                                : Strings.get(R.string.mainactivity_098) + t.name + Strings.get(R.string.mainactivity_099) + vr.warnings.size() + Strings.get(R.string.mainactivity_100);
+                                : Strings.get(R.string.mainactivity_098, t.name, vr.warnings.size());
                         AcToast.showLong(MainActivity.this, tip);
                     } catch (Throwable e) {
                         LogUtil.w(TAG, "importTheme failed: %s", e.getMessage());
-                        AcToast.showLong(MainActivity.this, Strings.get(R.string.mainactivity_101) + e.getMessage());
+                        AcToast.showLong(MainActivity.this, Strings.get(R.string.mainactivity_101, e.getMessage()));
                     }
                 }
             });
@@ -3953,7 +3956,7 @@ public class MainActivity extends ThemedActivity {
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
-                            AcToast.showLong(MainActivity.this, Strings.get(R.string.mainactivity_102) + errMsg);
+                            AcToast.showLong(MainActivity.this, Strings.get(R.string.mainactivity_102, errMsg));
                         }
                     });
                 } finally {
@@ -4125,7 +4128,7 @@ public class MainActivity extends ThemedActivity {
             AcToast.show(this, Strings.get(R.string.mainactivity_117));
         } catch (Exception e) {
             LogUtil.e(TAG, "copyToClipboard failed: " + e.getMessage(), e);
-            AcToast.showLong(this, Strings.get(R.string.mainactivity_118) + e.getMessage());
+            AcToast.showLong(this, Strings.get(R.string.mainactivity_118, e.getMessage()));
         }
     }
 
@@ -4321,7 +4324,7 @@ public class MainActivity extends ThemedActivity {
      */
     private boolean rejectWhileStreaming(String action) {
         if (!isRequestInProgress.get()) return false;
-        AcToast.show(this, Strings.get(R.string.mainactivity_136) + action);
+        AcToast.show(this, Strings.get(R.string.mainactivity_136, action));
         return true;
     }
 
@@ -4336,7 +4339,7 @@ public class MainActivity extends ThemedActivity {
         String preview = getMessageText(msg);
         if (preview == null) preview = "";
         if (preview.length() > 30) preview = preview.substring(0, 30) + "...";
-        showConfirmDialog(Strings.get(R.string.mainactivity_138) + preview, new Runnable() {
+        showConfirmDialog(Strings.get(R.string.mainactivity_138, preview), new Runnable() {
             public void run() {
                 // 弹窗期间列表可能已经变化（排队消息发出去、另一条被回滚）
                 if (pos < 0 || pos >= messages.size()) {
@@ -4728,7 +4731,7 @@ public class MainActivity extends ThemedActivity {
                 messages = branch.messages;
                 conversationManager.saveCurrentConversation();
                 refreshWebView();
-                AcToast.show(MainActivity.this, Strings.get(R.string.mainactivity_163) + branch.title);
+                AcToast.show(MainActivity.this, Strings.get(R.string.mainactivity_163, branch.title));
             }
         });
     }

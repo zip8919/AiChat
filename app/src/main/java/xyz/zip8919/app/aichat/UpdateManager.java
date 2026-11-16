@@ -509,7 +509,7 @@ public final class UpdateManager {
                         r = parseRelease(body);
                     }
                 } catch (Throwable t) {
-                    err = cancelled ? Strings.get(R.string.updatemanager_005) : Strings.get(R.string.updatemanager_006) + brief(t);
+                    err = cancelled ? Strings.get(R.string.updatemanager_005) : Strings.get(R.string.updatemanager_006, brief(t));
                 } finally {
                     closeQuietly(c);
                 }

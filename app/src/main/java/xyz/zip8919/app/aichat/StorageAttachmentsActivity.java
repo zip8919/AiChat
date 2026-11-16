@@ -304,8 +304,8 @@ public class StorageAttachmentsActivity extends ThemedActivity {
     // ---------------------------------------------------------------- 渲染
 
     private void render() {
-        tabUsed.setText(Strings.get(R.string.storageattachmentsactivity_004) + used.size());
-        tabOrphan.setText(Strings.get(R.string.storageattachmentsactivity_005) + orphans.size());
+        tabUsed.setText(Strings.get(R.string.storageattachmentsactivity_004, used.size()));
+        tabOrphan.setText(Strings.get(R.string.storageattachmentsactivity_005, orphans.size()));
         tabUsed.setTextColor(getResources().getColor(
                 showOrphans ? R.color.text_secondary : R.color.storage_att));
         tabOrphan.setTextColor(getResources().getColor(
@@ -346,7 +346,9 @@ public class StorageAttachmentsActivity extends ThemedActivity {
             hint.setText(Strings.get(R.string.storageattachmentsactivity_013));
         }
 
-        deleteBtn.setText(Strings.get(R.string.storageattachmentsactivity_014) + (selected.size() > 0 ? "(" + selected.size() + ")" : ""));
+        deleteBtn.setText(selected.size() > 0
+                ? Strings.get(R.string.storageattachmentsactivity_054, selected.size())
+                : Strings.get(R.string.storageattachmentsactivity_014));
         deleteBtn.setEnabled(!selected.isEmpty());
 
         if (data.isEmpty()) {
@@ -435,10 +437,8 @@ public class StorageAttachmentsActivity extends ThemedActivity {
         String sub = it.refs > 0
                 ? Strings.get(R.string.storageattachmentsactivity_026, it.refs)
                 : Strings.get(R.string.storageattachmentsactivity_028);
-        String msg = Strings.get(R.string.storageattachmentsactivity_029) + it.name + "\n"
-                + Strings.get(R.string.storageattachmentsactivity_030) + StorageReport.size(it.bytes) + "\n"
-                + Strings.get(R.string.storageattachmentsactivity_031) + TIME_FMT.format(new Date(it.mtime)) + "\n"
-                + Strings.get(R.string.storageattachmentsactivity_032) + sub + "\n\n"
+        String msg = Strings.get(R.string.storageattachmentsactivity_029, it.name,
+                StorageReport.size(it.bytes), TIME_FMT.format(new Date(it.mtime)), sub)
                 + (it.refs > 0
                 ? Strings.get(R.string.storageattachmentsactivity_033)
                 : Strings.get(R.string.storageattachmentsactivity_034));
@@ -462,8 +462,7 @@ public class StorageAttachmentsActivity extends ThemedActivity {
         }
         AcDialog.builder(this)
                 .setTitle(Strings.get(R.string.storageattachmentsactivity_039))
-                .setMessage(Strings.get(R.string.storageattachmentsactivity_040) + selected.size() + Strings.get(R.string.storageattachmentsactivity_041)
-                        + StorageReport.size(bytes) + Strings.get(R.string.storageattachmentsactivity_042))
+                .setMessage(Strings.get(R.string.storageattachmentsactivity_040, selected.size(), StorageReport.size(bytes)))
                 .setPositiveButton(Strings.get(R.string.storageattachmentsactivity_043), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         deleteSelected();
@@ -544,9 +543,10 @@ public class StorageAttachmentsActivity extends ThemedActivity {
                 runOnUiThread(new Runnable() {
                     public void run() {
                         if (isFinishing() || isDestroyed()) return;
-                        AcToast.show(StorageAttachmentsActivity.this, Strings.get(R.string.storageattachmentsactivity_047) + okCount + Strings.get(R.string.storageattachmentsactivity_048) + StorageReport.size(freed)
-                                        + (failCount > 0 ? "，" + failCount + Strings.get(R.string.storageattachmentsactivity_049) : "")
-                                        + (skipCount > 0 ? "，" + skipCount + Strings.get(R.string.storageattachmentsactivity_050) : ""));
+                        AcToast.show(StorageAttachmentsActivity.this, Strings.get(R.string.storageattachmentsactivity_047,
+                                        okCount, StorageReport.size(freed),
+                                        failCount > 0 ? Strings.get(R.string.storageattachmentsactivity_049, failCount) : "",
+                                        skipCount > 0 ? Strings.get(R.string.storageattachmentsactivity_050, skipCount) : ""));
                         exitSelection();
                         // 总览页的缓存已过期，否则返回后仍显示旧数字
                         StorageActivity.invalidateCache();
@@ -610,8 +610,10 @@ public class StorageAttachmentsActivity extends ThemedActivity {
             final Item it = data.get(position);
             h.name.setText(displayName(it.name));
             h.size.setText(StorageReport.size(it.bytes));
-            h.sub.setText((it.refs > 0 ? Strings.get(R.string.storageattachmentsactivity_051) + it.refs + Strings.get(R.string.storageattachmentsactivity_052) : Strings.get(R.string.storageattachmentsactivity_053))
-                    + " · " + TIME_FMT.format(new Date(it.mtime)));
+            String when = TIME_FMT.format(new Date(it.mtime));
+            h.sub.setText(it.refs > 0
+                    ? Strings.get(R.string.storageattachmentsactivity_051, it.refs, when)
+                    : Strings.get(R.string.storageattachmentsactivity_053, when));
             ThemeRecolor.applyTo(convertView);
 
             if (selectionMode) {

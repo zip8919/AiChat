@@ -271,7 +271,7 @@ public class ConversationManagerActivity extends ThemedActivity {
             sortToggle.setVisibility(selectionMode ? View.GONE : View.VISIBLE);
         }
         selectionCount.setText(selectionMode
-                ? (Strings.get(R.string.conversationmanageractivity_010) + (adapter == null ? 0 : adapter.getSelectedCount()) + " / " + conversations.size())
+                ? (Strings.get(R.string.conversationmanageractivity_010, adapter == null ? 0 : adapter.getSelectedCount(), conversations.size()))
                 : (fromStorage ? Strings.get(R.string.conversationmanageractivity_011) : Strings.get(R.string.conversationmanageractivity_012)));
     }
 
@@ -405,11 +405,9 @@ public class ConversationManagerActivity extends ThemedActivity {
         // 列表项可能只有索引元数据、没有 messages，条数优先取 messageCount
         int count = conv.messageCount > 0 ? conv.messageCount
                 : (conv.messages == null ? 0 : conv.messages.size());
-        String msg = Strings.get(R.string.conversationmanageractivity_021, count)
-                + Strings.get(R.string.conversationmanageractivity_023) + StorageReport.size(conv.fileBytes) + "\n"
-                + Strings.get(R.string.conversationmanageractivity_024) + android.text.format.DateFormat.format("yyyy-MM-dd HH:mm",
-                        conv.updatedAt) + "\n\n"
-                + Strings.get(R.string.conversationmanageractivity_025);
+        String msg = Strings.get(R.string.conversationmanageractivity_021, count,
+                StorageReport.size(conv.fileBytes),
+                android.text.format.DateFormat.format("yyyy-MM-dd HH:mm", conv.updatedAt));
         AcDialog.builder(this)
                 .setTitle(ConversationManager.normalizeTitle(conv.title))
                 .setMessage(msg)
@@ -445,7 +443,7 @@ public class ConversationManagerActivity extends ThemedActivity {
     private void showActionDialog(final Conversation conv) {
         String[] items = {Strings.get(R.string.conversationmanageractivity_029), Strings.get(R.string.conversationmanageractivity_030)};
         AcDialog.builder(this)
-                .setTitle(Strings.get(R.string.conversationmanageractivity_031) + conv.title)
+                .setTitle(Strings.get(R.string.conversationmanageractivity_031, conv.title))
                 .setItems(items, new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface dialog, int which) {
                         LogUtil.d(TAG, "action dialog: id=%s which=%d (%s)", conv.id, which,

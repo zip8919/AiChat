@@ -94,8 +94,8 @@ final class ProviderTester {
         }
         if (r.httpCode >= 200 && r.httpCode < 300) {
             int n = countModels(r.body);
-            String extra = n >= 0 ? Strings.get(R.string.providertester_002) + n + Strings.get(R.string.providertester_003) : "";
-            return new Result(OK, Strings.get(R.string.providertester_004) + ms + " ms）" + extra, ms);
+            String extra = n >= 0 ? Strings.get(R.string.providertester_002, n) : "";
+            return new Result(OK, Strings.get(R.string.providertester_004, ms, extra), ms);
         }
         // 401/403：Key 问题，换对话端点也一样，不必再试
         if (r.httpCode == 401 || r.httpCode == 403) {
@@ -105,8 +105,8 @@ final class ProviderTester {
         String model = firstConfiguredModel(snap);
         Result chat = testChat(snap, model == null ? "" : model);
         if (chat.ok()) {
-            return new Result(OK, Strings.get(R.string.providertester_005) + chat.ms + Strings.get(R.string.providertester_006)
-                    + r.httpCode + Strings.get(R.string.providertester_007) + (model == null ? Strings.get(R.string.providertester_008) : ""), chat.ms);
+            return new Result(OK, Strings.get(R.string.providertester_005, chat.ms, r.httpCode,
+                    model == null ? Strings.get(R.string.providertester_008) : ""), chat.ms);
         }
         return new Result(FAIL, "/models HTTP " + r.httpCode + "；" + chat.message, ms + chat.ms);
     }
@@ -129,7 +129,7 @@ final class ProviderTester {
         long ms = System.currentTimeMillis() - t0;
 
         if (r.error == null && r.httpCode >= 200 && r.httpCode < 300) {
-            return new Result(OK, Strings.get(R.string.providertester_011) + ms + " ms）", ms);
+            return new Result(OK, Strings.get(R.string.providertester_011, ms), ms);
         }
         return new Result(FAIL, describe(snap, r, ms, model), ms);
     }
@@ -365,17 +365,17 @@ final class ProviderTester {
         int code = r.httpCode;
         String detail = errorMessage(r.body);
         String suffix = detail.length() > 0 ? "：" + detail : "";
-        if (code == 401) return Strings.get(R.string.providertester_018) + suffix;
-        if (code == 403) return Strings.get(R.string.providertester_019) + suffix;
+        if (code == 401) return Strings.get(R.string.providertester_018, suffix);
+        if (code == 403) return Strings.get(R.string.providertester_019, suffix);
         if (code == 404) {
-            return Strings.get(R.string.providertester_020)
-                    + (model == null ? "" : Strings.get(R.string.providertester_021)) + suffix;
+            return Strings.get(R.string.providertester_020,
+                    model == null ? "" : Strings.get(R.string.providertester_021), suffix);
         }
-        if (code == 405) return Strings.get(R.string.providertester_022) + suffix;
-        if (code == 429) return Strings.get(R.string.providertester_023) + suffix;
-        if (code == 400) return Strings.get(R.string.providertester_024) + suffix;
-        if (code >= 500) return "HTTP " + code + Strings.get(R.string.providertester_025) + suffix;
-        return "HTTP " + code + suffix;
+        if (code == 405) return Strings.get(R.string.providertester_022, suffix);
+        if (code == 429) return Strings.get(R.string.providertester_023, suffix);
+        if (code == 400) return Strings.get(R.string.providertester_024, suffix);
+        if (code >= 500) return Strings.get(R.string.providertester_025, code, suffix);
+        return Strings.get(R.string.providertester_042, code, suffix);
     }
 
     /**
@@ -412,14 +412,14 @@ final class ProviderTester {
             return Strings.get(R.string.providertester_027, host);
         }
         if (lower.contains("sockettimeout") || lower.contains("timed out") || lower.contains("timeout")) {
-            return Strings.get(R.string.providertester_029) + (local ? Strings.get(R.string.providertester_030) : "");
+            return Strings.get(local ? R.string.providertester_043 : R.string.providertester_029);
         }
         if (lower.contains("certificate") || lower.contains("certpathvalidator")
                 || lower.contains("trust anchor") || lower.contains("hostname")) {
             return Strings.get(R.string.providertester_031);
         }
         if (lower.contains("sslexception") || lower.contains("handshake")) {
-            return Strings.get(R.string.providertester_032) + (local ? Strings.get(R.string.providertester_033) : Strings.get(R.string.providertester_034));
+            return Strings.get(local ? R.string.providertester_044 : R.string.providertester_045);
         }
         if (lower.contains("connectexception") || lower.contains("econnrefused")
                 || lower.contains("failed to connect")) {
@@ -429,7 +429,7 @@ final class ProviderTester {
             return Strings.get(R.string.providertester_036);
         }
         // 兜底也给原始异常，否则日志里对不上
-        return Strings.get(R.string.providertester_037) + TextKit.shorten(r, 120);
+        return Strings.get(R.string.providertester_037, TextKit.shorten(r, 120));
     }
 
     /** 供调试：把异常类名映射成人话（保留给将来接入 javax.net 的直接调用）。 */

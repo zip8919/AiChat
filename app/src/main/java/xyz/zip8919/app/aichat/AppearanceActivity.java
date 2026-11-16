@@ -231,13 +231,15 @@ public class AppearanceActivity extends ThemedActivity {
         String hex = r.value == null ? "" : r.value;
         String name = colorName(hex);
         if (r.overridden) {
-            colorSelectedTv.setText(Strings.get(R.string.appearanceactivity_013) + name + " " + hex
-                    + (r.themeName != null ? Strings.get(R.string.appearanceactivity_014) + r.themeName : ""));
+            colorSelectedTv.setText(r.themeName != null
+                    ? Strings.get(R.string.appearanceactivity_014, name, hex, r.themeName)
+                    : Strings.get(R.string.appearanceactivity_013, name, hex));
         } else if (r.source == ThemeResolver.SOURCE_THEME) {
-            colorSelectedTv.setText(Strings.get(R.string.appearanceactivity_015)
-                    + (r.themeName == null ? "" : r.themeName) + " · " + name + " " + hex);
+            colorSelectedTv.setText(r.themeName == null
+                    ? Strings.get(R.string.appearanceactivity_063, name, hex)
+                    : Strings.get(R.string.appearanceactivity_015, r.themeName, name, hex));
         } else {
-            colorSelectedTv.setText(Strings.get(R.string.appearanceactivity_016) + name + " " + hex);
+            colorSelectedTv.setText(Strings.get(R.string.appearanceactivity_016, name, hex));
         }
     }
 

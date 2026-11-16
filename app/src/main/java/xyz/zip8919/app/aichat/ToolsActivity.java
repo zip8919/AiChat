@@ -452,7 +452,7 @@ public class ToolsActivity extends ThemedActivity {
         selectButton.setVisibility(View.GONE);
         selectionCancelButton.setVisibility(selectionMode ? View.VISIBLE : View.GONE);
         if (selectionMode) {
-            selectionCount.setText(Strings.get(R.string.toolsactivity_009) + selectedFileCount() + " / " + files.size());
+            selectionCount.setText(Strings.get(R.string.toolsactivity_009, selectedFileCount(), files.size()));
         }
     }
 
@@ -634,7 +634,7 @@ public class ToolsActivity extends ThemedActivity {
                             // rename(2) 会静默覆盖已存在的目标文件，先确认避免数据丢失
                             AcDialog.builder(ToolsActivity.this)
                                     .setTitle(Strings.get(R.string.toolsactivity_037))
-                                    .setMessage(name + Strings.get(R.string.toolsactivity_038))
+                                    .setMessage(Strings.get(R.string.toolsactivity_038, name))
                                     .setPositiveButton(Strings.get(R.string.toolsactivity_039), new DialogInterface.OnClickListener() {
                                         public void onClick(DialogInterface d2, int w2) {
                                             performRename(f, target, name);
@@ -676,7 +676,7 @@ public class ToolsActivity extends ThemedActivity {
 
     private void deleteFile(final File f) {
         AcDialog.builder(this)
-                .setTitle(Strings.get(R.string.toolsactivity_043) + f.getName() + " ?")
+                .setTitle(Strings.get(R.string.toolsactivity_043, f.getName()))
                 .setPositiveButton(Strings.get(R.string.toolsactivity_044), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         boolean ok = f.delete();

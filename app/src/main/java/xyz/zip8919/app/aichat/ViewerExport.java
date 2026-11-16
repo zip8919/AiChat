@@ -238,7 +238,7 @@ final class ViewerExport {
             return r;
         } catch (Throwable e) {
             LogUtil.w(TAG, "export failed: %s", e.getMessage());
-            r.error = Strings.get(R.string.viewerexport_014) + e.getMessage();
+            r.error = Strings.get(R.string.viewerexport_014, e.getMessage());
             return r;
         } finally {
             if (captured != null && !captured.isRecycled()) captured.recycle();
@@ -607,11 +607,8 @@ final class ViewerExport {
         String mode = r.direct ? Strings.get(R.string.viewerexport_019)
                 : (r.trimmed ? Strings.get(R.string.viewerexport_020) : Strings.get(R.string.viewerexport_021));
         int kb = r.bytes / 1024;
-        return Strings.get(R.string.viewerexport_022) + r.name + "\n"
-                + Strings.get(R.string.viewerexport_023) + r.width + "×" + r.height + Strings.get(R.string.viewerexport_024) + (r.jpeg ? "JPEG" : "PNG")
-                + Strings.get(R.string.viewerexport_025) + kb + " KB\n"
-                + Strings.get(R.string.viewerexport_026) + mode + "\n"
-                + Strings.get(R.string.viewerexport_027) + r.path + "\n\n"
+        return Strings.get(R.string.viewerexport_040, r.name, r.width, r.height,
+                        r.jpeg ? "JPEG" : "PNG", kb, mode, r.path)
                 + (r.direct ? "" : Strings.get(R.string.viewerexport_028));
     }
 

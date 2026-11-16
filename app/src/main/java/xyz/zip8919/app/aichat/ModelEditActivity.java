@@ -138,8 +138,10 @@ public class ModelEditActivity extends ThemedActivity {
             selectProvider(editing.provider);
             if (editing.levelsProbed()) {
                 probedLevels = editing.levelList();
-                probeResult.setText(Strings.get(R.string.modeleditactivity_003) + ThinkingLevels.describe(probedLevels)
-                        + (editing.levelsUnverifiable ? Strings.get(R.string.modeleditactivity_004) : ""));
+                String lv = ThinkingLevels.describe(probedLevels);
+                probeResult.setText(editing.levelsUnverifiable
+                        ? Strings.get(R.string.modeleditactivity_044, lv)
+                        : Strings.get(R.string.modeleditactivity_003, lv));
             }
         }
         updateDefaultButton();
@@ -205,7 +207,7 @@ public class ModelEditActivity extends ThemedActivity {
         busy = true;
         testBtn.setEnabled(false);
         testBtn.setText(Strings.get(R.string.modeleditactivity_012));
-        testResult.setText(Strings.get(R.string.modeleditactivity_013) + Endpoint.chatUrl(p) + " …");
+        testResult.setText(Strings.get(R.string.modeleditactivity_013, Endpoint.chatUrl(p)));
         final ProviderInfo snap = p.copy();
         final String modelId = model;
         new Thread(new Runnable() {
@@ -277,7 +279,7 @@ public class ModelEditActivity extends ThemedActivity {
         if (!levelsOk && !rep.levelsRejected && rep.vision == null) {
             // 一档都没得出，也没探到图片：认证、网络或端点不可用，配置不动
             probeResult.setTextColor(0xFFC62828);
-            probeResult.setText(Strings.get(R.string.modeleditactivity_021) + rep.error);
+            probeResult.setText(Strings.get(R.string.modeleditactivity_021, rep.error));
             LogUtil.w(TAG, "probe %s failed: %s", modelId, rep.error);
             return;
         }
@@ -357,11 +359,11 @@ public class ModelEditActivity extends ThemedActivity {
             return;
         }
         if (cfg.getProvider(provider) == null) {
-            AcToast.show(this, Strings.get(R.string.modeleditactivity_035) + provider);
+            AcToast.show(this, Strings.get(R.string.modeleditactivity_035, provider));
             return;
         }
         if (cfg.isModelNameTaken(provider, name, editing)) {
-            AcToast.show(this, Strings.get(R.string.modeleditactivity_036) + name);
+            AcToast.show(this, Strings.get(R.string.modeleditactivity_036, name));
             nameEt.requestFocus();
             return;
         }
@@ -407,7 +409,7 @@ public class ModelEditActivity extends ThemedActivity {
         if (editing == null) return;
         AcDialog.builder(this)
                 .setTitle(Strings.get(R.string.modeleditactivity_039))
-                .setMessage(Strings.get(R.string.modeleditactivity_040) + editing.label() + "？")
+                .setMessage(Strings.get(R.string.modeleditactivity_040, editing.label()))
                 .setPositiveButton(Strings.get(R.string.modeleditactivity_041), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         boolean wasDefault = cfg.isDefaultModel(editing);

@@ -306,21 +306,14 @@ public class SettingsActivity extends ThemedActivity {
             public void onCheckedChanged(CompoundButton b, boolean checked) {
                 if (bindingSwitches || !checked) return;
                 confirmRisk(Strings.get(R.string.settingsactivity_016),
-                        Strings.get(R.string.settingsactivity_017)
-                                + Strings.get(R.string.settingsactivity_018)
-                                + Strings.get(R.string.settingsactivity_019)
-                                + Strings.get(R.string.settingsactivity_020),
-                        b);
+                        Strings.get(R.string.settingsactivity_076), b);
             }
         });
         trustAllCertsSwitch.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
             public void onCheckedChanged(CompoundButton b, boolean checked) {
                 if (bindingSwitches || !checked) return;
                 confirmRisk(Strings.get(R.string.settingsactivity_021),
-                        Strings.get(R.string.settingsactivity_022)
-                                + Strings.get(R.string.settingsactivity_023)
-                                + Strings.get(R.string.settingsactivity_024),
-                        b);
+                        Strings.get(R.string.settingsactivity_077), b);
             }
         });
 
@@ -749,7 +742,7 @@ public class SettingsActivity extends ThemedActivity {
                             LogUtil.i(TAG, "queryBalance OK: %s", sb.toString().replace("\n", " | "));
 
                             AcDialog.builder(SettingsActivity.this)
-                                    .setTitle(dsProvider.label() + Strings.get(R.string.settingsactivity_044))
+                                    .setTitle(Strings.get(R.string.settingsactivity_078, dsProvider.label()))
                                     .setMessage(sb.toString())
                                     .setPositiveButton(Strings.get(R.string.settingsactivity_045), null)
                                     .show();
@@ -761,7 +754,7 @@ public class SettingsActivity extends ThemedActivity {
                                     + " body=" + LogUtil.preview(result, 800), e);
                             String brief = result.trim();
                             if (brief.length() > 60) brief = TextKit.cut(brief, 60) + "…";
-                            AcToast.show(SettingsActivity.this, Strings.get(R.string.settingsactivity_046) + brief);
+                            AcToast.show(SettingsActivity.this, Strings.get(R.string.settingsactivity_046, brief));
                         }
                     }
                 });
@@ -801,7 +794,7 @@ public class SettingsActivity extends ThemedActivity {
             AppearanceManager am = AppearanceManager.getInstance(this);
             String name = am.getActiveThemeName();
             String text = (name == null || name.length() == 0) ? Strings.get(R.string.settingsactivity_049) : name;
-            if (am.isDark()) text = text + Strings.get(R.string.settingsactivity_050);
+            if (am.isDark()) text = Strings.get(R.string.settingsactivity_079, text);
             sub.setText(text);
         } catch (Throwable t) {
             // 外观系统异常不能拖垮设置页，最坏情况副标题显示内置默认
@@ -819,7 +812,7 @@ public class SettingsActivity extends ThemedActivity {
         if (storageEntrySize == null) return;
         StorageReport cached = StorageActivity.cachedReport();
         if (cached != null) {
-            storageEntrySize.setText(Strings.get(R.string.settingsactivity_052) + StorageReport.size(cached.usedBytes()));
+            storageEntrySize.setText(Strings.get(R.string.settingsactivity_052, StorageReport.size(cached.usedBytes())));
             return;
         }
         // 反复进出设置页时避免叠起多个扫描线程
@@ -829,7 +822,7 @@ public class SettingsActivity extends ThemedActivity {
         new Thread(new Runnable() {
             public void run() {
                 final StorageReport r = StorageScanner.scan(getApplicationContext());
-                final String text = Strings.get(R.string.settingsactivity_053) + StorageReport.size(r.usedBytes());
+                final String text = Strings.get(R.string.settingsactivity_053, StorageReport.size(r.usedBytes()));
                 runOnUiThread(new Runnable() {
                     public void run() {
                         storageScanning = false;
@@ -1135,7 +1128,7 @@ public class SettingsActivity extends ThemedActivity {
                                 }
                                 List<PresetStore.Preset> cur = PresetStore.load(SettingsActivity.this);
                                 if (PresetStore.contains(cur, name, null)) {
-                                    AcToast.show(SettingsActivity.this, Strings.get(R.string.settingsactivity_066) + name);
+                                    AcToast.show(SettingsActivity.this, Strings.get(R.string.settingsactivity_066, name));
                                     return;
                                 }
                                 if (cur.size() >= PresetStore.MAX_PRESETS) {
@@ -1153,7 +1146,7 @@ public class SettingsActivity extends ThemedActivity {
                                 appliedPresetName = name;
                                 refreshPresetSpinner();
                                 dlg.dismiss();
-                                AcToast.show(SettingsActivity.this, Strings.get(R.string.settingsactivity_070) + name);
+                                AcToast.show(SettingsActivity.this, Strings.get(R.string.settingsactivity_070, name));
                             }
                         });
             }

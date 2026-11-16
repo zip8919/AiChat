@@ -34,7 +34,7 @@ final class ExportHelper {
         input.setSelection(input.getText().length());
         AcDialog.builder(activity)
                 .setTitle(Strings.get(R.string.exporthelper_002))
-                .setMessage(Strings.get(R.string.exporthelper_003) + ext + "）")
+                .setMessage(Strings.get(R.string.exporthelper_003, ext))
                 .setView(input)
                 .setPositiveButton(Strings.get(R.string.exporthelper_004), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
@@ -58,7 +58,7 @@ final class ExportHelper {
             final String lang, final String code) {
         AcDialog.builder(activity)
                 .setTitle(Strings.get(R.string.exporthelper_006))
-                .setMessage(fileName + Strings.get(R.string.exporthelper_007))
+                .setMessage(Strings.get(R.string.exporthelper_007, fileName))
                 .setPositiveButton(Strings.get(R.string.exporthelper_008), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         write(activity, fileName, lang, code);
@@ -74,7 +74,7 @@ final class ExportHelper {
         if (path == null) {
             AcToast.show(activity, Strings.get(R.string.exporthelper_010));
         } else {
-            AcToast.showLong(activity, Strings.get(R.string.exporthelper_011) + path);
+            AcToast.showLong(activity, Strings.get(R.string.exporthelper_011, path));
         }
     }
 

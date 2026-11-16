@@ -192,7 +192,7 @@ public class StorageFilesActivity extends ThemedActivity {
                         fileMeta.putAll(meta);
                         summary.setText(files.isEmpty()
                                 ? Strings.get(R.string.storagefilesactivity_004)
-                                : files.size() + Strings.get(R.string.storagefilesactivity_005) + StorageReport.size(totalSize));
+                                : Strings.get(R.string.storagefilesactivity_005, files.size(), StorageReport.size(totalSize)));
                         adapter.notifyDataSetChanged();
                         if (files.isEmpty()) {
                             empty.setVisibility(View.VISIBLE);
@@ -349,8 +349,7 @@ public class StorageFilesActivity extends ThemedActivity {
     private void confirmDelete(final File f) {
         AcDialog.builder(this)
                 .setTitle(Strings.get(R.string.storagefilesactivity_019))
-                .setMessage(Strings.get(R.string.storagefilesactivity_020) + f.getName() + "？\n\n"
-                        + StorageReport.size(f.length()) + Strings.get(R.string.storagefilesactivity_021))
+                .setMessage(Strings.get(R.string.storagefilesactivity_020, f.getName(), StorageReport.size(f.length())))
                 .setPositiveButton(Strings.get(R.string.storagefilesactivity_022), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         boolean ok = f.delete();

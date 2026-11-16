@@ -229,7 +229,7 @@ public class JsRunnerActivity extends ThemedActivity {
                     long ms = System.currentTimeMillis() - runStartedAt;
                     stopTicker();
                     setRunningUi(false);
-                    setStatus(Strings.get(R.string.jsrunneractivity_006) + fmtDuration(ms), false);
+                    setStatus(Strings.get(R.string.jsrunneractivity_006, fmtDuration(ms)), false);
                     return;
                 }
                 // 不再在这里直接报「已完成」：页面加载完只说明同步代码跑过了，
@@ -410,7 +410,7 @@ public class JsRunnerActivity extends ThemedActivity {
         runReported = true;
         stopTicker();
         setRunningUi(false);
-        setStatus(Strings.get(R.string.jsrunneractivity_011) + fmtDuration(ms), true);
+        setStatus(Strings.get(R.string.jsrunneractivity_011, fmtDuration(ms)), true);
         appendOutput(Strings.get(R.string.jsrunneractivity_012));
         ui.removeCallbacks(heartbeat);
         LogUtil.i(TAG, "abortRun after %dms", ms);
@@ -550,7 +550,8 @@ public class JsRunnerActivity extends ThemedActivity {
         String name = "code_" + System.currentTimeMillis() + "." + ext;
         String path = StorageManager.getInstance().saveExport(name, code);
         LogUtil.i(TAG, "saveToExports: lang=%s path=%s", lang, path);
-        AcToast.show(this, path == null ? Strings.get(R.string.jsrunneractivity_018) : (Strings.get(R.string.jsrunneractivity_019) + path));
+        AcToast.show(this, path == null ? Strings.get(R.string.jsrunneractivity_018)
+                    : Strings.get(R.string.jsrunneractivity_019, path));
     }
 
     @Override
@@ -641,14 +642,14 @@ public class JsRunnerActivity extends ThemedActivity {
         setRunningUi(false);
         if (runHadError) {
             state = ST_ERROR;
-            setStatus(Strings.get(R.string.jsrunneractivity_020) + shortError() + " · " + fmtDuration(ms), true);
+            setStatus(Strings.get(R.string.jsrunneractivity_020, shortError(), fmtDuration(ms)), true);
         } else if (lines == 0) {
             state = ST_DONE;
-            setStatus(Strings.get(R.string.jsrunneractivity_021) + fmtDuration(ms), false);
+            setStatus(Strings.get(R.string.jsrunneractivity_021, fmtDuration(ms)), false);
             if (output.length() == 0) outputView.setText(Strings.get(R.string.jsrunneractivity_022));
         } else {
             state = ST_DONE;
-            setStatus(Strings.get(R.string.jsrunneractivity_023) + lines + Strings.get(R.string.jsrunneractivity_024) + fmtDuration(ms), false);
+            setStatus(Strings.get(R.string.jsrunneractivity_023, lines, fmtDuration(ms)), false);
         }
         LogUtil.i(TAG, "run done: lines=%d error=%s elapsed=%dms", lines, runHadError, ms);
     }

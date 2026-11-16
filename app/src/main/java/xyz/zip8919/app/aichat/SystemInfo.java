@@ -219,7 +219,7 @@ final class SystemInfo {
         c.setTimeInMillis(ts);
         int i = c.get(java.util.Calendar.DAY_OF_WEEK) - java.util.Calendar.SUNDAY;
         if (i < 0 || i > 6) i = 0;
-        return Strings.get(R.string.systeminfo_017) + names[i];
+        return Strings.get(R.string.systeminfo_017, names[i]);
     }
 
     /** 例如 {@code GMT+8} / {@code GMT+5:30}。 */

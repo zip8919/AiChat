@@ -189,8 +189,9 @@ final class MessageQueue {
             String s = qm.text.replace('\n', ' ');
             // 只发附件不写字时 text 是空的：列表里出现「3. 」谁也认不出是哪条
             if (s.length() == 0 && !qm.files.isEmpty()) {
-                s = Strings.get(R.string.messagequeue_006) + qm.files.get(0).name;
-                if (qm.files.size() > 1) s += Strings.get(R.string.messagequeue_007) + qm.files.size() + Strings.get(R.string.messagequeue_008);
+                s = qm.files.size() > 1
+                        ? Strings.get(R.string.messagequeue_007, qm.files.get(0).name, qm.files.size())
+                        : Strings.get(R.string.messagequeue_006, qm.files.get(0).name);
             }
             if (s.length() > 30) s = s.substring(0, 30) + "…";
             items[i] = (i + 1) + ". " + s;

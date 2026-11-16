@@ -80,7 +80,7 @@ public class ThemeEditActivity extends ThemedActivity {
         descEdit.setText(t.description);
         cssEdit.setText(darkMode ? t.darkCss : t.lightCss);
         title.setText(t.id.length() == 0
-                ? Strings.get(R.string.themeeditactivity_001) : Strings.get(R.string.themeeditactivity_002) + t.name);
+                ? Strings.get(R.string.themeeditactivity_001) : Strings.get(R.string.themeeditactivity_002, t.name));
     }
 
     private void updateModeButtons() {
@@ -180,7 +180,7 @@ public class ThemeEditActivity extends ThemedActivity {
         // 从属性页返回：tokens 变了但界面元素没变。先 collect 保住用户正在输入的 CSS，
         // 再刷新标题（名称可能在别处改过）。
         collect();
-        title.setText(t.id.length() == 0 ? Strings.get(R.string.themeeditactivity_007) : Strings.get(R.string.themeeditactivity_008) + t.name);
+        title.setText(t.id.length() == 0 ? Strings.get(R.string.themeeditactivity_007) : Strings.get(R.string.themeeditactivity_008, t.name));
         // 属性页里的预览是临时的（退出即收回），这里必须讲清楚，否则用户会以为没生效
         AcToast.show(this, Strings.get(R.string.themeeditactivity_009));
     }
@@ -206,12 +206,12 @@ public class ThemeEditActivity extends ThemedActivity {
         repo.invalidate();
         snapshot();
         refreshFields();
-        toast(Strings.get(R.string.themeeditactivity_012) + t.name + "」");
+        toast(Strings.get(R.string.themeeditactivity_012, t.name));
         return true;
     }
 
     private void saveAs() {
-        promptName(Strings.get(R.string.themeeditactivity_013), t.name + Strings.get(R.string.themeeditactivity_014), new NameCb() {
+        promptName(Strings.get(R.string.themeeditactivity_013), Strings.get(R.string.themeeditactivity_014, t.name), new NameCb() {
             public void onName(String n) {
                 collect();
                 t.name = n;
@@ -224,7 +224,7 @@ public class ThemeEditActivity extends ThemedActivity {
                 repo.invalidate();
                 snapshot();
                 refreshFields();
-                toast(Strings.get(R.string.themeeditactivity_016) + n + "」");
+                toast(Strings.get(R.string.themeeditactivity_016, n));
             }
         });
     }
@@ -251,7 +251,7 @@ public class ThemeEditActivity extends ThemedActivity {
         final ThemeValidator.Result vr =
                 ThemeValidator.validate(text, FontRepository.getInstance().installedIds());
         if (vr.blocked || vr.theme == null) {
-            toast(Strings.get(R.string.themeeditactivity_019) + vr.blockReason);
+            toast(Strings.get(R.string.themeeditactivity_019, vr.blockReason));
             return;
         }
         confirmOverwrite(new Runnable() {
@@ -356,7 +356,7 @@ public class ThemeEditActivity extends ThemedActivity {
             if (i > 0) sb.append("\n");
             sb.append("· ").append(vr.warnings.get(i));
         }
-        toast(Strings.get(R.string.themeeditactivity_038) + sb.toString());
+        toast(Strings.get(R.string.themeeditactivity_038, sb.toString()));
     }
 
     private String readText(Uri uri) {
@@ -446,9 +446,9 @@ public class ThemeEditActivity extends ThemedActivity {
             scroll.requestLayout();
         }
         body.setText(prompt);
-        meta.setText(prompt.length() + Strings.get(R.string.themeeditactivity_044)
-                + (ThemePromptStore.isCustomized(this) ? Strings.get(R.string.themeeditactivity_045) : Strings.get(R.string.themeeditactivity_046))
-                + Strings.get(R.string.themeeditactivity_047));
+        meta.setText(ThemePromptStore.isCustomized(this)
+                ? Strings.get(R.string.themeeditactivity_058, prompt.length())
+                : Strings.get(R.string.themeeditactivity_059, prompt.length()));
 
         final AlertDialog d = AcDialog.builder(this)
                 .setTitle(Strings.get(R.string.themeeditactivity_048))

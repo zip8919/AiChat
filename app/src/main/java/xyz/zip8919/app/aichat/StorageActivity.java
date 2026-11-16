@@ -162,10 +162,11 @@ public class StorageActivity extends ThemedActivity {
             used.setText(Strings.get(R.string.storageactivity_018));
             free.setText(Strings.get(R.string.storageactivity_019));
         } else {
-            used.setText(Strings.get(R.string.storageactivity_020) + StorageReport.size(r.usedBytes()));
+            used.setText(Strings.get(R.string.storageactivity_020, StorageReport.size(r.usedBytes())));
             long total = r.usedBytes() + r.freeBytes;
-            free.setText(Strings.get(R.string.storageactivity_021) + StorageReport.size(r.freeBytes)
-                    + (total > 0 ? Strings.get(R.string.storageactivity_022) + StorageReport.size(total) : ""));
+            free.setText(total > 0
+                    ? Strings.get(R.string.storageactivity_090, StorageReport.size(r.freeBytes), StorageReport.size(total))
+                    : Strings.get(R.string.storageactivity_021, StorageReport.size(r.freeBytes)));
         }
 
         ((StorageBarView) findViewById(R.id.storage_bar)).setData(r.size, r.freeBytes);
@@ -176,8 +177,7 @@ public class StorageActivity extends ThemedActivity {
             warn.setText(Strings.get(R.string.storageactivity_023));
         } else if (r.indexIncomplete) {
             warn.setVisibility(View.VISIBLE);
-            warn.setText("⚠ " + r.unreadableConversations
-                    + Strings.get(R.string.storageactivity_024));
+            warn.setText(Strings.get(R.string.storageactivity_024, r.unreadableConversations));
         } else if (r.indexEmpty) {
             warn.setVisibility(View.VISIBLE);
             warn.setText(Strings.get(R.string.storageactivity_025));
@@ -187,7 +187,8 @@ public class StorageActivity extends ThemedActivity {
 
         StorageManager sm = StorageManager.getInstance(getApplicationContext());
         TextView path = (TextView) findViewById(R.id.storage_path);
-        path.setText(Strings.get(R.string.storageactivity_026) + (sm.isUsingInternalStorage() ? Strings.get(R.string.storageactivity_027) : Strings.get(R.string.storageactivity_028)) + "  ›");
+        path.setText(Strings.get(R.string.storageactivity_026,
+                sm.isUsingInternalStorage() ? Strings.get(R.string.storageactivity_027) : Strings.get(R.string.storageactivity_028)));
 
         renderCategories(r);
         renderClean(r);
@@ -329,17 +330,15 @@ public class StorageActivity extends ThemedActivity {
             return;
         }
         cleanCard.setVisibility(View.VISIBLE);
-        cleanTitle.setText(Strings.get(R.string.storageactivity_045) + StorageReport.size(can));
+        cleanTitle.setText(Strings.get(R.string.storageactivity_045, StorageReport.size(can)));
         String sub;
         if (r.indexIncomplete) {
-            sub = Strings.get(R.string.storageactivity_046) + StorageReport.size(r.cleanableTempSize)
-                    + Strings.get(R.string.storageactivity_047);
+            sub = Strings.get(R.string.storageactivity_046, StorageReport.size(r.cleanableTempSize));
         } else if (r.indexEmpty) {
-            sub = Strings.get(R.string.storageactivity_048) + StorageReport.size(r.cleanableTempSize)
-                    + Strings.get(R.string.storageactivity_049);
+            sub = Strings.get(R.string.storageactivity_048, StorageReport.size(r.cleanableTempSize));
         } else {
-            sub = Strings.get(R.string.storageactivity_050) + StorageReport.size(r.cleanableTempSize)
-                    + Strings.get(R.string.storageactivity_051) + StorageReport.size(r.orphanSize);
+            sub = Strings.get(R.string.storageactivity_050,
+                    StorageReport.size(r.cleanableTempSize), StorageReport.size(r.orphanSize));
         }
         cleanSub.setText(sub);
         cleanBtn.setEnabled(true);
@@ -400,10 +399,10 @@ public class StorageActivity extends ThemedActivity {
                         if (isFinishing() || isDestroyed()) return;
                         String text;
                         if (count == 0) {
-                            text = failed > 0 ? Strings.get(R.string.storageactivity_063) + failed + Strings.get(R.string.storageactivity_064) : Strings.get(R.string.storageactivity_065);
+                            text = failed > 0 ? Strings.get(R.string.storageactivity_063, failed) : Strings.get(R.string.storageactivity_065);
                         } else {
-                            text = Strings.get(R.string.storageactivity_066) + StorageReport.size(bytes) + Strings.get(R.string.storageactivity_067) + count + Strings.get(R.string.storageactivity_068);
-                            if (failed > 0) text += "，" + failed + Strings.get(R.string.storageactivity_069);
+                            text = Strings.get(R.string.storageactivity_066, StorageReport.size(bytes), count,
+                                    failed > 0 ? Strings.get(R.string.storageactivity_069, failed) : "");
                         }
                         AcToast.show(StorageActivity.this, text);
                         refresh(true);
@@ -551,8 +550,7 @@ public class StorageActivity extends ThemedActivity {
         TextView intro = new TextView(this);
         intro.setTextSize(13);
         intro.setTextColor(getResources().getColor(R.color.text_secondary));
-        intro.setText(Strings.get(R.string.storageactivity_071)
-                + Strings.get(R.string.storageactivity_072));
+        intro.setText(Strings.get(R.string.storageactivity_071));
         box.addView(intro, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 

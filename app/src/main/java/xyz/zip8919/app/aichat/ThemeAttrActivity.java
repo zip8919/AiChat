@@ -146,8 +146,9 @@ public class ThemeAttrActivity extends ThemedActivity {
         TextView title = (TextView) findViewById(R.id.attr_title);
         TextView hint = (TextView) findViewById(R.id.attr_hint);
         if (theme != null) {
-            title.setText(Strings.get(R.string.themeattractivity_033) + (theme.name == null || theme.name.length() == 0
-                    ? Strings.get(R.string.themeattractivity_034) : theme.name));
+            title.setText(Strings.get(R.string.themeattractivity_033,
+                    theme.name == null || theme.name.length() == 0
+                            ? Strings.get(R.string.themeattractivity_034) : theme.name));
             hint.setText(Strings.get(R.string.themeattractivity_035));
         }
 
@@ -462,7 +463,7 @@ public class ThemeAttrActivity extends ThemedActivity {
         }
         if (definedValue != null) return Strings.get(R.string.themeattractivity_048);
         String name = am.getActiveThemeName();
-        return name == null ? Strings.get(R.string.themeattractivity_049) : Strings.get(R.string.themeattractivity_050) + name + "」";
+        return name == null ? Strings.get(R.string.themeattractivity_049) : Strings.get(R.string.themeattractivity_050, name);
     }
 
     private String fontLabel(String id) {
@@ -565,7 +566,7 @@ public class ThemeAttrActivity extends ThemedActivity {
         });
 
         final AlertDialog d = AcDialog.builder(this)
-                .setTitle(Strings.get(R.string.themeattractivity_054) + labelOf(token))
+                .setTitle(Strings.get(R.string.themeattractivity_054, labelOf(token)))
                 .setView(root)
                 .setPositiveButton(Strings.get(R.string.themeattractivity_055), null)
                 .setNeutralButton(Strings.get(R.string.themeattractivity_056), null)
@@ -629,7 +630,7 @@ public class ThemeAttrActivity extends ThemedActivity {
             ids.add(f.id);
         }
         AcDialog.builder(this)
-                .setTitle(Strings.get(R.string.themeattractivity_059) + labelOf(token))
+                .setTitle(Strings.get(R.string.themeattractivity_059, labelOf(token)))
                 .setItems(items.toArray(new String[items.size()]),
                         new DialogInterface.OnClickListener() {
                             public void onClick(DialogInterface d, int which) {

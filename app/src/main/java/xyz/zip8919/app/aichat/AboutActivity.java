@@ -25,7 +25,7 @@ public class AboutActivity extends ThemedActivity {
         setContentView(R.layout.activity_about);
 
         TextView version = (TextView) findViewById(R.id.about_version);
-        version.setText(Strings.get(R.string.aboutactivity_001) + versionText());
+        version.setText(Strings.get(R.string.aboutactivity_001, versionText()));
 
         Button help = (Button) findViewById(R.id.about_help);
         Button checkUpdate = (Button) findViewById(R.id.about_check_update);
@@ -86,11 +86,7 @@ public class AboutActivity extends ThemedActivity {
      * 具体条款以各项目仓库为准。
      */
     private void showLicenses() {
-        String text = Strings.get(R.string.aboutactivity_006)
-                + Strings.get(R.string.aboutactivity_007)
-                + "• commonmark-java\n  github.com/commonmark/commonmark-java\n\n"
-                + "• jlatexmath-android\n  github.com/noties/jlatexmath-android\n\n"
-                + "• Conscrypt\n  github.com/google/conscrypt\n";
+        String text = Strings.get(R.string.aboutactivity_006);
         AcDialog.builder(this)
                 .setTitle(Strings.get(R.string.aboutactivity_008))
                 .setMessage(text)

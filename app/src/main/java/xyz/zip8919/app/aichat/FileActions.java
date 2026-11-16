@@ -122,7 +122,7 @@ final class FileActions {
             Intent view = new Intent(Intent.ACTION_VIEW);
             view.setDataAndType(FileActions.uriOf(f), mime);
             view.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            a.startActivity(Intent.createChooser(view, Strings.get(R.string.fileactions_002) + f.getName()));
+            a.startActivity(Intent.createChooser(view, Strings.get(R.string.fileactions_002, f.getName())));
             LogUtil.i(TAG, "open: %s mime=%s", f.getName(), mime);
         } catch (ActivityNotFoundException e) {
             AcToast.showLong(a, Strings.get(R.string.fileactions_003, f.getName()));
@@ -145,7 +145,7 @@ final class FileActions {
             send.putExtra(Intent.EXTRA_STREAM, FileActions.uriOf(f));
             send.putExtra(Intent.EXTRA_SUBJECT, f.getName());
             send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            a.startActivity(Intent.createChooser(send, Strings.get(R.string.fileactions_007) + f.getName()));
+            a.startActivity(Intent.createChooser(send, Strings.get(R.string.fileactions_007, f.getName())));
             LogUtil.i(TAG, "share: %s mime=%s", f.getName(), mime);
         } catch (Throwable t) {
             LogUtil.w(TAG, "share failed: %s : %s", f.getName(), t.getMessage());
@@ -323,7 +323,7 @@ final class FileActions {
                         input.setText(content);
                         input.setTextSize(12);
                         AcDialog.builder(a)
-                                .setTitle(Strings.get(R.string.fileactions_015) + f.getName())
+                                .setTitle(Strings.get(R.string.fileactions_015, f.getName()))
                                 .setView(input)
                                 .setPositiveButton(Strings.get(R.string.fileactions_016), new DialogInterface.OnClickListener() {
                                     public void onClick(DialogInterface d, int w) {

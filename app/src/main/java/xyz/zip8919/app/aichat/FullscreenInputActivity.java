@@ -119,8 +119,8 @@ public class FullscreenInputActivity extends ThemedActivity {
             if (pendingCount != null) COUNTER.removeCallbacks(pendingCount);
             pendingCount = null;
             int tokens = MessageHtmlRenderer.estimateTokens(edit.getText());
-            counter.setText(len + Strings.get(R.string.fullscreeninputactivity_006)
-                    + MessageHtmlRenderer.formatTokens(tokens) + " tokens");
+            counter.setText(Strings.get(R.string.fullscreeninputactivity_006, len,
+                    MessageHtmlRenderer.formatTokens(tokens)));
             return;
         }
         if (pendingCount != null) COUNTER.removeCallbacks(pendingCount);
@@ -131,8 +131,8 @@ public class FullscreenInputActivity extends ThemedActivity {
                 // 与消息底部同一套估算规则（中英分别计权、代理对算一个宽字符），
                 // 长文输入时先看到大概要花多少，不用发出去再看回执
                 int tokens = MessageHtmlRenderer.estimateTokens(edit.getText());
-                counter.setText(len + Strings.get(R.string.fullscreeninputactivity_007)
-                        + MessageHtmlRenderer.formatTokens(tokens) + " tokens");
+                counter.setText(Strings.get(R.string.fullscreeninputactivity_007, len,
+                        MessageHtmlRenderer.formatTokens(tokens)));
             }
         };
         COUNTER.postDelayed(pendingCount, 150);

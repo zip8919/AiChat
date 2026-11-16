@@ -180,7 +180,8 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
     private void refreshProbeOptionText() {
         boolean parallel = UpdateManager.isParallelProbe(this);
         btnConcurrency.setText(parallel
-                ? Strings.get(R.string.updateactivity_003) + UpdateManager.probeConcurrency(this) : Strings.get(R.string.updateactivity_004));
+                ? Strings.get(R.string.updateactivity_003, UpdateManager.probeConcurrency(this))
+                : Strings.get(R.string.updateactivity_004));
     }
 
     /** 并发数 1~64，越界直接拒绝；老设备内存有限，文案里把风险说清楚。 */
@@ -485,17 +486,17 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
         String cur = versionName();
         int cmp = UpdateManager.compareVersion(r.tag, cur);
         if (cmp > 0) {
-            statusView.setText(Strings.get(R.string.updateactivity_028) + r.tag + Strings.get(R.string.updateactivity_029) + cur);
+            statusView.setText(Strings.get(R.string.updateactivity_028, r.tag, cur));
         } else if (cmp == 0) {
-            statusView.setText(Strings.get(R.string.updateactivity_030) + r.tag);
+            statusView.setText(Strings.get(R.string.updateactivity_030, r.tag));
         } else {
-            statusView.setText(Strings.get(R.string.updateactivity_031) + r.tag + Strings.get(R.string.updateactivity_032) + cur + Strings.get(R.string.updateactivity_033));
+            statusView.setText(Strings.get(R.string.updateactivity_031, r.tag, cur));
         }
         btnNotes.setEnabled(r.body.length() > 0);
         btnSwitchAsset.setEnabled(!r.assets.isEmpty());
         btnAction.setEnabled(asset != null);
         assetView.setText(asset == null ? Strings.get(R.string.updateactivity_034)
-                : Strings.get(R.string.updateactivity_035) + asset.name + "  " + formatSize(asset.size));
+                : Strings.get(R.string.updateactivity_035, asset.name, formatSize(asset.size)));
         // 内置源已扩到 80+ 项：不再进页面就自动跑一次全量测速。
         // 那是分钟级长任务，还会把用户上次选中的源悄悄换成某个陌生域名。
         // 改成明确提示，测速由用户点按钮或长按单个源触发。
@@ -526,7 +527,7 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
         UpdateManager.cancelProbe();
         final boolean parallel = UpdateManager.isParallelProbe(this);
         final int concurrency = UpdateManager.probeConcurrency(this);
-        probeModeLabel = parallel ? Strings.get(R.string.updateactivity_040) + concurrency + Strings.get(R.string.updateactivity_041) : Strings.get(R.string.updateactivity_042);
+        probeModeLabel = parallel ? Strings.get(R.string.updateactivity_040, concurrency) : Strings.get(R.string.updateactivity_042);
         probeStale = false;
         probing = true;
         probeSingleMode = false;
@@ -538,8 +539,7 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
         refreshAllRows();
         btnProbe.setEnabled(false);
         // 窄屏只放得下模式 + 排序状态；「下载并校验测速文件」写在常驻提示里
-        progressText.setText(Strings.get(R.string.updateactivity_043) + mirrors.size()
-                + "…（" + probeModeLabel + Strings.get(R.string.updateactivity_044));
+        progressText.setText(Strings.get(R.string.updateactivity_043, mirrors.size(), probeModeLabel));
         UpdateManager.probeAll(mirrors, asset.url, testUrl(),
                 parallel, concurrency, this);
     }
@@ -566,7 +566,7 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
         int row = mirrors.indexOf(target);
         if (row >= 0) refreshRow(row);
         btnProbe.setEnabled(false);
-        progressText.setText(Strings.get(R.string.updateactivity_047) + target.name + "…");
+        progressText.setText(Strings.get(R.string.updateactivity_047, target.name));
         UpdateManager.probeOne(target, asset.url, testUrl(), this);
     }
 
@@ -582,8 +582,7 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
         }
         if (!probing) return;      // 全量测速已结束的迟到回调，不再动列表
         probeDone++;
-        progressText.setText(Strings.get(R.string.updateactivity_048) + probeDone + "/" + mirrors.size()
-                + "…（" + probeModeLabel + Strings.get(R.string.updateactivity_049));
+        progressText.setText(Strings.get(R.string.updateactivity_048, probeDone, mirrors.size(), probeModeLabel));
         if (openDialogs > 0) {
             // 菜单/编辑框开着时列表必须停住，否则里面捕获的行下标会指错源。
             // 只刷这一行的数值，重排推迟到对话框全部关闭后 flushResort 补一次。
@@ -606,8 +605,8 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
             probeSingleMirror = null;
             if (m != null) {
                 int l = m.latency;
-                progressText.setText(m.name + Strings.get(R.string.updateactivity_050)
-                        + (l == UpdateManager.FAILED ? Strings.get(R.string.updateactivity_051) : l + " ms"));
+                progressText.setText(Strings.get(R.string.updateactivity_050, m.name,
+                        l == UpdateManager.FAILED ? Strings.get(R.string.updateactivity_051) : l + " ms"));
             }
             return;
         }
@@ -627,12 +626,10 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
                 // 用户测速期间手动点过源：自动跟随让位于手动选择，只文字告知最快项
                 UpdateManager.Mirror keep = (selectedIndex >= 0 && selectedIndex < mirrors.size())
                         ? mirrors.get(selectedIndex) : null;
-                progressText.setText(Strings.get(R.string.updateactivity_052) + fastest.name + " "
-                        + fastest.latency + " ms" + modeSuffix + Strings.get(R.string.updateactivity_053)
-                        + (keep == null ? "—" : keep.name) + "）");
+                progressText.setText(Strings.get(R.string.updateactivity_052, fastest.name, fastest.latency,
+                        modeSuffix, keep == null ? "—" : keep.name));
             } else {
-                progressText.setText(Strings.get(R.string.updateactivity_054) + fastest.name + "  "
-                        + fastest.latency + " ms" + modeSuffix);
+                progressText.setText(Strings.get(R.string.updateactivity_054, fastest.name, fastest.latency, modeSuffix));
             }
         } else {
             progressText.setText(Strings.get(R.string.updateactivity_055));
@@ -664,7 +661,7 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
         btnSwitchAsset.setEnabled(false);
         progress.setVisibility(View.VISIBLE);
         progress.setProgress(0);
-        progressText.setText(Strings.get(R.string.updateactivity_057) + m.name + Strings.get(R.string.updateactivity_058) + cleared + Strings.get(R.string.updateactivity_059));
+        progressText.setText(Strings.get(R.string.updateactivity_057, m.name, cleared));
         LogUtil.i(TAG, "startDownload: mirror=%s url=%s", m.name, url);
         UpdateManager.resetCancel();
         UpdateManager.download(url, apkFile, asset.size, this);
@@ -676,10 +673,9 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
         if (total > 0) {
             int p = (int) (done * 100 / total);
             progress.setProgress(p);
-            progressText.setText(Strings.get(R.string.updateactivity_060) + p + "%   "
-                    + formatSize(done) + " / " + formatSize(total));
+            progressText.setText(Strings.get(R.string.updateactivity_060, p, formatSize(done), formatSize(total)));
         } else {
-            progressText.setText(Strings.get(R.string.updateactivity_061) + formatSize(done));
+            progressText.setText(Strings.get(R.string.updateactivity_061, formatSize(done)));
         }
     }
 
@@ -926,8 +922,7 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
         final UpdateManager.Mirror m = mirrors.get(i);
         showPaused(AcDialog.builder(this)
                 .setTitle(Strings.get(R.string.updateactivity_093))
-                .setMessage(m.name + "\n" + m.template
-                        + Strings.get(R.string.updateactivity_094))
+                .setMessage(Strings.get(R.string.updateactivity_094, m.name, m.template))
                 .setPositiveButton(Strings.get(R.string.updateactivity_095), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         if (m.custom) {
@@ -936,7 +931,7 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
                             UpdateManager.hideBuiltin(UpdateActivity.this, m.template);
                         }
                         reloadMirrors(null);
-                        progressText.setText(Strings.get(R.string.updateactivity_096) + m.name);
+                        progressText.setText(Strings.get(R.string.updateactivity_096, m.name));
                     }
                 })
                 .setNegativeButton(Strings.get(R.string.updateactivity_097), null)
@@ -952,7 +947,7 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
     private void showNotes() {
         if (release == null) return;
         String body = release.body;
-        if (body.length() > 4000) body = TextKit.cut(body, 4000) + Strings.get(R.string.updateactivity_099);
+        if (body.length() > 4000) body = Strings.get(R.string.updateactivity_099, TextKit.cut(body, 4000));
         showPaused(AcDialog.builder(this)
                 .setTitle(release.name.length() > 0 ? release.name : release.tag)
                 .setMessage(body)
@@ -983,7 +978,7 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
                         // 否则 install 的后台线程回来会弹出切换前那个包的安装器。
                         installPending = false;
                         btnAction.setEnabled(true);
-                        assetView.setText(Strings.get(R.string.updateactivity_102) + asset.name + "  " + formatSize(asset.size));
+                        assetView.setText(Strings.get(R.string.updateactivity_102, asset.name, formatSize(asset.size)));
                         btnAction.setText(Strings.get(R.string.updateactivity_103));
                         progressText.setText(Strings.get(R.string.updateactivity_104));
                         for (UpdateManager.Mirror m : mirrors) {

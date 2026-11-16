@@ -243,20 +243,20 @@ public class ThemeManagerActivity extends ThemedActivity {
     }
 
     private void promptCopy(final Theme t) {
-        promptName(Strings.get(R.string.thememanageractivity_031), t.name + Strings.get(R.string.thememanageractivity_032), new NameCb() {
+        promptName(Strings.get(R.string.thememanageractivity_031), Strings.get(R.string.thememanageractivity_032, t.name), new NameCb() {
             public void onName(String n) {
                 String id = repo.copy(t.id, n);
                 if (id == null) { toast(Strings.get(R.string.thememanageractivity_033)); return; }
                 repo.invalidate();
                 load();
-                toast(Strings.get(R.string.thememanageractivity_034) + n + "」");
+                toast(Strings.get(R.string.thememanageractivity_034, n));
             }
         });
     }
 
     private void doExport(Theme t) {
         String path = repo.export(t.id);
-        toast(path == null ? Strings.get(R.string.thememanageractivity_035) : Strings.get(R.string.thememanageractivity_036) + path);
+        toast(path == null ? Strings.get(R.string.thememanageractivity_035) : Strings.get(R.string.thememanageractivity_036, path));
     }
 
     private void openEdit(Theme t) {
@@ -367,7 +367,7 @@ public class ThemeManagerActivity extends ThemedActivity {
         final ThemeValidator.Result vr =
                 ThemeValidator.validate(text, FontRepository.getInstance().installedIds());
         if (vr.blocked || vr.theme == null) {
-            toast(Strings.get(R.string.thememanageractivity_061) + vr.blockReason);
+            toast(Strings.get(R.string.thememanageractivity_061, vr.blockReason));
             return;
         }
         final Theme t = vr.theme;
@@ -408,7 +408,7 @@ public class ThemeManagerActivity extends ThemedActivity {
         if (id == null) { toast(Strings.get(R.string.thememanageractivity_067)); return; }
         repo.invalidate();
         load();
-        toast(warn.length() > 0 ? Strings.get(R.string.thememanageractivity_068) + warn : Strings.get(R.string.thememanageractivity_069));
+        toast(warn.length() > 0 ? Strings.get(R.string.thememanageractivity_068, warn) : Strings.get(R.string.thememanageractivity_069));
     }
 
     private boolean hasUserThemeNamed(String name) {

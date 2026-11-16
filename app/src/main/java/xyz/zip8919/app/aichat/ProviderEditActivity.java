@@ -253,7 +253,7 @@ public class ProviderEditActivity extends ThemedActivity {
             return false;
         }
         if (cfg.isProviderNameTaken(name, editing)) {
-            AcToast.show(this, Strings.get(R.string.providereditactivity_014) + name);
+            AcToast.show(this, Strings.get(R.string.providereditactivity_014, name));
             nameEt.requestFocus();
             return false;
         }
@@ -313,8 +313,9 @@ public class ProviderEditActivity extends ThemedActivity {
     private void confirmDelete() {
         if (editing == null) return;
         final int models = cfg.modelsOf(editing.name).size();
-        String msg = Strings.get(R.string.providereditactivity_016) + editing.label() + "？"
-                + (models > 0 ? Strings.get(R.string.providereditactivity_017, models) : "");
+        String msg = models > 0
+                ? Strings.get(R.string.providereditactivity_064, editing.label(), models)
+                : Strings.get(R.string.providereditactivity_016, editing.label());
         AcDialog.builder(this)
                 .setTitle(Strings.get(R.string.providereditactivity_019))
                 .setMessage(msg)
@@ -356,7 +357,7 @@ public class ProviderEditActivity extends ThemedActivity {
         busy = true;
         testBtn.setEnabled(false);
         testBtn.setText(Strings.get(R.string.providereditactivity_025));
-        testResult.setText(Strings.get(R.string.providereditactivity_026) + Endpoint.chatUrl(probe) + " …");
+        testResult.setText(Strings.get(R.string.providereditactivity_026, Endpoint.chatUrl(probe)));
         new Thread(new Runnable() {
             public void run() {
                 final ProviderTester.Result r = ProviderTester.testProvider(probe);
@@ -422,7 +423,7 @@ public class ProviderEditActivity extends ThemedActivity {
                             testResult.setTextColor(0xFFC62828);
                             AcDialog.builder(ProviderEditActivity.this)
                                     .setTitle(Strings.get(R.string.providereditactivity_031))
-                                    .setMessage(r.message + Strings.get(R.string.providereditactivity_061))
+                                    .setMessage(Strings.get(R.string.providereditactivity_061, r.message))
                                     .setPositiveButton(Strings.get(R.string.providereditactivity_034), null)
                                     .show();
                             return;
@@ -507,8 +508,9 @@ public class ProviderEditActivity extends ThemedActivity {
         }
         cfg.save();
         refreshModels();
-        String msg = Strings.get(R.string.providereditactivity_045, added);
-        if (skipped > 0) msg += Strings.get(R.string.providereditactivity_047) + skipped + Strings.get(R.string.providereditactivity_048);
+        String msg = skipped > 0
+                ? Strings.get(R.string.providereditactivity_063, added, skipped)
+                : Strings.get(R.string.providereditactivity_045, added);
         AcToast.show(this, msg);
         LogUtil.i(TAG, "addModels: added=%d skipped=%d provider=%s", added, skipped, editing.name);
     }
@@ -529,7 +531,7 @@ public class ProviderEditActivity extends ThemedActivity {
         fetchBtn.setEnabled(true);
         modelsHint.setText(Strings.get(R.string.providereditactivity_051));
         final List<ModelInfo> list = cfg.modelsOf(editing.name);
-        modelsTitle.setText(Strings.get(R.string.providereditactivity_052) + list.size() + "）");
+        modelsTitle.setText(Strings.get(R.string.providereditactivity_052, list.size()));
         if (list.isEmpty()) {
             TextView empty = new TextView(this);
             empty.setText(Strings.get(R.string.providereditactivity_053));
@@ -588,7 +590,7 @@ public class ProviderEditActivity extends ThemedActivity {
     private void confirmDeleteModel(final ModelInfo m) {
         AcDialog.builder(this)
                 .setTitle(Strings.get(R.string.providereditactivity_056))
-                .setMessage(Strings.get(R.string.providereditactivity_057) + m.label() + "？")
+                .setMessage(Strings.get(R.string.providereditactivity_057, m.label()))
                 .setPositiveButton(Strings.get(R.string.providereditactivity_058), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         boolean wasDefault = cfg.isDefaultModel(m);

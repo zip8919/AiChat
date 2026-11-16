@@ -140,7 +140,7 @@ public class FontManagerActivity extends ThemedActivity {
 
     private void refreshSelectionUi() {
         selectionBar.setVisibility(selectionMode ? View.VISIBLE : View.GONE);
-        selectionCount.setText(Strings.get(R.string.fontmanageractivity_014) + adapter.checkedKeys().size() + " / " + fonts.size());
+        selectionCount.setText(Strings.get(R.string.fontmanageractivity_014, adapter.checkedKeys().size(), fonts.size()));
     }
 
     private FontRepository.FontItem findFont(String id) {
@@ -203,7 +203,7 @@ public class FontManagerActivity extends ThemedActivity {
         float[] sizes = {12f, 14f, 20f};
         for (int i = 0; i < sizes.length; i++) {
             TextView tv = new TextView(this);
-            tv.setText(Strings.get(R.string.fontmanageractivity_026) + (int) sizes[i] + "sp");
+            tv.setText(Strings.get(R.string.fontmanageractivity_026, (int) sizes[i]));
             tv.setTextSize(sizes[i]);
             if (tf != null) tv.setTypeface(tf);
             box.addView(tv);
@@ -249,8 +249,7 @@ public class FontManagerActivity extends ThemedActivity {
         }
         AcDialog.builder(this)
                 .setTitle(Strings.get(R.string.fontmanageractivity_035))
-                .setMessage("「" + f.name + Strings.get(R.string.fontmanageractivity_036)
-                        + Strings.get(R.string.fontmanageractivity_037))
+                .setMessage(Strings.get(R.string.fontmanageractivity_061, f.name))
                 .setItems(names.toArray(new String[names.size()]),
                         new DialogInterface.OnClickListener() {
                             public void onClick(DialogInterface d, int w) {
@@ -302,11 +301,9 @@ public class FontManagerActivity extends ThemedActivity {
         for (String id : keys) {
             if (isReferenced(id)) used.add(id);
         }
-        String msg = Strings.get(R.string.fontmanageractivity_044, keys.size());
-        if (!used.isEmpty()) {
-            msg += Strings.get(R.string.fontmanageractivity_046) + used.size()
-                    + Strings.get(R.string.fontmanageractivity_047);
-        }
+        String msg = used.isEmpty()
+                ? Strings.get(R.string.fontmanageractivity_044, keys.size())
+                : Strings.get(R.string.fontmanageractivity_062, keys.size(), used.size());
         AcDialog.builder(this)
                 .setTitle(Strings.get(R.string.fontmanageractivity_048))
                 .setMessage(msg)

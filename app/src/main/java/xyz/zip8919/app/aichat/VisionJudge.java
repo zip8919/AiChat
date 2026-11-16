@@ -101,7 +101,7 @@ final class VisionJudge {
             return out;
         }
         out.correct = Boolean.FALSE;
-        out.note = Strings.get(R.string.visionjudge_021) + answer;
+        out.note = Strings.get(R.string.visionjudge_021, answer);
         return out;
     }
 

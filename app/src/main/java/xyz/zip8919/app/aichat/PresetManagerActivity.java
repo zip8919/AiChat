@@ -130,7 +130,7 @@ public class PresetManagerActivity extends ThemedActivity {
         TextView meta = new TextView(this);
         meta.setTextSize(11);
         meta.setTextColor(ThemeTokens.get(this, ThemeTokens.AC_TEXT_SECONDARY));
-        meta.setText((p.prompt == null ? 0 : p.prompt.length()) + Strings.get(R.string.presetmanageractivity_001));
+        meta.setText(Strings.get(R.string.presetmanageractivity_001, p.prompt == null ? 0 : p.prompt.length()));
         box.addView(meta);
 
         android.widget.ScrollView sc = new android.widget.ScrollView(this);
@@ -285,7 +285,7 @@ public class PresetManagerActivity extends ThemedActivity {
                                     return;
                                 }
                                 if (PresetStore.contains(presets, nm, self)) {
-                                    AcToast.show(PresetManagerActivity.this, Strings.get(R.string.presetmanageractivity_021) + nm);
+                                    AcToast.show(PresetManagerActivity.this, Strings.get(R.string.presetmanageractivity_021, nm));
                                     return;
                                 }
                                 if (sink.onSave(nm, pr)) {

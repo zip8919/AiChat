@@ -213,8 +213,7 @@ public class StatsActivity extends ThemedActivity {
     private void confirmClear() {
         AcDialog.builder(this)
                 .setTitle(Strings.get(R.string.statsactivity_005))
-                .setMessage(Strings.get(R.string.statsactivity_006)
-                        + Strings.get(R.string.statsactivity_007))
+                .setMessage(Strings.get(R.string.statsactivity_044))
                 .setPositiveButton(Strings.get(R.string.statsactivity_008), new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         UsageStats.get().clear();
