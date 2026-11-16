@@ -1,23 +1,33 @@
 package xyz.zip8919.app.aichat;
 
-import android.app.Activity;
-import android.app.AlertDialog;
+import android.content.ActivityNotFoundException;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.pm.PackageInfo;
+import android.net.Uri;
 import android.os.Bundle;
 import android.view.View;
 import android.widget.Button;
 import android.widget.TextView;
-import android.widget.Toast;
 
 /**
- * 关于页。版本号、开源许可、使用说明，以及「检查更新」入口（跳 {@link UpdateActivity}）。
- * 「反馈建议」仍是占位入口，不接后端。
+ * 关于页。版本号、开源许可、使用说明，「检查更新」（跳 {@link UpdateActivity}）与「反馈建议」入口。
+ *
+ * <p>反馈建议给三条路：发邮件、提 Issue、在线反馈中心，全部交给系统已装应用处理，
+ * 应用自己不联网、不上传任何内容。设备上没有邮件应用或打不开网页时，弹窗把地址或
+ * 链接显示出来，可复制后手动处理，不静默失败。
  */
 public class AboutActivity extends ThemedActivity {
 
     private static final String TAG = "AboutActivity";
+
+    /** 开发者收件地址；与在线反馈中心后台配置的收件人相互独立。 */
+    private static final String DEV_EMAIL = "zip8919@qq.com";
+    private static final String ISSUES_URL = "https://github.com/zip8919/AiChat/issues/new";
+    private static final String FEEDBACK_URL = "https://feedback.20090102.xyz";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -44,7 +54,7 @@ public class AboutActivity extends ThemedActivity {
         });
         feedback.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
-                AcToast.show(AboutActivity.this, Strings.get(R.string.aboutactivity_002));
+                showFeedback();
             }
         });
         licenses.setOnClickListener(new View.OnClickListener() {
@@ -96,5 +106,126 @@ public class AboutActivity extends ThemedActivity {
                     }
                 })
                 .show();
+    }
+
+    /**
+     * 三条反馈渠道。用列表而不是三个按钮：关于页按钮已经四个，再拆三个会把页面撑长，
+     * 老设备一屏放不下。
+     */
+    private void showFeedback() {
+        final String[] items = new String[]{
+                Strings.get(R.string.aboutactivity_010),
+                Strings.get(R.string.aboutactivity_011),
+                Strings.get(R.string.aboutactivity_012)
+        };
+        AcDialog.builder(this)
+                .setTitle(Strings.get(R.string.activity_about_004))
+                .setItems(items, new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface d, int which) {
+                        if (which == 0) {
+                            sendMail();
+                        } else if (which == 1) {
+                            openUrl(ISSUES_URL);
+                        } else {
+                            openUrl(FEEDBACK_URL);
+                        }
+                    }
+                })
+                .setNegativeButton(Strings.get(R.string.aboutactivity_013), null)
+                .show();
+    }
+
+    /**
+     * 邮件走 {@code ACTION_SENDTO} + {@code mailto:}，只匹配邮件类应用；
+     * 用 {@code ACTION_SEND} 会被聊天软件接走，用户拿到的不是写信界面。
+     */
+    private void sendMail() {
+        Intent intent = new Intent(Intent.ACTION_SENDTO);
+        intent.setData(Uri.parse("mailto:" + DEV_EMAIL
+                + "?subject=" + Uri.encode(Strings.get(R.string.aboutactivity_014))
+                + "&body=" + Uri.encode(mailBody())));
+        if (intent.resolveActivity(getPackageManager()) != null) {
+            try {
+                startActivity(intent);
+                return;
+            } catch (ActivityNotFoundException e) {
+                LogUtil.w(TAG, "sendMail failed: %s", e.getMessage());
+            }
+        }
+        showMailFallback();
+    }
+
+    /** 预填正文带上版本与机型，用户不用自己找；三段都为空时也只是少几行。 */
+    private String mailBody() {
+        return Strings.get(R.string.aboutactivity_015,
+                SystemInfo.appVersion(this),
+                SystemInfo.deviceModel(),
+                SystemInfo.androidVersion());
+    }
+
+    /**
+     * 没有邮件应用：给出地址本身，同时留一条「用其他应用发送」。
+     * 只提示「无法发送」等于把用户堵死，复制与分享至少有一条能走通。
+     */
+    private void showMailFallback() {
+        AcDialog.builder(this)
+                .setTitle(Strings.get(R.string.aboutactivity_016))
+                .setMessage(Strings.get(R.string.aboutactivity_017, DEV_EMAIL))
+                .setPositiveButton(Strings.get(R.string.aboutactivity_018), new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface d, int w) {
+                        copyText(DEV_EMAIL);
+                    }
+                })
+                .setNeutralButton(Strings.get(R.string.aboutactivity_019), new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface d, int w) {
+                        shareMail();
+                    }
+                })
+                .setNegativeButton(Strings.get(R.string.aboutactivity_013), null)
+                .show();
+    }
+
+    private void shareMail() {
+        Intent send = new Intent(Intent.ACTION_SEND);
+        send.setType("text/plain");
+        send.putExtra(Intent.EXTRA_EMAIL, new String[]{DEV_EMAIL});
+        send.putExtra(Intent.EXTRA_SUBJECT, Strings.get(R.string.aboutactivity_014));
+        send.putExtra(Intent.EXTRA_TEXT, mailBody());
+        try {
+            startActivity(Intent.createChooser(send, Strings.get(R.string.aboutactivity_024)));
+        } catch (ActivityNotFoundException e) {
+            LogUtil.w(TAG, "shareMail failed: %s", e.getMessage());
+            copyText(DEV_EMAIL);
+        }
+    }
+
+    private void openUrl(String url) {
+        try {
+            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+        } catch (ActivityNotFoundException e) {
+            LogUtil.w(TAG, "openUrl failed: %s", e.getMessage());
+            showLinkFallback(url);
+        }
+    }
+
+    /** 打不开网页时把链接摆出来；用户能看见地址，才谈得上换台设备继续。 */
+    private void showLinkFallback(final String url) {
+        AcDialog.builder(this)
+                .setTitle(Strings.get(R.string.aboutactivity_020))
+                .setMessage(Strings.get(R.string.aboutactivity_021, url))
+                .setPositiveButton(Strings.get(R.string.aboutactivity_022), new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface d, int w) {
+                        copyText(url);
+                    }
+                })
+                .setNegativeButton(Strings.get(R.string.aboutactivity_013), null)
+                .show();
+    }
+
+    private void copyText(String text) {
+        ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+        if (cm == null) return;
+        cm.setPrimaryClip(ClipData.newPlainText("aichat", text));
+        AcToast.show(this, Strings.get(R.string.aboutactivity_023));
     }
 }

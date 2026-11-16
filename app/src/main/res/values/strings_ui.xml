@@ -2,7 +2,6 @@
 <!-- 界面文案。由源码抽取生成，新增文案请补充在这里。 -->
 <resources>
     <string name="aboutactivity_001">版本 %1$s</string>
-    <string name="aboutactivity_002">反馈渠道尚未开放</string>
     <string name="aboutactivity_003">未知</string>
     <string name="aboutactivity_004">使用说明</string>
     <string name="aboutactivity_005">关闭</string>
@@ -10,6 +9,21 @@
     
     <string name="aboutactivity_008">开源许可</string>
     <string name="aboutactivity_009">关闭</string>
+    <string name="aboutactivity_010">发送邮件到开发者</string>
+    <string name="aboutactivity_011">在 GitHub 提交 Issue</string>
+    <string name="aboutactivity_012">打开在线反馈中心</string>
+    <string name="aboutactivity_013">取消</string>
+    <string name="aboutactivity_014">AiChat 反馈</string>
+    <string name="aboutactivity_015">问题描述：\n\n\n复现步骤：\n\n\n应用版本：%1$s\n设备：%2$s\n系统：Android %3$s</string>
+    <string name="aboutactivity_016">没有找到邮件应用</string>
+    <string name="aboutactivity_017">可复制地址 %1$s 后手动发送，或选择其他应用分享。</string>
+    <string name="aboutactivity_018">复制地址</string>
+    <string name="aboutactivity_019">用其他应用发送</string>
+    <string name="aboutactivity_020">无法打开链接</string>
+    <string name="aboutactivity_021">可复制以下地址，粘贴到浏览器打开：\n%1$s</string>
+    <string name="aboutactivity_022">复制链接</string>
+    <string name="aboutactivity_023">已复制到剪贴板</string>
+    <string name="aboutactivity_024">选择发送方式</string>
     <string name="appearanceactivity_001">朱红</string>
     <string name="appearanceactivity_002">橙</string>
     <string name="appearanceactivity_003">琥珀</string>
