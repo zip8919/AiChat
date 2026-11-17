@@ -316,6 +316,7 @@
     <string name="feedbackactivity_015">摘要生成中…</string>
     <string name="feedbackactivity_016">已折叠 %1$d 条无关内容，点此展开</string>
     <string name="feedbackactivity_017">已展开无关内容，点此收起</string>
+    <string name="feedbackactivity_018">备注：%1$s</string>
     <string name="feedbackcomposeactivity_001">新建反馈</string>
     <string name="feedbackcomposeactivity_002">返回</string>
     <string name="feedbackcomposeactivity_003">标题</string>

@@ -194,6 +194,7 @@ public class FeedbackActivity extends ThemedActivity {
             TextView type = (TextView) view.findViewById(R.id.item_feedback_type);
             TextView status = (TextView) view.findViewById(R.id.item_feedback_status);
             TextView summary = (TextView) view.findViewById(R.id.item_feedback_summary);
+            TextView remark = (TextView) view.findViewById(R.id.item_feedback_remark);
             TextView meta = (TextView) view.findViewById(R.id.item_feedback_meta);
 
             title.setText(item.optString("title"));
@@ -211,6 +212,14 @@ public class FeedbackActivity extends ThemedActivity {
                 summary.setVisibility(View.VISIBLE);
             } else {
                 summary.setVisibility(View.GONE);
+            }
+
+            String remarkText = item.optString("remark");
+            if (remarkText.length() > 0) {
+                remark.setText(Strings.get(R.string.feedbackactivity_018, remarkText));
+                remark.setVisibility(View.VISIBLE);
+            } else {
+                remark.setVisibility(View.GONE);
             }
 
             String id = item.optString("id");
