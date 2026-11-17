@@ -2172,4 +2172,22 @@
     <string name="providereditactivity_061">%1$s\n\n有些服务不提供模型列表，可以点「新建模型」手动添加。</string>
     <string name="providereditactivity_062">该提供商的 %1$d 个模型都已添加。</string>
     <string name="updatemanager_019">检查更新失败（HTTP %1$d），请稍后再试</string>
+    <string name="mainactivity_171">查看详情</string>
+    <string name="mainactivity_172">公告</string>
+    <string name="mainactivity_173">我知道了</string>
+    <string name="mainactivity_174">打不开链接</string>
+    <string name="mainactivity_175">复制地址</string>
+    <string name="noticeactivity_001">历史公告</string>
+    <string name="noticeactivity_002">公告详情</string>
+    <string name="noticeactivity_003">关闭</string>
+    <string name="noticeactivity_004">还没有公告，有新消息会在这里显示。</string>
+    <string name="noticeactivity_005">公告加载失败，请检查网络后重试。</string>
+    <string name="noticeactivity_006">查看详情</string>
+    <string name="noticeactivity_007">打不开链接</string>
+    <string name="noticeactivity_008">复制地址</string>
+    <string name="noticeactivity_009">时间未知</string>
+    <string name="noticeactivity_010">已复制地址</string>
+    <string name="noticeactivity_011">正在加载公告</string>
+    <string name="noticeactivity_012">重试</string>
+    <string name="aboutactivity_025">历史公告</string>
 </resources>

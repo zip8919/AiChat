@@ -377,10 +377,78 @@ public class MainActivity extends ThemedActivity {
         // 否则从别的应用「发送到 AiChat」时，消息会在引导弹窗背后被发出去。
         if (prefs.getBoolean(KEY_FIRST_LAUNCH_DONE, false)) {
             handlePromptIntent(getIntent());
+            fetchNotice();
         } else {
             showFirstLaunchDialog();
         }
         LogUtil.i(TAG, "========== onCreate done ==========");
+    }
+
+    /**
+     * 启动拉一次公告，有未读的最新一条就弹出来。
+     *
+     * <p>失败静默：公告是附赠信息，网络不通或服务异常不该打扰用户，也不该阻塞任何操作。
+     * 已读记录在 {@link Notice#markRead}，同一条只弹一次。
+     */
+    private void fetchNotice() {
+        Notice.load(this, new FeedbackApi.Callback() {
+            public void onSuccess(org.json.JSONObject data) {
+                final Notice n = Notice.firstUnread(MainActivity.this, Notice.parseList(data));
+                if (n == null) return;
+                showNoticeDialog(n);
+            }
+
+            public void onError(String message) {
+                LogUtil.d(TAG, "notice load skipped: %s", message);
+            }
+        });
+    }
+
+    private void showNoticeDialog(final Notice n) {
+        if (isFinishing()) return;
+        final View content = getLayoutInflater().inflate(R.layout.view_notice_detail, null);
+        TextView title = (TextView) content.findViewById(R.id.nd_title);
+        TextView body = (TextView) content.findViewById(R.id.nd_body);
+        TextView link = (TextView) content.findViewById(R.id.nd_link);
+        title.setText(n.title);
+        body.setText(n.body);
+        if (n.link != null && n.link.length() > 0) {
+            link.setVisibility(View.VISIBLE);
+            link.setText(Strings.get(R.string.mainactivity_171));
+            link.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    openNoticeLink(n.link);
+                }
+            });
+        }
+
+        AcDialog.builder(this)
+                .setTitle(Strings.get(R.string.mainactivity_172))
+                .setView(content)
+                .setPositiveButton(Strings.get(R.string.mainactivity_173), new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface d, int w) {
+                        // 已读在下面统一记录，这里只需关闭
+                        d.dismiss();
+                    }
+                })
+                .show();
+        // 弹出即算送达：无论点按钮、返回键还是点外部关闭，都不再重复弹
+        Notice.markRead(this, n.id);
+        LogUtil.i(TAG, "notice shown: %s", n.id);
+    }
+
+    /** 跳转链接打不开时提示地址可复制，不让按钮点了没反应。 */
+    private void openNoticeLink(final String url) {
+        try {
+            startActivity(new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url)));
+        } catch (Exception e) {
+            LogUtil.w(TAG, "openNoticeLink failed: %s", e.getMessage());
+            AcDialog.builder(this)
+                    .setTitle(Strings.get(R.string.mainactivity_174))
+                    .setMessage(url)
+                    .setPositiveButton(Strings.get(R.string.mainactivity_175), null)
+                    .show();
+        }
     }
 
     /**
