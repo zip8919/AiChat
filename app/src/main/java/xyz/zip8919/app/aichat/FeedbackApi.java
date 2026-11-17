@@ -61,8 +61,8 @@ final class FeedbackApi {
     private FeedbackApi() {
     }
 
-    static void list(int page, Callback callback) {
-        get("/api/public/list?page=" + page + "&size=20", callback);
+    static void list(int page, boolean fold, Callback callback) {
+        get("/api/public/list?page=" + page + "&size=20" + (fold ? "" : "&fold=0"), callback);
     }
 
     static void detail(String id, Callback callback) {
@@ -70,13 +70,15 @@ final class FeedbackApi {
     }
 
     static void submit(Context context, final String title, final String body,
-                       final String contact, final String appVersion, final String device,
+                       final String nickname, final String contact,
+                       final String appVersion, final String device,
                        final List<UploadFile> files, final Callback callback) {
         final Context app = context.getApplicationContext();
         new Thread(new Runnable() {
             public void run() {
                 try {
-                    JSONObject data = postMultipart(app, title, body, contact, appVersion, device, files);
+                    JSONObject data = postMultipart(app, title, body, nickname, contact,
+                            appVersion, device, files);
                     postSuccess(callback, data);
                 } catch (Exception e) {
                     LogUtil.w(TAG, "submit failed: %s", e.getMessage());
@@ -122,8 +124,8 @@ final class FeedbackApi {
     }
 
     private static JSONObject postMultipart(Context context, String title, String body,
-                                            String contact, String appVersion, String device,
-                                            List<UploadFile> files) throws Exception {
+                                            String nickname, String contact, String appVersion,
+                                            String device, List<UploadFile> files) throws Exception {
         String boundary = "----AiChat" + System.currentTimeMillis();
         HttpURLConnection conn = (HttpURLConnection) new URL(BASE + "/api/feedback/upload").openConnection();
         conn.setRequestMethod("POST");
@@ -139,6 +141,7 @@ final class FeedbackApi {
         try {
             writeField(os, boundary, "title", title);
             writeField(os, boundary, "body", body);
+            writeField(os, boundary, "nickname", nickname);
             writeField(os, boundary, "contact", contact);
             writeField(os, boundary, "app_version", appVersion);
             writeField(os, boundary, "device", device);

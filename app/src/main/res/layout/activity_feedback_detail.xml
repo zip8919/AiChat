@@ -155,6 +155,29 @@
                 android:layout_height="wrap_content" />
 
             <TextView
+                android:id="@+id/detail_remark_label"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:textColor="@color/text_primary"
+                android:visibility="gone"
+                android:paddingTop="16dp"
+                android:paddingBottom="4dp"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/feedbackdetailactivity_018" />
+
+            <TextView
+                android:id="@+id/detail_remark"
+                android:textSize="13sp"
+                android:textColor="@color/text_primary"
+                android:lineSpacingExtra="3dp"
+                android:visibility="gone"
+                android:background="@drawable/bg_card"
+                android:padding="12dp"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content" />
+
+            <TextView
                 android:textSize="13sp"
                 android:textStyle="bold"
                 android:textColor="@color/text_primary"

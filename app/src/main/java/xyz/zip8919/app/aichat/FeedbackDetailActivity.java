@@ -38,6 +38,8 @@ public class FeedbackDetailActivity extends ThemedActivity {
     private TextView summaryLabel;
     private TextView summaryView;
     private TextView bodyView;
+    private TextView remarkLabel;
+    private TextView remarkView;
     private LinearLayout attachmentsBox;
     private TextView attachmentsHint;
 
@@ -57,6 +59,8 @@ public class FeedbackDetailActivity extends ThemedActivity {
         summaryLabel = (TextView) findViewById(R.id.detail_summary_label);
         summaryView = (TextView) findViewById(R.id.detail_summary);
         bodyView = (TextView) findViewById(R.id.detail_body);
+        remarkLabel = (TextView) findViewById(R.id.detail_remark_label);
+        remarkView = (TextView) findViewById(R.id.detail_remark);
         attachmentsBox = (LinearLayout) findViewById(R.id.detail_attachments);
         attachmentsHint = (TextView) findViewById(R.id.detail_attachments_hint);
 
@@ -119,8 +123,12 @@ public class FeedbackDetailActivity extends ThemedActivity {
         String id = item.optString("id");
         String time = item.optString("createdAt");
         String version = item.optString("appVersion");
+        String nickname = item.optString("nicknameText");
         StringBuilder meta = new StringBuilder();
-        meta.append(Strings.get(R.string.feedbackdetailactivity_003)).append(' ').append(id);
+        meta.append(Strings.get(R.string.feedbackdetailactivity_016)).append(' ')
+                .append(nickname.length() == 0
+                        ? Strings.get(R.string.feedbackdetailactivity_017) : nickname);
+        meta.append('\n').append(Strings.get(R.string.feedbackdetailactivity_003)).append(' ').append(id);
         meta.append('\n').append(Strings.get(R.string.feedbackdetailactivity_004)).append(' ')
                 .append(time.length() == 0 ? Strings.get(R.string.feedbackdetailactivity_012) : time);
         if (version.length() > 0) {
@@ -136,9 +144,20 @@ public class FeedbackDetailActivity extends ThemedActivity {
         // 摘要与正文重复时不再单列一块：AI 生成摘要失败会退回正文首段，重复展示只是噪音
         String summary = item.optString("summary");
         boolean hasSummary = summary.length() > 0 && !summary.equals(body);
-        summaryLabel.setVisibility(hasSummary ? View.VISIBLE : View.GONE);
-        summaryView.setVisibility(hasSummary ? View.VISIBLE : View.GONE);
-        if (hasSummary) summaryView.setText(summary);
+        boolean pending = "pending".equals(item.optString("summaryState"));
+        summaryLabel.setVisibility(hasSummary || pending ? View.VISIBLE : View.GONE);
+        summaryView.setVisibility(hasSummary || pending ? View.VISIBLE : View.GONE);
+        if (hasSummary) {
+            summaryView.setText(summary);
+        } else if (pending) {
+            summaryView.setText(R.string.feedbackdetailactivity_019);
+        }
+
+        // 备注由管理员填写且对所有人可见，放在正文之后单独一块
+        String remark = item.optString("remark");
+        remarkLabel.setVisibility(remark.length() == 0 ? View.GONE : View.VISIBLE);
+        remarkView.setVisibility(remark.length() == 0 ? View.GONE : View.VISIBLE);
+        if (remark.length() > 0) remarkView.setText(remark);
 
         renderAttachments(item.optJSONArray("attachments"));
     }

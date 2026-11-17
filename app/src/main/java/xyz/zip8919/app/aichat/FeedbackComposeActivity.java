@@ -1,11 +1,14 @@
 package xyz.zip8919.app.aichat;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.ClipData;
 import android.content.Intent;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.provider.OpenableColumns;
 import android.text.TextUtils;
 import android.text.format.Formatter;
@@ -42,11 +45,14 @@ public class FeedbackComposeActivity extends ThemedActivity {
     /** 与反馈中心 config.js 的 LIMITS 保持一致：单文件 15MB、最多 5 个。 */
     private static final long MAX_FILE_BYTES = 15L * 1024 * 1024;
     private static final int MAX_FILES = 5;
-    /** 服务端要求描述至少 5 个字，本地提前拦住。 */
-    private static final int MIN_BODY_CHARS = 5;
+    /** 摘要由服务端在提交之后生成，这里按 1.2 秒一轮、最多 20 轮去取。 */
+    private static final long SUMMARY_POLL_MS = 1200;
+    private static final int SUMMARY_POLL_TRIES = 20;
+    private static final Handler MAIN_HANDLER = new Handler(Looper.getMainLooper());
 
     private EditText titleView;
     private EditText bodyView;
+    private EditText nicknameView;
     private EditText contactView;
     private Button pickButton;
     private Button submitButton;
@@ -56,6 +62,8 @@ public class FeedbackComposeActivity extends ThemedActivity {
 
     private final List<FeedbackApi.UploadFile> files = new ArrayList<FeedbackApi.UploadFile>();
     private boolean busy = false;
+    /** 摘要轮询的代次，弹窗关掉后加一，让还在排队的下一轮直接作废。 */
+    private int pollSeq = 0;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -64,6 +72,7 @@ public class FeedbackComposeActivity extends ThemedActivity {
 
         titleView = (EditText) findViewById(R.id.compose_title);
         bodyView = (EditText) findViewById(R.id.compose_body);
+        nicknameView = (EditText) findViewById(R.id.compose_nickname);
         contactView = (EditText) findViewById(R.id.compose_contact);
         pickButton = (Button) findViewById(R.id.compose_pick);
         submitButton = (Button) findViewById(R.id.compose_submit);
@@ -261,6 +270,7 @@ public class FeedbackComposeActivity extends ThemedActivity {
     private void submit() {
         final String title = titleView.getText().toString().trim();
         final String body = bodyView.getText().toString().trim();
+        final String nickname = nicknameView.getText().toString().trim();
         final String contact = contactView.getText().toString().trim();
 
         if (title.length() == 0) {
@@ -273,17 +283,12 @@ public class FeedbackComposeActivity extends ThemedActivity {
             bodyView.requestFocus();
             return;
         }
-        if (body.length() < MIN_BODY_CHARS) {
-            AcToast.show(this, Strings.get(R.string.feedbackcomposeactivity_013));
-            bodyView.requestFocus();
-            return;
-        }
 
         setBusy(true);
         String appVersion = SystemInfo.appVersion(this);
         String device = SystemInfo.deviceModel() + " / Android " + SystemInfo.androidVersion();
 
-        FeedbackApi.submit(this, title, body, contact, appVersion, device,
+        FeedbackApi.submit(this, title, body, nickname, contact, appVersion, device,
                 new ArrayList<FeedbackApi.UploadFile>(files), new FeedbackApi.Callback() {
                     public void onSuccess(JSONObject data) {
                         setBusy(false);
@@ -311,29 +316,28 @@ public class FeedbackComposeActivity extends ThemedActivity {
     }
 
     /**
-     * 提交成功后的确认弹窗。把编号、AI 分配的类型与摘要在这一屏交代清楚：
-     * 用户下一步要用编号回查，也要知道这条被归到了哪一类。
+     * 提交成功后的确认弹窗。先给出编号，再看摘要：
+     * 摘要由服务端在响应之后生成，所以这里先显示「生成中」，取到结果或超时再改。
      */
     private void showResult(final JSONObject data) {
         final String id = data.optString("id");
-        StringBuilder sb = new StringBuilder();
-        sb.append(Strings.get(R.string.feedbackcomposeactivity_018, id));
-        String typeText = data.optString("typeText");
-        if (typeText.length() > 0) {
-            sb.append('\n').append(Strings.get(R.string.feedbackcomposeactivity_019, typeText));
-        }
-        String summary = data.optString("summary");
-        if (summary.length() > 0) {
-            sb.append('\n').append(Strings.get(R.string.feedbackcomposeactivity_020, summary));
-        }
+        final String base = Strings.get(R.string.feedbackcomposeactivity_018, id);
 
-        AcDialog.builder(this)
+        final String summary = data.optString("summary");
+        final boolean hasSummary = summary.length() > 0;
+        final String message = hasSummary
+                ? base + "\n" + Strings.get(R.string.feedbackcomposeactivity_020, summary)
+                : base + "\n" + Strings.get(R.string.feedbackcomposeactivity_029);
+
+        final int seq = ++pollSeq;
+        final AlertDialog.Builder builder = AcDialog.builder(this)
                 .setTitle(Strings.get(R.string.feedbackcomposeactivity_026))
-                .setMessage(sb.toString())
+                .setMessage(message)
                 .setPositiveButton(Strings.get(R.string.feedbackcomposeactivity_021),
                         new android.content.DialogInterface.OnClickListener() {
                             public void onClick(android.content.DialogInterface d, int w) {
                                 d.dismiss();
+                                pollSeq++;
                                 if (id.length() > 0) {
                                     Intent intent = new Intent(FeedbackComposeActivity.this,
                                             FeedbackDetailActivity.class);
@@ -347,12 +351,70 @@ public class FeedbackComposeActivity extends ThemedActivity {
                         new android.content.DialogInterface.OnClickListener() {
                             public void onClick(android.content.DialogInterface d, int w) {
                                 d.dismiss();
+                                pollSeq++;
                                 finish();
                             }
                         })
                 // 已经提交成功，返回键不该把这一屏留在可编辑状态：再点一次提交就是重复反馈
-                .setCancelable(false)
-                .show();
+                .setCancelable(false);
+        final AlertDialog dialog = builder.create();
+        // 弹窗一旦没了就作废所有在途轮询，不只是靠两个按钮的点击
+        dialog.setOnDismissListener(new android.content.DialogInterface.OnDismissListener() {
+            public void onDismiss(android.content.DialogInterface d) {
+                pollSeq++;
+            }
+        });
+        dialog.show();
+
+        if (!hasSummary && id.length() > 0) pollSummary(id, seq, base, dialog, 0);
+    }
+
+    /**
+     * 轮询摘要直到有结果。20 轮之后停下，用户留在这一屏时不会一直占着网络。
+     * dialog 已关或代次变了就直接退出，不必再改界面。
+     */
+    private void pollSummary(final String id, final int seq, final String base,
+                             final AlertDialog dialog, final int done) {
+        if (seq != pollSeq) return;
+        FeedbackApi.detail(id, new FeedbackApi.Callback() {
+            public void onSuccess(JSONObject data) {
+                if (seq != pollSeq) return;
+                JSONObject item = data.optJSONObject("item");
+                String text = item == null ? "" : item.optString("summary");
+                String state = item == null ? "" : item.optString("summaryState");
+                if (text.length() > 0) {
+                    dialog.setMessage(base + "\n"
+                            + Strings.get(R.string.feedbackcomposeactivity_020, text));
+                    return;
+                }
+                // 服务端明确说生成失败，或轮次用完，都要给一句收尾，不能让「生成中」一直挂着
+                if (!"pending".equals(state)) {
+                    dialog.setMessage(base + "\n"
+                            + Strings.get(R.string.feedbackcomposeactivity_030));
+                    return;
+                }
+                retryPoll(id, seq, base, dialog, done);
+            }
+
+            public void onError(String message) {
+                retryPoll(id, seq, base, dialog, done);
+            }
+        });
+    }
+
+    private void retryPoll(final String id, final int seq, final String base,
+                           final AlertDialog dialog, final int done) {
+        if (seq != pollSeq) return;
+        if (done >= SUMMARY_POLL_TRIES) {
+            dialog.setMessage(base + "\n" + Strings.get(R.string.feedbackcomposeactivity_031));
+            return;
+        }
+        MAIN_HANDLER.postDelayed(new Runnable() {
+            public void run() {
+                if (seq != pollSeq) return;
+                pollSummary(id, seq, base, dialog, done + 1);
+            }
+        }, SUMMARY_POLL_MS);
     }
 
     private int dp(int value) {

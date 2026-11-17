@@ -28,6 +28,7 @@ public class FeedbackActivity extends ThemedActivity {
     private ProgressBar loading;
     private TextView emptyView;
     private TextView pageText;
+    private TextView foldView;
     private Button prevButton;
     private Button nextButton;
 
@@ -35,6 +36,8 @@ public class FeedbackActivity extends ThemedActivity {
     private int page = 1;
     private int pages = 1;
     private boolean loadingNow = false;
+    /** true 表示无关内容被折叠，默认如此；点一下折叠条展开。 */
+    private boolean fold = true;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -45,6 +48,7 @@ public class FeedbackActivity extends ThemedActivity {
         loading = (ProgressBar) findViewById(R.id.feedback_loading);
         emptyView = (TextView) findViewById(R.id.feedback_empty);
         pageText = (TextView) findViewById(R.id.feedback_page);
+        foldView = (TextView) findViewById(R.id.feedback_fold);
         prevButton = (Button) findViewById(R.id.feedback_prev);
         nextButton = (Button) findViewById(R.id.feedback_next);
 
@@ -64,6 +68,14 @@ public class FeedbackActivity extends ThemedActivity {
         findViewById(R.id.feedback_new).setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 startActivityForResult(new Intent(FeedbackActivity.this, FeedbackComposeActivity.class), REQ_NEW);
+            }
+        });
+
+        foldView.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                if (loadingNow) return;
+                fold = !fold;
+                load(page);
             }
         });
 
@@ -96,7 +108,7 @@ public class FeedbackActivity extends ThemedActivity {
         emptyView.setVisibility(View.GONE);
         pageText.setText(R.string.feedbackactivity_007);
 
-        FeedbackApi.list(target, new FeedbackApi.Callback() {
+        FeedbackApi.list(target, fold, new FeedbackApi.Callback() {
             public void onSuccess(JSONObject data) {
                 loadingNow = false;
                 loading.setVisibility(View.GONE);
@@ -110,6 +122,7 @@ public class FeedbackActivity extends ThemedActivity {
                 if (isEmpty) emptyView.setText(R.string.feedbackactivity_006);
                 emptyView.setVisibility(isEmpty ? View.VISIBLE : View.GONE);
                 if (!isEmpty) listView.setSelection(0);
+                renderFold(data.optInt("folded", 0));
                 renderPager();
                 LogUtil.d(TAG, "list loaded page=%d pages=%d count=%d", page, pages, adapter.getCount());
             }
@@ -126,6 +139,21 @@ public class FeedbackActivity extends ThemedActivity {
                 renderPager();
             }
         });
+    }
+
+    /** 折叠条：折叠时提示有多少条被收起并给「展开」，展开后给「收起」。 */
+    private void renderFold(int folded) {
+        int textId;
+        if (fold && folded > 0) textId = R.string.feedbackactivity_016;
+        else if (!fold) textId = R.string.feedbackactivity_017;
+        else textId = 0;
+        if (textId == 0) {
+            foldView.setVisibility(View.GONE);
+            return;
+        }
+        foldView.setText(folded > 0 && fold
+                ? Strings.get(textId, folded) : Strings.get(textId));
+        foldView.setVisibility(View.VISIBLE);
     }
 
     private void renderPager() {
@@ -177,14 +205,20 @@ public class FeedbackActivity extends ThemedActivity {
             if (sum.length() > 0 && !sum.equals(item.optString("body"))) {
                 summary.setText(sum);
                 summary.setVisibility(View.VISIBLE);
+            } else if ("pending".equals(item.optString("summaryState"))) {
+                // 摘要还在生成，占位比空着好：空着会让人以为这条没有摘要
+                summary.setText(R.string.feedbackactivity_015);
+                summary.setVisibility(View.VISIBLE);
             } else {
                 summary.setVisibility(View.GONE);
             }
 
             String id = item.optString("id");
             String time = item.optString("createdAt");
+            String nickname = item.optString("nicknameText");
             int attachments = item.optInt("attachments", 0);
             StringBuilder sb = new StringBuilder();
+            if (nickname.length() > 0) sb.append(nickname).append("  ");
             sb.append(Strings.get(R.string.feedbackactivity_013, id));
             if (time.length() > 0) sb.append("  ").append(time);
             if (attachments > 0) {
