@@ -404,10 +404,10 @@ public class MainActivity extends ThemedActivity {
     }
 
     /**
-     * 开屏公告弹窗。展示全部上线中的公告，多条时带「下一条」翻看。
+     * 开屏公告弹窗。展示全部上线中的公告，多条时正文下方带「上一条 / 下一条」翻看。
      *
      * <p>打开时定位到第一条没读过的，全读过则从第一条开始；翻看时切换正文，
-     * 标题带当前位置（第几条 / 共几条），最后一条时按钮改为「已是最后一条」且不可点。
+     * 标题带当前位置（第几条 / 共几条），到首条或末条时对应按钮变灰不可点。
      * 关闭后本次启动不再弹，下次启动仍会展示。
      */
     private void showNoticeDialog(java.util.List<Notice> list) {
@@ -424,6 +424,10 @@ public class MainActivity extends ThemedActivity {
         final TextView title = (TextView) content.findViewById(R.id.nd_title);
         final TextView body = (TextView) content.findViewById(R.id.nd_body);
         final TextView link = (TextView) content.findViewById(R.id.nd_link);
+        final View pager = content.findViewById(R.id.nd_pager);
+        final android.widget.Button prev = (android.widget.Button) content.findViewById(R.id.nd_prev);
+        final android.widget.Button next = (android.widget.Button) content.findViewById(R.id.nd_next);
+        pager.setVisibility(total > 1 ? View.VISIBLE : View.GONE);
         link.setText(Strings.get(R.string.mainactivity_171));
         link.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
@@ -431,28 +435,35 @@ public class MainActivity extends ThemedActivity {
                 if (url != null && url.length() > 0) openNoticeLink(url);
             }
         });
-
         final android.app.AlertDialog dialog = AcDialog.builder(this)
                 .setTitle(Strings.get(R.string.mainactivity_172))
                 .setView(content)
                 .setPositiveButton(Strings.get(R.string.mainactivity_173), null)
-                .setNegativeButton(Strings.get(R.string.mainactivity_173), null)
                 .create();
+
+        prev.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                if (index[0] > 0) {
+                    index[0]--;
+                    renderNotice(index[0], items, title, body, link, prev, next);
+                    dialog.setTitle(titleOf(index[0], items.size()));
+                }
+            }
+        });
+        next.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                if (index[0] < items.size() - 1) {
+                    index[0]++;
+                    renderNotice(index[0], items, title, body, link, prev, next);
+                    dialog.setTitle(titleOf(index[0], items.size()));
+                }
+            }
+        });
 
         AcDialog.onShow(dialog, new android.content.DialogInterface.OnShowListener() {
             public void onShow(android.content.DialogInterface d) {
-                renderNotice(dialog, index[0], items, title, body, link);
-                android.widget.Button next = dialog.getButton(android.app.AlertDialog.BUTTON_NEGATIVE);
-                if (next != null) {
-                    next.setOnClickListener(new View.OnClickListener() {
-                        public void onClick(View v) {
-                            if (index[0] < items.size() - 1) {
-                                index[0]++;
-                                renderNotice(dialog, index[0], items, title, body, link);
-                            }
-                        }
-                    });
-                }
+                renderNotice(index[0], items, title, body, link, prev, next);
+                dialog.setTitle(titleOf(index[0], items.size()));
             }
         });
         dialog.show();
@@ -463,9 +474,15 @@ public class MainActivity extends ThemedActivity {
         LogUtil.i(TAG, "notice dialog: %d items, start=%d", total, index[0]);
     }
 
-    /** 刷新当前这一条；标题带位置，只有一条时不显示翻页按钮。 */
-    private void renderNotice(android.app.AlertDialog dialog, int i, java.util.List<Notice> items,
-                              TextView title, TextView body, TextView link) {
+    /** 弹窗标题，带当前第几条与总条数。 */
+    private String titleOf(int i, int total) {
+        return Strings.get(R.string.mainactivity_176, i + 1, total);
+    }
+
+    /** 刷新当前这一条；标题带位置，翻页按钮按是否到边界置灰。 */
+    private void renderNotice(int i, java.util.List<Notice> items,
+                              TextView title, TextView body, TextView link,
+                              android.widget.Button prev, android.widget.Button next) {
         final Notice n = items.get(i);
         title.setText(n.title);
         body.setText(n.body);
@@ -474,16 +491,8 @@ public class MainActivity extends ThemedActivity {
         } else {
             link.setVisibility(View.GONE);
         }
-        dialog.setTitle(Strings.get(R.string.mainactivity_176, i + 1, items.size()));
-        android.widget.Button next = dialog.getButton(android.app.AlertDialog.BUTTON_NEGATIVE);
-        if (next != null) {
-            boolean multi = items.size() > 1;
-            next.setVisibility(multi ? View.VISIBLE : View.GONE);
-            next.setText(i >= items.size() - 1
-                    ? Strings.get(R.string.mainactivity_177)
-                    : Strings.get(R.string.mainactivity_175));
-            next.setEnabled(i < items.size() - 1);
-        }
+        prev.setEnabled(i > 0);
+        next.setEnabled(i < items.size() - 1);
     }
 
     /** 跳转链接打不开时提示地址可复制，不让按钮点了没反应。 */
