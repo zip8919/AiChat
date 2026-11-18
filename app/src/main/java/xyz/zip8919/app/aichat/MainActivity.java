@@ -68,6 +68,10 @@ public class MainActivity extends ThemedActivity {
      */
     private static final int VIEWER_TOOLBAR_INSET_PX = 52;
     private static final String PREFS_NAME = "aichat_prefs";
+    /** 公告弹窗本次运行是否已经弹过，避免切后台回来重复弹。 */
+    private boolean noticeShown;
+    /** 公告已读记录是否已按新规则重置过一次。 */
+    private static final String KEY_NOTICE_RESET = "notice_read_reset_v2";
     /** 按 provider 记住「不支持 stream_options」，值是 boolean，缺省 false。 */
     private static final String KEY_USAGE_UNSUPPORTED_PREFIX = "usage_unsupported_";
     /** 首次启动说明与免责声明确认过没有。 */
@@ -385,16 +389,27 @@ public class MainActivity extends ThemedActivity {
     }
 
     /**
-     * 启动拉一次公告，有上线中的就弹出来，全部可翻看。
+     * 启动拉一次公告，有没读过的就弹出来，可逐条翻看。
      *
-     * <p>失败静默：公告是附赠信息，网络不通或服务异常不该打扰用户，也不该阻塞任何操作。
+     * <p>只弹没读过的。老版本每版都弹，已经打扰过一轮，升级后作废旧记录，
+     * 上线公告只再弹一次，之后按「我知道了」的结果判定，不再重复。
+     * 失败静默：公告是附赠信息，网络不通或服务异常不该打扰用户，也不该阻塞任何操作。
      */
     private void fetchNotice() {
         Notice.load(this, new FeedbackApi.Callback() {
             public void onSuccess(org.json.JSONObject data) {
                 java.util.List<Notice> list = Notice.parseList(data);
-                if (list.isEmpty()) return;
-                showNoticeDialog(list);
+                if (list.isEmpty()) {
+                    NoticeReadStore.rememberLast(MainActivity.this, "");
+                    return;
+                }
+                String latest = list.get(0).id;
+                // 老版本的记录不算数：那一版每次启动都弹，已读等于没生效
+                boolean upgraded = !prefs.getBoolean(KEY_NOTICE_RESET, false);
+                if (upgraded) prefs.edit().putBoolean(KEY_NOTICE_RESET, true).commit();
+                java.util.List<Notice> pending = upgraded ? list : NoticeReadStore.unread(MainActivity.this, list);
+                if (pending.isEmpty()) return;
+                showNoticeDialog(pending, latest);
             }
 
             public void onError(String message) {
@@ -404,21 +419,18 @@ public class MainActivity extends ThemedActivity {
     }
 
     /**
-     * 开屏公告弹窗。展示全部上线中的公告，多条时正文下方带「上一条 / 下一条」翻看。
+     * 开屏公告弹窗。只放没读过的公告，多条时正文下方带「上一条 / 下一条」翻看。
      *
-     * <p>打开时定位到第一条没读过的，全读过则从第一条开始；翻看时切换正文，
-     * 标题带当前位置（第几条 / 共几条），到首条或末条时对应按钮变灰不可点。
-     * 关闭后本次启动不再弹，下次启动仍会展示。
+     * <p>标题带当前位置（第几条 / 共几条），到首条或末条时对应按钮变灰不可点。
+     * 点「我知道了」才记为已读，直接返回或杀掉应用视为没看，下次继续弹。
+     * 弹出后本次运行内不再重复弹。
      */
-    private void showNoticeDialog(java.util.List<Notice> list) {
-        if (isFinishing() || list.isEmpty()) return;
+    private void showNoticeDialog(final java.util.List<Notice> list, final String latestId) {
+        if (isFinishing() || list.isEmpty() || noticeShown) return;
+        noticeShown = true;
         final java.util.List<Notice> items = list;
         final int total = items.size();
-        // 打开时定位到第一条没读过的，全读过则从第一条开始
         final int[] index = new int[]{0};
-        for (int i = 0; i < total; i++) {
-            if (!Notice.isRead(this, items.get(i).id)) { index[0] = i; break; }
-        }
 
         final View content = getLayoutInflater().inflate(R.layout.view_notice_detail, null);
         final TextView title = (TextView) content.findViewById(R.id.nd_title);
@@ -435,10 +447,19 @@ public class MainActivity extends ThemedActivity {
                 if (url != null && url.length() > 0) openNoticeLink(url);
             }
         });
+
         final android.app.AlertDialog dialog = AcDialog.builder(this)
                 .setTitle(Strings.get(R.string.mainactivity_172))
                 .setView(content)
-                .setPositiveButton(Strings.get(R.string.mainactivity_173), null)
+                .setPositiveButton(Strings.get(R.string.mainactivity_173), new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface d, int w) {
+                        // 点「我知道了」才记为已读并写盘，下次启动不再弹这几条
+                        for (int i = 0; i < items.size(); i++) {
+                            NoticeReadStore.markRead(MainActivity.this, items.get(i).id);
+                        }
+                        NoticeReadStore.rememberLast(MainActivity.this, latestId);
+                    }
+                })
                 .create();
 
         prev.setOnClickListener(new View.OnClickListener() {
@@ -467,11 +488,7 @@ public class MainActivity extends ThemedActivity {
             }
         });
         dialog.show();
-        // 弹出即算送达：本次启动不再重复弹，下次启动仍会展示第一条未读
-        for (int i = 0; i < total; i++) {
-            Notice.markRead(this, items.get(i).id);
-        }
-        LogUtil.i(TAG, "notice dialog: %d items, start=%d", total, index[0]);
+        LogUtil.i(TAG, "notice dialog: %d items", total);
     }
 
     /** 弹窗标题，带当前第几条与总条数。 */
