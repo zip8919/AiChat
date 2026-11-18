@@ -259,12 +259,28 @@ public class WebSearchTool {
      */
     public static String executeTool(ProviderInfo provider, String toolName, JSONObject args,
             String originalQuestion, RequestGuard guard, boolean useTavily, String tavilyKey) {
+        return executeTool(provider, toolName, args, originalQuestion, guard, useTavily,
+                tavilyKey, true);
+    }
+
+    /**
+     * 带「联网开关」的执行入口。
+     *
+     * <p>{@code webEnabled=false} 时搜索类工具一律回「联网搜索已关闭」，且<b>在检查
+     * 密钥之前</b>判断：以前关掉联网后模型若仍发起搜索（历史里带过工具调用、
+     * 或端点在无工具时自己拼了一个），会走到密钥检查，报出「未配置 Key」——
+     * 用户明明是按需关掉了搜索，却被告知要去填密钥，指向完全错误。
+     */
+    public static String executeTool(ProviderInfo provider, String toolName, JSONObject args,
+            String originalQuestion, RequestGuard guard, boolean useTavily, String tavilyKey,
+            boolean webEnabled) {
         try {
             // 本地工具优先处理：不需要 provider / Key，也不受搜索开关影响
             if (TOOL_TIME.equals(toolName)) {
                 return currentTimeResult();
             }
             if (TOOL_SEARCH.equals(toolName)) {
+                if (!webEnabled) return error(webOffResult());
                 String query = args == null ? "" : args.optString("query", "").trim();
                 if (query.length() == 0) return error("搜索词不能为空");
                 if (query.length() > 128) query = query.substring(0, 128);
@@ -285,6 +301,7 @@ public class WebSearchTool {
                 return search(provider, query, count, ori, guard);
             }
             if (TOOL_IMAGE.equals(toolName)) {
+                if (!webEnabled) return error(webOffResult());
                 String query = args == null ? "" : args.optString("query", "").trim();
                 if (query.length() == 0) return error("图片搜索词不能为空");
                 if (query.length() > 128) query = query.substring(0, 128);
@@ -302,6 +319,7 @@ public class WebSearchTool {
                 return TavilyTool.imageSearch(query, count, tavilyKey, guard);
             }
             if (TOOL_FETCH.equals(toolName)) {
+                if (!webEnabled) return error(webOffResult());
                 String url = args == null ? "" : args.optString("url", "").trim();
                 if (!isValidHttpUrl(url)) return error("抓取地址必须是合法的 http/https URL");
                 if (useTavily) {
@@ -320,6 +338,16 @@ public class WebSearchTool {
             LogUtil.e(TAG, "executeTool failed: " + e.getMessage(), e);
             return error("联网工具执行失败: " + messageOf(e));
         }
+    }
+
+    /**
+     * 联网关闭时的工具结果：告诉模型「不是坏了，是用户关掉了」，并给出下一步。
+     *
+     * <p>这是发给模型看的文本，属于工具返回内容的既有例外（不进资源文件的只有
+     * 结果本身；用户可见的那一句在 {@code chatstreamrunner_018} 里）。
+     */
+    static String webOffResult() {
+        return Strings.get(R.string.chatstreamrunner_017);
     }
 
     private static String search(ProviderInfo provider, String query, int count,

@@ -2207,4 +2207,16 @@
     <string name="noticeactivity_011">正在加载公告</string>
     <string name="noticeactivity_012">重试</string>
     <string name="aboutactivity_025">历史公告</string>
+    <string name="thinkinglevels_007">关闭</string>
+    <string name="mainactivity_180">执行结果</string>
+    <string name="chatstreamrunner_017">联网搜索已关闭，未执行这次搜索。需要联网时，在设置里打开联网搜索再让我查。</string>
+    <string name="chatstreamrunner_018">联网搜索已关闭，联网搜索不可用</string>
+    <string name="modelconfigactivity_152">可用</string>
+    <string name="modelconfigactivity_158">可用思考档位：%1$s</string>
+    <string name="modelconfigactivity_159">思考档位：未探测，按全局档位下发</string>
+    <string name="modelconfigactivity_160">思考档位：不支持</string>
+    <string name="modelconfigactivity_161">图片输入：支持</string>
+    <string name="modelconfigactivity_162">图片输入：不支持</string>
+    <string name="modelconfigactivity_163">关闭</string>
+    <string name="modelconfigactivity_164">\n\n探测明细：\n</string>
 </resources>

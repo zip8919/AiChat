@@ -47,6 +47,10 @@ final class RendererAssets {
             "display:inline-block;background:#E3F2FD;" +
             "padding:8px 12px;border-radius:12px;max-width:85%;text-align:left;}" +
             ".msg.ai{border-top:1px solid #e0e0e0;padding-top:12px;margin-top:8px;}" +
+            // overflow:hidden 只裁不滚：内容的真实宽度仍参与外层布局，
+            // 一旦里面出现超宽元素（长代码行、宽表格），body 的排版宽度会被顶大，
+            // 页面上就出现「代码块溢出到屏幕外」。overflow-x:hidden 同理成立，
+            // 真正的横向滚动交给 pre 与 .table-scroll 自己。
             ".msg.ai .content{max-width:100%;}" +
             "h1,h2,h3,h4,h5,h6{margin:12px 0 6px;font-weight:bold;line-height:1.3;}" +
             "h1{font-size:1.6em;border-bottom:2px solid #eee;padding-bottom:4px;}" +
@@ -62,14 +66,22 @@ final class RendererAssets {
             "padding:1px 4px;border-radius:3px;font-size:0.9em;color:#C7254E;}" +
             // 顶部不再靠 pre 的 padding 给按钮留位置。
             // 语言标签 / 复制 / 保存 都是绝对定位，压在 pre 的 padding 上——
-            // 只要主题 CSS 里写了 pre{padding:8px}（很常见），按钮就正好盖住第一行代码。
+            // 只要主题层写了 pre{padding:8px}（很常见），按钮就正好盖住第一行代码。
             // 现在改由流内的 .code-head 撑出高度，padding 被主题改小也压不到正文。
-            "pre{position:relative;background:#f6f8fa;border:1px solid #e1e4e8;" +
+            // pre 的内容宽度必须由自己决定，不能被外层撑开：正文根节点是 body，
+            // 一条很长的代码行会让 pre 的「内容宽」把整个文档的宽度顶出去，
+            // 表现为代码块右侧溢出到屏幕外、整页可以左右拖动。width:auto + max-width:100%
+            // 让 pre 老实按容器宽排版，超长的行在内部横向滚动。
+            "pre{position:relative;display:block;background:#f6f8fa;border:1px solid #e1e4e8;" +
             "border-radius:4px;padding:0 12px 10px 12px;margin:8px 0;" +
-            "overflow-x:auto;-webkit-overflow-scrolling:touch;}" +
+            "width:auto;max-width:100%;overflow-x:auto;overflow-y:hidden;" +
+            "-webkit-overflow-scrolling:touch;}" +
             "pre .code-head{display:block;height:28px;font-size:0;line-height:0;}" +
+            // display:inline-block + min-width:100%：代码块按最长行决定滚动宽度，
+            // 但短代码也不会缩成一条；white-space:pre 保证缩进与换行原样保留。
             "pre code{background:transparent;padding:0;color:#333;white-space:pre;" +
-            "word-wrap:normal;font-size:13px;line-height:1.5;display:block;}" +
+            "word-wrap:normal;display:inline-block;min-width:100%;vertical-align:top;" +
+            "font-size:13px;line-height:1.5;}" +
             "pre .lang-tag{position:absolute;top:6px;left:12px;font-size:10px;line-height:14px;" +
             "color:#999;font-family:Roboto,sans-serif;}" +
             "pre .copy-btn{position:absolute;top:4px;right:8px;padding:2px 8px;line-height:16px;" +
@@ -87,10 +99,12 @@ final class RendererAssets {
             "pre .run-btn{position:absolute;top:4px;right:104px;padding:2px 8px;line-height:16px;" +
             "font-size:11px;background:#fff3e0;border:1px solid #ffcc80;border-radius:3px;" +
             "color:#e65100;font-family:Roboto,sans-serif;}" +
+            // 表格同样不能把文档撑宽：.table-scroll 自身限宽，宽表格在容器内滑动。
+            // 以前 table 直接以内容宽参与布局，列一多整页就被顶宽，代码块跟着跑出屏幕。
             "table{border-collapse:collapse;margin:8px 0;font-size:13px;white-space:nowrap;}" +
             "th,td{border:1px solid #ddd;padding:6px 10px;text-align:left;}" +
             "th{background:#f0f0f0;font-weight:bold;}" +
-            ".table-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;" +
+            ".table-scroll{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;" +
             "-webkit-tap-highlight-color:rgba(100,180,255,0.3);}" +
             "a{color:#2196F3;text-decoration:none;}" +
             "img{max-width:100%;height:auto;}" +
@@ -755,7 +769,23 @@ final class RendererAssets {
             "b=c.querySelector('.stream-base');t=c.querySelector('.stream-tail');" +
             "if(keep)b.innerHTML=keep;}" +
             "if(html)b.innerHTML=html;" +
+            // 关掉实时渲染时，base 重建必须带上此前已经流出去的正文：同一轮的正文
+            // 在调用工具前是纯文本 tail，调用结束后若只重渲染「卡片 + 新一轮正文」，
+            // 那一段会被直接从屏幕上抹掉（切走再回来才对得上）。
+            "var tw=window.__takeTailText(t);" +
+            "if(tw&&tw.length)b.appendChild(tw);" +
             "applyToolStates(b);addCopyBtns(b);clearStatus();};" +
+            // 取出 tail 里的正文纯文本（含实时卡片容器里的），搬成 base 里的一个块。
+            // 结构约定见 liveTools：正文按出现顺序被 .tool-live 分成若干段。
+            "window.__takeTailText=function(t){" +
+            "if(!t)return null;" +
+            "var out='',nodes=t.childNodes;" +
+            "for(var i=0;i<nodes.length;i++){var n=nodes[i];" +
+            "if(n.className&&(''+n.className).indexOf('tool-live')>=0)continue;" +
+            "var s=n.textContent||'';if(s.length)out+=(out?'\n':'')+s;}" +
+            "if(!out.length)return null;" +
+            "var pw=document.createElement('div');pw.className='stream-plain';pw.textContent=out;" +
+            "return pw;};" +
             // 增量追加：只把「本轮新增的那几张卡片」解析后挂到 base 末尾。
             // 与 streamBase 的区别是不动已有子树——已经渲染好的公式图片、代码高亮、
             // 展开状态全部原样保留，也不重新解析几万字的历史 markdown。
@@ -784,6 +814,9 @@ final class RendererAssets {
             "window.streamCommitTail=function(){" +
             // commit 已把本轮 tail 整体搬进 base，hold 期间缓存的那一帧也在其中。
             // 不清掉的话，抬手后 __flushPending 会把旧 tail 再写回新 tail，正文重复一遍。
+            // 只清「帧缓存」，不清纯文本前缀：前缀就是上一轮已经流出去的正文，
+            // 它马上就要被搬进 base；清掉会让屏幕上少一段（下一轮重渲染时才补回来，
+            // 中间那段空白用户是看得见的）。
             "window.__pendingTailHtml=null;window.__pendingTailText=null;window.__pendingBaseHtml=null;" +
             "window.__endHold();" +
             "var ms=document.querySelectorAll('.msg.ai .content');" +
@@ -806,6 +839,11 @@ final class RendererAssets {
             "if(tx&&tx.length){var pw=document.createElement('div');" +
             "pw.className='stream-plain';pw.textContent=tx;b.appendChild(pw);}" +
             "t.innerHTML='';}" +
+            // 关掉实时渲染时的临时卡片容器：卡片内容搬进 base，容器本身丢掉，
+            // 否则下一轮 base 重建时它会被当成「正在进行的卡片」整段替换，
+            // 界面上的卡片就会闪一下、并且跟着下一个工具的进度一起消失。
+            "var live=t.querySelector?t.querySelector('.tool-live'):null;" +
+            "if(live&&live.parentNode)live.parentNode.removeChild(live);" +
             "while(t.firstChild)b.appendChild(t.firstChild);" +
             "t.className='stream-tail';t.innerHTML='';" +
             // 搬进来的 tail 节点按其 key 恢复展开状态（状态存在 __thinkOpen 里）
@@ -856,6 +894,12 @@ final class RendererAssets {
             "t.className='stream-tail';t.innerHTML=html;window.__restoreScroll(t,s);" +
             "clearStatus();addCopyBtns(t);applyToolStates(t);smartScrollToBottom();};" +
             "window.__applyTailText=function(t,text){var s=window.__snapScroll(t);" +
+            // tail 里已经有实时写入的工具卡片时，纯文本帧会把它们整段抹掉——
+            // 关掉实时渲染时「工具调用的卡片一闪就没了」就是这个原因。
+            // 有卡片时只更新卡片之后那段纯文本，没有卡片才退回原来的整段纯文本。
+            "if(t.querySelector('.tool-live')){" +
+            "window.__setLiveText(t,text);window.__restoreScroll(t,s);" +
+            "clearStatus();smartScrollToBottom();return;}" +
             // 空文本不挂 plain：挂了就会画出一个孤零零的流式光标 ▍
             "t.className=text?'stream-tail plain':'stream-tail';t.textContent=text;" +
             "window.__restoreScroll(t,s);" +
@@ -918,6 +962,50 @@ final class RendererAssets {
             "window.__guardHold();" +
             "if(window.__holdRender){window.__pendingTailText=text;window.__pendingTailHtml=null;return;}" +
             "window.__applyTailText(t,text);};" +
+            // 工具进行中的实时卡片（关掉实时渲染时专用）。
+            //
+            // 关掉实时渲染后 tail 走纯文本、base 只在轮次切换时才重渲染，也就是说
+            // 「模型正在调工具」这一段时间屏幕上是空的，直到这一轮结束才一次性出现
+            // 全部卡片；中途失败的轮次更是什么都留不下。这里提供一个临时容器，
+            // 用纯 DOM 往 tail 里写卡片：不解析 markdown，开销远小于实时渲染，
+            // 轮次结束时由 streamCommitTail 一并搬进 base。
+            "window.liveTools=function(html,reset){" +
+            "if(!html||html.length===0)return;" +
+            "var ms=document.querySelectorAll('.msg.ai .content');" +
+            "if(ms.length===0)return;" +
+            "var c=ms[ms.length-1];" +
+            "var t=c.querySelector('.stream-tail');" +
+            "if(!t){var b=c.querySelector('.stream-base');var keep=b?b.innerHTML:c.innerHTML;" +
+            "c.className='content';" +
+            "c.innerHTML='<div class=\"stream-base\"></div><div class=\"stream-tail\"></div>';" +
+            "c.querySelector('.stream-base').innerHTML=keep;" +
+            "t=c.querySelector('.stream-tail');}" +
+            "window.__guardHold();" +
+            "if(window.__holdRender)return;" +
+            // 这一轮的临时卡片单独包一层，整段替换而不去碰已经渲染好的历史卡片
+            "if(reset){var olds=t.querySelector('.tool-live');" +
+            // 只清这一轮临时写入的卡片，不碰已经渲染进 tail 的历史卡片
+            "if(olds&&olds.parentNode)olds.parentNode.removeChild(olds);" +
+            "var wrap=document.createElement('div');wrap.className='tool-live';t.appendChild(wrap);" +
+            "t=wrap;}" +
+            "var d=document.createElement('div');d.innerHTML=html;" +
+            "var frag=document.createDocumentFragment();" +
+            "while(d.firstChild)frag.appendChild(d.firstChild);" +
+            "t.appendChild(frag);" +
+            "var host=t.parentNode||t;" +
+            "applyToolStates(host);smartScrollToBottom();};" +
+            // 卡片之后那段「本轮正文」的唯一载体。结构固定为：
+            //   tail > .stream-plain(正文纯文本) | .tool-live(卡片) ... | .stream-plain(正文)
+            // 两段 .stream-plain 分开存，是因为卡片夹在中间：把它们合成一段就没有
+            // 地方插卡片，实测表现是卡片被正文顶到气泡外面。
+            "window.__setLiveText=function(t,text){" +
+            "if(!text||text.length===0)return;" +
+            "var ps=t.querySelectorAll('.stream-plain');" +
+            "var last=ps.length?ps[ps.length-1]:null;" +
+            // 只有最后一个节点是纯文本时才续写，否则说明卡片之后还没有正文段落
+            "if(last&&last===t.lastElementChild){last.textContent=text;return;}" +
+            "var pw=document.createElement('div');pw.className='stream-plain';pw.textContent=text;" +
+            "t.appendChild(pw);};" +
             // 写入失败卡片（工具轮次中途失败时挂在 AI 气泡下方，支持从出错处重试）
             "window.markAssistantFailed=function(idx,cardHtml){" +
             "var all=document.querySelectorAll('.msg.ai');" +
