@@ -1,9 +1,6 @@
 package xyz.zip8919.app.aichat;
 
 import android.content.ActivityNotFoundException;
-import android.content.ClipData;
-import android.content.ClipboardManager;
-import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.net.Uri;
@@ -119,18 +116,13 @@ public class NoticeActivity extends ThemedActivity {
                     .setMessage(url)
                     .setPositiveButton(Strings.get(R.string.noticeactivity_008), new DialogInterface.OnClickListener() {
                         public void onClick(DialogInterface d, int w) {
-                            copyText(url);
+                            if (ClipUtil.copy(NoticeActivity.this, url)) {
+                                AcToast.show(NoticeActivity.this, Strings.get(R.string.noticeactivity_010));
+                            }
                         }
                     })
                     .show();
         }
-    }
-
-    private void copyText(String text) {
-        ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-        if (cm == null) return;
-        cm.setPrimaryClip(ClipData.newPlainText("aichat", text));
-        AcToast.show(this, Strings.get(R.string.noticeactivity_010));
     }
 
     private final class NoticeAdapter extends BaseAdapter {

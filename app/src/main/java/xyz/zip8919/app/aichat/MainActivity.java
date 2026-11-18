@@ -385,17 +385,16 @@ public class MainActivity extends ThemedActivity {
     }
 
     /**
-     * 启动拉一次公告，有未读的最新一条就弹出来。
+     * 启动拉一次公告，有上线中的就弹出来，全部可翻看。
      *
      * <p>失败静默：公告是附赠信息，网络不通或服务异常不该打扰用户，也不该阻塞任何操作。
-     * 已读记录在 {@link Notice#markRead}，同一条只弹一次。
      */
     private void fetchNotice() {
         Notice.load(this, new FeedbackApi.Callback() {
             public void onSuccess(org.json.JSONObject data) {
-                final Notice n = Notice.firstUnread(MainActivity.this, Notice.parseList(data));
-                if (n == null) return;
-                showNoticeDialog(n);
+                java.util.List<Notice> list = Notice.parseList(data);
+                if (list.isEmpty()) return;
+                showNoticeDialog(list);
             }
 
             public void onError(String message) {
@@ -404,37 +403,87 @@ public class MainActivity extends ThemedActivity {
         });
     }
 
-    private void showNoticeDialog(final Notice n) {
-        if (isFinishing()) return;
+    /**
+     * 开屏公告弹窗。展示全部上线中的公告，多条时带「下一条」翻看。
+     *
+     * <p>打开时定位到第一条没读过的，全读过则从第一条开始；翻看时切换正文，
+     * 标题带当前位置（第几条 / 共几条），最后一条时按钮改为「已是最后一条」且不可点。
+     * 关闭后本次启动不再弹，下次启动仍会展示。
+     */
+    private void showNoticeDialog(java.util.List<Notice> list) {
+        if (isFinishing() || list.isEmpty()) return;
+        final java.util.List<Notice> items = list;
+        final int total = items.size();
+        // 打开时定位到第一条没读过的，全读过则从第一条开始
+        final int[] index = new int[]{0};
+        for (int i = 0; i < total; i++) {
+            if (!Notice.isRead(this, items.get(i).id)) { index[0] = i; break; }
+        }
+
         final View content = getLayoutInflater().inflate(R.layout.view_notice_detail, null);
-        TextView title = (TextView) content.findViewById(R.id.nd_title);
-        TextView body = (TextView) content.findViewById(R.id.nd_body);
-        TextView link = (TextView) content.findViewById(R.id.nd_link);
+        final TextView title = (TextView) content.findViewById(R.id.nd_title);
+        final TextView body = (TextView) content.findViewById(R.id.nd_body);
+        final TextView link = (TextView) content.findViewById(R.id.nd_link);
+        link.setText(Strings.get(R.string.mainactivity_171));
+        link.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                String url = items.get(index[0]).link;
+                if (url != null && url.length() > 0) openNoticeLink(url);
+            }
+        });
+
+        final android.app.AlertDialog dialog = AcDialog.builder(this)
+                .setTitle(Strings.get(R.string.mainactivity_172))
+                .setView(content)
+                .setPositiveButton(Strings.get(R.string.mainactivity_173), null)
+                .setNegativeButton(Strings.get(R.string.mainactivity_173), null)
+                .create();
+
+        AcDialog.onShow(dialog, new android.content.DialogInterface.OnShowListener() {
+            public void onShow(android.content.DialogInterface d) {
+                renderNotice(dialog, index[0], items, title, body, link);
+                android.widget.Button next = dialog.getButton(android.app.AlertDialog.BUTTON_NEGATIVE);
+                if (next != null) {
+                    next.setOnClickListener(new View.OnClickListener() {
+                        public void onClick(View v) {
+                            if (index[0] < items.size() - 1) {
+                                index[0]++;
+                                renderNotice(dialog, index[0], items, title, body, link);
+                            }
+                        }
+                    });
+                }
+            }
+        });
+        dialog.show();
+        // 弹出即算送达：本次启动不再重复弹，下次启动仍会展示第一条未读
+        for (int i = 0; i < total; i++) {
+            Notice.markRead(this, items.get(i).id);
+        }
+        LogUtil.i(TAG, "notice dialog: %d items, start=%d", total, index[0]);
+    }
+
+    /** 刷新当前这一条；标题带位置，只有一条时不显示翻页按钮。 */
+    private void renderNotice(android.app.AlertDialog dialog, int i, java.util.List<Notice> items,
+                              TextView title, TextView body, TextView link) {
+        final Notice n = items.get(i);
         title.setText(n.title);
         body.setText(n.body);
         if (n.link != null && n.link.length() > 0) {
             link.setVisibility(View.VISIBLE);
-            link.setText(Strings.get(R.string.mainactivity_171));
-            link.setOnClickListener(new View.OnClickListener() {
-                public void onClick(View v) {
-                    openNoticeLink(n.link);
-                }
-            });
+        } else {
+            link.setVisibility(View.GONE);
         }
-
-        AcDialog.builder(this)
-                .setTitle(Strings.get(R.string.mainactivity_172))
-                .setView(content)
-                .setPositiveButton(Strings.get(R.string.mainactivity_173), new DialogInterface.OnClickListener() {
-                    public void onClick(DialogInterface d, int w) {
-                        // 已读在下面统一记录，这里只需关闭
-                        d.dismiss();
-                    }
-                })
-                .show();
-        // 弹出即算送达：无论点按钮、返回键还是点外部关闭，都不再重复弹
-        Notice.markRead(this, n.id);
-        LogUtil.i(TAG, "notice shown: %s", n.id);
+        dialog.setTitle(Strings.get(R.string.mainactivity_176, i + 1, items.size()));
+        android.widget.Button next = dialog.getButton(android.app.AlertDialog.BUTTON_NEGATIVE);
+        if (next != null) {
+            boolean multi = items.size() > 1;
+            next.setVisibility(multi ? View.VISIBLE : View.GONE);
+            next.setText(i >= items.size() - 1
+                    ? Strings.get(R.string.mainactivity_177)
+                    : Strings.get(R.string.mainactivity_175));
+            next.setEnabled(i < items.size() - 1);
+        }
     }
 
     /** 跳转链接打不开时提示地址可复制，不让按钮点了没反应。 */
@@ -444,9 +493,14 @@ public class MainActivity extends ThemedActivity {
         } catch (Exception e) {
             LogUtil.w(TAG, "openNoticeLink failed: %s", e.getMessage());
             AcDialog.builder(this)
-                    .setTitle(Strings.get(R.string.mainactivity_174))
+                    .setTitle(Strings.get(R.string.mainactivity_178))
                     .setMessage(url)
-                    .setPositiveButton(Strings.get(R.string.mainactivity_175), null)
+                    .setPositiveButton(Strings.get(R.string.mainactivity_179), new DialogInterface.OnClickListener() {
+                        public void onClick(DialogInterface d, int w) {
+                            ClipUtil.copy(MainActivity.this, url);
+                            AcToast.show(MainActivity.this, Strings.get(R.string.noticeactivity_010));
+                        }
+                    })
                     .show();
         }
     }

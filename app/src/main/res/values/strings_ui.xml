@@ -2175,8 +2175,12 @@
     <string name="mainactivity_171">查看详情</string>
     <string name="mainactivity_172">公告</string>
     <string name="mainactivity_173">我知道了</string>
-    <string name="mainactivity_174">打不开链接</string>
-    <string name="mainactivity_175">复制地址</string>
+    <string name="mainactivity_174">上一条</string>
+    <string name="mainactivity_175">下一条</string>
+    <string name="mainactivity_176">公告（%1$d/%2$d）</string>
+    <string name="mainactivity_177">已是最后一条</string>
+    <string name="mainactivity_178">打不开链接</string>
+    <string name="mainactivity_179">复制地址</string>
     <string name="noticeactivity_001">历史公告</string>
     <string name="noticeactivity_002">公告详情</string>
     <string name="noticeactivity_003">关闭</string>
