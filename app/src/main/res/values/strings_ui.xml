@@ -347,6 +347,13 @@
     <string name="feedbackcomposeactivity_030">这条没有生成摘要，详情里可以看正文。</string>
     <string name="feedbackcomposeactivity_031">摘要还在生成，稍后到详情里看。</string>
     <string name="feedbackcomposeactivity_032">昵称（可留空，留空显示为匿名）</string>
+    <string name="feedbackcomposeactivity_033">撤销没成功，请稍后重试</string>
+    <string name="feedbackcomposeactivity_034">撤销提交</string>
+    <string name="feedbackcomposeactivity_035">正在撤销…</string>
+    <string name="feedbackcomposeactivity_036">邮件还没发出，撤销后可以带着内容重新编辑。</string>
+    <string name="feedbackcomposeactivity_037">已撤销，内容已填回，改完可以重新提交。</string>
+    <string name="feedbackcomposeactivity_038">撤销时间已过，这条反馈已经发出，可以在详情里查看。</string>
+    <string name="feedbackcomposeactivity_039">附件没能取回，需要的话请重新选择。</string>
     <string name="feedbackdetailactivity_001">反馈详情</string>
     <string name="feedbackdetailactivity_002">返回</string>
     <string name="feedbackdetailactivity_003">编号</string>

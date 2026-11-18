@@ -74,6 +74,51 @@ final class FeedbackApi {
         get(path, callback);
     }
 
+    /**
+     * 撤销刚提交的反馈。凭证是提交时拿到的编号与令牌，不需要登录。
+     * 成功返回里带 draft，就是要填回编辑页的原始内容与附件地址。
+     */
+    static void undo(String id, String token, Callback callback) {
+        final String path = "/api/feedback/undo?id=" + Uri.encode(id) + "&token=" + Uri.encode(token);
+        new Thread(new Runnable() {
+            public void run() {
+                HttpURLConnection conn = null;
+                try {
+                    conn = (HttpURLConnection) new URL(BASE + path).openConnection();
+                    conn.setRequestMethod("POST");
+                    conn.setDoOutput(true);
+                    conn.setConnectTimeout(CONNECT_TIMEOUT);
+                    conn.setReadTimeout(READ_TIMEOUT);
+                    conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+                    conn.setRequestProperty("Accept", "application/json");
+                    conn.setRequestProperty("User-Agent", "AiChat-Android");
+                    byte[] body = "{}".getBytes("UTF-8");
+                    conn.setFixedLengthStreamingMode(body.length);
+                    OutputStream out = conn.getOutputStream();
+                    try {
+                        out.write(body);
+                    } finally {
+                        out.close();
+                    }
+                    int code = conn.getResponseCode();
+                    String text = readAll(code >= 200 && code < 300
+                            ? conn.getInputStream() : conn.getErrorStream());
+                    JSONObject data = new JSONObject(text);
+                    if (code < 200 || code >= 300 || !data.optBoolean("ok")) {
+                        postError(callback, data.optString("message", Strings.get(R.string.feedbackcomposeactivity_033)));
+                        return;
+                    }
+                    postSuccess(callback, data);
+                } catch (Exception e) {
+                    LogUtil.w(TAG, "undo %s failed: %s", id, e.getMessage());
+                    postError(callback, Strings.get(R.string.feedbackcomposeactivity_033));
+                } finally {
+                    if (conn != null) conn.disconnect();
+                }
+            }
+        }).start();
+    }
+
     static void submit(Context context, final String title, final String body,
                        final String nickname, final String contact,
                        final String appVersion, final String device,
