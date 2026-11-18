@@ -486,6 +486,10 @@ public class ModelConfigActivity extends ThemedActivity {
                 if (modelSelection) {
                     modelAdapter.toggle(r.key);
                     updateModelSelectionBar();
+                } else if (isProbed(r.key)) {
+                    // 探测过的模型：点一行先摊开结论。探测到底探出了什么，不该只藏在
+                    // 编辑页的一行小字里；未探测的照旧直接进编辑页，不多一步。
+                    showModelSummary(r.key);
                 } else {
                     openModelEditor(r.key, null);
                 }
@@ -673,9 +677,18 @@ public class ModelConfigActivity extends ThemedActivity {
                 sub.append(Strings.get(R.string.modelconfigactivity_050));
             }
             String badge;
-            if (cfg.isDefaultModel(m)) badge = Strings.get(R.string.modelconfigactivity_051);
-            else if (m.supportsVision) badge = Strings.get(R.string.modelconfigactivity_052);
-            else badge = "";
+            // 徽标依次回答：它是不是默认模型 → 探测下来能不能用 → 支持哪些能力。
+            // 探测通过的模型显示「可用」：以前这里没有这一档，探完徽标还是空，
+            // 用户以为探测没生效。默认模型仍显示「默认」，它的档位明细在同行的副标题里。
+            if (cfg.isDefaultModel(m)) {
+                badge = Strings.get(R.string.modelconfigactivity_051);
+            } else if (m.levelsProbed()) {
+                badge = Strings.get(R.string.modelconfigactivity_152);
+            } else if (m.supportsVision) {
+                badge = Strings.get(R.string.modelconfigactivity_052);
+            } else {
+                badge = "";
+            }
             // 行键用唯一键：同名不同提供商的两条要能分别勾选、分别打开编辑页
             rows.add(new ConfigRowAdapter.Row(m.key(), m.label(), sub.toString(), badge));
         }
@@ -995,7 +1008,8 @@ public class ModelConfigActivity extends ThemedActivity {
         new Thread(new Runnable() {
             public void run() {
                 for (int i = 0; i < targets.size(); i++) {
-                    if (!probing.get()) break;
+                    // onDestroy 会把标记置 false：页面已经没了，后面的模型不必再发请求
+                    if (!probing.get() || isFinishing()) break;
                     final String key = targets.get(i);
                     final ModelInfo m = cfg.findModel(key);
                     if (m == null) continue;
@@ -1025,11 +1039,17 @@ public class ModelConfigActivity extends ThemedActivity {
                         m.supportsThinking = false;
                         m.probedAt = System.currentTimeMillis();
                     }
+                    cfg.bumpProbeRevision();
                     cfg.save();
-                    reportBadge(key, probeBadge(rep), !rep.ok() || rep.levels.isEmpty());
+                    String badge = probeBadge(rep);
+                    reportBadge(key, badge, !rep.ok() || rep.levels.isEmpty());
                     if (!rep.ok() || rep.levels.isEmpty()) {
                         fail.incrementAndGet();
                         details.add(m.label() + "：" + (rep.ok() ? Strings.get(R.string.modelconfigactivity_102) : rep.error));
+                    } else {
+                        // 成功的也留一行：结束后用户要能一眼看到每个模型探出了什么，
+                        // 而不是只看到一份失败清单，再逐行点进去找。
+                        details.add(m.label() + "：" + badge);
                     }
                     probeDone++;
                     final int done = probeDone;
@@ -1048,8 +1068,9 @@ public class ModelConfigActivity extends ThemedActivity {
                 probing.set(false);
                 ui.post(new Runnable() {
                     public void run() {
-                        modelProbe.setText(Strings.get(R.string.modelconfigactivity_104));
+                        // 页面已销毁：不能再弹汇总窗，但列表刷新留给重新进入时重建
                         if (isFinishing()) return;
+                        modelProbe.setText(Strings.get(R.string.modelconfigactivity_104));
                         modelStatus.setText(Strings.get(stopped ? R.string.modelconfigactivity_150 : R.string.modelconfigactivity_151,
                                 probeTotal, fail.get()));
                         reloadModels();
@@ -1070,6 +1091,43 @@ public class ModelConfigActivity extends ThemedActivity {
                     public void onClick(DialogInterface d, int w) { runBatchProbe(targets, n); }
                 })
                 .setNegativeButton(Strings.get(R.string.modelconfigactivity_116), null)
+                .show();
+    }
+
+    /** 这个模型是否已有可查看的探测结论。 */
+    private boolean isProbed(String key) {
+        ModelInfo m = cfg.findModel(key);
+        return m != null && (m.levelsProbed() || m.supportsVision || m.probedAt > 0);
+    }
+
+    /**
+     * 点一行时先给出这台模型的实际能力：思考档位明细、图片输入、最近一次探测时间。
+     *
+     * <p>批量探测的结论只写进副标题和徽标，副标题在窄屏上会被省略号截断，
+     * 徽标只报最高档——用户点进来才发现「看不到结果」。这个弹窗把完整结论摊开，
+     * 并提供「编辑配置」与「继续探测」两个出口。
+     */
+    private void showModelSummary(final String key) {
+        final ModelInfo m = cfg.findModel(key);
+        if (m == null) return;
+        StringBuilder sb = new StringBuilder();
+        sb.append(m.name).append(" · ").append(cfg.providerLabel(m.provider)).append("\n\n");
+        if (m.levelsProbed()) {
+            sb.append(Strings.get(R.string.modelconfigactivity_158, ThinkingLevels.describe(m.levelList())));
+            if (m.levelsUnverifiable) sb.append(Strings.get(R.string.modelconfigactivity_049));
+        } else if (m.supportsThinking) {
+            sb.append(Strings.get(R.string.modelconfigactivity_159));
+        } else {
+            sb.append(Strings.get(R.string.modelconfigactivity_160));
+        }
+        sb.append("\n").append(m.supportsVision
+                ? Strings.get(R.string.modelconfigactivity_161)
+                : Strings.get(R.string.modelconfigactivity_162));
+        // 弹窗只负责「看懂结论」；想改配置或重探，走原来的长按菜单，避免一个弹窗挂三项操作
+        AcDialog.builder(this)
+                .setTitle(m.label())
+                .setMessage(sb.toString())
+                .setPositiveButton(Strings.get(R.string.modelconfigactivity_163), null)
                 .show();
     }
 
@@ -1094,8 +1152,9 @@ public class ModelConfigActivity extends ThemedActivity {
             copy = new ArrayList<String>(details);
         }
         if (!copy.isEmpty()) {
-            sb.append(Strings.get(R.string.modelconfigactivity_126));
-            int limit = Math.min(copy.size(), 10);
+            // 明细含成功项：标题不再写「失败明细」，否则成功的行看着像失败
+            sb.append(Strings.get(R.string.modelconfigactivity_164));
+            int limit = Math.min(copy.size(), 12);
             for (int i = 0; i < limit; i++) {
                 sb.append("· ").append(copy.get(i)).append("\n");
             }

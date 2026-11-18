@@ -305,7 +305,10 @@ public class ModelEditActivity extends ThemedActivity {
             probedLevels = new ArrayList<String>();
             sb.append(Strings.get(R.string.modeleditactivity_027));
         } else {
-            // 探到一半断了：开关保持原样，不拿半截结论改配置
+            // 探到一半断了：开关保持原样，不拿半截结论改配置。
+            // 这时探到的那几档**不能**带进保存流程：带进去就会被当成完整结论落库，
+            // 下一轮请求按它落档，模型真正接受的档位反而被丢掉。
+            probedLevels = null;
             sb.append(Strings.get(R.string.modeleditactivity_028)).append(rep.error);
         }
 
@@ -330,6 +333,51 @@ public class ModelEditActivity extends ThemedActivity {
         LogUtil.i(TAG, "probe %s done: levels=%s vision=%s unverifiable=%s rejected=%s",
                 modelId, ThinkingLevels.join(probedLevels), rep.vision, rep.unverifiable,
                 rep.levelsRejected);
+        // 探测结果当场落库：这个「探明了却看不到」的反馈，根因是结论只存在本页字段里，
+        // 要用户再点一次「保存」才生效，中途返回就全丢了。模型已存在时立即写回配置，
+        // 后面的保存只负责改名字、换提供商这类表单字段。
+        persistProbe(rep);
+    }
+
+    /**
+     * 把探测结论写进已保存的那条模型，并落盘。
+     *
+     * <p>只处理「这条模型已经存在」的情况：新建页面上还没保存的模型不能凭空出现，
+     * 否则用户取消新建后列表里会多一条半成品。
+     *
+     * <p>改名或换提供商之后按唯一键就找不到原记录了，这种情况留给保存流程处理。
+     */
+    private void persistProbe(CapabilityProbe.Report rep) {
+        if (editing == null) return;
+        String name = nameEt.getText().toString().trim();
+        String provider = selectedProvider();
+        if (!editing.name.equals(name) || !editing.provider.equals(provider)) {
+            LogUtil.d(TAG, "probe persisted on save only: name/provider changed");
+            return;
+        }
+        if (rep == null || (!rep.ok() && !rep.levelsRejected && rep.vision == null)) return;
+        ModelInfo target = cfg.findModel(editing.provider, editing.name);
+        if (target == null) return;
+        // 视觉与档位是两项独立结论，各写各的
+        if (rep.vision != null) {
+            target.supportsVision = rep.vision.booleanValue();
+        }
+        if (rep.ok() && !rep.levels.isEmpty()) {
+            target.setLevelList(new ArrayList<String>(rep.levels));
+            target.supportsThinking = true;
+            target.levelsUnverifiable = rep.unverifiable;
+            target.probedAt = System.currentTimeMillis();
+        } else if (rep.levelsRejected) {
+            // 空列表而不是 null：保存时要据此清掉旧档位，否则列表还显示早就不可用的档位
+            target.setLevelList(new ArrayList<String>());
+            target.supportsThinking = false;
+            target.levelsUnverifiable = false;
+            target.probedAt = System.currentTimeMillis();
+        }
+        cfg.bumpProbeRevision();
+        cfg.save();
+        LogUtil.i(TAG, "probe persisted: %s@%s levels=%s vision=%s",
+                target.name, target.provider, target.thinkingLevels, target.supportsVision);
     }
 
     // ---- 保存 / 删除 ----

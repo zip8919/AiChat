@@ -19,7 +19,15 @@ public class ConfigManager {
     private List<ModelInfo> models;
     private String defaultModel;
     private boolean enableThinking;
-    private String thinkingLevel;  // "off", "low", "medium", "high"
+    private String thinkingLevel;  // "off"，或 ThinkingLevels.ORDER 里的六档之一
+    /**
+     * 能力探测结论的版本号：每写回一次探测结果就加一。
+     *
+     * <p>探测在别的页面完成，聊天页的思考档位下拉是按模型结论生成的；
+     * 没有这个计数，回到聊天页只能靠「重进应用」才能看到新的档位。
+     */
+    private final java.util.concurrent.atomic.AtomicInteger probeRevision =
+            new java.util.concurrent.atomic.AtomicInteger(0);
 
     private ConfigManager() {
         this.storageManager = StorageManager.getInstance();
@@ -67,6 +75,15 @@ public class ConfigManager {
         }
         LogUtil.i(TAG, "load done: providers=%d models=%d default=%s thinking=%s/%s",
                 providers.size(), models.size(), defaultModel, enableThinking, thinkingLevel);
+    }
+
+    /** 探测结论文本变化时调用，让按结论生成的下拉列表知道该重建。 */
+    void bumpProbeRevision() {
+        probeRevision.incrementAndGet();
+    }
+
+    int probeRevision() {
+        return probeRevision.get();
     }
 
     public void save() {

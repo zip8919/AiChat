@@ -47,6 +47,20 @@ final class ChatStreamRunner {
      */
     private static final int MAX_TOOL_ROUNDS = 8;
 
+    /**
+     * 端点「正常收尾但一个字都没有」时自动重发的次数。
+     *
+     * <p>这类空回复不报错：端点回了 200、收到 [DONE]，但 delta 里既没有正文也没有
+     * 工具调用。用户看到的是一个空气泡，等下去什么都不会来，只能自己发现再点一次重试。
+     * 一次重发就能恢复的情况占绝大多数，继续空手返回只会让用户以为应用坏了。
+     *
+     * <p>只重发空回复，不重发超时或断流——那两类需要用户决定是否继续等待。
+     */
+    private static final int MAX_EMPTY_RETRY = 1;
+
+    /** 空回复重发前的等待：给端点一点缓存/调度上的余量，立刻重发往往同样为空。 */
+    private static final long EMPTY_RETRY_DELAY_MS = 800;
+
     /** 视图侧能力。继承 {@link StreamRenderer.Ui}，渲染器直接用同一个实现。 */
     interface Ui extends StreamRenderer.Ui {
         void toast(String msg);
@@ -56,6 +70,18 @@ final class ChatStreamRunner {
 
         /** 用完整 trace 重渲染（工具卡片追加后调用）。 */
         void renderTrace(String trace, int generation, String status, int aiIndex);
+
+        /**
+         * 把工具卡片直接写进正在流式输出的气泡（只用于关掉实时渲染的场景）。
+         *
+         * <p>关掉实时渲染时 tail 走纯文本、base 要等轮次切换才重渲染，中间这一段
+         * 屏幕上是空的：模型调用了什么工具、执行到哪一步，用户完全看不到，中途失败
+         * 的轮次更是不会留下任何记录。这条通道用纯 DOM 写卡片，开销远小于实时渲染。
+         *
+         * @param incrementalHtml 只含本轮新增的卡片片段
+         * @param reset           true 表示这一轮第一次写，先清掉上一轮的临时片段
+         */
+        void renderLiveTools(String incrementalHtml, boolean reset);
 
         /** trace 因超长裁掉了前缀。渲染基准必须作废——裁剪后文本变短，
          * 仍按旧基准判断会把它当成「过期快照」永久丢弃。 */
@@ -210,6 +236,7 @@ final class ChatStreamRunner {
         final State st = new State(job);
         activeTrace = st.trace;
         HttpURLConnection conn = null;
+        StreamRenderer renderer = null;
         try {
             JSONArray conversation = job.isResume()
                     // 续跑复用的是上一次失败时保存的 conversation，那份可能停在
@@ -245,6 +272,8 @@ final class ChatStreamRunner {
              */
             int retryRound = -1;
             int retryCount = 0;
+            /** 本轮空回复已经重发过几次；换轮次（工具轮）清零。 */
+            int emptyRetry = 0;
             int round = job.isResume() ? job.resume.round : 0;
             // 上限按「本次 execute 实际跑的工具轮数」算，不能用绝对 round：
             // 续跑的 round 起点是上次累计轮数（可能已是 8），round+1>=MAX 会
@@ -259,7 +288,7 @@ final class ChatStreamRunner {
 
             // 跨轮次复用：baseRendered 记录的是「已推到 DOM 的 trace」，
             // 每轮重新 new 会让它清零，工具卡片之后多出一整次无谓的整段重渲染
-            final StreamRenderer renderer = new StreamRenderer(ui, job.aiIndex, job.generation,
+            renderer = new StreamRenderer(ui, job.aiIndex, job.generation,
                     job.realtimeRender);
             while (true) {
                 st.round = round;
@@ -268,6 +297,7 @@ final class ChatStreamRunner {
                 if (round != retryRound) {
                     retryRound = round;
                     retryCount = 0;
+                    emptyRetry = 0;
                     last429Body = "";  // 上一轮的配额超限原因不能串到本轮错误卡片
                 }
                 if (!session.isAlive(job.generation)) {
@@ -429,6 +459,22 @@ final class ChatStreamRunner {
                         LogUtil.i(TAG, "round %d aborted by user: %s", round, rr.error);
                         return;
                     }
+                    // 端点正常收尾却一个字都没有：先自动重发，别让用户对着空气泡等。
+                    // 重发前不需要清理 DOM —— 这一轮什么都没画，tail 是空的；
+                    // lastStreamTrace 也还停在上一轮结束的位置，重发会直接续上。
+                    if (rr.emptyReply && emptyRetry < MAX_EMPTY_RETRY) {
+                        emptyRetry++;
+                        LogUtil.w(TAG, "empty reply at round %d, auto retry %d/%d",
+                                round, emptyRetry, MAX_EMPTY_RETRY);
+                        ChatTransport.close(conn);
+                        conn = null;
+                        session.setConnection(null);
+                        if (!sleepInterruptible(EMPTY_RETRY_DELAY_MS, job.generation)) {
+                            LogUtil.i(TAG, "empty-reply retry wait aborted by user");
+                            return;
+                        }
+                        continue;
+                    }
                     st.failed = true;
                     // 本轮流式已经吐出来的内容不能丢：错误卡片要挂在这段内容之下，
                     // 否则用户看到的是「回答突然没了，只剩一张报错卡」
@@ -481,9 +527,16 @@ final class ChatStreamRunner {
                     // assistant(tool_calls).content 存在于 toolHistory 里，再拼一次会让模型看到重复内容
                     ToolCalls.appendAssistant(conversation, st.toolHistory,
                             rr.content.toString(), rr.toolCalls, rr.reasoning.toString());
+                    final int traceBefore = st.trace.length();
                     ToolExecutor.Outcome outcome = ToolExecutor.run(rr.toolCalls,
                             job.maxCallsPerRound, conversation, st.toolHistory, st.trace,
                             st.sources, job.question, toolHost);
+                    // 关掉实时渲染时补上这一轮的工具卡片：trace 追加过（没被裁剪）
+                    // 才有增量片段，写进 tail 后立刻可见，不必等轮次结束。
+                    if (!job.realtimeRender && !outcome.aborted
+                            && st.trace.length() > traceBefore && traceBefore == baseBefore.length()) {
+                        ui.renderLiveTools(st.trace.substring(traceBefore), true);
+                    }
                     if (outcome.aborted) {
                         LogUtil.i(TAG, "tool loop aborted at round %d", round);
                         return;
@@ -545,6 +598,8 @@ final class ChatStreamRunner {
             LogUtil.i(TAG, "<<< request end: elapsed=%d ms, chunks=%d, failed=%s, tokens=%d/%d cached=%d",
                     st.finishedAt - startMs, st.chunks, st.failed,
                     st.promptTokens, st.completionTokens, st.cachedTokens);
+            // 帧速率：长回答「越写越慢」时，这一行能看出是哪一段开始掉速（间隔被拉开）
+            if (renderer != null) LogUtil.i(TAG, "stream frames: %s", renderer.frameSummary());
             if (conn != null) {
                 try { conn.disconnect(); } catch (Exception ignored) { }
             }
@@ -645,9 +700,15 @@ final class ChatStreamRunner {
         }
 
         public String execute(String name, JSONObject args, String question) {
+            // 联网关掉与「没配密钥」是两件事：前者由工具自己回「联网搜索已关闭」，
+            // 后者才走 unavailableResult 提示去填密钥。顺序不能反 —— 关掉联网时
+            // 往往也没配密钥，先判 searchReady 会把原因说成「未配置 Key」。
+            if (!job.webSearchEnabled) {
+                return WebSearchTool.webOffResult();
+            }
             if (!job.searchReady) return null;
             return WebSearchTool.executeTool(job.searchProvider, name, args, question,
-                    guard, job.useTavily, job.tavilyKey);
+                    guard, job.useTavily, job.tavilyKey, true);
         }
 
         public String unavailableResult() {
@@ -674,6 +735,11 @@ final class ChatStreamRunner {
         public void onUnavailable() {
             if (warnedNoSearchKey) return;
             warnedNoSearchKey = true;
+            // 联网本来就是关的：提示说的是开关，而不是让用户去填一个与当前操作无关的密钥
+            if (!job.webSearchEnabled) {
+                ui.toast(Strings.get(R.string.chatstreamrunner_018));
+                return;
+            }
             ui.toast(job.useTavily
                     ? Strings.get(R.string.chatstreamrunner_014)
                     : Strings.get(R.string.chatstreamrunner_015));

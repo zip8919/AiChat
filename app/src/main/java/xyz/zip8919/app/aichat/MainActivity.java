@@ -148,6 +148,10 @@ public class MainActivity extends ThemedActivity {
     private TextView queueBarText;
     private MessageQueue queue;
     private boolean userPicked = false;
+    /** 思考下拉当前的可选档位（下标与下拉项一一对应）。 */
+    private final List<String> thinkingChoices = new ArrayList<String>();
+    /** 上次按哪一版探测结论生成档位下拉，探测在别的页面完成时用它判断要不要重建。 */
+    private int probedRev;
 
     private List<Message> messages;
     private List<ModelInfo> availableModels;
@@ -1613,37 +1617,62 @@ public class MainActivity extends ThemedActivity {
         });
     }
 
+    /**
+     * 思考档位下拉：按当前模型的实测档位生成选项。
+     *
+     * <p>以前固定四项「关 / 低 / 中 / 高」，探测出模型只支持「高」也照样列出其余三项，
+     * 选了之后请求侧再悄悄落到「高」——界面和实际下发永远不一致。现在列表跟模型走：
+     * 探测过的只列实测档位，未探测的列六档全集。
+     *
+     * <p>切换模型时整表重建并复位选中项，所以模型下拉变化后要重新调用本方法。
+     */
     private void bindThinkingSpinner() {
-        String[] thinkingLevels = {Strings.get(R.string.mainactivity_046), Strings.get(R.string.mainactivity_047), Strings.get(R.string.mainactivity_048), Strings.get(R.string.mainactivity_049)};
+        thinkingChoices.clear();
+        List<String> labels = new ArrayList<String>();
+        ModelInfo model = currentModelInfo();
+        List<String> available = (model != null && model.levelsProbed())
+                ? model.levelList() : new ArrayList<String>();
+        thinkingChoices.addAll(ThinkingLevels.choices(available));
+        for (String c : thinkingChoices) labels.add(ThinkingLevels.pickLabel(c));
+
         ArrayAdapter<String> thinkingAdapter = new ArrayAdapter<String>(this,
-                android.R.layout.simple_spinner_item, thinkingLevels);
+                android.R.layout.simple_spinner_item, labels);
         thinkingAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        userPicked = false;
         thinkingSpinner.setAdapter(thinkingAdapter);
 
         String level = configManager.getThinkingLevel();
-        int levelPos = 2;
-        if ("off".equals(level)) levelPos = 0;
-        else if ("low".equals(level)) levelPos = 1;
-        else if ("high".equals(level)) levelPos = 3;
-        // 先复位再去 setSelection：否则 setSelection 触发的回调会把它当成用户操作写盘
-        userPicked = false;
+        int levelPos = ThinkingLevels.indexIn(thinkingChoices, level);
+        // 先复位再去 setSelection：setSelection 会同步触发一次 onItemSelected，
+        // 此时的 pos 还是旧的，不能当作用户操作写盘（见 refreshModelSpinner 的复位）
         thinkingSpinner.setSelection(levelPos);
-        LogUtil.d(TAG, "thinking level restored: %s -> pos=%d (thinkingEnabled=%s)",
-                level, levelPos, configManager.isThinkingEnabled());
+        LogUtil.d(TAG, "thinking levels for model=%s: %s (global=%s -> pos=%d)",
+                model == null ? "-" : model.name, thinkingChoices, level, levelPos);
 
         thinkingSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             public void onItemSelected(AdapterView<?> parent, View view, int pos, long id) {
-                userPicked = true;
-                String[] levels = {"off", "low", "medium", "high"};
-                LogUtil.d(TAG, "thinking level selected: pos=%d -> %s", pos, levels[pos]);
-                if (userPicked) {
-                    configManager.setThinkingLevel(levels[pos]);
-                    configManager.save();
-                }
+                if (!userPicked) return;
+                if (pos < 0 || pos >= thinkingChoices.size()) return;
+                String picked = thinkingChoices.get(pos);
+                LogUtil.d(TAG, "thinking level selected: pos=%d -> %s", pos, picked);
+                configManager.setThinkingLevel(picked);
+                configManager.save();
             }
 
             public void onNothingSelected(AdapterView<?> parent) { }
         });
+    }
+
+    /** 当前选中的模型配置；找不到返回 null。 */
+    private ModelInfo currentModelInfo() {
+        if (currentModel == null) return null;
+        for (ModelInfo m : availableModels) {
+            if (m.name.equals(currentModel)
+                    && (currentProvider == null || currentProvider.equals(m.provider))) {
+                return m;
+            }
+        }
+        return configManager.findModel(currentModel);
     }
 
     private void refreshModelSpinner() {
@@ -1746,6 +1775,14 @@ public class MainActivity extends ThemedActivity {
                     provider.apiKey == null ? 0 : provider.apiKey.length());
         } else {
             LogUtil.w(TAG, "selectModel: provider '%s' not found for model '%s'", model.provider, model.name);
+        }
+        // 档位选项跟着模型走：换模型后按新模型的实测档位重建，否则会留着上一个模型的选项
+        if (thinkingSpinner != null) bindThinkingSpinner();
+        // 探测在别的页面完成时，这里的档位列表还是旧的；切回本页要按最新结论重建
+        if (thinkingSpinner != null && probedRev != configManager.probeRevision()) {
+            LogUtil.d(TAG, "probe results changed: rebuild thinking levels");
+            probedRev = configManager.probeRevision();
+            bindThinkingSpinner();
         }
     }
 
@@ -2960,6 +2997,17 @@ public class MainActivity extends ThemedActivity {
         public void renderTrace(String trace, int generation, String status, int aiIndex) {
             renderTraceAsync(trace, generation, status, aiIndex);
         }
+
+        public void renderLiveTools(final String incrementalHtml, final boolean reset) {
+            final int generation = requestGeneration.get();
+            if (incrementalHtml == null || incrementalHtml.length() == 0) return;
+            runOnUiThread(new Runnable() {
+                public void run() {
+                    if (requestGeneration.get() != generation) return;
+                    webViewEvalJs("liveTools('" + jsEscape(incrementalHtml) + "'," + reset + ")");
+                }
+            });
+        }
     }
 
     /** 请求代数与连接的收口：旧线程只能看到自己的代数，写不进新请求。 */
@@ -3054,29 +3102,18 @@ public class MainActivity extends ThemedActivity {
                         return;
                     }
 
-                    // 收尾提交。两条路径：
-                    //   1) DOM 已经是最终内容（最后一次分片成功落地）——只把 tail 定型进
-                    //      base，不重新解析 markdown。长回答含代码块/公式时，整段重渲染
-                    //      会让公式图片重新解码，视觉上就是「回答结束后闪一下」。
-                    //   2) DOM 落后于最终内容（最后一片被节流丢弃/被序号守卫挡掉）——
-                    //      必须重渲染补上，否则结尾少几十个字。
-                    final boolean domComplete = settled.content != null
-                            && settled.content.equals(lastPushedContent);
-                    if (domComplete) {
-                        // DOM 已是最终态，不重渲染（避免公式图片重新解码闪一下），
-                        // 但流式路径全部 cacheable=false，这里要把定稿 HTML 预热进
-                        // 缓存，否则下次切会话/换肤整页重灌时必然全 miss。
-                        //
-                        // 预热不能挡在 UI post 前面：这份 HTML 是整条回答的完整重渲染
-                        // （含代码高亮与公式位图），长回答要 200~800ms；而下面那个
-                        // runOnUiThread 才是「消息定稿、按钮出现、滚动到底」的那一帧。
-                        // 原来的顺序等于让用户盯着还在闪光标的界面等这段渲染跑完。
-                        // 改成延时到定稿帧之后（600ms 足够 UI 那帧画完），
-                        // 缓存晚一点热，但用户看到的是立刻定稿。
-                        scheduleWarmUp(settled.content, settled.generation);
-                    }
-                    final String html = domComplete ? null
-                            : MessageHtmlRenderer.contentToHtml(settled.content, MainActivity.this);
+                    // 收尾一律按完整正文重新渲染一次。
+                    //
+                    // 以前只要「最后一次流式帧的内容等于最终文本」就跳过重渲染，靠
+                    // streamFinalize 把 tail 搬进 base。但流式帧在关掉实时渲染时走的是
+                    // 纯文本 tail，搬进 base 的只是包在 .stream-plain 里的原文——markdown、
+                    // 公式、代码高亮全都没有，屏幕停在一坨未渲染的文字上，切走再回来才
+                    // 恢复。现在不再判断 DOM 是否「看起来已完整」，直接补一帧渲染好的 HTML。
+                    final String html = MessageHtmlRenderer.contentToHtml(settled.content, MainActivity.this);
+                    // 定稿 HTML 同时预热进缓存：流式路径全部 cacheable=false，不预热的话
+                    // 下次切会话/换肤整页重灌必然全 miss。这份计算已在当前线程完成，
+                    // 预热只负责把它写进缓存，安排在定稿帧之后（见 scheduleWarmUp）。
+                    scheduleWarmUp(settled.content, settled.generation);
                     if (requestGeneration.get() != settled.generation) return;
                     runOnUiThread(new Runnable() {
                         public void run() {
@@ -3108,15 +3145,14 @@ public class MainActivity extends ThemedActivity {
                                     done.tokensEstimated = true;
                                 }
                             }
-                            if (domComplete) {
-                                webViewEvalJs("streamFinalize()");
-                            } else {
-                                webViewEvalJs("updateLastMsg('" + jsEscape(html) + "')");
-                            }
-                            // 两条分支都让 base 层等于这条消息的全文：streamFinalize 把
-                            // tail 搬进了 base，updateLastMsg 直接把全文写进 base。
-                            // 不更新的话，续跑时增量渲染会拿「旧 prefix」当基准，
-                            // 把已经显示的内容再追加一遍。
+                            // 先收掉流式骨架（清空 tail、隐藏光标），再写入完整渲染结果。
+                            // updateLastMsg 会把全文写进 base 并清空 tail，所以这里不再
+                            // 单独调用 streamFinalize —— 它只做「把 tail 搬进 base」，
+                            // 而 tail 里的纯文本正好是要被替换掉的那一坨。
+                            webViewEvalJs("streamFinalize()");
+                            webViewEvalJs("updateLastMsg('" + jsEscape(html) + "')");
+                            // base 层此时等于这条消息的全文。不更新的话，续跑时增量渲染
+                            // 会拿「旧 prefix」当基准，把已经显示的内容再追加一遍。
                             lastStreamTrace = settled.content == null ? "" : settled.content;
                             // 来源区独立渲染在 .content 之外，默认折叠
                             Message am = finalIdx >= 0 && finalIdx < messages.size()
@@ -3266,7 +3302,9 @@ public class MainActivity extends ThemedActivity {
         // 前提由 ChatStreamRunner 保证：trace 的每次追加都以完整的
         // [thinking]…[/thinking] 或 [tool]…[/tool] 块为单位，边界处切分不会
         // 破坏 markdown 结构。
-        final boolean append = base0.length() > 0 && snapshot.startsWith(base0);
+        final boolean append = isRequestInProgress.get()
+                && SettingsActivity.isRealtimeRenderEnabled(this)
+                && base0.length() > 0 && snapshot.startsWith(base0);
         final String part = append ? snapshot.substring(base0.length()) : snapshot;
 
         final int mySeq = traceRenderSeq.incrementAndGet();
@@ -3286,6 +3324,9 @@ public class MainActivity extends ThemedActivity {
                         // 判过期，导致流式丢帧。只做幂等判重，不动序号。
                         if (!snapshot.equals(lastStreamTrace)) {
                             lastStreamTrace = snapshot;
+                            // 追加模式在关掉实时渲染时不成立：那份 trace 的结尾是本轮
+                            // 正文纯文本，DOM 里正文在 tail 上，追加进去会让屏幕上多一份。
+                            // 纯文本模式下统一走 streamBase 重建，并把 tail 的正文带过来。
                             if (append) {
                                 webViewEvalJs("streamAppendBase('" + jsEscape(html) + "')");
                             } else {

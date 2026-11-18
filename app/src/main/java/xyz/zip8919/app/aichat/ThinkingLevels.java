@@ -56,6 +56,65 @@ final class ThinkingLevels {
         return level == null ? "" : level;
     }
 
+    /** 关闭。与六档合用一套文案，选择列表与结果提示口径一致。 */
+    static String offLabel() {
+        return Strings.get(R.string.thinkinglevels_007);
+    }
+
+    /** 档位的界面文案（含 off）；未知值原样返回。 */
+    static String pickLabel(String level) {
+        return OFF.equalsIgnoreCase(level == null ? "" : level.trim())
+                ? offLabel() : label(level);
+    }
+
+    /**
+     * 可选档位：总是以「关闭」开头，后面接这个模型真正可用的档位。
+     *
+     * <p><b>为什么按模型生成</b>：以前聊天页固定写死「关 / 低 / 中 / 高」四项，
+     * 而模型实际可能只认「高」——用户选了「中」，请求侧再悄悄落到「高」，
+     * 界面上看到的和实际发出去的永远对不上。探测过的模型直接按实测档位列出，
+     * 没探测过的才退回六档全集，两边都不会出现「选了没用」的选项。
+     *
+     * @param available 模型可用档位；空集合表示未探测
+     */
+    static List<String> choices(List<String> available) {
+        List<String> out = new ArrayList<String>();
+        out.add(OFF);
+        if (available == null || available.isEmpty()) {
+            out.addAll(ORDER);
+            return out;
+        }
+        for (String l : ORDER) {
+            if (available.contains(l)) out.add(l);
+        }
+        // 可用集合里只有无法识别的自定义值：原样列出，不做猜译
+        if (out.size() == 1) out.addAll(available);
+        return out;
+    }
+
+    /**
+     * 当前位置：全局档位不在可选列表里时，指向最近可落的那一档。
+     *
+     * <p>不返回 -1：返回 -1 会让 Spinner 显示空白，看起来像「档位没设置」。
+     */
+    static int indexIn(List<String> choices, String global) {
+        if (choices == null || choices.isEmpty()) return 0;
+        int i = choices.indexOf(global);
+        if (i >= 0) return i;
+        String actual = resolve(global, withoutOff(choices));
+        int j = choices.indexOf(actual);
+        return j >= 0 ? j : 0;
+    }
+
+    /** 去掉「关闭」后的档位集合，供 {@link #resolve} 使用。 */
+    private static List<String> withoutOff(List<String> choices) {
+        List<String> out = new ArrayList<String>();
+        for (String c : choices) {
+            if (!OFF.equalsIgnoreCase(c)) out.add(c);
+        }
+        return out;
+    }
+
     /** 把 {@code low,high} 这种存储格式拆成列表（去空、去重、按档位顺序排列）。 */
     static List<String> parse(String csv) {
         List<String> out = new ArrayList<String>();

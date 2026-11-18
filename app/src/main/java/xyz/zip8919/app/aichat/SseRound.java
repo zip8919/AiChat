@@ -52,6 +52,14 @@ final class SseRound {
         String rawBody;
         int httpCode = 200;
         Exception cause;
+        /**
+         * 端点正常收尾（收到 [DONE]）却一个正文字、一个工具调用都没有。
+         *
+         * <p>这种情况在部分中转和负载高的官方端点上随机出现：通常是最后一次请求
+         * 没有任何报错，界面上只留下一个空气泡，用户必须手动重试。上层据此自动重发，
+         * 不用用户自己发现「刚才那条怎么什么都没回」。
+         */
+        boolean emptyReply;
     }
 
     /**
@@ -385,7 +393,10 @@ final class SseRound {
             return;
         }
         if (r.display.length() == 0 && r.toolCalls.length() == 0) {
+            // 标成「空回复」而不是普通失败：上层据此自动重发一次，
+            // 不需要用户自己看见报错后猜要不要再点一次重试。
             r.error = Strings.get(R.string.sseround_010);
+            r.emptyReply = true;
             r.cause = new Exception("stream has neither text nor tool_calls");
             LogUtil.e(TAG, "stream finished without text or tool calls (chunks=%d)", r.chunks);
             return;

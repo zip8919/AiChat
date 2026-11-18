@@ -89,6 +89,9 @@ final class StreamRenderer {
     private final boolean realtime;
 
     private final AtomicBoolean inFlight = new AtomicBoolean(false);
+    /** 渲染池里还没跑完的任务数（含正在跑的）。 */
+    private final java.util.concurrent.atomic.AtomicInteger pending =
+            new java.util.concurrent.atomic.AtomicInteger(0);
     private volatile long lastEmitMs;
     /** commitTail 已经发出但 UI 还没落地：这段时间内的分片直接跳过，避免写进旧的 tail。 */
     private volatile boolean committing;
@@ -100,6 +103,12 @@ final class StreamRenderer {
         this.aiIndex = aiIndex;
         this.generation = generation;
         this.realtime = realtime;
+        this.guard = new FrameGuard(realtime ? INTERVAL_HTML_MS : INTERVAL_TEXT_MS);
+    }
+
+    /** 帧速率统计，请求结束时写一行日志，便于对着「越写越慢」的反馈查是哪一段开始掉速。 */
+    String frameSummary() {
+        return guard.summary();
     }
 
     /**
@@ -213,9 +222,11 @@ final class StreamRenderer {
         if (roundNow == null) roundNow = "";
         if (committing) return;
         long now = System.currentTimeMillis();
-        long interval = realtime ? INTERVAL_HTML_MS : INTERVAL_TEXT_MS;
+        // 间隔由 FrameGuard 按实际每帧耗时动态调整，见 FrameGuard 的说明
+        long interval = guard.gap();
         if (now - lastEmitMs < interval || inFlight.get()) return;
         lastEmitMs = now;
+        guard.dispatched(now);
         if (realtime) {
             renderHtml(baseNow, roundNow);
         } else {
@@ -227,7 +238,8 @@ final class StreamRenderer {
         inFlight.set(true);
         final boolean baseChanged = !baseNow.equals(ui.baseRendered());
         final int mySeq = ui.nextSeq();
-        RENDER_POOL.execute(new Runnable() {
+        final int[] queuedRef = new int[1];
+        submit(new Runnable() {
             public void run() {
                 String bh = null;
                 String th = null;
@@ -242,6 +254,7 @@ final class StreamRenderer {
                 }
                 if (th == null) {
                     inFlight.set(false);
+                    pending.decrementAndGet();
                     return;
                 }
                 final String baseHtml = bh;
@@ -251,6 +264,7 @@ final class StreamRenderer {
                         // 先复位再判序号：过期分支若直接 return，这个标志会永远为 true，
                         // 后续所有 tick 都被「有渲染在飞」挡掉，界面从此不再更新。
                         inFlight.set(false);
+                        pending.decrementAndGet();
                         if (ui.currentSeq() != mySeq) return;
                         if (!ui.isCurrent(generation)) return;
                         ui.setContent(aiIndex, baseNow + roundNow);
@@ -262,10 +276,27 @@ final class StreamRenderer {
                             ui.noteBaseRendered(baseNow);
                         }
                         ui.evalJsHtml("streamTailHtml", tailHtml);
+                        guard.landed(System.currentTimeMillis(), queuedRef[0]);
                     }
                 });
             }
-        });
+        }, queuedRef);
+    }
+
+    /**
+     * 投递一帧渲染，把投递时渲染池里的任务数（含刚投的这一帧）写进 {@code queuedRef[0]}。
+     *
+     * <p>{@code pending} 是 {@code FrameGuard} 判断「产出快于消费」的依据：
+     * 只看单帧耗时不够——正文变长后每帧都慢，但真正让界面卡住的是
+     * 「一帧还没画完，下一帧已经排在后面」。任务退出时必须减一，
+     * 渲染失败、序号过期两条路径都要减，否则计数只增不减，间隔会被永久翻倍。
+     *
+     * <p>用单元素数组回传而不是返回值：Runnable 里引用的是投递之后的变量，
+     * 直接写 {@code int queued = submit(...)} 会被 Java 判成「可能未初始化」。
+     */
+    private void submit(Runnable task, int[] queuedRef) {
+        queuedRef[0] = pending.incrementAndGet();
+        RENDER_POOL.execute(task);
     }
 
     private void renderPlain(final String baseNow, final String roundNow) {
@@ -282,13 +313,15 @@ final class StreamRenderer {
                     if (!ui.isCurrent(generation)) return;
                     ui.setContent(aiIndex, baseNow + roundNow);
                     ui.evalJsHtml("streamTailText", tailPlain);
+                    guard.landed(System.currentTimeMillis(), 0);
                 }
             });
             return;
         }
         // trace 刚追加了工具卡片：重建一次 base，再续上本轮文字
         inFlight.set(true);
-        RENDER_POOL.execute(new Runnable() {
+        final int[] queuedRef = new int[1];
+        submit(new Runnable() {
             public void run() {
                 final String baseHtml;
                 try {
@@ -297,11 +330,13 @@ final class StreamRenderer {
                     // 同上：渲染失败必须复位 inFlight，否则后续分片全被挡掉
                     LogUtil.e("StreamRenderer", "plain base render failed: " + t.getMessage());
                     inFlight.set(false);
+                    pending.decrementAndGet();
                     return;
                 }
                 ui.runOnUi(new Runnable() {
                     public void run() {
                         inFlight.set(false);
+                        pending.decrementAndGet();
                         if (ui.currentSeq() != mySeq) return;
                         if (!ui.isCurrent(generation)) return;
                         ui.setContent(aiIndex, baseNow + roundNow);
@@ -310,9 +345,120 @@ final class StreamRenderer {
                             ui.noteBaseRendered(baseNow);
                         }
                         ui.evalJsHtml("streamTailText", tailPlain);
+                        guard.landed(System.currentTimeMillis(), queuedRef[0]);
                     }
                 });
             }
-        });
+        }, queuedRef);
     }
+
+    // ---- 帧速率守门 ----
+
+    /** 单帧耗时超过「间隔的一半」就认为渲染跟不上，下一帧拉开距离。 */
+    private static final long ADAPT_SLOW_RATIO = 2;
+
+    /** 一帧落地后的总耗时（渲染线程解析 + UI 线程写入）超过它，视为本机扛不住当前频率。 */
+    private static final long ADAPT_SAMPLE_MS = 40;
+
+    /** 连续多少帧跟不上才降速；单帧抖动（公式解码、GC）不调整。 */
+    private static final int ADAPT_SLOW_STREAK = 3;
+
+    /**
+     * 按机器与内容自动拉开流式帧间距。
+     *
+     * <p><b>为什么需要</b>：固定 200/120ms 的假设是「每帧几十毫秒」，正文越长越不成立。
+     * 一帧要把本轮全部正文重新解析成 HTML，正文到两三万字时单帧就要几百毫秒，
+     * 而分片仍在源源不断地进来——渲染线程的队列越压越长，用户看到的就是
+     * 「开头流畅，越往后每个字都要等半天」，最后整条回答卡住不动。
+     *
+     * <p>做法：记下最近一帧从发起到落地花了多久。连续几帧都明显慢于当前间隔，
+     * 就把间隔翻倍（至少 1200ms 为止）；连续几帧都很轻快，再逐步收回。
+     * 降速后每帧处理的内容更少、间隔更长，屏幕刷新变慢但不再堆积，
+     * 收尾仍由 {@code flushAndWait} 补最后一帧，不会丢内容。
+     *
+     * <p>每个 {@link StreamRenderer} 实例对应一次请求，状态不跨请求累积。
+     */
+    static final class FrameGuard {
+        private final long baseMs;
+        private final long maxMs;
+        private long gapMs;
+        private long dispatchAt;
+        private int slowStreak;
+        private int fastStreak;
+        private final long[] stats = new long[4];
+
+        FrameGuard(long baseMs) {
+            this.baseMs = baseMs;
+            this.maxMs = Math.max(baseMs * 6, 1200L);
+            this.gapMs = baseMs;
+        }
+
+        /** 当前帧间距。 */
+        synchronized long gap() {
+            return gapMs;
+        }
+
+        /** 记下发帧时刻；只有真正发出去的帧才计时，被挡掉的帧不计。 */
+        synchronized void dispatched(long now) {
+            dispatchAt = now;
+        }
+
+        /**
+         * 在 UI 线程写入完成后调用。
+         *
+         * @param now    落地时刻
+         * @param queued 发出这一帧时渲染池里还有多少任务在排队（含自己）
+         */
+        void landed(long now, int queued) {
+            long cost;
+            long gap;
+            synchronized (this) {
+                if (dispatchAt <= 0) return;
+                cost = now - dispatchAt;
+                dispatchAt = 0;
+                gap = gapMs;
+                stats[0] = cost;
+                if (cost > stats[1]) stats[1] = cost;
+                stats[2] += cost;
+                stats[3]++;
+            }
+            boolean slow = cost >= ADAPT_SAMPLE_MS && cost * ADAPT_SLOW_RATIO >= gap;
+            // 排队两层以上说明上游产出快于消费，即便单帧看着不慢也要拉开
+            boolean backed = queued > 1;
+            synchronized (this) {
+                if (slow || backed) {
+                    fastStreak = 0;
+                    slowStreak++;
+                    if (slowStreak >= (backed ? 1 : ADAPT_SLOW_STREAK)) {
+                        long next = Math.min(maxMs, gapMs * 2);
+                        if (next != gapMs) {
+                            LogUtil.i(TAG, "stream frame slow: cost=%dms gap=%dms queued=%d -> gap=%dms",
+                                    cost, gapMs, queued, next);
+                        }
+                        gapMs = next;
+                        slowStreak = 0;
+                    }
+                } else {
+                    slowStreak = 0;
+                    fastStreak++;
+                    // 收回要保守：连续 6 帧都轻快才减一档，避免在临界点来回跳
+                    if (fastStreak >= 6 && gapMs > baseMs) {
+                        gapMs = Math.max(baseMs, gapMs / 2);
+                        fastStreak = 0;
+                    }
+                }
+            }
+        }
+
+        /** 日志用：最近一帧 / 最慢一帧 / 平均耗时。 */
+        String summary() {
+            synchronized (this) {
+                if (stats[3] == 0) return "frames=0";
+                return "frames=" + stats[3] + " last=" + stats[0] + "ms max=" + stats[1]
+                        + "ms avg=" + (stats[2] / stats[3]) + "ms gap=" + gapMs + "ms";
+            }
+        }
+    }
+
+    private final FrameGuard guard;
 }
