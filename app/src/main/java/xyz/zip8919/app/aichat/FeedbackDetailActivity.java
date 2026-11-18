@@ -6,6 +6,7 @@ import android.content.Intent;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
+import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -19,8 +20,8 @@ import org.json.JSONObject;
  * 反馈详情。数据来自反馈中心的公开详情接口，只有标题、类型、状态、摘要、正文、
  * 版本与附件——联系方式、批注、备注属于管理员信息，客户端拿不到也不需要拿到。
  *
- * <p>附件是签名链接（30 天有效），点击交给系统浏览器或对应应用打开，
- * 应用自己不下载、不缓存，避免在词典笔那点存储上再留一份副本。
+ * <p>附件是签名链接（30 天有效）。点「预览」在本应用内看图片与文本，
+ * 点「下载」交给系统浏览器或对应应用打开，不在本机留副本。
  */
 public class FeedbackDetailActivity extends ThemedActivity {
 
@@ -172,6 +173,7 @@ public class FeedbackDetailActivity extends ThemedActivity {
             return;
         }
 
+        final JSONArray list = attachments;
         for (int i = 0; i < count; i++) {
             JSONObject a = attachments.optJSONObject(i);
             if (a == null) continue;
@@ -188,19 +190,34 @@ public class FeedbackDetailActivity extends ThemedActivity {
 
             TextView label = new TextView(this);
             label.setTextSize(13);
-            label.setTextColor(getResources().getColor(R.color.primary));
+            label.setTextColor(getResources().getColor(R.color.text_primary));
+            label.setSingleLine(true);
+            label.setEllipsize(TextUtils.TruncateAt.MIDDLE);
             label.setText(sizeText.length() == 0 ? name : name + "  " + sizeText);
             row.addView(label, new LinearLayout.LayoutParams(
                     0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
-            TextView open = new TextView(this);
-            open.setTextSize(13);
-            open.setTextColor(getResources().getColor(R.color.text_secondary));
-            open.setPadding(dp(10), dp(4), 0, dp(4));
-            open.setText(R.string.feedbackdetailactivity_015);
-            row.addView(open);
+            TextView preview = new TextView(this);
+            preview.setTextSize(13);
+            preview.setTextColor(getResources().getColor(R.color.primary));
+            preview.setPadding(0, dp(4), dp(8), dp(4));
+            preview.setText(R.string.feedbackdetailactivity_020);
+            row.addView(preview);
 
-            row.setOnClickListener(new View.OnClickListener() {
+            TextView download = new TextView(this);
+            download.setTextSize(13);
+            download.setTextColor(getResources().getColor(R.color.text_secondary));
+            download.setPadding(dp(10), dp(4), 0, dp(4));
+            download.setText(R.string.feedbackdetailactivity_021);
+            row.addView(download);
+
+            preview.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    // 预览页内部按地址定位，这里不依赖循环下标
+                    AttachmentPreviewActivity.open(FeedbackDetailActivity.this, list, url);
+                }
+            });
+            download.setOnClickListener(new View.OnClickListener() {
                 public void onClick(View v) {
                     openUrl(url);
                 }
