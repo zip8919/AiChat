@@ -42,6 +42,17 @@ public class AboutActivity extends ThemedActivity {
         Button checkUpdate = (Button) findViewById(R.id.about_check_update);
         Button feedback = (Button) findViewById(R.id.about_feedback);
         Button licenses = (Button) findViewById(R.id.about_licenses);
+        Button notices = (Button) findViewById(R.id.about_notice);
+
+        notices.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                try {
+                    startActivity(new Intent(AboutActivity.this, NoticeActivity.class));
+                } catch (Exception e) {
+                    LogUtil.w(TAG, "openNotices failed: %s", e.getMessage());
+                }
+            }
+        });
 
         help.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {

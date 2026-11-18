@@ -69,6 +69,11 @@ final class FeedbackApi {
         get("/api/public/item?id=" + Uri.encode(id), callback);
     }
 
+    /** 公告等公开接口用，路径自带查询串。 */
+    static void getPath(String path, Callback callback) {
+        get(path, callback);
+    }
+
     static void submit(Context context, final String title, final String body,
                        final String nickname, final String contact,
                        final String appVersion, final String device,

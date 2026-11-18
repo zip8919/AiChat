@@ -53,6 +53,13 @@
             android:layout_marginBottom="10dp"/>
 
         <Button
+            android:id="@+id/about_notice"
+            android:text="@string/aboutactivity_025"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="10dp"/>
+
+        <Button
             android:id="@+id/about_licenses"
             android:text="@string/activity_about_005"
             android:layout_width="match_parent"

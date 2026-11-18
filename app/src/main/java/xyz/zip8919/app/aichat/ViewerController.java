@@ -1105,22 +1105,8 @@ final class ViewerController {
 
     /** 页面销毁时释放三个预览 WebView，避免持有已销毁的 Activity。 */
     void destroy() {
-        if (imageWebView != null) {
-            imageWebView.destroy();
-            imageWebView = null;
-        }
-        if (tableWebView != null) {
-            tableWebView.destroy();
-            tableWebView = null;
-        }
-        if (codeWebView != null) {
-            codeWebView.destroy();
-            codeWebView = null;
-        }
-        if (docWebView != null) {
-            docWebView.destroy();
-            docWebView = null;
-        }
+        // 顺序不能反：每个对话框的 onDismiss 里也会 destroy 自己的 WebView。
+        // 先 destroy 再 dismiss，回调拿到的就是已经销毁的实例（第二次 destroy 直接崩）。
         if (imageDialog != null) {
             imageDialog.dismiss();
             imageDialog = null;
@@ -1136,6 +1122,22 @@ final class ViewerController {
         if (docDialog != null) {
             docDialog.dismiss();
             docDialog = null;
+        }
+        if (imageWebView != null) {
+            imageWebView.destroy();
+            imageWebView = null;
+        }
+        if (tableWebView != null) {
+            tableWebView.destroy();
+            tableWebView = null;
+        }
+        if (codeWebView != null) {
+            codeWebView.destroy();
+            codeWebView = null;
+        }
+        if (docWebView != null) {
+            docWebView.destroy();
+            docWebView = null;
         }
     }
 }

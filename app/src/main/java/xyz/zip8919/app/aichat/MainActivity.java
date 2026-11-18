@@ -68,6 +68,10 @@ public class MainActivity extends ThemedActivity {
      */
     private static final int VIEWER_TOOLBAR_INSET_PX = 52;
     private static final String PREFS_NAME = "aichat_prefs";
+    /** 公告弹窗本次运行是否已经弹过，避免切后台回来重复弹。 */
+    private boolean noticeShown;
+    /** 公告已读记录是否已按新规则重置过一次。 */
+    private static final String KEY_NOTICE_RESET = "notice_read_reset_v2";
     /** 按 provider 记住「不支持 stream_options」，值是 boolean，缺省 false。 */
     private static final String KEY_USAGE_UNSUPPORTED_PREFIX = "usage_unsupported_";
     /** 首次启动说明与免责声明确认过没有。 */
@@ -377,10 +381,154 @@ public class MainActivity extends ThemedActivity {
         // 否则从别的应用「发送到 AiChat」时，消息会在引导弹窗背后被发出去。
         if (prefs.getBoolean(KEY_FIRST_LAUNCH_DONE, false)) {
             handlePromptIntent(getIntent());
+            fetchNotice();
         } else {
             showFirstLaunchDialog();
         }
         LogUtil.i(TAG, "========== onCreate done ==========");
+    }
+
+    /**
+     * 启动拉一次公告，有没读过的就弹出来，可逐条翻看。
+     *
+     * <p>只弹没读过的。老版本每版都弹，已经打扰过一轮，升级后作废旧记录，
+     * 上线公告只再弹一次，之后按「我知道了」的结果判定，不再重复。
+     * 失败静默：公告是附赠信息，网络不通或服务异常不该打扰用户，也不该阻塞任何操作。
+     */
+    private void fetchNotice() {
+        Notice.load(this, new FeedbackApi.Callback() {
+            public void onSuccess(org.json.JSONObject data) {
+                java.util.List<Notice> list = Notice.parseList(data);
+                if (list.isEmpty()) {
+                    NoticeReadStore.rememberLast(MainActivity.this, "");
+                    return;
+                }
+                String latest = list.get(0).id;
+                // 老版本的记录不算数：那一版每次启动都弹，已读等于没生效
+                boolean upgraded = !prefs.getBoolean(KEY_NOTICE_RESET, false);
+                if (upgraded) prefs.edit().putBoolean(KEY_NOTICE_RESET, true).commit();
+                java.util.List<Notice> pending = upgraded ? list : NoticeReadStore.unread(MainActivity.this, list);
+                if (pending.isEmpty()) return;
+                showNoticeDialog(pending, latest);
+            }
+
+            public void onError(String message) {
+                LogUtil.d(TAG, "notice load skipped: %s", message);
+            }
+        });
+    }
+
+    /**
+     * 开屏公告弹窗。只放没读过的公告，多条时正文下方带「上一条 / 下一条」翻看。
+     *
+     * <p>标题带当前位置（第几条 / 共几条），到首条或末条时对应按钮变灰不可点。
+     * 点「我知道了」才记为已读，直接返回或杀掉应用视为没看，下次继续弹。
+     * 弹出后本次运行内不再重复弹。
+     */
+    private void showNoticeDialog(final java.util.List<Notice> list, final String latestId) {
+        if (isFinishing() || list.isEmpty() || noticeShown) return;
+        noticeShown = true;
+        final java.util.List<Notice> items = list;
+        final int total = items.size();
+        final int[] index = new int[]{0};
+
+        final View content = getLayoutInflater().inflate(R.layout.view_notice_detail, null);
+        final TextView title = (TextView) content.findViewById(R.id.nd_title);
+        final TextView body = (TextView) content.findViewById(R.id.nd_body);
+        final TextView link = (TextView) content.findViewById(R.id.nd_link);
+        final View pager = content.findViewById(R.id.nd_pager);
+        final android.widget.Button prev = (android.widget.Button) content.findViewById(R.id.nd_prev);
+        final android.widget.Button next = (android.widget.Button) content.findViewById(R.id.nd_next);
+        pager.setVisibility(total > 1 ? View.VISIBLE : View.GONE);
+        link.setText(Strings.get(R.string.mainactivity_171));
+        link.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                String url = items.get(index[0]).link;
+                if (url != null && url.length() > 0) openNoticeLink(url);
+            }
+        });
+
+        final android.app.AlertDialog dialog = AcDialog.builder(this)
+                .setTitle(Strings.get(R.string.mainactivity_172))
+                .setView(content)
+                .setPositiveButton(Strings.get(R.string.mainactivity_173), new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface d, int w) {
+                        // 点「我知道了」才记为已读并写盘，下次启动不再弹这几条
+                        for (int i = 0; i < items.size(); i++) {
+                            NoticeReadStore.markRead(MainActivity.this, items.get(i).id);
+                        }
+                        NoticeReadStore.rememberLast(MainActivity.this, latestId);
+                    }
+                })
+                .create();
+
+        prev.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                if (index[0] > 0) {
+                    index[0]--;
+                    renderNotice(index[0], items, title, body, link, prev, next);
+                    dialog.setTitle(titleOf(index[0], items.size()));
+                }
+            }
+        });
+        next.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                if (index[0] < items.size() - 1) {
+                    index[0]++;
+                    renderNotice(index[0], items, title, body, link, prev, next);
+                    dialog.setTitle(titleOf(index[0], items.size()));
+                }
+            }
+        });
+
+        AcDialog.onShow(dialog, new android.content.DialogInterface.OnShowListener() {
+            public void onShow(android.content.DialogInterface d) {
+                renderNotice(index[0], items, title, body, link, prev, next);
+                dialog.setTitle(titleOf(index[0], items.size()));
+            }
+        });
+        dialog.show();
+        LogUtil.i(TAG, "notice dialog: %d items", total);
+    }
+
+    /** 弹窗标题，带当前第几条与总条数。 */
+    private String titleOf(int i, int total) {
+        return Strings.get(R.string.mainactivity_176, i + 1, total);
+    }
+
+    /** 刷新当前这一条；标题带位置，翻页按钮按是否到边界置灰。 */
+    private void renderNotice(int i, java.util.List<Notice> items,
+                              TextView title, TextView body, TextView link,
+                              android.widget.Button prev, android.widget.Button next) {
+        final Notice n = items.get(i);
+        title.setText(n.title);
+        body.setText(n.body);
+        if (n.link != null && n.link.length() > 0) {
+            link.setVisibility(View.VISIBLE);
+        } else {
+            link.setVisibility(View.GONE);
+        }
+        prev.setEnabled(i > 0);
+        next.setEnabled(i < items.size() - 1);
+    }
+
+    /** 跳转链接打不开时提示地址可复制，不让按钮点了没反应。 */
+    private void openNoticeLink(final String url) {
+        try {
+            startActivity(new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url)));
+        } catch (Exception e) {
+            LogUtil.w(TAG, "openNoticeLink failed: %s", e.getMessage());
+            AcDialog.builder(this)
+                    .setTitle(Strings.get(R.string.mainactivity_178))
+                    .setMessage(url)
+                    .setPositiveButton(Strings.get(R.string.mainactivity_179), new DialogInterface.OnClickListener() {
+                        public void onClick(DialogInterface d, int w) {
+                            ClipUtil.copy(MainActivity.this, url);
+                            AcToast.show(MainActivity.this, Strings.get(R.string.noticeactivity_010));
+                        }
+                    })
+                    .show();
+        }
     }
 
     /**
