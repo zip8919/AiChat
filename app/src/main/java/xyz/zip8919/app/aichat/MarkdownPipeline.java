@@ -387,6 +387,15 @@ final class MarkdownPipeline {
         return text;
     }
     static String buildPage(String bodyHtml, int olderCount) {
+        return buildPage(bodyHtml, olderCount, 0);
+    }
+
+    /**
+     * @param pageVersion 写进 {@code <body data-ac-page>} 的版本号。宿主靠它判断
+     *                    WebView 里到底是哪一版页面——onPageFinished 的 URL 恒为
+     *                    about:blank，除此之外没有别的办法分辨迟到的回调。
+     */
+    static String buildPage(String bodyHtml, int olderCount, int pageVersion) {
         // olderCount = 尚未渲染的更早消息条数；>0 时顶部显示上滑提示
         String hint = olderCount > 0
                 ? "<div id=\"older-hint\" onclick=\"loadOlderNow()\">"
@@ -407,7 +416,7 @@ final class MarkdownPipeline {
                "<style>\n" + RendererAssets.CSS + "\n</style>\n" +
                "<style id=\"ac-theme\">\n" + themeCss + "\n</style>\n" +
                "<style id=\"ac-font\">\n" + fontCss + "\n</style>\n" +
-               "</head>\n<body>\n" +
+               "</head>\n<body data-ac-page=\"" + pageVersion + "\">\n" +
                hint +
                "<div id=\"msgs\">\n" + bodyHtml + "\n</div>\n" +
                "<script>\n" + RendererAssets.localize(RendererAssets.JS) + "\n</script>\n" +

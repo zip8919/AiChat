@@ -111,6 +111,11 @@ public class MessageHtmlRenderer {
     }
 
     public static String buildConversationHtml(List<Message> messages, int from, Context ctx) {
+        return buildConversationHtml(messages, from, ctx, 0);
+    }
+
+    public static String buildConversationHtml(List<Message> messages, int from, Context ctx,
+            int pageVersion) {
         long startTs = System.currentTimeMillis();
         ensureCacheSig(ctx);
         int total = messages == null ? 0 : messages.size();
@@ -124,7 +129,7 @@ public class MessageHtmlRenderer {
         // 于是长会话（>40 条）里所有消息索引整体偏移 start —— 长按菜单、复制、
         // 修改、删除、重试全部命中错误的那一条，上滑加载还会重复渲染已在本页的消息。
         body.append(renderMessagesHtml(messages == null ? null : messages.subList(start, total), start, ctx));
-        String page = MarkdownPipeline.buildPage(body.toString(), start);
+        String page = MarkdownPipeline.buildPage(body.toString(), start, pageVersion);
         LogUtil.d(TAG, "buildConversationHtml done: rendered=%d, body=%d chars, page=%d chars in %d ms",
                 total - start, body.length(), page.length(), System.currentTimeMillis() - startTs);
         return page;

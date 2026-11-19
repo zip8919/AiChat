@@ -134,35 +134,28 @@ public class MainActivity extends ThemedActivity {
     private boolean sendButtonLongPressed = false;
     private WebView conversationWebView;
     /**
-     * WebView 里的 DOM 是否可用（onPageFinished 之后）。
+     * 页面内容版本与已就绪版本。
      *
-     * <p>加载期间下发 JS 会被新一轮导航丢弃，DOM 里什么都没有，表现为
-     * 「有时候消息不自动渲染」。未就绪时先入 {@link #pendingJs} 排队，
-     * 页面就绪后按原顺序重放。
+     * <p>WebView 每次都用 {@code loadDataWithBaseURL(null, …)} 灌页，onPageFinished
+     * 只给一个恒为 about:blank 的 URL，没法分辨回调属于哪一次加载：切会话时旧页迟到的
+     * 回调会把页面判成可用，随后 appendMsg / appendAiDiv 写进即将被冲掉的旧 DOM，
+     * 用户看到的就是「发完消息界面没有任何变化，重进历史才看得到」。
+     *
+     * <p>所以把版本号写进页面本身（{@code <body data-ac-page="N">}），回调里读回来比对。
+     * 读回来的不是当前版本，说明这次回调属于已经被替换掉的旧页，直接忽略。
      */
-    private volatile boolean pageReady = false;
-    /**
-     * 页面是否还是「当前这次加载」。
-     *
-     * <p>WebView 的 onPageFinished 回调只带 URL，而这里每次都 loadDataWithBaseURL(null, …)，
-     * URL 恒为 about:blank，没法靠它分辨是哪一次加载的回调。于是会出现这种情况：
-     * 切会话时旧页的 onPageFinished 迟到，把 {@link #pageReady} 置回 true，
-     * 而此时新页的 HTML 还在后台拼；紧接着用户发送消息，appendMsg / appendAiDiv
-     * 直接 eval 到旧页，随后被 loadDataWithBaseURL 冲掉——用户看到的就是
-     * 「发完消息界面没有任何变化，重进历史才看得到」。
-     *
-     * <p>每次 loadDataWithBaseURL 自增；onPageFinished 只认自己发起时的值。
-     */
-    private int pageLoadToken = 0;
-    /**
-     * 已灌进页面的那条消息列表是不是 {@link #messages} 本身。
-     *
-     * <p>切会话时 {@code messages = conv.messages} 在数据线程加载完之后才换，
-     * 换之前 DOM 里挂的还是上一个会话的气泡。{@code appendMsg} 往这种页面上追加，
-     * 用户消息就会插到旧会话的可见内容后面。false 时追加类操作先排队，等页面换成
-     * 当前列表后再按顺序重放。
-     */
-    private volatile boolean pageMatchesMessages = false;
+    private final java.util.concurrent.atomic.AtomicInteger pageVersion =
+            new java.util.concurrent.atomic.AtomicInteger();
+    /** 已经在 WebView 里确认加载完成的页面版本；-1 表示还没有任何一版加载完成。 */
+    private volatile int loadedPageVersion = -1;
+    /** 有页面正在加载、还没确认就绪。 */
+    private volatile boolean pageLoading = false;
+    /** 版本探测轮次，用于超时补灌，避免回调始终不来时永久卡住。 */
+    private int pageProbeTries = 0;
+    /** 本次加载已经补灌过一次；只补一次，防止失败时无限重灌。 */
+    private boolean pageReloadRetried = false;
+    /** 渲染时列表被改动导致重来的次数，防止极端情况下连着重来。 */
+    private int renderRetryCount = 0;
     private final java.util.ArrayDeque<String> pendingJs = new java.util.ArrayDeque<String>();
     private Spinner modelSpinner;
     private Spinner thinkingSpinner;
@@ -693,7 +686,6 @@ public class MainActivity extends ThemedActivity {
     }
 
     private void bindWebView() {
-        final int myLoadToken = pageLoadToken;
         conversationWebView = (WebView) findViewById(R.id.message_webview);
         WebSettings settings = conversationWebView.getSettings();
         settings.setJavaScriptEnabled(true);
@@ -714,37 +706,19 @@ public class MainActivity extends ThemedActivity {
             public void onPageFinished(WebView view, String url) {
                 // 整页重建后强制重绘一次。硬件加速下合成层偶发不主动刷新，DOM 里
                 // 内容齐全却没画出来，直到用户点开菜单/弹对话框触发窗口重绘才可见。
-                // invalidate 是最轻的兜底，不改 DOM、不引入闪烁。
                 view.invalidate();
-                // 不是当前这次加载的回调：页面已经被下一次 loadDataWithBaseURL 接管。
-                // 还开 pageReady 的话，后台渲染期间到达的 JS 会直接写进即将被冲掉的 DOM。
-                if (pageLoadToken != myLoadToken) {
-                    LogUtil.d(TAG, "onPageFinished ignored: stale load (mine=%d, current=%d)",
-                            myLoadToken, pageLoadToken);
-                    return;
-                }
-                // 页面可用了：把加载期间排队的 JS 一次性重放。
-                // 之前加载中调 evaluateJavascript / loadUrl("javascript:") 会被
-                // 新一轮导航直接丢弃，DOM 里既没有消息也没有尾巴 —— 表现就是
-                // 「有时候消息不会自动渲染」，重新进会话才正常。
-                pageReady = true;
-                flushPendingJs();
-                // 页面真正可交互了才收切会话遮罩；构建 HTML 期间它一直盖着并有进度。
-                finishConversationRender(false);
+                // 这里只当「可以开始确认了」的信号：同一次灌页可能来多次回调，
+                // 旧页的回调也会迟到，只有读回页面自己带的版本号才能确定 DOM 是哪一版。
+                probePageReady();
             }
 
             @Override
             public void onReceivedError(WebView view, int errorCode, String description,
                                         String failingUrl) {
-                // 过期加载的错误同样要忽略，理由同 onPageFinished
-                if (pageLoadToken != myLoadToken) return;
-                // 加载失败也要放行队列：否则 pageReady 永远为 false，这个会话
-                // 之后所有消息都只进队列不显示，比渲染错位严重得多。
                 LogUtil.w(TAG, "webview error: %d %s url=%s", errorCode, description, failingUrl);
-                pageReady = true;
-                flushPendingJs();
-                // 出错也放行遮罩：宁可显示空页，也不能把用户锁在「正在切换会话」里。
-                finishConversationRender(false);
+                // 加载失败时页面可能没有 body 标记，探测会一直读不回来；
+                // 交给 probe 的超时路径补灌一次，这里不做别的判断。
+                probePageReady();
             }
         });
 
@@ -3489,47 +3463,59 @@ public class MainActivity extends ThemedActivity {
     }
 
     private void refreshWebView() {
-        LogUtil.d(TAG, "refreshWebView: messages=%d", messages == null ? -1 : messages.size());
+        refreshWebView(false);
+    }
+
+    /**
+     * @param recovery 这次是「页面迟迟不就绪」触发的补灌。补灌本身不再重置
+     *                 {@link #pageReloadRetried}，否则补灌失败后又能补灌，会无限循环。
+     */
+    private void refreshWebView(final boolean recovery) {
+        LogUtil.d(TAG, "refreshWebView: messages=%d recovery=%s",
+                messages == null ? -1 : messages.size(), recovery);
         final long t0 = System.currentTimeMillis();
         // 渲染代数守卫 + 列表快照：两次刷新可能乱序落地，且渲染线程不能直接遍历
         // 可能被 UI 线程结构性修改的 messages
         final int myRenderGen = renderGeneration.incrementAndGet();
+        // 每次灌页换一版：页面 HTML 里带着这个号，回调读回来一比就知道 DOM 是哪一版。
+        // 在真正下发之前，所有追加类脚本都排队，不会写进即将被冲掉的旧 DOM。
+        final int myPageVersion = pageVersion.incrementAndGet();
+        pageLoading = true;
+        if (!recovery) pageReloadRetried = false;
+        // 清掉针对旧页面排的队列：这一版页面会把当前列表整体画一遍，
+        // 旧页面积压的追加操作重放出来只会重复。
+        pendingJs.clear();
         // 切会话遮罩还开着时，把「等待的渲染」迁移到最新一代：期间若因主题变化、
         // 上滑加载等又触发一次重灌，应等最后一次页面就绪再收遮罩，既不能被旧回调
         // 提前关掉，也不能因为旧渲染被丢弃而永远不收。
         if (conversationRenderState != 0) conversationRenderGen = myRenderGen;
+        final List<Message> listAtSnapshot = messages;
+        final int sizeAtSnapshot = messages == null ? 0 : messages.size();
         final List<Message> snapshot =
                 messages == null ? new ArrayList<Message>() : new ArrayList<Message>(messages);
         // 只渲染最近一批：更早的消息等用户上滑到顶部再追加
         final int from = Math.max(0, snapshot.size() - INITIAL_VISIBLE_MESSAGES);
-        // 重灌「起点」先关门：后台渲染 html 期间若 pageReady 仍为 true，appendMsg、
-        // 流式帧会直接 eval 到即将被 loadDataWithBaseURL 冲掉的旧 DOM，消息随之丢失
-        // （偶现「消息不自动渲染」）。先清掉针对旧页面排的遗留队列，再关门，
-        // 让渲染期间到达的 JS 走 pendingJs，由 onPageFinished 重放到新页。
-        // 同时自增加载序号：旧页可能还有一次迟到的 onPageFinished，不放行它。
-        pageLoadToken++;
-        pageReady = false;
-        pendingJs.clear();
         new Thread(new Runnable() {
             public void run() {
                 if (conversationRenderState != 0 && conversationRenderGen == myRenderGen) {
                     reportConversationRenderStage(
                             Strings.get(R.string.mainactivity_078, (snapshot.size() - from)), 68);
                 }
-                // 渲染线程必须有兜底：pageReady 已在上面关门，一旦这里抛异常（例如
-                // 公式提取遇到截断的 \ce{A ->[），runOnUiThread 永不执行 → pageReady
-                // 永远为 false，后续所有 JS 只会进 pendingJs（上限 300），整页空白
-                // 直到用户重进会话。宁可加载一张空骨架，也不能让页面卡死。
+                // 渲染线程必须有兜底：一旦这里抛异常（例如公式提取遇到截断的 \ce{A ->[），
+                // runOnUiThread 永不执行 → 页面永远不就绪，后续所有 JS 只会进队列，
+                // 整页空白直到用户重进会话。宁可加载一张空骨架，也不能让页面卡死。
                 String html = null;
                 try {
-                    html = MessageHtmlRenderer.buildConversationHtml(snapshot, from, MainActivity.this);
+                    html = MessageHtmlRenderer.buildConversationHtml(
+                            snapshot, from, MainActivity.this, myPageVersion);
                     LogUtil.d(TAG, "conversation html built: len=%d in %d ms",
                             html == null ? -1 : html.length(), System.currentTimeMillis() - t0);
                 } catch (Throwable t) {
                     LogUtil.e(TAG, "buildConversationHtml failed, fallback to empty page: %s",
                             String.valueOf(t));
                 }
-                final String page = html != null ? html : MarkdownPipeline.buildPage("", from);
+                final String page = html != null
+                        ? html : MarkdownPipeline.buildPage("", from, myPageVersion);
                 runOnUiThread(new Runnable() {
                     public void run() {
                         if (renderGeneration.get() != myRenderGen) {
@@ -3538,30 +3524,167 @@ public class MainActivity extends ThemedActivity {
                             return;
                         }
                         if (conversationWebView == null) return;
+                        // 拼页期间列表又变了（用户在渲染窗口里发了消息）：这一版缺最后几条，
+                        // 而排队的追加也已随换版被清掉。重来一次，最多连着重来三次。
+                        if (renderRetryCount < 3 && (messages != listAtSnapshot
+                                || (messages == null ? 0 : messages.size()) != sizeAtSnapshot)) {
+                            renderRetryCount++;
+                            LogUtil.d(TAG, "refreshWebView: list changed during render, retry %d",
+                                    renderRetryCount);
+                            refreshWebView();
+                            return;
+                        }
+                        renderRetryCount = 0;
                         renderedFrom = from;
                         loadingOlderMessages = false;
-                        // 灌进去的就是渲染它时那份列表：之后在此基础上追加的
-                        // appendMsg 才落到正确的会话里
-                        pageMatchesMessages = (messages == snapshot);
                         // 整页重建，DOM 里不存在上一次流式留下的 base 骨架，
                         // 「已推送基准」必须作废，否则下一次 trace 渲染会误走增量
                         lastStreamTrace = "";
-                        // pageReady 已在重灌起点关门、遗留队列也已清掉；
-                        // 加载期间新到的 JS 继续排队，onPageFinished 统一开门重放。
                         conversationWebView.loadDataWithBaseURL(null, page, "text/html", "UTF-8", null);
-                        // 灌页之后把遮罩的收起权交给 WebView 回调（或超时兜底），
+                        // 从现在起开始确认这一版有没有上屏。onPageFinished 一般会来，
+                        // 但程序化写 DOM 时它不保证触发，所以另起一个短周期探测兜底。
+                        pageProbeTries = 0;
+                        handler.removeCallbacks(pageProbeTask);
+                        handler.postDelayed(pageProbeTask, 60);
+                        // 绝对兜底：探测本身出问题（脚本抛错、回调不执行）时也不能
+                        // 把页面锁死，到点无条件放行
+                        handler.removeCallbacks(pageReadyWatchdog);
+                        handler.postDelayed(pageReadyWatchdog, 2500);
+                        // 灌页之后把遮罩的收起权交给「确认就绪」（或超时兜底），
                         // 不再像旧版那样固定等 260ms —— 那会儿页面往往还没画完。
                         awaitConversationPageFinish(myRenderGen);
                         // 新 DOM 的 style 节点已重建，清掉 CSS 相等短路，
                         // 否则下一次外观变更会跳过注入、样式停在初始值。
                         if (webRefresher != null) webRefresher.reset();
                         updateUsageBar();
-                        LogUtil.d(TAG, "webview reloaded: showing %d of %d messages (from=%d)",
-                                snapshot.size() - from, snapshot.size(), from);
+                        LogUtil.d(TAG, "webview reloaded: showing %d of %d messages (from=%d, v=%d)",
+                                snapshot.size() - from, snapshot.size(), from, myPageVersion);
                     }
                 });
             }
         }) {{ setName("aichat-render-" + System.currentTimeMillis()); }}.start();
+    }
+
+    /**
+     * 读回 WebView 里实际是哪一版页面。
+     *
+     * <p>onPageFinished 的 URL 恒为 about:blank，判不出回调属于哪一次加载。
+     * 页面自己带着 {@code data-ac-page}，读回来和当前版本比一次就能定论：
+     * 相等说明这版已经上屏，可以下发追加脚本；不相等说明 DOM 还是上一版
+     * （或新页还没解析完），继续等。
+     */
+    private void probePageReady() {
+        if (conversationWebView == null || !pageLoading) return;
+        if (android.os.Build.VERSION.SDK_INT < 19) {
+            // API 18 没有带回调的 evaluateJavascript，只能直接放行
+            markPageReady(pageVersion.get());
+            return;
+        }
+        pageProbeTries = 0;
+        handler.removeCallbacks(pageProbeTask);
+        handler.post(pageProbeTask);
+    }
+
+    /** 兜底计时：无论探测成没成，到点都让页面可用。 */
+    private final Runnable pageReadyWatchdog = new Runnable() {
+        public void run() {
+            if (!pageLoading) return;
+            LogUtil.w(TAG, "page ready watchdog fired (v=%d)", pageVersion.get());
+            markPageReady(pageVersion.get());
+        }
+    };
+
+    /** 短周期探测；页面确认上屏就放行，迟迟读不回来就补灌一次。 */
+    private final Runnable pageProbeTask = new Runnable() {
+        public void run() {
+            final WebView wv = conversationWebView;
+            if (wv == null || !pageLoading) return;
+            final int want = pageVersion.get();
+            if (android.os.Build.VERSION.SDK_INT < 19) {
+                markPageReady(want);
+                return;
+            }
+            try {
+                wv.evaluateJavascript(
+                        "(function(){var b=document.body;return b&&b.getAttribute"
+                                + "?(''+b.getAttribute('data-ac-page')):'';})()",
+                        new android.webkit.ValueCallback<String>() {
+                            public void onReceiveValue(String value) {
+                                if (want != pageVersion.get()) {
+                                    // 期间又换了一版：这次结果作废，但探测链不能断，
+                                    // 否则新版本没人去确认，页面就又「永远不就绪」了
+                                    handler.removeCallbacks(pageProbeTask);
+                                    handler.postDelayed(pageProbeTask, 60);
+                                    return;
+                                }
+                                if (pageVersionOf(value) == want) {
+                                    markPageReady(want);
+                                } else {
+                                    retryProbe();
+                                }
+                            }
+                        });
+            } catch (Throwable t) {
+                LogUtil.w(TAG, "probe page version failed: %s", String.valueOf(t));
+                retryProbe();
+            }
+        }
+    };
+
+    /** evaluateJavascript 的回调值是 JSON：字符串带引号，取不到值是 null 或空串。 */
+    private static int pageVersionOf(String raw) {
+        if (raw == null) return -1;
+        String v = raw.trim();
+        if (v.length() >= 2 && v.charAt(0) == '"' && v.charAt(v.length() - 1) == '"') {
+            v = v.substring(1, v.length() - 1);
+        }
+        if (v.length() == 0 || "null".equals(v)) return -1;
+        try {
+            return Integer.parseInt(v);
+        } catch (NumberFormatException e) {
+            return -1;
+        }
+    }
+
+    private void retryProbe() {
+        if (!pageLoading) return;
+        pageProbeTries++;
+        if (pageProbeTries > 12) {
+            // 约一秒还读不回自己的版本：页面多半加载失败、或被系统丢弃了。
+            // 补灌一次；补灌后再等一轮还不成，也必须放行 —— 宁可少几条气泡，
+            // 也不能把页面锁在「未就绪」里，那会让之后每一条消息都进队列。
+            if (!pageReloadRetried) {
+                pageReloadRetried = true;
+                LogUtil.w(TAG, "page never became ready, reload once (v=%d)", pageVersion.get());
+                refreshWebView(true);
+            } else {
+                LogUtil.w(TAG, "page never became ready, give up waiting (v=%d)", pageVersion.get());
+                markPageReady(pageVersion.get());
+            }
+            return;
+        }
+        handler.postDelayed(pageProbeTask, 80);
+    }
+
+    /** 这一版页面确认上屏：放行队列、收起遮罩。 */
+    private void markPageReady(int version) {
+        if (version != pageVersion.get()) return;
+        if (loadedPageVersion == version && !pageLoading) return;
+        loadedPageVersion = version;
+        pageLoading = false;
+        pageProbeTries = 0;
+        pageReloadRetried = false;
+        handler.removeCallbacks(pageProbeTask);
+        handler.removeCallbacks(pageReadyWatchdog);
+        LogUtil.d(TAG, "page ready: v=%d, replay %d deferred js", version, pendingJs.size());
+        flushPendingJs();
+        finishConversationRender(false);
+        if (conversationWebView != null) conversationWebView.invalidate();
+    }
+
+    /** 页面当前这版内容已经就绪：追加类脚本可以直接下发。 */
+    private boolean pageReady() {
+        return !pageLoading && loadedPageVersion == pageVersion.get();
     }
 
     // ============ 逐字渐显 ============
@@ -3594,7 +3717,7 @@ public class MainActivity extends ThemedActivity {
     private final Runnable smoothTick = new Runnable() {
         public void run() {
             if (!smoothRunning) return;
-            if (!uiVisible || !pageReady) {
+            if (!uiVisible || !pageReady()) {
                 // 后台或页面不可用：先不推进，回到前台再继续，不能让内容压在缓冲里
                 handler.postDelayed(this, 250);
                 return;
@@ -3784,13 +3907,12 @@ public class MainActivity extends ThemedActivity {
     /**
      * 往消息列表末尾追加的脚本（{@code appendMsg} 一类）。
      *
-     * <p>页面已经就绪、但里面挂的还是上一个会话的 DOM 时不能直接写：切会话的后半段
-     * 正在后台拼新页，这时发送消息会把用户气泡插到旧会话的内容后面，气泡也没有
-     * 对应的流式骨架可写。先排队，等页面换成当前列表后按原顺序重放。
+     * <p>只有「当前这一版页面已经确认上屏」时才直接写。否则先排队：页面可能正在
+     * 被新一版 HTML 替换，此刻 eval 的结果会随旧文档一起丢掉 —— 表现就是
+     * 「发消息后界面一点变化都没有，重进历史才看得到」。
      *
-     * <p>队列顺序必须保留：排队期间若恰好有新页加载完成，重放时会由
-     * {@link #flushPendingJs()} 按入队顺序执行，{@code appendMsg} 一定排在
-     * 紧随其后的 {@code appendAiDiv} 之前。
+     * <p>排队顺序必须保留：{@code appendMsg} 一定排在紧随其后的
+     * {@code appendAiDiv} 之前，否则 AI 气泡会跑到用户气泡上面。
      */
     private void evalAppendJs(final String js) {
         if (android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) {
@@ -3802,21 +3924,16 @@ public class MainActivity extends ThemedActivity {
             return;
         }
         if (conversationWebView == null) return;
-        // pageReady 为 true 而页面属于别的会话：此时直接 eval 的结果会被随后的
-        // loadDataWithBaseURL 冲掉，用户看到的是「点了发送没有任何变化」。
-        // 与页面加载期间排队的脚本同一队列、同一顺序：后续的 appendAiDiv 也排在它后面。
-        if (!pageReady || !pageMatchesMessages) {
-            // 页面属于别的会话、而新页还没开始加载：多半是切会话失败或列表被换掉，
-            // 这里补一次整页重灌（refreshWebView 自己有代数和就绪守卫，重入安全），
-            // 否则这条气泡会一直排队到用户手动重进会话
-            if (pageReady && !pendingJs.isEmpty()) {
-                LogUtil.w(TAG, "evalAppendJs: page stale, reloading conversation");
-                pageMatchesMessages = true;
+        if (!pageReady()) {
+            // 没有任何一版页面在加载（首次进入、上次加载被系统丢弃）：补一次整页灌入，
+            // 否则这条气泡会一直排在队列里，直到用户手动重进会话才出现
+            if (!pageLoading) {
+                LogUtil.w(TAG, "evalAppendJs: no page loaded, reloading conversation");
                 refreshWebView();
             }
             if (pendingJs.size() < 300) pendingJs.add(js);
-            LogUtil.d(TAG, "evalAppendJs: queued (ready=%s, matches=%s)",
-                    pageReady, pageMatchesMessages);
+            LogUtil.d(TAG, "evalAppendJs: queued (loading=%s, loaded=%d, current=%d)",
+                    pageLoading, loadedPageVersion, pageVersion.get());
             return;
         }
         evalJsNow(conversationWebView, js);
@@ -3841,9 +3958,14 @@ public class MainActivity extends ThemedActivity {
         // onDestroy 后 WebView 已 destroy 并置空，迟到的回调直接丢弃
         WebView wv = conversationWebView;
         if (wv == null) return;
-        // 页面还没加载完：此刻 evaluateJavascript / loadUrl("javascript:") 都会被
-        // 随后的导航丢弃。排队到 onPageFinished 重放，避免「消息有时不渲染」。
-        if (!pageReady) {
+        // 页面换版期间下发的脚本会被随后的导航冲掉，先排队等确认就绪再重放
+        if (!pageReady()) {
+            // 没有正在进行的加载：先补一次整页灌入（它自带版本自增与队列清空，
+            // 所以必须在入队之前调用），再把这条排在后面
+            if (!pageLoading) {
+                LogUtil.w(TAG, "webViewEvalJs: no page loaded, reloading conversation");
+                refreshWebView();
+            }
             if (pendingJs.size() < 300) pendingJs.add(js);
             return;
         }
@@ -5227,8 +5349,7 @@ public class MainActivity extends ThemedActivity {
                 conversationManager.setCurrentConversation(branch);
                 messages = branch.messages;
                 conversationManager.saveCurrentConversation();
-                // 换了列表对象，页面上挂的还是旧列表：先作废，再整页重灌
-                pageMatchesMessages = false;
+                // 换了列表对象：整页重灌，页面版本自增会关掉旧的追加通道
                 refreshWebView();
                 AcToast.show(MainActivity.this, Strings.get(R.string.mainactivity_163, branch.title));
             }
