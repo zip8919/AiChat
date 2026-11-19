@@ -84,6 +84,8 @@ final class StreamJob {
     /** 是否请求服务端返回 token 用量（端点不支持时会被降级掉）。 */
     final boolean includeUsage;
     final boolean realtimeRender;
+    /** 正文逐字渐显；与 {@link #realtimeRender} 同时为真时才生效。 */
+    final boolean smoothStream;
     final boolean webSearchEnabled;
     /** 是否向模型暴露 http_request 工具（默认关闭，设置页开启）。 */
     final boolean httpToolEnabled;
@@ -126,6 +128,7 @@ final class StreamJob {
         this.streamEnabled = b.streamEnabled;
         this.includeUsage = b.includeUsage;
         this.realtimeRender = b.realtimeRender;
+        this.smoothStream = b.smoothStream && b.realtimeRender;
         this.webSearchEnabled = b.webSearchEnabled;
         this.httpToolEnabled = b.httpToolEnabled;
         this.vision = b.vision;
@@ -175,6 +178,7 @@ final class StreamJob {
         boolean streamEnabled;
         boolean includeUsage;
         boolean realtimeRender;
+        boolean smoothStream;
         boolean webSearchEnabled;
         boolean httpToolEnabled;
         boolean vision;
@@ -203,6 +207,9 @@ final class StreamJob {
         Builder streamEnabled(boolean v) { streamEnabled = v; return this; }
         Builder includeUsage(boolean v) { includeUsage = v; return this; }
         Builder realtimeRender(boolean v) { realtimeRender = v; return this; }
+
+        /** 逐字渐显。非实时渲染时自动失效：那条路径走的是纯文本 tail。 */
+        Builder smoothStream(boolean v) { smoothStream = v; return this; }
         Builder webSearchEnabled(boolean v) { webSearchEnabled = v; return this; }
         Builder httpToolEnabled(boolean v) { httpToolEnabled = v; return this; }
         Builder vision(boolean v) { vision = v; return this; }

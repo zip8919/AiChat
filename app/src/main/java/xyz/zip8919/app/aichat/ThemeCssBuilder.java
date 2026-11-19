@@ -110,7 +110,7 @@ final class ThemeCssBuilder {
         s.append("h1,h2{border-bottom-color:").append(divider).append(";}");
         s.append("h6,del,s,.msg-meta,.msg-meta-sub,.attach-sub,.attach-view,.err-summary,")
          .append(".src-arrow,#older-hint,.retry-reason,.tool-hint,.tool-meta,.tool-empty,")
-         .append(".tool-trim,.fn-def,.fn-def sup a,.thinking-block,.stream-tail.plain::after,")
+         .append(".tool-trim,.fn-def,.fn-def sup a,.thinking-block,.stream-tail.plain::after,.smooth-hint,")
          .append("pre .lang-tag{color:").append(text2).append(";}");
 
         // --- 气泡 ---

@@ -148,6 +148,7 @@ Android/data/xyz.zip8919.app.aichat/files/
 | `ToolHistoryRecovery` | 旧会话：从正文卡片反推工具历史 | 不碰网络，不改消息 |
 | `MessageSanitizer` | 发送前修正 messages 的协议顺序 | 不改消息内容与语义 |
 | `StreamRenderer` | 流式节流、base 与 tail 分开更新 | 不解析 markdown |
+| `SmoothTail` | 逐字渐显：把已到达的 HTML 按「标签不拆、空白粘前」切成单位，按节奏放出来 | 不碰 View、不碰线程，不给正文加内容 |
 | `TraceKit` | trace 长度上限，只在块边界裁剪 | 不做渲染，不判断内容语义 |
 | `RetryPolicy` | 429 重试：退避、`Retry-After`、上限、可打断等待 | 不判断 HTTP 状态，不写 UI |
 | `ErrorReport` | 错误详情归类 | 不进任何 API 请求体 |
@@ -217,6 +218,7 @@ Android/data/xyz.zip8919.app.aichat/files/
 | `isRequestInProgress` | 是否有一条请求在跑 | UI 线程 | 队列、发送键、Abort |
 | `renderSeq` | 渲染序号。每次发起渲染自增，回来时对不上就丢弃 | 任意线程 | 渲染回调 |
 | `lastStreamTrace` | base 层当前已推送的 trace 文本 | UI 线程 | 请求线程（判断要不要写 base） |
+| `smoothGeneration` | 渐显服务的是哪一次请求；旧气泡上的「直接显示」据此失效 | UI 线程 | UI 线程 |
 | `queue.paused` | 重试期间暂停队列放行 | UI 线程 | drain |
 | `__holdRender`（JS） | 手指按在表格/代码块上时暂停重绘，保护横向滚动 | touchstart | touchend 后 180ms |
 
@@ -254,6 +256,7 @@ Android/data/xyz.zip8919.app.aichat/files/
 | markdown 扩展语法 | `MarkdownPipeline` |
 | 公式渲染 | `MathRenderer` |
 | 流式刷新的频率与内容 | `StreamRenderer` |
+| 逐字渐显的节奏、「直接显示」气泡 | `SmoothTail`（切分与进度）+ `MainActivity.smoothTick`（节奏）+ `RendererAssets` 的 `__smooth*` |
 | 发送键 / 排队 / 长按行为 | `MainActivity.bindSendButton`、`MessageQueue` |
 | 发送键图标与启用状态（发送 / 停止） | `MainActivity.refreshSendButton`、`isStopState` |
 | 429 重试次数、间隔、退避 | `RetryPolicy` + `SettingsActivity.getRetryPolicy` |

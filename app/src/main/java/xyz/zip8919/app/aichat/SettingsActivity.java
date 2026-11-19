@@ -48,6 +48,8 @@ public class SettingsActivity extends ThemedActivity {
     private static final String KEY_LOG_ENABLED = "log_enabled";
     private static final String KEY_REALTIME_RENDER = "realtime_render_enabled";
     private static final String KEY_STREAM_ENABLED = "stream_enabled";
+    /** 流式输出逐字渐显。默认开启：关掉等于回到「整段文字一次跳出来」。 */
+    private static final String KEY_SMOOTH_STREAM = "smooth_stream_enabled";
     private static final String KEY_PRESETS = "system_presets";
     /** 是否向模型开放本机 HTTP 请求工具。默认关闭：等于把网络出口交给模型。 */
     private static final String KEY_HTTP_TOOL_ENABLED = "http_tool_enabled";
@@ -110,6 +112,7 @@ public class SettingsActivity extends ThemedActivity {
     private EditText webSearchMaxCallsEdit;
     private EditText jsEnvPromptEdit;
     private Switch autoTitleSwitch, quickScanSwitch, logSwitch, realtimeRenderSwitch, streamSwitch;
+    private Switch smoothStreamSwitch;
     private Switch webSearchSwitch, httpToolSwitch;
     private Switch httpAllowPrivateSwitch, trustAllCertsSwitch;
     /** loadSettings 期间置 true：否则 setChecked 会当成用户操作，弹出风险确认。 */
@@ -213,6 +216,7 @@ public class SettingsActivity extends ThemedActivity {
         logSwitch = (Switch) findViewById(R.id.log_switch);
         realtimeRenderSwitch = (Switch) findViewById(R.id.realtime_render_switch);
         streamSwitch = (Switch) findViewById(R.id.stream_switch);
+        smoothStreamSwitch = (Switch) findViewById(R.id.smooth_stream_switch);
         titleModelSpinner = (Spinner) findViewById(R.id.title_model_spinner);
         searchBackendSpinner = (Spinner) findViewById(R.id.search_backend_spinner);
         tavilyKeyEdit = (EditText) findViewById(R.id.tavily_key_edit);
@@ -399,7 +403,7 @@ public class SettingsActivity extends ThemedActivity {
     private static final int[] DESC_IDS = {
             R.id.desc_web_search, R.id.desc_search_backend, R.id.desc_tavily,
             R.id.desc_tool_calls, R.id.desc_http_tool, R.id.desc_http_private,
-            R.id.desc_certs, R.id.desc_retry429, R.id.desc_quota};
+            R.id.desc_certs, R.id.desc_retry429, R.id.desc_quota, R.id.desc_smooth_stream};
 
     private void initDescDetails() {
         for (int i = 0; i < DESC_IDS.length; i++) {
@@ -465,6 +469,7 @@ public class SettingsActivity extends ThemedActivity {
         logSwitch.setChecked(prefs.getBoolean(KEY_LOG_ENABLED, true));
         realtimeRenderSwitch.setChecked(prefs.getBoolean(KEY_REALTIME_RENDER, false));
         streamSwitch.setChecked(prefs.getBoolean(KEY_STREAM_ENABLED, true));
+        smoothStreamSwitch.setChecked(prefs.getBoolean(KEY_SMOOTH_STREAM, true));
         LogUtil.ENABLED = logSwitch.isChecked();
         refreshTitleModelSpinner();
         refreshPresetSpinner();
@@ -585,6 +590,7 @@ public class SettingsActivity extends ThemedActivity {
         editor.putBoolean(KEY_LOG_ENABLED, logEnabled);
         editor.putBoolean(KEY_REALTIME_RENDER, realtimeRenderSwitch.isChecked());
         editor.putBoolean(KEY_STREAM_ENABLED, streamSwitch.isChecked());
+        editor.putBoolean(KEY_SMOOTH_STREAM, smoothStreamSwitch.isChecked());
 
         // 代码执行提示词留空等于恢复默认，避免用户删光后拿到一句空提示
         String jsEnvPrompt = jsEnvPromptEdit.getText().toString().trim();
@@ -919,6 +925,12 @@ public class SettingsActivity extends ThemedActivity {
     public static boolean isRealtimeRenderEnabled(Context context) {
         SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, 0);
         return prefs.getBoolean(KEY_REALTIME_RENDER, false);
+    }
+
+    /** 流式正文逐字渐显。关闭时恢复「每帧整段替换」。 */
+    public static boolean isSmoothStreamEnabled(Context context) {
+        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, 0);
+        return prefs.getBoolean(KEY_SMOOTH_STREAM, true);
     }
 
     /** Use stream=true on the completion request. On by default. */

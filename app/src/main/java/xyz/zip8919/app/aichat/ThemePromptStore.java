@@ -102,7 +102,7 @@ final class ThemePromptStore {
         b.append("· Markdown：h1~h6, p, li, ul, ol, blockquote, a, strong, em, hr, mark, del, s, sup, sub, img, svg, table, th, td, .table-scroll, .svg-scroll").append('\n');
         b.append("· 代码：pre, pre code, code, pre .lang-tag, pre .copy-btn, pre .save-btn, pre .import-btn, pre .preview-btn, pre .run-btn, .tk-kw, .tk-str, .tk-cmt, .tk-num, .tk-type, .tk-fn, .tk-op").append('\n');
         b.append("· 搜索/工具卡片：.tool-card, .tool-card-head, .tool-item, .tool-title, .tool-meta, .tool-summary, .tool-arrow, .tool-hint, .tool-status, .tool-trim, .tool-fold, .tool-imgs, .tool-img-cell, .tool-fetch-content, .tool-error, .tool-empty, .tool-body").append('\n');
-        b.append("· 思考块/流式：.thinking-block, .thinking-toggle, .stream-tail, .stream-tail.plain").append('\n');
+        b.append("· 思考块/流式：.thinking-block, .thinking-toggle, .stream-tail, .stream-tail.plain, .stream-ghost, .stream-shown, .smooth-hint").append('\n');
         b.append("· 来源/脚注：.sources-block, .sources-head, .sources-body, .src-item, .src-arrow, .fn-ref, .fn-def").append('\n');
         b.append("· 附件：.attach-list, .attach-item, .attach-ico, .attach-thumb, .attach-body, .attach-name, .attach-sub, .attach-cut, .attach-view").append('\n');
         b.append("· 错误/重试：.error-card, .err-title, .err-summary, .err-actions, .err-btn, .err-btn.retry, .retry-btn, .retry-reason").append('\n');

@@ -141,6 +141,28 @@ public class MainActivity extends ThemedActivity {
      * 页面就绪后按原顺序重放。
      */
     private volatile boolean pageReady = false;
+    /**
+     * 页面是否还是「当前这次加载」。
+     *
+     * <p>WebView 的 onPageFinished 回调只带 URL，而这里每次都 loadDataWithBaseURL(null, …)，
+     * URL 恒为 about:blank，没法靠它分辨是哪一次加载的回调。于是会出现这种情况：
+     * 切会话时旧页的 onPageFinished 迟到，把 {@link #pageReady} 置回 true，
+     * 而此时新页的 HTML 还在后台拼；紧接着用户发送消息，appendMsg / appendAiDiv
+     * 直接 eval 到旧页，随后被 loadDataWithBaseURL 冲掉——用户看到的就是
+     * 「发完消息界面没有任何变化，重进历史才看得到」。
+     *
+     * <p>每次 loadDataWithBaseURL 自增；onPageFinished 只认自己发起时的值。
+     */
+    private int pageLoadToken = 0;
+    /**
+     * 已灌进页面的那条消息列表是不是 {@link #messages} 本身。
+     *
+     * <p>切会话时 {@code messages = conv.messages} 在数据线程加载完之后才换，
+     * 换之前 DOM 里挂的还是上一个会话的气泡。{@code appendMsg} 往这种页面上追加，
+     * 用户消息就会插到旧会话的可见内容后面。false 时追加类操作先排队，等页面换成
+     * 当前列表后再按顺序重放。
+     */
+    private volatile boolean pageMatchesMessages = false;
     private final java.util.ArrayDeque<String> pendingJs = new java.util.ArrayDeque<String>();
     private Spinner modelSpinner;
     private Spinner thinkingSpinner;
@@ -201,6 +223,14 @@ public class MainActivity extends ThemedActivity {
     // 提到字段上是因为 renderTraceAsync 与流式 tick 都要用它做互斥。
     private final java.util.concurrent.atomic.AtomicInteger renderSeq =
             new java.util.concurrent.atomic.AtomicInteger();
+    /**
+     * 本次请求是否逐字渐显，在发起时定死。
+     *
+     * <p>流式帧要据此决定「直接写入可见的 tail」还是「写进渐显缓冲」，
+     * 生成中途去设置页改动开关时，正在跑的这一条必须保持原来的方式：
+     * 一半文字已经渐显完、一半还压在缓冲里，切到另一种写法会缺字或重复。
+     */
+    private volatile boolean smoothStream = true;
     // trace（base 层）渲染单独一个序号：tick 的 nextSeq() 只该作废流式 tail 渲染，
     // 不该把在飞的整段工具卡片渲染判为过期。generation 守卫仍拦住跨请求的旧结果。
     private final java.util.concurrent.atomic.AtomicInteger traceRenderSeq =
@@ -663,6 +693,7 @@ public class MainActivity extends ThemedActivity {
     }
 
     private void bindWebView() {
+        final int myLoadToken = pageLoadToken;
         conversationWebView = (WebView) findViewById(R.id.message_webview);
         WebSettings settings = conversationWebView.getSettings();
         settings.setJavaScriptEnabled(true);
@@ -685,6 +716,13 @@ public class MainActivity extends ThemedActivity {
                 // 内容齐全却没画出来，直到用户点开菜单/弹对话框触发窗口重绘才可见。
                 // invalidate 是最轻的兜底，不改 DOM、不引入闪烁。
                 view.invalidate();
+                // 不是当前这次加载的回调：页面已经被下一次 loadDataWithBaseURL 接管。
+                // 还开 pageReady 的话，后台渲染期间到达的 JS 会直接写进即将被冲掉的 DOM。
+                if (pageLoadToken != myLoadToken) {
+                    LogUtil.d(TAG, "onPageFinished ignored: stale load (mine=%d, current=%d)",
+                            myLoadToken, pageLoadToken);
+                    return;
+                }
                 // 页面可用了：把加载期间排队的 JS 一次性重放。
                 // 之前加载中调 evaluateJavascript / loadUrl("javascript:") 会被
                 // 新一轮导航直接丢弃，DOM 里既没有消息也没有尾巴 —— 表现就是
@@ -698,6 +736,8 @@ public class MainActivity extends ThemedActivity {
             @Override
             public void onReceivedError(WebView view, int errorCode, String description,
                                         String failingUrl) {
+                // 过期加载的错误同样要忽略，理由同 onPageFinished
+                if (pageLoadToken != myLoadToken) return;
                 // 加载失败也要放行队列：否则 pageReady 永远为 false，这个会话
                 // 之后所有消息都只进队列不显示，比渲染错位严重得多。
                 LogUtil.w(TAG, "webview error: %d %s url=%s", errorCode, description, failingUrl);
@@ -1900,6 +1940,8 @@ public class MainActivity extends ThemedActivity {
                     return;
                 }
                 if (queue != null) queue.drain();
+                // 打断后不再继续渐显：停在用户已经看到的位置
+                stopSmooth(requestGeneration.get());
                 if (messages.size() != msgCountAtInterrupt) return;
                 if (!messages.isEmpty()) {
                     Message lastMsg = messages.get(messages.size() - 1);
@@ -2518,6 +2560,11 @@ public class MainActivity extends ThemedActivity {
         super.onResume();
         LogUtil.d(TAG, "onResume");
         uiVisible = true;
+        // 后台期间渐显停住了：回到前台立刻接着放，别让用户看到半截回答
+        if (smoothRunning) {
+            handler.removeCallbacks(smoothTick);
+            handler.post(smoothTick);
+        }
         // 在后台期间发生的外观改动只记了签名（避免每拖一格就重建整页），
         // 回到前台时补一次。必须在 invalidate 之前，否则用户先看到的是旧配色。
         if (tintSigPending != null) {
@@ -2784,11 +2831,15 @@ public class MainActivity extends ThemedActivity {
                 : WebSearchTool.appendToSystemPrompt(systemPrompt, webSearchEnabled)
                         + conversationTimeSuffix();
         final boolean streamEnabled = SettingsActivity.isStreamEnabled(this);
+        final boolean jobRealtimeRender = SettingsActivity.isRealtimeRenderEnabled(this);
         // 模型是否支持图片输入：只有用户勾过才发 image_url 块，否则图片只写一行说明
         final ModelInfo visionModel = configManager.getModel(currentModel);
         final boolean vision = visionModel != null && visionModel.supportsVision;
         // 端点上次拒过 stream_options 就不再发，避免每次对话白吃一个 400
         final boolean includeUsage = streamEnabled && !isUsageUnsupported(provider.name);
+        // 渐显只在流式、实时渲染时有意义：非流式是一次性拿到全文，纯文本 tail 也不需要渐显
+        smoothStream = SettingsActivity.isSmoothStreamEnabled(this)
+                && streamEnabled && jobRealtimeRender;
         activeProviderName = provider.name;
         retryNowRequested.set(false);
 
@@ -2859,7 +2910,8 @@ public class MainActivity extends ThemedActivity {
                 .chatEndpoint(Endpoint.chatUrl(provider))
                 .streamEnabled(streamEnabled)
                 .includeUsage(includeUsage)
-                .realtimeRender(SettingsActivity.isRealtimeRenderEnabled(this))
+                .realtimeRender(jobRealtimeRender)
+                .smoothStream(smoothStream)
                 .webSearchEnabled(webSearchEnabled)
                 .httpToolEnabled(SettingsActivity.isHttpToolEnabled(this))
                 .vision(vision)
@@ -2967,6 +3019,36 @@ public class MainActivity extends ThemedActivity {
 
         public int currentSeq() {
             return renderSeq.get();
+        }
+
+        public void renderTailHtml(final String baseNow, final String html) {
+            if (!smoothStream) {
+                evalJsHtml("streamTailHtml", html);
+                return;
+            }
+            feedSmooth(html, MainActivity.this.requestGeneration.get());
+        }
+
+        public void smoothFinished(int generation) {
+            finishSmooth(generation);
+        }
+
+        public void smoothInterrupted(int generation) {
+            stopSmooth(generation);
+        }
+
+        public void smoothReveal(int generation) {
+            if (!smoothStream || requestGeneration.get() != generation) return;
+            handler.removeCallbacks(smoothHintTask);
+            showHintScheduled = false;
+            smoothTail.finish();
+            webViewEvalJs("hideSmoothHint()");
+            webViewEvalJs("__smoothFinish('" + jsEscape(smoothTail.shownHtml()) + "')");
+            // 定时器下一拍会发现没有待显示内容并自行退出
+        }
+
+        public boolean smooth() {
+            return smoothStream;
         }
 
         public String renderHtml(String markdown) {
@@ -3085,6 +3167,7 @@ public class MainActivity extends ThemedActivity {
             public void run() {
                 try {
                     if (failed) {
+                        stopSmooth(settled.generation);
                         // 工具结果已经回传给模型的轮次：保留这条 AI 消息和已展示的
                         // 思考/工具卡片，挂「从出错处重试」，不再重发整条用户消息。
                         // 400/422 说明工具格式被拒，这类失败只能整条重来。
@@ -3145,6 +3228,9 @@ public class MainActivity extends ThemedActivity {
                                     done.tokensEstimated = true;
                                 }
                             }
+                            // 渐显里还压着没浮出来的字：先全部放完再定稿，
+                            // 否则最后一段会在同一帧里「跳」出来，前面的平滑感就断了
+                            finishSmooth(settled.generation);
                             // 先收掉流式骨架（清空 tail、隐藏光标），再写入完整渲染结果。
                             // updateLastMsg 会把全文写进 base 并清空 tail，所以这里不再
                             // 单独调用 streamFinalize —— 它只做「把 tail 搬进 base」，
@@ -3272,6 +3358,9 @@ public class MainActivity extends ThemedActivity {
     private void renderTraceAsync(final String traceText, final int generation, final String status,
             final int aiIndex) {
         final String snapshot = traceText == null ? "" : traceText;
+        // 新一轮（工具卡片追加）开始：渐显从这一段起重新开始，
+        // 不把上一轮的显示进度带到新片段上
+        if (smoothStream && !snapshot.equals(lastStreamTrace)) beginSmoothRound(generation);
         final String base0 = lastStreamTrace == null ? "" : lastStreamTrace;
 
         // 内容没变（最常见：只换了状态文案）就只写状态行。
@@ -3417,6 +3506,8 @@ public class MainActivity extends ThemedActivity {
         // 流式帧会直接 eval 到即将被 loadDataWithBaseURL 冲掉的旧 DOM，消息随之丢失
         // （偶现「消息不自动渲染」）。先清掉针对旧页面排的遗留队列，再关门，
         // 让渲染期间到达的 JS 走 pendingJs，由 onPageFinished 重放到新页。
+        // 同时自增加载序号：旧页可能还有一次迟到的 onPageFinished，不放行它。
+        pageLoadToken++;
         pageReady = false;
         pendingJs.clear();
         new Thread(new Runnable() {
@@ -3449,6 +3540,9 @@ public class MainActivity extends ThemedActivity {
                         if (conversationWebView == null) return;
                         renderedFrom = from;
                         loadingOlderMessages = false;
+                        // 灌进去的就是渲染它时那份列表：之后在此基础上追加的
+                        // appendMsg 才落到正确的会话里
+                        pageMatchesMessages = (messages == snapshot);
                         // 整页重建，DOM 里不存在上一次流式留下的 base 骨架，
                         // 「已推送基准」必须作废，否则下一次 trace 渲染会误走增量
                         lastStreamTrace = "";
@@ -3470,10 +3564,154 @@ public class MainActivity extends ThemedActivity {
         }) {{ setName("aichat-render-" + System.currentTimeMillis()); }}.start();
     }
 
+    // ============ 逐字渐显 ============
+
+    /**
+     * 本次请求的渐显缓冲与节奏。
+     *
+     * <p>为什么节奏放在 Java 侧而不是 CSS 动画里：流式片段每帧都会整段替换，
+     * CSS 动画会跟着被重置，长回答越到后面越像「一顿一顿地蹦字」。
+     * 由一个定时器按固定间隔往前推，帧率与内容量无关，低端机上也不会越写越慢。
+     */
+    private final SmoothTail smoothTail = new SmoothTail();
+    private volatile boolean smoothRunning;
+    /** 手指按在气泡上：由页面脚本在抬手/取消时复位。 */
+    private volatile boolean smoothPaused;
+    /** 渐显正在服务的那次请求代数：旧气泡上的「直接显示」不能打到新回复上。 */
+    private volatile int smoothGeneration;
+    /** 显示已经追上到达，页面侧暂时不必再收新片段。 */
+    private boolean toldPageStop;
+    /** 「直接显示」挂出前的等待：至少要浮出一小段，否则看着像误触。 */
+    private static final long SMOOTH_HINT_DELAY_MS = 700;
+
+    /**
+     * 一次渐显推进。
+     *
+     * <p>顺序有讲究：先取尚未显示的完整片段写进透明占位层，再从缓冲里取前缀
+     * 写进可见层。中间任何一帧被丢弃，下一次推进都会把这两层重新写成完整状态，
+     * 不会留下半截内容。
+     */
+    private final Runnable smoothTick = new Runnable() {
+        public void run() {
+            if (!smoothRunning) return;
+            if (!uiVisible || !pageReady) {
+                // 后台或页面不可用：先不推进，回到前台再继续，不能让内容压在缓冲里
+                handler.postDelayed(this, 250);
+                return;
+            }
+            // 手指按在气泡上（阅读、选字、拖表格）：停一下，抬手后接着浮
+            if (smoothPaused) {
+                handler.postDelayed(this, 120);
+                return;
+            }
+            if (smoothTail.hasPending()) {
+                webViewEvalJs("__smoothPush('" + jsEscape(smoothTail.pendingHtml()) + "')");
+                smoothTail.step();
+                webViewEvalJs("__smoothStep('" + jsEscape(smoothTail.shownHtml()) + "')");
+                toldPageStop = false;
+                handler.postDelayed(this, 1000L / SmoothTail.STEPS_PER_SECOND);
+                return;
+            }
+            if (!toldPageStop) {
+                // 显示追上到达：让页面先别再收，下一帧到了再收（隐藏层整段重建开销不小）
+                toldPageStop = true;
+                webViewEvalJs("__smoothStopPush()");
+            }
+            if (smoothTail.finished()) {
+                // 全部放完：收掉「直接显示」，退出循环
+                smoothRunning = false;
+                webViewEvalJs("hideSmoothHint()");
+                return;
+            }
+            if (showHintScheduled) {
+                // 到点了才把「直接显示」挂出来，不会在刚开始输出时一闪而过
+                showHintScheduled = false;
+                webViewEvalJs("showSmoothHint()");
+            }
+            handler.postDelayed(this, 60);
+        }
+    };
+
+    /**
+     * 新的一段正文开始渐显：清空缓冲，让第一屏内容立刻出现。
+     *
+     * <p>同时把定时器拉起来。只有真正有文字到达时才会拿到这个调用，
+     * 所以不必在发请求那一刻就空转。
+     */
+    private void beginSmoothRound(final int generation) {
+        if (!smoothStream || requestGeneration.get() != generation) return;
+        smoothGeneration = generation;
+        smoothTail.beginRound();
+        webViewEvalJs("__smoothStart()");
+        if (!smoothRunning) {
+            smoothRunning = true;
+            handler.removeCallbacks(smoothTick);
+            handler.postDelayed(smoothTick, 1000L / SmoothTail.STEPS_PER_SECOND);
+        }
+    }
+
+    /** 「直接显示」提示是否已经排在一秒后挂出来；只在第一次进入时调度。 */
+    private boolean showHintScheduled;
+
+    /** 把这一帧已到达的正文交给渐显：只记账，显示多少由定时器决定。 */
+    private void feedSmooth(final String html, final int generation) {
+        if (!smoothStream || !smoothRunning || requestGeneration.get() != generation) return;
+        if (!smoothTail.onHtml(html)) return;
+        // 定时器发现没有待显示内容时会自己退出；有新内容就把它重新拉起来
+        if (!smoothTail.hasPending()) {
+            handler.removeCallbacks(smoothTick);
+            handler.postDelayed(smoothTick, 1000L / SmoothTail.STEPS_PER_SECOND);
+        }
+        // 至少要浮一小段才值得给出口：刚出第一个字就挂气泡，看着像误触
+        if (!showHintScheduled && smoothTail.shownUnits() > 0
+                && smoothTail.unitCount() > 0) {
+            showHintScheduled = true;
+            handler.removeCallbacks(smoothHintTask);
+            handler.postDelayed(smoothHintTask, SMOOTH_HINT_DELAY_MS);
+        }
+    }
+
+    /**
+     * 「直接显示」的挂出时机。
+     *
+     * <p>等文字已经全部到达、只剩浮出动画时才挂，才是真正「点了有区别」的时刻；
+     * 提前挂出来，用户点完看到的还是同一段慢慢浮的字，会觉得没反应。
+     * 一律从当前一拍开始算延迟，快速连续的小帧不会反复重置。
+     */
+    private final Runnable smoothHintTask = new Runnable() {
+        public void run() {
+            showHintScheduled = false;
+            if (!smoothRunning || smoothTail.finished()) return;
+            webViewEvalJs("showSmoothHint()");
+        }
+    };
+
+    /** 停止渐显：停在当前显示的位置，不把剩下的字一次性甩出来。 */
+    private void stopSmooth(final int generation) {
+        handler.removeCallbacks(smoothTick);
+        handler.removeCallbacks(smoothHintTask);
+        smoothRunning = false;
+        showHintScheduled = false;
+        webViewEvalJs("hideSmoothHint()");
+        webViewEvalJs("__smoothStop()");
+    }
+
+    /** 收尾：剩下的全部放完，随后由完整渲染接管这条气泡。 */
+    private void finishSmooth(final int generation) {
+        if (!smoothStream) return;
+        handler.removeCallbacks(smoothTick);
+        handler.removeCallbacks(smoothHintTask);
+        smoothRunning = false;
+        showHintScheduled = false;
+        smoothTail.finish();
+        webViewEvalJs("hideSmoothHint()");
+        webViewEvalJs("__smoothFinish('" + jsEscape(smoothTail.shownHtml()) + "')");
+    }
+
     private void appendHtml(String msgHtml) {
         String esc = jsEscape(msgHtml);
         LogUtil.v(TAG, "webview js: appendMsg(len=%d)", esc.length());
-        webViewEvalJs("appendMsg('" + esc + "')");
+        evalAppendJs("appendMsg('" + esc + "')");
     }
 
     private void updateAiContent(final String content) {
@@ -3543,6 +3781,47 @@ public class MainActivity extends ThemedActivity {
         });
     }
 
+    /**
+     * 往消息列表末尾追加的脚本（{@code appendMsg} 一类）。
+     *
+     * <p>页面已经就绪、但里面挂的还是上一个会话的 DOM 时不能直接写：切会话的后半段
+     * 正在后台拼新页，这时发送消息会把用户气泡插到旧会话的内容后面，气泡也没有
+     * 对应的流式骨架可写。先排队，等页面换成当前列表后按原顺序重放。
+     *
+     * <p>队列顺序必须保留：排队期间若恰好有新页加载完成，重放时会由
+     * {@link #flushPendingJs()} 按入队顺序执行，{@code appendMsg} 一定排在
+     * 紧随其后的 {@code appendAiDiv} 之前。
+     */
+    private void evalAppendJs(final String js) {
+        if (android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) {
+            handler.post(new Runnable() {
+                public void run() {
+                    evalAppendJs(js);
+                }
+            });
+            return;
+        }
+        if (conversationWebView == null) return;
+        // pageReady 为 true 而页面属于别的会话：此时直接 eval 的结果会被随后的
+        // loadDataWithBaseURL 冲掉，用户看到的是「点了发送没有任何变化」。
+        // 与页面加载期间排队的脚本同一队列、同一顺序：后续的 appendAiDiv 也排在它后面。
+        if (!pageReady || !pageMatchesMessages) {
+            // 页面属于别的会话、而新页还没开始加载：多半是切会话失败或列表被换掉，
+            // 这里补一次整页重灌（refreshWebView 自己有代数和就绪守卫，重入安全），
+            // 否则这条气泡会一直排队到用户手动重进会话
+            if (pageReady && !pendingJs.isEmpty()) {
+                LogUtil.w(TAG, "evalAppendJs: page stale, reloading conversation");
+                pageMatchesMessages = true;
+                refreshWebView();
+            }
+            if (pendingJs.size() < 300) pendingJs.add(js);
+            LogUtil.d(TAG, "evalAppendJs: queued (ready=%s, matches=%s)",
+                    pageReady, pageMatchesMessages);
+            return;
+        }
+        evalJsNow(conversationWebView, js);
+    }
+
     // Execute JS in the conversation WebView: evaluateJavascript (API 19+) avoids a
     // full page navigation per call; loadUrl fallback for API 18.
     private void webViewEvalJs(final String js) {
@@ -3568,6 +3847,11 @@ public class MainActivity extends ThemedActivity {
             if (pendingJs.size() < 300) pendingJs.add(js);
             return;
         }
+        evalJsNow(wv, js);
+    }
+
+    /** 真正下发一段脚本；调用方负责线程与就绪判断。 */
+    private void evalJsNow(WebView wv, String js) {
         if (android.os.Build.VERSION.SDK_INT >= 19) {
             wv.evaluateJavascript(js, null);
         } else {
@@ -3633,6 +3917,30 @@ public class MainActivity extends ThemedActivity {
                     }
                 }
             });
+        }
+
+        /** 「直接显示」：跳过本次渐显，立刻显示全文。 */
+        @JavascriptInterface
+        public void smoothReveal() {
+            LogUtil.d(TAG, "JsBridge.smoothReveal");
+            runOnUiThread(new Runnable() {
+                public void run() {
+                    // 只对「还在跑的那一条」生效：旧气泡上的残留按钮不碰当前回复
+                    if (requestGeneration.get() != smoothGeneration) return;
+                    smoothTail.finish();
+                    handler.removeCallbacks(smoothHintTask);
+                    showHintScheduled = false;
+                    webViewEvalJs("hideSmoothHint()");
+                    webViewEvalJs("__smoothFinish('"
+                            + jsEscape(smoothTail.shownHtml()) + "')");
+                }
+            });
+        }
+
+        /** 手指按在气泡上：暂停往外放字，抬手后继续。 */
+        @JavascriptInterface
+        public void smoothPause(final boolean paused) {
+            smoothPaused = paused;
         }
 
         /** 429 等待卡片上的「立即重试」。只置位，等待循环下一轮就读到。 */
@@ -4919,6 +5227,8 @@ public class MainActivity extends ThemedActivity {
                 conversationManager.setCurrentConversation(branch);
                 messages = branch.messages;
                 conversationManager.saveCurrentConversation();
+                // 换了列表对象，页面上挂的还是旧列表：先作废，再整页重灌
+                pageMatchesMessages = false;
                 refreshWebView();
                 AcToast.show(MainActivity.this, Strings.get(R.string.mainactivity_163, branch.title));
             }

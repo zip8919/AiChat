@@ -1950,6 +1950,8 @@
     <string name="activity_settings_007">实时渲染</string>
     <string name="activity_settings_008">流式输出</string>
     <string name="activity_settings_009">外观</string>
+    <string name="activity_settings_smooth">逐字渐显</string>
+    <string name="activity_settings_smooth_desc">回答逐字出现，可点气泡上的「直接显示」跳过  ⓘ</string>
     <string name="activity_settings_010">内置默认</string>
     <string name="activity_settings_011">模型与提示词</string>
     <string name="activity_settings_012">6 项</string>
@@ -2009,6 +2011,8 @@
     <string name="activity_settings_066">使用统计 →</string>
     <string name="activity_settings_067">查询 DeepSeek 余额</string>
     <string name="activity_settings_068">关于</string>
+    <string name="activity_settings_069">根据用户消息生成3-15字标题。只输出标题本身。</string>
+    <string name="activity_settings_070">支持占位符：{android} {api} {webview} {model} {app_version} {ua}，生成标题时替换为当前设备的实际值。</string>
     <string name="activity_stats_001">统计范围</string>
     <string name="activity_stats_002">起始日</string>
     <string name="activity_stats_003">至</string>
@@ -2120,6 +2124,7 @@
     <string name="activity_appearance_tag_004">覆盖优先级：你手动改过的项 大于 自定义主题 大于 内置默认。选中主题只重置「跟随主题」的项，已手动改过的项会保留。每项旁的「跟随主题」可单项清除覆盖。</string>
     <string name="activity_appearance_tag_005">临时保存只在本次运行生效，应用被杀或重启后自动回到上次永久保存的外观；永久保存会写入配置文件，重启后仍然保留。两者都不删除已导入的字体与主题文件；重置只回到内置默认，仍需点永久保存才写盘。</string>
     <string name="activity_settings_tag_001">允许 AI 调用搜索/抓取工具，使用 DeepSeek Search API（需配置 DeepSeek API Key）</string>
+    <string name="activity_settings_tag_smooth">回答先逐字淡入，阅读节奏更平稳。接近收尾时气泡上方会出现「直接显示」，点一下就立刻显示全文；按发送键下方的停止键也会停在这里，不再继续渐显。</string>
     <string name="activity_settings_tag_002">Tavily：经自建网关调用，默认选项；DeepSeek：使用 DeepSeek 提供商的 API Key，按次计费。</string>
     <string name="activity_settings_tag_003">仅保存在本机，不会写入源码或打进安装包；换设备、清除数据后需重新填写。</string>
     <string name="activity_settings_tag_004">限制单轮 AI 回复中执行的搜索/抓取请求数（1-50，默认 15）；工具轮次不设上限。</string>
@@ -2149,6 +2154,7 @@
     <string name="renderer_017">HTTP 429：</string>
     <string name="renderer_018">HTTP 429：请求过于频繁（服务端未返回具体原因）</string>
     <string name="renderer_019">正在重试…</string>
+    <string name="renderer_020">直接显示</string>
     <string name="settingsactivity_071">货币：</string>
     <string name="settingsactivity_072">总余额：</string>
     <string name="settingsactivity_073">充值余额：</string>

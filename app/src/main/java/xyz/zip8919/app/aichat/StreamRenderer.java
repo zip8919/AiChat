@@ -77,6 +77,24 @@ final class StreamRenderer {
 
         int currentSeq();
 
+        /**
+         * 实时渲染的一帧正文已经产出（整段 HTML）。
+         *
+         * <p>默认实现直接写进可见的 tail；逐字渐显时由实现改成写进缓冲，
+         * 由宿主按节奏放出来。渲染器本身不关心「显示了多少」，
+         * 它只保证「这一段正文已经到达」。
+         */
+        void renderTailHtml(String baseNow, String html);
+
+        /** 本轮正文已经全部到达：剩余内容可以一次放完。 */
+        void smoothFinished(int generation);
+
+        /** 请求被停止：停在当前显示位置，不把剩余内容甩出来。 */
+        void smoothInterrupted(int generation);
+
+        /** 用户点了「直接显示」。 */
+        void smoothReveal(int generation);
+
         /** markdown → html，实现里可以放到后台线程调用。 */
         String renderHtml(String markdown);
 
@@ -97,6 +115,8 @@ final class StreamRenderer {
     private volatile boolean committing;
     /** flushAndWait 迟到落地帧的作废代数，见 commitTail。 */
     private volatile int commitEpoch = 0;
+    /** 最近一次投递出去的正文片段；收尾时要把它交给渐显放完，而不是直接甩出去。 */
+    private String lastTailHtml = "";
 
     StreamRenderer(Ui ui, int aiIndex, int generation, boolean realtime) {
         this.ui = ui;
@@ -176,7 +196,12 @@ final class StreamRenderer {
                                 ui.evalJsHtml("streamBase", baseHtml);
                                 ui.noteBaseRendered(base);
                             }
-                            if (tailHtml != null) ui.evalJsHtml("streamTailHtml", tailHtml);
+                            // 渐显时同样只交给缓冲：收尾的完整渲染紧接着就把这条
+                            // 气泡整段重画，这里甩出去只会多闪一下
+                            if (tailHtml != null) {
+                                lastTailHtml = tailHtml;
+                                ui.renderTailHtml(base, tailHtml);
+                            }
                         } catch (Throwable t) {
                             LogUtil.e(TAG, "flush apply failed: " + t.getMessage());
                         } finally {
@@ -195,6 +220,9 @@ final class StreamRenderer {
 
     void commitTail(String baseNow) {
         if (baseNow == null) baseNow = "";
+        // 这一轮正文已经全部到达，只剩还没浮出来的部分：让宿主一次放完。
+        // 必须在搬 DOM 之前，否则搬到 base 里的只是已经显示出来的那一截。
+        ui.smoothFinished(generation);
         commitEpoch++;          // 作废旧 flush 的迟到落地帧
         committing = true;
         ui.nextSeq();              // 作废正在飞的 tick，避免它回头覆盖搬好的 base
@@ -275,7 +303,7 @@ final class StreamRenderer {
                             ui.evalJsHtml("streamBase", baseHtml);
                             ui.noteBaseRendered(baseNow);
                         }
-                        ui.evalJsHtml("streamTailHtml", tailHtml);
+                        ui.renderTailHtml(baseNow, tailHtml);
                         guard.landed(System.currentTimeMillis(), queuedRef[0]);
                     }
                 });
