@@ -20,10 +20,19 @@ import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
+
+import javax.net.ssl.HttpsURLConnection;
 
 /**
  * 新建反馈：全部是安卓原生控件，输入框自己画、文件用系统选择器挑，
@@ -318,9 +327,14 @@ public class FeedbackComposeActivity extends ThemedActivity {
     /**
      * 提交成功后的确认弹窗。先给出编号，再看摘要：
      * 摘要由服务端在响应之后生成，所以这里先显示「生成中」，取到结果或超时再改。
+     *
+     * <p>邮件会晚半分钟才发出，这段时间里可以撤销。撤销后内容与附件都填回编辑页，
+     * 用户可以改完重新提交，而不是重写一遍。
      */
     private void showResult(final JSONObject data) {
         final String id = data.optString("id");
+        final String undoToken = data.optString("undoToken");
+        final boolean canUndo = data.optBoolean("canUndo", false) && undoToken.length() > 0;
         final String base = Strings.get(R.string.feedbackcomposeactivity_018, id);
 
         final String summary = data.optString("summary");
@@ -328,11 +342,14 @@ public class FeedbackComposeActivity extends ThemedActivity {
         final String message = hasSummary
                 ? base + "\n" + Strings.get(R.string.feedbackcomposeactivity_020, summary)
                 : base + "\n" + Strings.get(R.string.feedbackcomposeactivity_029);
+        final String withUndo = canUndo
+                ? message + "\n\n" + Strings.get(R.string.feedbackcomposeactivity_036)
+                : message;
 
         final int seq = ++pollSeq;
         final AlertDialog.Builder builder = AcDialog.builder(this)
                 .setTitle(Strings.get(R.string.feedbackcomposeactivity_026))
-                .setMessage(message)
+                .setMessage(withUndo)
                 .setPositiveButton(Strings.get(R.string.feedbackcomposeactivity_021),
                         new android.content.DialogInterface.OnClickListener() {
                             public void onClick(android.content.DialogInterface d, int w) {
@@ -357,6 +374,16 @@ public class FeedbackComposeActivity extends ThemedActivity {
                         })
                 // 已经提交成功，返回键不该把这一屏留在可编辑状态：再点一次提交就是重复反馈
                 .setCancelable(false);
+        if (canUndo) {
+            builder.setNeutralButton(Strings.get(R.string.feedbackcomposeactivity_034),
+                    new android.content.DialogInterface.OnClickListener() {
+                        public void onClick(android.content.DialogInterface d, int w) {
+                            d.dismiss();
+                            pollSeq++;
+                            undo(id, undoToken, withUndo);
+                        }
+                    });
+        }
         final AlertDialog dialog = builder.create();
         // 弹窗一旦没了就作废所有在途轮询，不只是靠两个按钮的点击
         dialog.setOnDismissListener(new android.content.DialogInterface.OnDismissListener() {
@@ -367,6 +394,125 @@ public class FeedbackComposeActivity extends ThemedActivity {
         dialog.show();
 
         if (!hasSummary && id.length() > 0) pollSummary(id, seq, base, dialog, 0);
+    }
+
+    /**
+     * 撤销提交。成功后把返回的内容与附件填回编辑页，用户可以接着改。
+     *
+     * <p>失败按原因分开说：时间过了就是「已经发出」，别让用户以为是网络问题反复重试。
+     */
+    private void undo(final String id, final String token, final String restoreMessage) {
+        AcToast.show(this, Strings.get(R.string.feedbackcomposeactivity_035));
+        FeedbackApi.undo(id, token, new FeedbackApi.Callback() {
+            public void onSuccess(JSONObject data) {
+                JSONObject draft = data.optJSONObject("draft");
+                if (draft == null) {
+                    AcToast.show(FeedbackComposeActivity.this,
+                            Strings.get(R.string.feedbackcomposeactivity_033));
+                    return;
+                }
+                fillDraft(draft);
+                AcToast.showLong(FeedbackComposeActivity.this,
+                        Strings.get(R.string.feedbackcomposeactivity_037));
+            }
+
+            public void onError(String message) {
+                AcToast.showLong(FeedbackComposeActivity.this,
+                        message == null || message.length() == 0
+                                ? Strings.get(R.string.feedbackcomposeactivity_033) : message);
+            }
+        });
+    }
+
+    /** 把撤销返回的内容填回输入框，附件取回来重新加入待提交列表。 */
+    private void fillDraft(JSONObject draft) {
+        titleView.setText(draft.optString("title"));
+        bodyView.setText(draft.optString("body"));
+        nicknameView.setText(draft.optString("nickname"));
+        contactView.setText(draft.optString("contact"));
+
+        files.clear();
+        refreshFiles();
+
+        JSONArray atts = draft.optJSONArray("attachments");
+        if (atts == null || atts.length() == 0) return;
+
+        final List<String> urls = new ArrayList<String>();
+        final List<String> names = new ArrayList<String>();
+        for (int i = 0; i < atts.length() && urls.size() < MAX_FILES; i++) {
+            JSONObject a = atts.optJSONObject(i);
+            if (a == null) continue;
+            String url = a.optString("url");
+            if (url.length() == 0) continue;
+            urls.add(url);
+            names.add(a.optString("name", "附件"));
+        }
+        if (urls.isEmpty()) return;
+
+        // 附件要从网络取回来：本机没有原文件，服务端暂存了一份
+        new Thread(new Runnable() {
+            public void run() {
+                final List<FeedbackApi.UploadFile> got = new ArrayList<FeedbackApi.UploadFile>();
+                for (int i = 0; i < urls.size(); i++) {
+                    File f = null;
+                    try {
+                        f = restoreFile(urls.get(i), names.get(i));
+                    } catch (Exception e) {
+                        LogUtil.w(TAG, "restore attachment failed: %s", e.getMessage());
+                    }
+                    if (f == null) continue;
+                    got.add(new FeedbackApi.UploadFile(Uri.fromFile(f), names.get(i),
+                            f.length(), null));
+                }
+                runOnUiThread(new Runnable() {
+                    public void run() {
+                        files.clear();
+                        files.addAll(got);
+                        refreshFiles();
+                        if (got.size() < urls.size()) {
+                            AcToast.show(FeedbackComposeActivity.this,
+                                    Strings.get(R.string.feedbackcomposeactivity_039));
+                        }
+                    }
+                });
+            }
+
+            private File restoreFile(String url, String name) throws Exception {
+                // 附件只在这里短暂落地，提交后由系统缓存目录的自然回收处理
+                File dir = new File(getCacheDir(), "feedback-undo");
+                if (!dir.isDirectory() && !dir.mkdirs()) return null;
+                File out = new File(dir, safeName(name));
+                HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+                try {
+                    conn.setConnectTimeout(15000);
+                    conn.setReadTimeout(30000);
+                    conn.setRequestProperty("Accept-Encoding", "identity");
+                    conn.setRequestProperty("User-Agent", "AiChat-Android");
+                    if (conn instanceof HttpsURLConnection) TlsCompat.apply((HttpsURLConnection) conn);
+                    if (conn.getResponseCode() != 200) return null;
+                    InputStream in = conn.getInputStream();
+                    OutputStream os = new FileOutputStream(out);
+                    try {
+                        byte[] buf = new byte[8192];
+                        int n;
+                        while ((n = in.read(buf)) > 0) os.write(buf, 0, n);
+                    } finally {
+                        try { in.close(); } catch (Exception ignored) { }
+                        try { os.close(); } catch (Exception ignored) { }
+                    }
+                    return out.length() > 0 ? out : null;
+                } finally {
+                    conn.disconnect();
+                }
+            }
+        }, "aichat-feedback-undo").start();
+    }
+
+    /** 附件名来自服务端，落盘前只保留安全字符，避免路径穿越。 */
+    private static String safeName(String name) {
+        String base = name == null ? "file" : name.replaceAll("[^A-Za-z0-9._\\-\\u4e00-\\u9fa5]", "_");
+        if (base.length() == 0 || base.startsWith(".")) base = "file" + base;
+        return base.length() > 80 ? base.substring(base.length() - 80) : base;
     }
 
     /**

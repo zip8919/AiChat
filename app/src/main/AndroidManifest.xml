@@ -125,12 +125,6 @@
             android:configChanges="screenSize|orientation|keyboardHidden"/>
 
         <activity
-            android:label="@string/attachmentpreview_001"
-            android:name="xyz.zip8919.app.aichat.AttachmentPreviewActivity"
-            android:exported="false"
-            android:configChanges="screenSize|orientation|keyboardHidden"/>
-
-        <activity
             android:label="@string/noticeactivity_001"
             android:name="xyz.zip8919.app.aichat.NoticeActivity"
             android:exported="false"

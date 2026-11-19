@@ -20,8 +20,9 @@ import org.json.JSONObject;
  * 反馈详情。数据来自反馈中心的公开详情接口，只有标题、类型、状态、摘要、正文、
  * 版本与附件——联系方式、批注、备注属于管理员信息，客户端拿不到也不需要拿到。
  *
- * <p>附件是签名链接（30 天有效）。点「预览」在本应用内看图片与文本，
- * 点「下载」交给系统浏览器或对应应用打开，不在本机留副本。
+ * <p>附件是签名链接（30 天有效）。点「预览」交给应用已有的查看器
+ * （{@link ViewerController}）：图片带缩放/旋转/背景/导出与上下条，文本按后缀高亮、
+ * 可切渲染；PDF 等查看器渲染不了的，点「下载」交系统应用打开。
  */
 public class FeedbackDetailActivity extends ThemedActivity {
 
@@ -46,10 +47,14 @@ public class FeedbackDetailActivity extends ThemedActivity {
 
     private String feedbackId;
 
+    /** 与聊天页同一个查看器：图片、文本的预览都复用它，不再维护第二套。 */
+    private ViewerController viewer;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_feedback_detail);
+        viewer = new ViewerController(this);
 
         loadingView = (TextView) findViewById(R.id.detail_loading);
         contentView = findViewById(R.id.detail_content);
@@ -173,13 +178,16 @@ public class FeedbackDetailActivity extends ThemedActivity {
             return;
         }
 
-        final JSONArray list = attachments;
+        final java.util.List<AttachmentViewer.Item> parsed = AttachmentViewer.parse(attachments);
         for (int i = 0; i < count; i++) {
             JSONObject a = attachments.optJSONObject(i);
             if (a == null) continue;
             final String url = a.optString("url");
             String name = a.optString("name");
             String sizeText = a.optString("sizeText");
+            final AttachmentViewer.Item start = findItem(parsed, url);
+            // PDF 之类查看器渲染不了，直接标「打开」而不是给一个点了会失败的「预览」
+            final boolean inApp = start != null && AttachmentViewer.canPreview(start.kind);
 
             LinearLayout row = new LinearLayout(this);
             row.setOrientation(LinearLayout.HORIZONTAL);
@@ -201,7 +209,7 @@ public class FeedbackDetailActivity extends ThemedActivity {
             preview.setTextSize(13);
             preview.setTextColor(getResources().getColor(R.color.primary));
             preview.setPadding(0, dp(4), dp(8), dp(4));
-            preview.setText(R.string.feedbackdetailactivity_020);
+            preview.setText(inApp ? R.string.feedbackdetailactivity_020 : R.string.feedbackdetailactivity_021);
             row.addView(preview);
 
             TextView download = new TextView(this);
@@ -209,12 +217,22 @@ public class FeedbackDetailActivity extends ThemedActivity {
             download.setTextColor(getResources().getColor(R.color.text_secondary));
             download.setPadding(dp(10), dp(4), 0, dp(4));
             download.setText(R.string.feedbackdetailactivity_021);
+            // 能预览的才需要并排一个「下载」；不能预览的，前面那个按钮本身就是打开
+            download.setVisibility(inApp ? View.VISIBLE : View.GONE);
             row.addView(download);
 
             preview.setOnClickListener(new View.OnClickListener() {
                 public void onClick(View v) {
-                    // 预览页内部按地址定位，这里不依赖循环下标
-                    AttachmentPreviewActivity.open(FeedbackDetailActivity.this, list, url);
+                    if (start == null) {
+                        openUrl(url);
+                        return;
+                    }
+                    AttachmentViewer.open(FeedbackDetailActivity.this, viewer, parsed, start,
+                            new AttachmentViewer.Fallback() {
+                                public void openWithSystem(String target) {
+                                    openUrl(target);
+                                }
+                            });
                 }
             });
             download.setOnClickListener(new View.OnClickListener() {
@@ -227,6 +245,26 @@ public class FeedbackDetailActivity extends ThemedActivity {
 
         attachmentsHint.setVisibility(View.VISIBLE);
         attachmentsHint.setText(R.string.feedbackdetailactivity_011);
+    }
+
+    /** 按地址在解析结果里定位：列表顺序变了也不会错位。 */
+    private static AttachmentViewer.Item findItem(java.util.List<AttachmentViewer.Item> items,
+                                                  String url) {
+        if (items == null || url == null || url.length() == 0) return null;
+        for (int i = 0; i < items.size(); i++) {
+            if (url.equals(items.get(i).url)) return items.get(i);
+        }
+        return null;
+    }
+
+    @Override
+    protected void onDestroy() {
+        // 查看器持有 WebView 与对话框，页面退出时一并销毁，避免泄漏
+        if (viewer != null) {
+            viewer.destroy();
+            viewer = null;
+        }
+        super.onDestroy();
     }
 
     private void openUrl(String url) {
