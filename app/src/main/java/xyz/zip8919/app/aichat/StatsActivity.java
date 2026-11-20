@@ -156,6 +156,23 @@ public class StatsActivity extends ThemedActivity {
         pickDate(true, customFrom, true);
     }
 
+    /** 上次画表时的主题版本；变了就整页重画，否则表格停在旧配色上。 */
+    private long drawnThemeRevision = -1;
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // 表格的颜色是建 View 时按当前主题取的，不会自己跟着主题走。
+        // 不在这里补一次，「打开统计页时选了深色、表格还是浅色」就会一直存在，
+        // 只有重进页面才正常。
+        long rev = AppearanceManager.getInstance(this).getRevision();
+        if (drawnThemeRevision >= 0 && rev != drawnThemeRevision) {
+            LogUtil.d(TAG, "theme revision %d -> %d, redraw", drawnThemeRevision, rev);
+            render();
+        }
+        drawnThemeRevision = rev;
+    }
+
     /**
      * 弹出日期选择。
      *
@@ -261,7 +278,7 @@ public class StatsActivity extends ThemedActivity {
 
         TextView head = new TextView(this);
         head.setTextSize(12);
-        head.setTextColor(0xFF78909C);
+        head.setTextColor(ThemeTokens.getSafe(this, ThemeTokens.AC_TEXT_SECONDARY));
         head.setPadding(0, 0, 0, dp(8));
         head.setText(periodLabel() + "  " + dayFmt.format(new Date(s.fromTs))
                 + " ~ " + dayFmt.format(new Date(s.toTs)));
@@ -279,7 +296,7 @@ public class StatsActivity extends ThemedActivity {
         t.setText(text);
         t.setTextSize(13);
         t.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
-        t.setTextColor(0xFF1565C0);
+        t.setTextColor(ThemeTokens.getSafe(this, ThemeTokens.AC_PRIMARY));
         t.setPadding(0, dp(12), 0, dp(4));
         return t;
     }
@@ -404,7 +421,7 @@ public class StatsActivity extends ThemedActivity {
         TextView t = new TextView(this);
         t.setText(text);
         t.setTextSize(10);
-        t.setTextColor(0xFF90A4AE);
+        t.setTextColor(ThemeTokens.getSafe(this, ThemeTokens.AC_TEXT_SECONDARY));
         t.setPadding(dp(2), dp(4), 0, 0);
         return t;
     }

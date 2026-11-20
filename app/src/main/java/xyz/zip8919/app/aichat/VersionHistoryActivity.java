@@ -94,7 +94,11 @@ public class VersionHistoryActivity extends ThemedActivity {
                 status.setText("共 " + data.size() + " 个版本 · 当前安装 " + currentVersion
                         + "\n时间为 UTC，点击版本可下载该版本");
                 for (int i = 0; i < data.size(); i++) {
-                    list.addView(buildCard(data.get(i), i == 0));
+                    View card = buildCard(data.get(i), i == 0);
+                    list.addView(card);
+                    // 卡片是异步回调里 new 出来的，不在 Activity 的 inflater 上：
+                    // 主题钩子够不到它，系统按钮底（Holo 浅灰）会一直是亮的。
+                    ThemeRecolor.applyTo(card);
                 }
                 LogUtil.i(TAG, "loaded %d releases, current=%s", data.size(), currentVersion);
             }
@@ -105,7 +109,7 @@ public class VersionHistoryActivity extends ThemedActivity {
     private View buildCard(final UpdateManager.Release r, boolean newest) {
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
-        card.setBackgroundColor(0xFFFFFFFF);
+        card.setBackgroundColor(ThemeTokens.getSafe(this, ThemeTokens.AC_SURFACE));
         int p = dp(12);
         card.setPadding(p, dp(10), p, dp(10));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
@@ -122,7 +126,7 @@ public class VersionHistoryActivity extends ThemedActivity {
         tag.setText(r.tag);
         tag.setTextSize(15);
         tag.setTypeface(Typeface.DEFAULT_BOLD);
-        tag.setTextColor(0xFF1565C0);
+        tag.setTextColor(ThemeTokens.getSafe(this, ThemeTokens.AC_PRIMARY));
         head.addView(tag);
 
         int cmp = UpdateManager.compareVersion(r.tag, currentVersion);
@@ -149,7 +153,7 @@ public class VersionHistoryActivity extends ThemedActivity {
             }
             sub.setText(sb.toString());
             sub.setTextSize(11);
-            sub.setTextColor(0xFF90A4AE);
+            sub.setTextColor(ThemeTokens.getSafe(this, ThemeTokens.AC_TEXT_SECONDARY));
             sub.setPadding(0, dp(3), 0, 0);
             card.addView(sub);
         }
@@ -159,7 +163,7 @@ public class VersionHistoryActivity extends ThemedActivity {
         if (body.length() > 0) {
             final TextView notes = new TextView(this);
             notes.setTextSize(12);
-            notes.setTextColor(0xFF37474F);
+            notes.setTextColor(ThemeTokens.getSafe(this, ThemeTokens.AC_TEXT));
             notes.setLineSpacing(dp(2), 1f);
             notes.setPadding(0, dp(6), 0, 0);
             // 折叠态只显示前 6 行：长日志默认全展开会把列表拉成几十屏，
@@ -172,7 +176,7 @@ public class VersionHistoryActivity extends ThemedActivity {
                 final TextView toggle = new TextView(this);
                 toggle.setText("展开全文");
                 toggle.setTextSize(12);
-                toggle.setTextColor(0xFF1565C0);
+                toggle.setTextColor(ThemeTokens.getSafe(this, ThemeTokens.AC_PRIMARY));
                 toggle.setPadding(0, dp(4), 0, 0);
                 toggle.setOnClickListener(new View.OnClickListener() {
                     private boolean open;

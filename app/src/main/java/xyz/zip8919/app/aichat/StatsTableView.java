@@ -106,12 +106,37 @@ final class StatsTableView extends LinearLayout {
         if (emptyView == null) {
             emptyView = new TextView(ctx);
             emptyView.setTextSize(12);
-            emptyView.setTextColor(0xFF90A4AE);
+            emptyView.setTextColor(themeColor(ThemeTokens.AC_TEXT_SECONDARY));
             emptyView.setPadding(dp(4), dp(10), dp(4), dp(6));
             addView(emptyView);
         }
         emptyView.setText(text);
         emptyView.setVisibility(rows.isEmpty() ? VISIBLE : GONE);
+    }
+
+    /**
+     * 主题变化后重画。
+     *
+     * <p>颜色是创建 View 时按当前主题取的，不重画就会停在旧主题上——
+     * 这正是实机上「表格开着时切深浅色，一部分格子还是旧配色」的来源。
+     */
+    void applyTheme() {
+        if (emptyView != null) {
+            emptyView.setTextColor(themeColor(ThemeTokens.AC_TEXT_SECONDARY));
+        }
+        rebuild();
+    }
+
+    /**
+     * 取当前主题色。
+     *
+     * <p>不能写死色值：写死的颜色只有被 {@code ThemeRecolor} 的映射表命中才会跟着
+     * 变深，而表头底 {@code #ECEFF1}、隔行底 {@code #F7F9FA}、正文 {@code #24292E}
+     * 都不在表里。结果就是深色模式下「偶数行黑底白字、奇数行白底浅灰字」——
+     * 一半刷上了一半没刷。直接按 token 取生效色，两套主题都从第一帧就是对的。
+     */
+    private int themeColor(String token) {
+        return ThemeTokens.getSafe(ctx, token);
     }
 
     private void rebuild() {
@@ -131,7 +156,7 @@ final class StatsTableView extends LinearLayout {
     private View buildHeader() {
         LinearLayout h = new LinearLayout(ctx);
         h.setOrientation(HORIZONTAL);
-        h.setBackgroundColor(0xFFECEFF1);
+        h.setBackgroundColor(themeColor(ThemeTokens.AC_DIVIDER));
         int pv = dp(6);
         h.setPadding(0, pv, 0, pv);
         for (int i = 0; i < cols.size(); i++) {
@@ -143,7 +168,7 @@ final class StatsTableView extends LinearLayout {
             t.setText(c.title + arrow);
             t.setTextSize(11);
             t.setTypeface(Typeface.DEFAULT_BOLD);
-            t.setTextColor(0xFF37474F);
+            t.setTextColor(themeColor(ThemeTokens.AC_TEXT));
             t.setGravity(c.numeric ? (Gravity.RIGHT | Gravity.CENTER_VERTICAL)
                     : (Gravity.LEFT | Gravity.CENTER_VERTICAL));
             t.setPadding(dp(4), dp(2), dp(4), dp(2));
@@ -169,8 +194,10 @@ final class StatsTableView extends LinearLayout {
     private View buildRow(Row r, int index) {
         LinearLayout row = new LinearLayout(ctx);
         row.setOrientation(HORIZONTAL);
-        // 隔行底色：宽表横向滑到后面时，靠底色才分得清哪几个格子属于同一行
-        row.setBackgroundColor(index % 2 == 0 ? 0xFFFFFFFF : 0xFFF7F9FA);
+        // 隔行底色：宽表横向滑到后面时，靠底色才分得清哪几个格子属于同一行。
+        // 用 surface / bg 两档而不是写死白与浅灰：深色下同样有区分，且都不会亮过表头。
+        row.setBackgroundColor(themeColor(index % 2 == 0
+                ? ThemeTokens.AC_SURFACE : ThemeTokens.AC_BG));
         int pv = dp(6);
         row.setPadding(0, pv, 0, pv);
         for (int i = 0; i < cols.size(); i++) {
@@ -178,7 +205,8 @@ final class StatsTableView extends LinearLayout {
             TextView t = new TextView(ctx);
             t.setText(r.cells != null && i < r.cells.length && r.cells[i] != null ? r.cells[i] : "");
             t.setTextSize(11);
-            t.setTextColor(i == 0 ? 0xFF24292E : 0xFF546E7A);
+            t.setTextColor(themeColor(i == 0
+                    ? ThemeTokens.AC_TEXT : ThemeTokens.AC_TEXT_SECONDARY));
             t.setGravity(c.numeric ? (Gravity.RIGHT | Gravity.CENTER_VERTICAL)
                     : (Gravity.LEFT | Gravity.CENTER_VERTICAL));
             t.setPadding(dp(4), 0, dp(4), 0);

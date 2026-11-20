@@ -110,7 +110,7 @@ public class ApiClient {
         HttpURLConnection conn = null;
         long startTs = System.currentTimeMillis();
         String p = (path == null || path.trim().length() == 0) ? "/user/balance" : path.trim();
-        String balanceUrl = Endpoint.join(provider.apiUrl, p);
+        String balanceUrl = Endpoint.joinApi(provider.apiUrl, p);
         out.url = balanceUrl;
         LogUtil.i(TAG, "queryBalance -> %s (%s)", balanceUrl, LogUtil.thread());
         try {

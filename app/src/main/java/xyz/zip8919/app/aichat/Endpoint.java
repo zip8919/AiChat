@@ -62,6 +62,28 @@ final class Endpoint {
     }
 
     /**
+     * 余额这类「预设自带路径」的接口地址。
+     *
+     * <p>与 {@link #join} 的差别只有一处：base 已经以版本段结尾（{@code /v1}）时，
+     * path 里的同名版本段要丢掉。Base URL 有两种都合法的填法 ——
+     * {@code https://api.siliconflow.cn/v1} 与 {@code https://api.siliconflow.cn} ——
+     * 而预设路径为了在两种填法下都能用，统一写成了带 {@code /v1} 的形式。
+     * 直接拼会得到 {@code /v1/v1/user/info}，服务端一律 404，
+     * 也就是用户看到的「查 TokenHub 余额返回 404」。
+     */
+    static String joinApi(String base, String path) {
+        String b = trim(base);
+        while (b.endsWith("/")) b = b.substring(0, b.length() - 1);
+        String p = trim(path);
+        while (p.startsWith("/")) p = p.substring(1);
+        String ver = versionSuffix(b);
+        if (ver.length() > 0 && p.startsWith(ver + "/")) {
+            p = p.substring(ver.length() + 1);
+        }
+        return join(b, p);
+    }
+
+    /**
      * 模型列表地址：取聊天地址的父路径 + {@code /models}。
      *
      * <p>{@code https://api.x.com/chat/completions} → {@code https://api.x.com/models}；

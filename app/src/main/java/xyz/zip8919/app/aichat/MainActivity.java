@@ -1668,6 +1668,9 @@ public class MainActivity extends ThemedActivity {
         if (banner == null) return;
         offlineShown = !NetworkState.isOnline(this);
         banner.setVisibility(offlineShown ? View.VISIBLE : View.GONE);
+        // 一进来就断网也提示一次：横幅在顶部，用户未必注意到，
+        // 而「点了发送才发现发不出去」才是真的浪费时间。
+        if (offlineShown) AcToast.show(this, Strings.get(R.string.offline_toast));
         if (netReceiver == null) {
             netReceiver = NetworkState.listen(this, new Runnable() {
                 public void run() {
@@ -1716,7 +1719,7 @@ public class MainActivity extends ThemedActivity {
         AcToast.show(this, Strings.get(R.string.offline_open_settings_failed));
     }
 
-    /** 重算一次并更新横幅。断网状态变化时弹一次提示，避免跨轮询反复打扰。 */
+    /** 重算一次并更新横幅。只在「有网 → 无网」这一刻提示，轮询本身不重复弹。 */
     private void applyOfflineState() {
         View banner = findViewById(R.id.offline_banner);
         if (banner == null) return;
@@ -1726,10 +1729,9 @@ public class MainActivity extends ThemedActivity {
         banner.setVisibility(online ? View.GONE : View.VISIBLE);
         LogUtil.d(TAG, "offline banner: %s", offlineShown ? "show" : "hide");
         if (!offlineShown) return;
-        // 提示只在「刚从有网变成无网」时弹一次，5 分钟内不重复
-        if (NetworkState.shouldNotify(this, System.currentTimeMillis(), 5 * 60 * 1000L)) {
-            AcToast.show(this, Strings.get(R.string.offline_toast));
-        }
+        // 不再做 5 分钟节流：断网就该立刻告诉我，而不是「上次说过，这次先不说」。
+        // 2.5 秒轮询也不会变成骚扰——只有状态真的翻转才走到这里。
+        AcToast.show(this, Strings.get(R.string.offline_toast));
     }
 
     /**

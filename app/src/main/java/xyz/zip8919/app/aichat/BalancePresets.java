@@ -46,7 +46,8 @@ final class BalancePresets {
             new Preset("deepseek", "DeepSeek 官方", "/user/balance",
                     "返回总余额、赠金余额与充值余额"),
             new Preset("tencent_tokenhub", "腾讯云 TokenHub", "/v1/usage",
-                    "返回剩余额度与已用额度"),
+                    "余额接口只在 api.lkeap.cloud.tencent.com/v1 下提供；"
+                            + "tokenhub 推理地址没有这个接口，会返回 404"),
             new Preset("openai_compat", "通用 OpenAI 兼容平台", "/dashboard/billing/credit_grants",
                     "适用于大多数中转站的额度接口"),
             new Preset("siliconflow", "硅基流动 SiliconFlow", "/v1/user/info",
@@ -136,12 +137,22 @@ final class BalancePresets {
         }
 
         if (json != null) {
-            String pid = presetId == null ? "deepseek" : presetId;
-            if ("deepseek".equals(pid)) parseDeepSeek(json, r);
-            else if ("tencent_tokenhub".equals(pid)) parseTencent(json, r);
-            else if ("siliconflow".equals(pid)) parseSiliconFlow(json, r);
-            else if ("openai_compat".equals(pid)) parseOpenAiCompat(json, r);
-            // 预设没解析出东西时走通用兜底：自定义平台与结构有变化的老平台都靠它
+            // 空串也要当 deepseek：老配置保存下来的 balance_preset 是 ""，
+            // 只判 null 会让它一路落到通用兜底 —— 而通用兜底只在顶层找字段，
+            // DeepSeek 的余额在 balance_infos 数组里，于是一条都解析不出来，
+            // 界面上只剩「账户状态：可用」这一行。
+            String pid = (presetId == null || presetId.trim().length() == 0)
+                    ? "deepseek" : presetId.trim();
+            if (!applyPreset(pid, json, r)) {
+                // 预设选错 / 用户把别家的 key 填在「自定义」里：按返回结构认一遍。
+                // 顺序按「结构最独特」排，DeepSeek 的 balance_infos 不会误命中别家。
+                String[] order = { "deepseek", "tencent_tokenhub", "siliconflow", "openai_compat" };
+                for (int i = 0; i < order.length; i++) {
+                    if (order[i].equals(pid)) continue;
+                    if (applyPreset(order[i], json, r)) break;
+                }
+            }
+            // 各家都不认识时走通用兜底：自定义平台与结构有变化的老平台都靠它
             if (r.fields.isEmpty()) parseGeneric(json, r);
         }
 
@@ -176,6 +187,16 @@ final class BalancePresets {
         return null;
     }
 
+    /** 按预设 id 跑一遍专用解析；返回是否解析出了字段。 */
+    private static boolean applyPreset(String id, JSONObject json, Result r) {
+        int before = r.fields.size();
+        if ("deepseek".equals(id)) parseDeepSeek(json, r);
+        else if ("tencent_tokenhub".equals(id)) parseTencent(json, r);
+        else if ("siliconflow".equals(id)) parseSiliconFlow(json, r);
+        else if ("openai_compat".equals(id)) parseOpenAiCompat(json, r);
+        return r.fields.size() > before;
+    }
+
     // ---- 各平台解析 ----
 
     /** DeepSeek：{@code {is_available, balance_infos:[{currency,total_balance,topped_up_balance,granted_balance}]}} */
@@ -184,15 +205,24 @@ final class BalancePresets {
             r.add("账户状态", json.optBoolean("is_available", false) ? "可用" : "不可用");
         }
         JSONArray infos = json.optJSONArray("balance_infos");
+        if (infos == null) {
+            // 个别中转站把它写成单个对象而不是数组，同结构照收
+            JSONObject only = json.optJSONObject("balance_infos");
+            if (only != null) {
+                infos = new JSONArray();
+                infos.put(only);
+            }
+        }
         if (infos == null || infos.length() == 0) return;
         for (int i = 0; i < infos.length(); i++) {
             JSONObject info = infos.optJSONObject(i);
             if (info == null) continue;
             String cur = info.optString("currency", "CNY");
             String suffix = infos.length() > 1 ? ("（" + cur + "）") : "";
-            r.add("总余额" + suffix, info.optString("total_balance", ""));
-            r.add("赠金余额" + suffix, info.optString("granted_balance", ""));
-            r.add("充值余额" + suffix, info.optString("topped_up_balance", ""));
+            // 用 pick 而不是 optString：金额有时是数字，optString 会得到 "110.0"
+            r.add("总余额" + suffix, pick(info, "total_balance", "total_balance_cny"));
+            r.add("赠金余额" + suffix, pick(info, "granted_balance"));
+            r.add("充值余额" + suffix, pick(info, "topped_up_balance"));
         }
     }
 
@@ -202,9 +232,11 @@ final class BalancePresets {
      */
     private static void parseTencent(JSONObject json, Result r) {
         JSONObject data = json.optJSONObject("data");
+        if (data == null) data = json.optJSONObject("Response");
         JSONObject src = data != null ? data : json;
         r.add("剩余额度", pick(src, "remaining_quota", "remain_quota", "balance", "quota", "total_quota"));
         r.add("已用额度", pick(src, "used_quota", "used", "consumed_quota"));
+        r.add("总容量", pick(src, "total_quota", "total", "total_amount"));
         r.add("赠送额度", pick(src, "granted_quota", "free_quota"));
         r.add("账户状态", pick(src, "status", "state"));
     }
@@ -252,7 +284,9 @@ final class BalancePresets {
     private static JSONObject[] scopesOf(JSONObject json) {
         List<JSONObject> list = new ArrayList<JSONObject>();
         list.add(json);
-        String[] keys = { "data", "result", "account", "billing", "info" };
+        // Response 是腾讯云云 API 的固定外壳（{Response:{Total,Used}}），
+        // 有的网关会原样透传；不认它就只能看见一个空对象。
+        String[] keys = { "data", "result", "account", "billing", "info", "Response" };
         for (String k : keys) {
             JSONObject sub = json.optJSONObject(k);
             if (sub != null) list.add(sub);
@@ -271,6 +305,10 @@ final class BalancePresets {
     /**
      * 取第一个存在且非空的字段，按原样转成字符串。
      *
+     * <p>先精确匹配，再忽略大小写找一遍：腾讯云云 API 的字段是 {@code Total} /
+     * {@code Used} 这种大驼峰，网关透传时保持原样，按小写名永远匹配不到，
+     * 界面上就会「余额查到了但一行都不显示」。
+     *
      * <p>数字统一去掉多余的 {@code .0}：额度多是整数，直接 {@code optString}
      * 会得到 {@code 12345.0}，看着像精度错乱。
      */
@@ -278,23 +316,37 @@ final class BalancePresets {
         if (json == null) return null;
         for (String n : names) {
             if (!json.has(n) || json.isNull(n)) continue;
-            Object v = json.opt(n);
-            if (v == null) continue;
-            String s;
-            if (v instanceof Number) {
-                double d = ((Number) v).doubleValue();
-                if (d == Math.floor(d) && !Double.isInfinite(d) && Math.abs(d) < 1e15) {
-                    s = String.valueOf((long) d);
-                } else {
-                    s = String.valueOf(d);
-                }
-            } else if (v instanceof Boolean) {
-                s = ((Boolean) v) ? "可用" : "不可用";
-            } else {
-                s = String.valueOf(v);
+            String s = stringOf(json.opt(n));
+            if (s != null) return s;
+        }
+        java.util.Iterator<String> it = json.keys();
+        while (it.hasNext()) {
+            String k = it.next();
+            for (String n : names) {
+                if (!k.equalsIgnoreCase(n) || json.isNull(k)) continue;
+                String s = stringOf(json.opt(k));
+                if (s != null) return s;
             }
-            if (s.trim().length() > 0) return s.trim();
         }
         return null;
+    }
+
+    /** 把任意 JSON 值转成展示用的字符串；空值返回 null。 */
+    private static String stringOf(Object v) {
+        if (v == null) return null;
+        String s;
+        if (v instanceof Number) {
+            double d = ((Number) v).doubleValue();
+            if (d == Math.floor(d) && !Double.isInfinite(d) && Math.abs(d) < 1e15) {
+                s = String.valueOf((long) d);
+            } else {
+                s = String.valueOf(d);
+            }
+        } else if (v instanceof Boolean) {
+            s = ((Boolean) v) ? "可用" : "不可用";
+        } else {
+            s = String.valueOf(v);
+        }
+        return s.trim().length() > 0 ? s.trim() : null;
     }
 }

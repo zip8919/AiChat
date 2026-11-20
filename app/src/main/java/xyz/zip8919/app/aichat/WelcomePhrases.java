@@ -84,9 +84,8 @@ final class WelcomePhrases {
      * 而用 flex 居中在 Chromium 30 上对高度 100% 的父容器处理不一致，
      * 绝对定位 + 四边 0 反而更稳。
      *
-     * <p>不用 CSS 变量与 flex（4.4 的内核都不支持），所有样式写死。
-     * 文字颜色取中性深灰而不是主题色：页面主题由 {@link ThemeCssBuilder} 覆盖，
-     * 这里若用主题色，深色主题下会出现「白底上的浅色字」看不出内容。
+     * <p>不用 CSS 变量与 flex（4.4 的内核都不支持），只留字号与间距。
+     * 颜色不做硬编码：主题 CSS 在后面注入，{@code inherit} 天然拿到当前主题的正文色。
      */
     static String buildHtml() {
         String g = esc(greeting());
@@ -108,14 +107,18 @@ final class WelcomePhrases {
         // 定位父级是 body：绝对定位的包含块取最近的已定位祖先，而 #msgs 没有定位
         // （它的高度由内容撑开，空对话时高度为 0）。这里给 body 补 position:relative
         // 与 100% 高度，卡片才是相对「窗口」居中，而不是相对某个零高度容器。
+        // 颜色一律 inherit，不写死：#37474f / #90a4ae 在深色主题下是「深底深字」，
+        // 欢迎语直接看不见。继承 body 的颜色后，浅色主题是深灰、深色主题是浅灰，
+        // 提示行靠透明度降一级，不需要为两套主题各写一份。
         return "html,body{height:100%;}"
                 + "body{position:relative;}"
                 + ".welcome-empty{position:absolute;left:0;right:0;top:0;bottom:0;"
                 + "display:table;width:100%;height:100%;"
                 + "padding:0 28px;-webkit-box-sizing:border-box;box-sizing:border-box;}"
                 + ".welcome-inner{display:table-cell;vertical-align:middle;text-align:center;}"
-                + ".welcome-greet{font-size:17px;line-height:1.5;color:#37474f;}"
-                + ".welcome-hint{margin-top:10px;font-size:12px;line-height:1.6;color:#90a4ae;}";
+                + ".welcome-greet{font-size:17px;line-height:1.5;color:inherit;}"
+                + ".welcome-hint{margin-top:10px;font-size:12px;line-height:1.6;"
+                + "color:inherit;opacity:.62;}";
     }
 
     private static String esc(String s) {

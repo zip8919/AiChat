@@ -52,6 +52,7 @@ final class BalanceDialog {
             for (String[] f : res.fields) {
                 TextView row = new TextView(act);
                 row.setTextSize(14);
+                row.setTextColor(ThemeTokens.getSafe(act, ThemeTokens.AC_TEXT));
                 row.setText(f[0] + "：" + f[1]);
                 row.setPadding(0, dp(act, 5), 0, dp(act, 5));
                 box.addView(row);
@@ -60,7 +61,7 @@ final class BalanceDialog {
         } else {
             TextView err = new TextView(act);
             err.setTextSize(14);
-            err.setTextColor(0xFFC62828);
+            err.setTextColor(ThemeTokens.getSafe(act, ThemeTokens.AC_DANGER));
             err.setPadding(0, dp(act, 6), 0, dp(act, 6));
             err.setText("查询失败\n" + (res != null && res.error != null ? res.error : "未知原因"));
             box.addView(err);
@@ -72,7 +73,7 @@ final class BalanceDialog {
         if (resp != null) {
             TextView meta = new TextView(act);
             meta.setTextSize(11);
-            meta.setTextColor(0xFF78909C);
+            meta.setTextColor(ThemeTokens.getSafe(act, ThemeTokens.AC_TEXT_SECONDARY));
             meta.setPadding(0, dp(act, 8), 0, 0);
             StringBuilder m = new StringBuilder();
             if (resp.url != null) m.append("请求地址：").append(resp.url);
@@ -83,6 +84,13 @@ final class BalanceDialog {
             if (resp.error != null) {
                 if (m.length() > 0) m.append('\n');
                 m.append("网络异常：").append(resp.error);
+            }
+            if (resp.code == 404) {
+                // 404 不是「解析失败」，是「这个地址上没有余额接口」。
+                // 不点明的话用户会一直以为自己填错了 key。
+                if (m.length() > 0) m.append('\n');
+                m.append("这个地址没有余额接口：确认 Base URL 是否填到 /v1，"
+                        + "或该平台是否允许用 API Key 查余额");
             }
             meta.setText(m.toString());
             box.addView(meta);
@@ -116,11 +124,14 @@ final class BalanceDialog {
         });
     }
 
-    /** 原始返回：只读、可选中、可滚动。长内容放进不可编辑的 EditText 才能正常选中复制。 */
+    /** 原始返回：格式化后展示，只读、可选中、可滚动。 */
     private static void showRaw(Activity act, String rawText) {
-        final String body = rawText == null || rawText.length() == 0 ? "（没有返回内容）" : rawText;
+        String formatted = pretty(rawText);
+        final String body = formatted.length() == 0 ? "（没有返回内容）" : formatted;
         EditText et = new EditText(act);
         et.setTextSize(11);
+        et.setTypeface(android.graphics.Typeface.MONOSPACE);
+        et.setTextColor(ThemeTokens.getSafe(act, ThemeTokens.AC_TEXT));
         et.setInputType(InputType.TYPE_NULL);
         et.setTextIsSelectable(true);
         et.setBackgroundDrawable(null);
@@ -142,6 +153,29 @@ final class BalanceDialog {
                     }
                 })
                 .show();
+    }
+
+    /**
+     * 把 JSON 排成两空格缩进的多行。
+     *
+     * <p>余额接口的返回经常是「一长串 800 字符、没有一个换行」，塞进对话框就是
+     * 一行横向滚到天荒地老，字段名和值对不上号。缩进后每行一个字段，扫一眼就能
+     * 找到 total_balance 在哪。
+     *
+     * <p>不是 JSON 时原样返回：网关错误页、纯文本提示都要能看见，不能因为
+     * 「格式化失败」就显示成空白。
+     */
+    private static String pretty(String raw) {
+        if (raw == null) return "";
+        String t = raw.trim();
+        if (t.length() == 0) return "";
+        try {
+            if (t.charAt(0) == '{') return new org.json.JSONObject(t).toString(2);
+            if (t.charAt(0) == '[') return new org.json.JSONArray(t).toString(2);
+        } catch (Throwable ignored) {
+            // 半截 JSON / 非 JSON：走原文
+        }
+        return t;
     }
 
     private static String rawOf(BalancePresets.Result res, ApiClient.BalanceResponse resp) {

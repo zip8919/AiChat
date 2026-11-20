@@ -4,7 +4,6 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
-import android.content.SharedPreferences;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 
@@ -88,22 +87,5 @@ final class NetworkState {
         }
     }
 
-    /**
-     * 记录上一次提示「无网络」的时间，用于限制重复打扰。
-     *
-     * <p>同一个状态不重复弹提示：跨轮询、跨前后台切换都会重算，
-     * 每次弹一下会变成骚扰。
-     */
-    static boolean shouldNotify(Context ctx, long now, long minGapMs) {
-        if (ctx == null) return true;
-        try {
-            SharedPreferences sp = ctx.getSharedPreferences("net_state", Context.MODE_PRIVATE);
-            long last = sp.getLong("last_offline_notify", 0L);
-            if (now - last < minGapMs) return false;
-            sp.edit().putLong("last_offline_notify", now).commit();
-            return true;
-        } catch (Throwable t) {
-            return true;
-        }
-    }
+
 }

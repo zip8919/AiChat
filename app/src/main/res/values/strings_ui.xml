@@ -2009,7 +2009,7 @@
     <string name="activity_settings_064">4 项</string>
     <string name="activity_settings_065">存储空间</string>
     <string name="activity_settings_066">使用统计 →</string>
-    <string name="activity_settings_067">查询 DeepSeek 余额</string>
+    <string name="activity_settings_067">查询余额</string>
     <string name="activity_settings_068">关于</string>
     <string name="activity_settings_069">根据用户消息生成3-15字标题。只输出标题本身。</string>
     <string name="activity_settings_070">支持占位符：{android} {api} {webview} {model} {app_version} {ua}，生成标题时替换为当前设备的实际值。</string>

@@ -140,6 +140,21 @@ public final class ThemeTokens {
         return parseColor(value) != null;
     }
 
+    /**
+     * 绘制期取色：读不到配置时回退内置默认，不抛。
+     *
+     * <p>这些调用发生在 {@code new TextView()} 之后、View 还没挂到窗口上之前，
+     * 一旦因为存储损坏导致外观单例初始化失败，抛出去就是整页白屏/崩溃；
+     * 退成默认色最多是这一屏配色不对，用户还能把页面关掉。
+     */
+    public static int getSafe(Context ctx, String token) {
+        try {
+            return get(ctx, token);
+        } catch (Throwable t) {
+            return defaultColor(token);
+        }
+    }
+
     /** 当前明暗模式下的生效色。 */
     public static int get(Context ctx, String token) {
         return AppearanceManager.getInstance(ctx).getEffectiveColor(token);
