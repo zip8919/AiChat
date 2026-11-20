@@ -51,6 +51,9 @@ public final class UpdateManager {
     public static final String REPO = "zip8919/AiChat";
     private static final String API_LATEST =
             "https://api.github.com/repos/" + REPO + "/releases/latest";
+    /** 全部 release（含历史版本），历史页用。 */
+    private static final String API_LIST =
+            "https://api.github.com/repos/" + REPO + "/releases?per_page=30";
     private static final String UA =
             "AiChat-Updater/1.0 (Android API " + Build.VERSION.SDK_INT + ")";
     private static final String PREFS = "aichat_update";
@@ -182,6 +185,14 @@ public final class UpdateManager {
     /** 版本查询 + 下载：两者先后发生，共用一个线程即可。 */
     private static final ExecutorService POOL = Executors.newSingleThreadExecutor();
     /**
+     * 历史版本列表专用线程。
+     *
+     * <p>不能借用 {@link #POOL}：那是单线程池，更新页正在下载 APK 时用户点历史页，
+     * 列表请求会排在整包下载后面，页面空白几十秒。这里只跑一个轻量的 GET，
+     * 单独开一条线程最省事。
+     */
+    private static volatile Thread listThread;
+    /**
      * 测速专用线程池，按用户设置的并发路数<b>按需重建</b>。
      *
      * <p>原来是固定 {@code newFixedThreadPool(3)}：80+ 个源要排 27 批，且没法调。
@@ -240,6 +251,10 @@ public final class UpdateManager {
         public String name = "";
         public String body = "";
         public String htmlUrl = "";
+        /** 发布时间（ISO8601 原文，如 2026-11-20T15:51:10Z）；老接口缺失时为空。 */
+        public String publishedAt = "";
+        /** 是否为预发布版本。历史列表要标出来，避免用户下了一个自己用不了的 beta。 */
+        public boolean prerelease;
         /** release 内置的测速文件下载地址；空串表示旧版本 release 没有这个文件。 */
         public String speedTestUrl = "";
         public final List<Asset> assets = new ArrayList<Asset>();
@@ -538,6 +553,8 @@ public final class UpdateManager {
         r.name = o.optString("name", "");
         r.body = o.optString("body", "");
         r.htmlUrl = o.optString("html_url", "");
+        r.publishedAt = o.optString("published_at", o.optString("created_at", ""));
+        r.prerelease = o.optBoolean("prerelease", false);
         JSONArray arr = o.optJSONArray("assets");
         if (arr != null) {
             for (int i = 0; i < arr.length(); i++) {
@@ -559,6 +576,173 @@ public final class UpdateManager {
             }
         }
         return r;
+    }
+
+    /**
+     * 拉取历史版本列表（按发布时间倒序）。
+     *
+     * <p>与 {@link #fetchLatest} 的区别：那个只拿最新一条，用于「是否有更新」；
+     * 历史页要看见全部版本、发布时间、更新日志，并允许下载任意一版。
+     *
+     * <p>{@code per_page} 取 30：GitHub 单页上限 100，但本项目 4.4 设备内存紧，
+     * 一次解析上百条 release（每条带完整 changelog 与数十个 asset）会明显卡顿。
+     * 30 条足够覆盖近一年的版本；需要更早的版本用户还是得去网页看。
+     */
+    public static void fetchReleases(final ReleasesCallback cb) {
+        Thread t = new Thread(new Runnable() {
+            public void run() {
+                List<Release> list = null;
+                String err = null;
+                HttpURLConnection c = null;
+                try {
+                    if (cancelled) {
+                        err = Strings.get(R.string.updatemanager_004);
+                    } else {
+                        c = open(API_LIST, false);
+                        c.setRequestProperty("Accept", "application/vnd.github+json");
+                        c.setConnectTimeout(8000);
+                        c.setReadTimeout(20000);
+                        int code = c.getResponseCode();
+                        if (code != 200) {
+                            err = apiError(c, code);
+                        } else {
+                            String body = readAll(c.getInputStream(), 1024 * 1024);
+                            list = parseReleases(body);
+                            if (list.isEmpty()) err = "没有可用的历史版本";
+                        }
+                    }
+                } catch (Throwable t) {
+                    err = cancelled ? Strings.get(R.string.updatemanager_005)
+                            : Strings.get(R.string.updatemanager_006, brief(t));
+                } finally {
+                    closeQuietly(c);
+                }
+                final List<Release> fl = list;
+                final String fe = err;
+                MAIN.post(new Runnable() {
+                    public void run() {
+                        if (cb != null) cb.onReleases(fl, fe);
+                    }
+                });
+            }
+        }, "aichat-releases");
+        listThread = t;
+        t.start();
+    }
+
+    public interface ReleasesCallback {
+        /** err 为 null 表示成功。 */
+        void onReleases(List<Release> list, String err);
+    }
+
+    /**
+     * 加载指定 tag 的版本。
+     *
+     * <p>GitHub 有 {@code /releases/tags/{tag}} 这个接口，但它与本项目的加速镜像
+     * 不完全兼容（部分镜像只代理 latest 与下载路径）。而历史列表刚刚才拉过一次，
+     * 直接复用同一份列表来找最稳，也省一次请求。列表里找不到时（被删除、
+     * 超出 30 条）回退到调用 {@link #fetchLatest}，至少不会让用户卡在空页面。
+     */
+    public static void fetchTag(final String tag, final Callback cb) {
+        if (tag == null || tag.length() == 0) {
+            fetchLatest(cb);
+            return;
+        }
+        Thread t = new Thread(new Runnable() {
+            public void run() {
+                Release found = null;
+                String err = null;
+                HttpURLConnection c = null;
+                try {
+                    if (cancelled) {
+                        err = Strings.get(R.string.updatemanager_004);
+                    } else {
+                        c = open(API_LIST, false);
+                        c.setRequestProperty("Accept", "application/vnd.github+json");
+                        c.setConnectTimeout(8000);
+                        c.setReadTimeout(20000);
+                        int code = c.getResponseCode();
+                        if (code != 200) {
+                            err = apiError(c, code);
+                        } else {
+                            List<Release> all = parseReleases(readAll(c.getInputStream(), 1024 * 1024));
+                            for (Release r : all) {
+                                if (tag.equals(r.tag)) {
+                                    found = r;
+                                    break;
+                                }
+                            }
+                            if (found == null) err = "找不到版本 " + tag + "，可能已被删除";
+                        }
+                    }
+                } catch (Throwable th) {
+                    err = cancelled ? Strings.get(R.string.updatemanager_005)
+                            : Strings.get(R.string.updatemanager_006, brief(th));
+                } finally {
+                    closeQuietly(c);
+                }
+                final Release fr = found;
+                final String fe = err;
+                MAIN.post(new Runnable() {
+                    public void run() {
+                        if (cb != null) cb.onRelease(fr, fe);
+                    }
+                });
+            }
+        }, "aichat-release-tag");
+        t.start();
+    }
+
+    /**
+     * 解析 release 数组。
+     *
+     * <p>没有安装包的 release（比如只发了说明、build 失败）直接跳过：
+     * 在历史页里点它只会得到「无法下载」，不如不列。「测速文件」不算安装包，
+     * 所以用 {@code hasApk()} 判断而不是 {@code assets.isEmpty()}。
+     */
+    private static List<Release> parseReleases(String body) throws Exception {
+        JSONArray arr = new JSONArray(body);
+        List<Release> out = new ArrayList<Release>();
+        for (int i = 0; i < arr.length(); i++) {
+            JSONObject o = arr.optJSONObject(i);
+            if (o == null) continue;
+            Release r;
+            try {
+                r = parseRelease(o.toString());
+            } catch (Exception e) {
+                continue;
+            }
+            if (r.tag.length() == 0) continue;
+            boolean hasApk = false;
+            for (Asset a : r.assets) {
+                if (a.name.endsWith(".apk")) { hasApk = true; break; }
+            }
+            if (!hasApk) continue;
+            out.add(r);
+        }
+        // 服务端已经按时间倒序给了，但 JSON 顺序在有些镜像/代理上会被打乱，
+        // 这里按版本号再排一次，保证「最新在上」的直觉不被打破
+        java.util.Collections.sort(out, new java.util.Comparator<Release>() {
+            public int compare(Release a, Release b) {
+                return compareVersion(b.tag, a.tag);
+            }
+        });
+        return out;
+    }
+
+    /**
+     * 把 GitHub 的 ISO 时间转成「2026-11-20 23:51」。
+     *
+     * <p>不引 SimpleDateFormat 的时区换算：设备时区千奇百怪，而用户看更新日志
+     * 只关心日期。直接截取日期与时分（UTC 原样显示，并在界面注明），
+     * 避免 4.4 上 TimeZone 数据库缺失导致的解析异常。
+     */
+    public static String formatDate(String iso) {
+        if (iso == null || iso.length() < 16) return "";
+        // 形如 2026-11-20T15:51:10Z
+        String d = iso.substring(0, 10);
+        String t = iso.substring(11, 16);
+        return d + " " + t;
     }
 
     /** 按 ABI 挑包，挑不到退 universal，再挑不到用第一个。 */

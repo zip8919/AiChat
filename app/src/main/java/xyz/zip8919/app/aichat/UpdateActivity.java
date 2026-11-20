@@ -55,6 +55,9 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
 
     private static final String TAG = "UpdateActivity";
 
+    /** 指定要加载的版本 tag（历史页选版本时带过来）；不传即最新版。 */
+    public static final String EXTRA_TAG = "want_tag";
+
     private TextView statusView, assetView, progressText;
     private ProgressBar progress;
     private Button btnRefresh, btnNotes, btnSwitchAsset, btnProbe, btnAdd;
@@ -96,10 +99,14 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
     private boolean resortDirty;
 
 
+    /** 历史页选中的版本 tag；非空时本页改为加载该版本而不是 latest。 */
+    private String wantTag;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_update);
+        wantTag = getIntent().getStringExtra(EXTRA_TAG);
 
         statusView = (TextView) findViewById(R.id.update_status);
         assetView = (TextView) findViewById(R.id.update_asset);
@@ -419,6 +426,13 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
         btnSwitchAsset.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) { chooseAsset(); }
         });
+        // 历史版本：单独一页，选完版本带 tag 回到本页加载（下载/安装仍走本页现成链路）
+        findViewById(R.id.btn_history).setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                LogUtil.d(TAG, "open version history");
+                startActivity(new Intent(UpdateActivity.this, VersionHistoryActivity.class));
+            }
+        });
         btnProbe.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) { runProbe(); }
         });
@@ -469,7 +483,12 @@ public class UpdateActivity extends ThemedActivity implements UpdateManager.Call
         assetView.setText(Strings.get(R.string.updateactivity_023));
         progressText.setText(Strings.get(R.string.updateactivity_024));
         UpdateManager.resetCancel();
-        UpdateManager.fetchLatest(this);
+        if (wantTag != null && wantTag.length() > 0) {
+            // 历史页点了某个旧版本：加载那一版，而不是 latest
+            UpdateManager.fetchTag(wantTag, this);
+        } else {
+            UpdateManager.fetchLatest(this);
+        }
     }
 
     @Override

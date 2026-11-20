@@ -1662,7 +1662,7 @@
     <string name="updateactivity_028">发现新版本 %1$s\n当前 %2$s</string>
     
     <string name="updateactivity_030">已是最新版 %1$s</string>
-    <string name="updateactivity_031">线上 %1$s / 本机 %2$s（较新）</string>
+    <string name="updateactivity_031">所选版本 %1$s 低于已安装的 %2$s\n这是降级安装，可能丢失新版本的数据或功能，建议只在需要回退时使用</string>
     
     
     <string name="updateactivity_034">无可用安装包</string>
