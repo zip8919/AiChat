@@ -10,10 +10,12 @@ import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.DatePicker;
+import android.widget.LinearLayout;
 import android.widget.Spinner;
 import android.widget.TextView;
 
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.List;
@@ -42,6 +44,17 @@ public class StatsActivity extends ThemedActivity {
     private View customRow;
     private Button fromButton, toButton;
 
+    /** 表格容器：概览 / 服务商 / 模型 / 工具 逐块塞进去。 */
+    private LinearLayout content;
+    private Spinner filterProvider, filterModel;
+    /** 筛选值：{@code null} / 空串表示「全部」。 */
+    private String selProvider = "";
+    private String selModel = "";
+    /** 上次渲染时出现过的服务商与模型，用于重建下拉且保住用户的选择。 */
+    private final List<String> providerOptions = new ArrayList<String>();
+    private final List<String> modelOptions = new ArrayList<String>();
+    private boolean buildingFilters;
+
     private int period = UsageStats.PERIOD_DAY;
     /** 自定义区间，闭区间；只在 period == PERIOD_CUSTOM 时有效。 */
     private long customFrom, customTo;
@@ -56,11 +69,15 @@ public class StatsActivity extends ThemedActivity {
         setContentView(R.layout.activity_stats);
         UsageStats.init(getApplicationContext());
 
-        statsText = (TextView) findViewById(R.id.stats_text);
+        statsText = null;
+        content = (LinearLayout) findViewById(R.id.stats_content);
+        filterProvider = (Spinner) findViewById(R.id.stats_filter_provider);
+        filterModel = (Spinner) findViewById(R.id.stats_filter_model);
         periodSpinner = (Spinner) findViewById(R.id.stats_period);
         customRow = findViewById(R.id.stats_custom_row);
         fromButton = (Button) findViewById(R.id.stats_from);
         toButton = (Button) findViewById(R.id.stats_to);
+        setupFilterSpinners();
 
         long now = System.currentTimeMillis();
         customTo = now;
@@ -225,103 +242,296 @@ public class StatsActivity extends ThemedActivity {
     }
 
     private void render() {
-        UsageStats.Summary s = period == PERIOD_CUSTOM
-                ? UsageStats.get().summarize(customFrom, customTo)
-                : UsageStats.get().summarize(period);
-
-        StringBuilder sb = new StringBuilder();
-        sb.append(periodLabel()).append('\n');
-        sb.append(dayFmt.format(new Date(s.fromTs))).append(" ~ ")
-          .append(dayFmt.format(new Date(s.toTs))).append("\n\n");
-
-        sb.append(Strings.get(R.string.statsactivity_010)).append(s.convs)
-          .append(Strings.get(R.string.statsactivity_011)).append(s.rounds).append("\n");
-        sb.append(Strings.get(R.string.statsactivity_012)).append(s.reqs);
-        if (s.retries > 0) sb.append(Strings.get(R.string.statsactivity_013)).append(s.retries).append(Strings.get(R.string.statsactivity_014));
-        sb.append("\n");
-        sb.append(Strings.get(R.string.statsactivity_015)).append(s.toolCalls).append(Strings.get(R.string.statsactivity_016));
-        if (s.toolFail > 0) sb.append(Strings.get(R.string.statsactivity_017)).append(s.toolFail).append(Strings.get(R.string.statsactivity_018));
-        sb.append("\n");
-
-        long total = s.pt + s.ct;
-        sb.append("Token  ").append(tok(total))
-          .append(Strings.get(R.string.statsactivity_019)).append(tok(s.pt))
-          .append(Strings.get(R.string.statsactivity_020)).append(tok(s.ct))
-          .append("）\n");
-        if (s.pt > 0) {
-            sb.append(Strings.get(R.string.statsactivity_021)).append(tok(s.cached))
-              .append(Strings.get(R.string.statsactivity_022)).append(s.cacheRate()).append("%）\n");
-        } else {
-            sb.append(Strings.get(R.string.statsactivity_023));
-        }
-        if (s.genMs > 0 && s.ct > 0) {
-            sb.append(Strings.get(R.string.statsactivity_024)).append(String.format(Locale.US, "%.1f tok/s", s.speed())).append("\n");
-        }
-        if (s.hasEstimated()) {
-            // 中断的回复、端点不返回 usage 的回复都只能估算。单列一行而不是混进总数：
-            // 混进去用户对账单时永远差那么一点，且找不到差在哪。
-            sb.append(Strings.get(R.string.statsactivity_025)).append(tok(s.estPt + s.estCt))
-              .append(Strings.get(R.string.statsactivity_026));
-        }
-
-        if (!s.tools.isEmpty()) {
-            sb.append(Strings.get(R.string.statsactivity_027));
-            for (Map.Entry<String, UsageStats.ToolCount> e : s.tools.entrySet()) {
-                sb.append("  ").append(e.getKey()).append("  ")
-                  .append(e.getValue().calls).append(Strings.get(R.string.statsactivity_028));
-                if (e.getValue().fail > 0) {
-                    sb.append(Strings.get(R.string.statsactivity_029)).append(e.getValue().fail).append("）");
-                }
-                sb.append("\n");
-            }
-        }
-
-        sb.append(Strings.get(R.string.statsactivity_030));
-        appendBuckets(sb, s.models);
-        sb.append(Strings.get(R.string.statsactivity_031));
-        appendBuckets(sb, s.providers);
-
-        sb.append(Strings.get(R.string.statsactivity_043));
-        statsText.setText(sb.toString());
+        UsageStats.Summary s = currentSummary();
+        rebuildFilters(s);
+        drawTables(s);
         LogUtil.d(TAG, "render: period=%d, reqs=%d, models=%d",
                 period, s.reqs, s.models.size());
     }
 
-    private static String tok(long n) {
-        return MessageHtmlRenderer.formatTokens((int) Math.min(n, Integer.MAX_VALUE));
+    private UsageStats.Summary currentSummary() {
+        return period == PERIOD_CUSTOM
+                ? UsageStats.get().summarize(customFrom, customTo)
+                : UsageStats.get().summarize(period);
+    }
+
+    /** 画区间说明与四张表。筛选变化时只走这条路径，不重建下拉。 */
+    private void drawTables(UsageStats.Summary s) {
+        content.removeAllViews();
+
+        TextView head = new TextView(this);
+        head.setTextSize(12);
+        head.setTextColor(0xFF78909C);
+        head.setPadding(0, 0, 0, dp(8));
+        head.setText(periodLabel() + "  " + dayFmt.format(new Date(s.fromTs))
+                + " ~ " + dayFmt.format(new Date(s.toTs)));
+        content.addView(head);
+
+        appendOverview(s);
+        appendBucketsTable("服务商", filterBy(s.providers, selProvider), "这个区间内没有服务商数据");
+        appendBucketsTable("模型", filterBy(s.models, selModel), "这个区间内没有模型数据");
+        appendToolsTable(s);
+    }
+
+    /** 小标题：每张表前面一行，说明这张表是什么。 */
+    private TextView sectionTitle(String text) {
+        TextView t = new TextView(this);
+        t.setText(text);
+        t.setTextSize(13);
+        t.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        t.setTextColor(0xFF1565C0);
+        t.setPadding(0, dp(12), 0, dp(4));
+        return t;
+    }
+
+    /** 概览表：把原先那一大段文字拆成「指标 / 数值」两列。 */
+    private void appendOverview(UsageStats.Summary s) {
+        content.addView(sectionTitle("总计"));
+        StatsTableView t = new StatsTableView(this);
+        List<StatsTableView.Col> cols = new ArrayList<StatsTableView.Col>();
+        cols.add(new StatsTableView.Col("指标", 120, false));
+        cols.add(new StatsTableView.Col("数值", 150, true));
+        t.setColumns(cols);
+
+        List<StatsTableView.Row> rows = new ArrayList<StatsTableView.Row>();
+        rows.add(row2("会话数", String.valueOf(s.convs)));
+        rows.add(row2("轮次", String.valueOf(s.rounds)));
+        rows.add(row2("请求数", s.retries > 0
+                ? s.reqs + "（含重试 " + s.retries + "）" : String.valueOf(s.reqs)));
+        rows.add(row2("Token 合计", tok(s.pt + s.ct)));
+        rows.add(row2("输入 tokens", tok(s.pt)));
+        rows.add(row2("输出 tokens", tok(s.ct)));
+        if (s.pt > 0) {
+            rows.add(row2("缓存命中", tok(s.cached) + "（" + s.cacheRate() + "%）"));
+        }
+        if (s.genMs > 0 && s.ct > 0) {
+            rows.add(row2("生成速度", String.format(Locale.US, "%.1f tok/s", s.speed())));
+        }
+        rows.add(row2("工具调用", s.toolFail > 0
+                ? s.toolCalls + " 次（失败 " + s.toolFail + "）"
+                : s.toolCalls + " 次"));
+        if (s.hasEstimated()) {
+            // 估算部分单列：端点没给 usage（例如中途打断）时只能本地估算，
+            // 混进总数会让用户对账永远差一点且找不到差在哪
+            rows.add(row2("其中本地估算", tok(s.estPt + s.estCt) + "（非官方用量）"));
+        }
+        t.setRows(rows);
+        content.addView(t);
+    }
+
+    private StatsTableView.Row row2(String k, String v) {
+        return new StatsTableView.Row(k, new String[] { k, v }, new double[] { 0, 0 });
     }
 
     /**
-     * 一行一个模型 / 服务商。
+     * 「服务商」与「模型」两张表结构一致：一行一个对象，列是各项指标。
      *
-     * <p>命中率只在有输入侧用量时显示：刚发出去还没回来的请求只有 reqs，
-     * 显示「命中 0%」会被误读成「缓存完全没生效」。
+     * <p>列宽是定值，整表可左右滑——词典笔屏幕只有几厘米，塞不下七八列，
+     * 滑动比压缩列宽（最后每列只剩一两个字）可读得多。
      */
-    private void appendBuckets(StringBuilder sb, Map<String, UsageStats.Bucket> map) {
+    private void appendBucketsTable(String title, Map<String, UsageStats.Bucket> map,
+            String noDataText) {
+        content.addView(sectionTitle(title));
+        StatsTableView t = new StatsTableView(this);
+        List<StatsTableView.Col> cols = new ArrayList<StatsTableView.Col>();
+        cols.add(new StatsTableView.Col("名称", 130, false));
+        cols.add(new StatsTableView.Col("请求", 52, true));
+        cols.add(new StatsTableView.Col("输入", 62, true));
+        cols.add(new StatsTableView.Col("输出", 62, true));
+        cols.add(new StatsTableView.Col("合计", 66, true));
+        cols.add(new StatsTableView.Col("缓存率", 56, true));
+        cols.add(new StatsTableView.Col("速度", 66, true));
+        t.setColumns(cols);
+
+        List<StatsTableView.Row> rows = new ArrayList<StatsTableView.Row>();
         List<Map.Entry<String, UsageStats.Bucket>> list = UsageStats.sorted(map);
-        if (list.isEmpty()) {
-            sb.append(Strings.get(R.string.statsactivity_034));
-            return;
-        }
         for (int i = 0; i < list.size(); i++) {
             Map.Entry<String, UsageStats.Bucket> e = list.get(i);
             UsageStats.Bucket b = e.getValue();
-            sb.append("  ").append(e.getKey()).append("\n")
-              .append("    ").append(b.reqs).append(Strings.get(R.string.statsactivity_035))
-              .append(tok(b.pt + b.ct)).append(" tokens");
-            if (b.pt > 0) {
-                sb.append(Strings.get(R.string.statsactivity_036)).append(tok(b.pt))
-                  .append(Strings.get(R.string.statsactivity_037)).append(b.cacheRate()).append("%");
-            }
-            if (b.estPt > 0 || b.estCt > 0) {
-                sb.append(Strings.get(R.string.statsactivity_038));
-            }
-            if (b.genMs > 0 && b.ct > 0) {
-                sb.append(" · ").append(String.format(Locale.US, "%.1f tok/s",
-                        b.ct * 1000.0 / b.genMs));
-            }
-            sb.append("\n");
+            boolean hasIn = b.pt > 0;
+            boolean hasSpeed = b.genMs > 0 && b.ct > 0;
+            double speed = hasSpeed ? b.ct * 1000.0 / b.genMs : 0;
+            // 没有输入侧用量时命中率显示「—」而不是 0%：
+            // 0% 会被读成「缓存完全没生效」，实际只是还没收到 usage
+            String cache = hasIn ? (b.cacheRate() + "%") : "—";
+            String sp = hasSpeed ? String.format(Locale.US, "%.0f", speed) : "—";
+            String totalStr = tok(b.pt + b.ct) + (b.estPt > 0 || b.estCt > 0 ? "*" : "");
+            rows.add(new StatsTableView.Row(e.getKey(),
+                    new String[] { e.getKey(), String.valueOf(b.reqs), tok(b.pt), tok(b.ct),
+                            totalStr, cache, sp },
+                    new double[] { 0, b.reqs, b.pt, b.ct, b.pt + b.ct,
+                            hasIn ? b.cacheRate() : -1, speed }));
         }
+        t.setRows(rows);
+        t.setEmptyText(noDataText);
+        content.addView(t);
+
+        // 有带 * 的行才解释 * 是什么意思，避免每张表都挂一行没用的说明
+        boolean anyEst = false;
+        for (Map.Entry<String, UsageStats.Bucket> e : list) {
+            if (e.getValue().estPt > 0 || e.getValue().estCt > 0) { anyEst = true; break; }
+        }
+        if (anyEst) content.addView(note("* 该行含本地估算的用量（端点未返回 usage）"));
+    }
+
+    /** 工具表：调用次数与失败次数。 */
+    private void appendToolsTable(UsageStats.Summary s) {
+        content.addView(sectionTitle("工具调用"));
+        StatsTableView t = new StatsTableView(this);
+        List<StatsTableView.Col> cols = new ArrayList<StatsTableView.Col>();
+        cols.add(new StatsTableView.Col("工具", 150, false));
+        cols.add(new StatsTableView.Col("调用", 60, true));
+        cols.add(new StatsTableView.Col("失败", 60, true));
+        cols.add(new StatsTableView.Col("成功率", 70, true));
+        t.setColumns(cols);
+
+        List<StatsTableView.Row> rows = new ArrayList<StatsTableView.Row>();
+        for (Map.Entry<String, UsageStats.ToolCount> e : s.tools.entrySet()) {
+            UsageStats.ToolCount c = e.getValue();
+            int okCount = c.calls - c.fail;
+            double rate = c.calls <= 0 ? 0 : okCount * 100.0 / c.calls;
+            rows.add(new StatsTableView.Row(e.getKey(),
+                    new String[] { e.getKey(), String.valueOf(c.calls), String.valueOf(c.fail),
+                            c.calls <= 0 ? "—" : String.format(Locale.US, "%.0f%%", rate) },
+                    new double[] { 0, c.calls, c.fail, rate }));
+        }
+        t.setRows(rows);
+        t.setEmptyText("这个区间内没有工具调用");
+        content.addView(t);
+    }
+
+    private TextView note(String text) {
+        TextView t = new TextView(this);
+        t.setText(text);
+        t.setTextSize(10);
+        t.setTextColor(0xFF90A4AE);
+        t.setPadding(dp(2), dp(4), 0, 0);
+        return t;
+    }
+
+    // ==================== 筛选 ====================
+
+    /**
+     * 筛选下拉的初始化。
+     *
+     * <p>两个下拉联动：选了服务商之后，模型下拉只列该服务商下出现过的模型。
+     * 但这里的数据来自「当前区间的事件」，所以还有一个附加规则——
+     * <b>筛选项永远保留「全部」</b>，且当前选中的值即使不在列表里也保留，
+     * 否则切换区间后筛选项消失、用户看到空白表格却不知道是被筛掉了。
+     */
+    private void setupFilterSpinners() {
+        filterProvider.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            public void onItemSelected(AdapterView<?> parent, View view, int pos, long id) {
+                if (buildingFilters) return;
+                Object o = parent.getItemAtPosition(pos);
+                String v = o == null ? "" : o.toString();
+                String next = v.startsWith("全部") ? "" : v;
+                if (next.equals(selProvider)) return;
+                selProvider = next;
+                // 换了服务商，模型的选择可能不再存在，重置回「全部」
+                selModel = "";
+                render();
+            }
+
+            public void onNothingSelected(AdapterView<?> parent) {
+            }
+        });
+        filterModel.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            public void onItemSelected(AdapterView<?> parent, View view, int pos, long id) {
+                if (buildingFilters) return;
+                Object o = parent.getItemAtPosition(pos);
+                String v = o == null ? "" : o.toString();
+                String next = v.startsWith("全部") ? "" : v;
+                if (next.equals(selModel)) return;
+                selModel = next;
+                // 只重画表格，不动下拉本身（否则会把用户刚点的项再重置一次）
+                redrawTablesOnly();
+            }
+
+            public void onNothingSelected(AdapterView<?> parent) {
+            }
+        });
+    }
+
+    /**
+     * 按当前区间的数据重建两个下拉的选项。
+     *
+     * <p>{@code buildingFilters} 抑制 setAdapter / setSelection 触发的 onItemSelected：
+     * 那两个回调会把 selProvider/selModel 重置掉，并立刻再触发一次 render，
+     * 表现为「切区间后筛选自动跳回全部」。
+     */
+    private void rebuildFilters(UsageStats.Summary s) {
+        buildingFilters = true;
+        providerOptions.clear();
+        providerOptions.addAll(keysOf(s.providers));
+
+        List<String> pLabels = new ArrayList<String>();
+        pLabels.add("全部");
+        for (String p : providerOptions) pLabels.add(p);
+        setSpinner(filterProvider, pLabels, selProvider);
+        // 之前选的服务商在新区间里不存在了：下拉已回退到「全部」，状态也跟着回退，
+        // 否则表格会被一个下拉上根本看不到的值筛空
+        if (selProvider.length() > 0 && filterProvider.getSelectedItemPosition() == 0) {
+            selProvider = "";
+            selModel = "";
+        }
+
+        // 模型列表给全集：Summary 按模型聚合，反查「某模型属于哪个服务商」需要
+        // 逐事件遍历，代价不划算。选了服务商时模型下拉仍列全集，但用户选中的模型
+        // 若不属于该服务商，表格会显示为空——这比藏起选项更不容易让人困惑。
+        modelOptions.clear();
+        modelOptions.addAll(keysOf(s.models));
+        List<String> mLabels = new ArrayList<String>();
+        mLabels.add("全部");
+        for (String m : modelOptions) mLabels.add(m);
+        setSpinner(filterModel, mLabels, selModel);
+        if (selModel.length() > 0 && filterModel.getSelectedItemPosition() == 0) {
+            selModel = "";
+        }
+        buildingFilters = false;
+    }
+
+    private List<String> keysOf(Map<String, UsageStats.Bucket> map) {
+        List<String> out = new ArrayList<String>();
+        for (Map.Entry<String, UsageStats.Bucket> e : UsageStats.sorted(map)) out.add(e.getKey());
+        return out;
+    }
+
+    /** 塞选项并保住当前选择；选项里找不到时回退到第一项。 */
+    private void setSpinner(Spinner sp, List<String> labels, String selected) {
+        ArrayAdapter<String> ad = new ArrayAdapter<String>(this,
+                android.R.layout.simple_spinner_item, labels);
+        ad.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        sp.setAdapter(ad);
+        int idx = 0;
+        if (selected != null && selected.length() > 0) {
+            int at = labels.indexOf(selected);
+            if (at >= 0) idx = at;
+        }
+        sp.setSelection(idx);
+    }
+
+    /** 只重画表格区（保留区间说明与下拉），供模型筛选使用。 */
+    private void redrawTablesOnly() {
+        drawTables(currentSummary());
+    }
+
+    /** 按名字过滤一张表；filter 为空时原样返回。 */
+    private Map<String, UsageStats.Bucket> filterBy(Map<String, UsageStats.Bucket> map,
+            String filter) {
+        if (filter == null || filter.length() == 0) return map;
+        Map<String, UsageStats.Bucket> out = new java.util.LinkedHashMap<String, UsageStats.Bucket>();
+        UsageStats.Bucket b = map.get(filter);
+        if (b != null) out.put(filter, b);
+        return out;
+    }
+
+    private int dp(int v) {
+        return (int) (v * getResources().getDisplayMetrics().density + 0.5f);
+    }
+
+    private static String tok(long n) {
+        return MessageHtmlRenderer.formatTokens((int) Math.min(n, Integer.MAX_VALUE));
     }
 
     private String periodLabel() {

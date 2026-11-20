@@ -62,19 +62,53 @@
             android:text="@string/activity_stats_004"/>
     </LinearLayout>
 
+    <!-- 筛选：按服务商 / 按模型缩小范围。两张下拉联动，
+         选服务商后模型下拉只列该服务商下的模型，避免一长串跨平台混排。 -->
+    <LinearLayout
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="6dp">
+
+        <TextView
+            android:textSize="11sp"
+            android:textColor="@color/text_secondary"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="服务商" />
+        <Spinner
+            android:id="@+id/stats_filter_provider"
+            android:layout_width="0dp"
+            android:layout_height="34dp"
+            android:layout_weight="1"
+            android:layout_marginLeft="4dp" />
+
+        <TextView
+            android:textSize="11sp"
+            android:textColor="@color/text_secondary"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginLeft="8dp"
+            android:text="模型" />
+        <Spinner
+            android:id="@+id/stats_filter_model"
+            android:layout_width="0dp"
+            android:layout_height="34dp"
+            android:layout_weight="1"
+            android:layout_marginLeft="4dp" />
+    </LinearLayout>
+
     <ScrollView
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1">
-        <TextView
-            android:id="@+id/stats_text"
-            android:textSize="13sp"
-            android:textColor="@color/text_primary"
-            android:lineSpacingExtra="4dp"
-            android:textIsSelectable="true"
+        <!-- 内容由代码按表格逐块生成：概览 / 服务商 / 模型 / 工具 -->
+        <LinearLayout
+            android:id="@+id/stats_content"
+            android:orientation="vertical"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="@string/activity_stats_005"/>
+            android:layout_height="wrap_content" />
     </ScrollView>
 
     <LinearLayout
