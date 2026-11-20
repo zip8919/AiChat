@@ -56,6 +56,12 @@ final class StreamRenderer {
         /** 执行 {@code fn('...')}，html 由实现负责转义。 */
         void evalJsHtml(String fn, String html);
 
+        /**
+         * 同上，额外把消息下标传进去：页面据此找到<b>自己那条</b>气泡，
+         * 而不是「最后一个 .msg.ai」。换版/重画交错时后者会写错地方。
+         */
+        void evalJsHtml(String fn, String html, int idx);
+
         /** 执行一段无参脚本，用于 {@code streamCommitTail()} 这类纯 DOM 操作。 */
         void evalJs(String code);
 
@@ -193,7 +199,7 @@ final class StreamRenderer {
                             inFlight.set(false);
                             ui.setContent(aiIndex, base + round);
                             if (baseHtml != null) {
-                                ui.evalJsHtml("streamBase", baseHtml);
+                                ui.evalJsHtml("streamBase", baseHtml, aiIndex);
                                 ui.noteBaseRendered(base);
                             }
                             // 渐显时同样只交给缓冲：收尾的完整渲染紧接着就把这条
@@ -230,7 +236,9 @@ final class StreamRenderer {
         ui.runOnUi(new Runnable() {
             public void run() {
                 try {
-                    if (ui.isCurrent(generation)) ui.evalJs("streamCommitTail()");
+                    // 带上气泡下标：页面在这期间被整页重建过时，只按「最后一个 AI」
+                    // 找会把这一轮的 tail 搬进上一条回答里
+                    if (ui.isCurrent(generation)) ui.evalJs("streamCommitTail(" + aiIndex + ")");
                 } finally {
                     committing = false;
                 }
@@ -300,7 +308,7 @@ final class StreamRenderer {
                         // 已经用 streamAppendBase 把这一段推上去了。此时再整段替换
                         // 就是拿旧内容盖新内容——卡片会消失，然后下一轮又冒出来。
                         if (baseHtml != null && !baseNow.equals(ui.baseRendered())) {
-                            ui.evalJsHtml("streamBase", baseHtml);
+                            ui.evalJsHtml("streamBase", baseHtml, aiIndex);
                             ui.noteBaseRendered(baseNow);
                         }
                         ui.renderTailHtml(baseNow, tailHtml);
@@ -369,7 +377,7 @@ final class StreamRenderer {
                         if (!ui.isCurrent(generation)) return;
                         ui.setContent(aiIndex, baseNow + roundNow);
                         if (!baseNow.equals(ui.baseRendered())) {
-                            ui.evalJsHtml("streamBase", baseHtml);
+                            ui.evalJsHtml("streamBase", baseHtml, aiIndex);
                             ui.noteBaseRendered(baseNow);
                         }
                         ui.evalJsHtml("streamTailText", tailPlain);

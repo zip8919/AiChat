@@ -116,6 +116,15 @@ public class MessageHtmlRenderer {
 
     public static String buildConversationHtml(List<Message> messages, int from, Context ctx,
             int pageVersion) {
+        return buildConversationHtml(messages, from, ctx, pageVersion, 0);
+    }
+
+    /**
+     * @param msgListId 这一版页面画的是哪个消息列表，与 pageVersion 一起写进页面：
+     *                  前者让宿主的追加脚本认得「自己人」，后者用来确认这一版已上屏。
+     */
+    public static String buildConversationHtml(List<Message> messages, int from, Context ctx,
+            int pageVersion, int msgListId) {
         long startTs = System.currentTimeMillis();
         ensureCacheSig(ctx);
         int total = messages == null ? 0 : messages.size();
@@ -124,12 +133,13 @@ public class MessageHtmlRenderer {
                 total, start, MathRenderer.cacheSize());
 
         StringBuilder body = new StringBuilder();
-        // 只渲染 [start, total)：renderMessagesHtml 把第二个参数当作起始索引，
-        // 若把整个列表传进去，它会从头渲染全部消息、却把 data-idx 标成 start+i，
-        // 于是长会话（>40 条）里所有消息索引整体偏移 start —— 长按菜单、复制、
-        // 修改、删除、重试全部命中错误的那一条，上滑加载还会重复渲染已在本页的消息。
-        body.append(renderMessagesHtml(messages == null ? null : messages.subList(start, total), start, ctx));
-        String page = MarkdownPipeline.buildPage(body.toString(), start, pageVersion);
+        // 只渲染 [start, total)，且按下标跳过而不是先 subList 复制：
+        // 复制发生在渲染线程，「复制完 → 开始渲染」之间用户在 UI 线程新加的消息
+        // 就落不进这一版页面（发完消息气泡不出现的一个来源）。索引口径也不能错——
+        // 若把整个列表传进去、却按 start 标 data-idx，长会话（>40 条）里所有消息
+        // 索引会整体偏移，长按菜单、复制、修改、删除、重试全部命中错的那一条。
+        body.append(renderMessagesHtml(messages, start, start, ctx));
+        String page = MarkdownPipeline.buildPage(body.toString(), start, pageVersion, msgListId);
         LogUtil.d(TAG, "buildConversationHtml done: rendered=%d, body=%d chars, page=%d chars in %d ms",
                 total - start, body.length(), page.length(), System.currentTimeMillis() - startTs);
         return page;
@@ -138,12 +148,31 @@ public class MessageHtmlRenderer {
     /**
      * 渲染一批消息为 HTML 片段（不带 html/head 外壳），data-idx 使用绝对索引，
      * 保证与 messages 下标一致——消息菜单、删除、重定位都依赖这个索引。
+     *
+     * @param startIndex 第一条消息在整个会话里的绝对下标
      */
     public static String renderMessagesHtml(List<Message> messages, int startIndex, Context ctx) {
+        return renderMessagesHtml(messages, 0, startIndex, ctx);
+    }
+
+    /**
+     * 从 {@code messages} 的第 {@code from} 条开始渲染（性能路径）。
+     *
+     * <p>整页重建只需要最近一屏，早期实现为此先用 {@code subList} 复制一段再渲染，
+     * 而复制会与「渲染期间用户又发了一条」竞态：复制到的是旧片段，渲染出来的
+     * 页面就少了最后一条。改成按下标跳过，渲染期间列表怎么变都不影响已渲染的内容，
+     * 是否过期由调用方按代数判断。
+     *
+     * @param from       从 {@code messages} 的第几条开始（含）
+     * @param startIndex 这批消息在整个会话里的绝对下标
+     */
+    public static String renderMessagesHtml(List<Message> messages, int from, int startIndex,
+            Context ctx) {
         if (messages == null) return "";
+        int begin = Math.max(0, Math.min(from, messages.size()));
         StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < messages.size(); i++) {
-            sb.append(renderMessageDiv(messages.get(i), startIndex + i, ctx));
+        for (int i = begin; i < messages.size(); i++) {
+            sb.append(renderMessageDiv(messages.get(i), startIndex + i - begin, ctx));
         }
         return sb.toString();
     }
@@ -156,6 +185,21 @@ public class MessageHtmlRenderer {
         }
         LogUtil.v(TAG, "renderMessageDiv: idx=%d role=%s len=%d", index,
                 msg.role, msg.content == null ? 0 : msg.content.length());
+        // 渲染缓存只按正文做 key，而一张卡片的内容不止正文：同一句「你好」先正常回复、
+        // 再点停止（interrupted 标记）、或先失败再成功，正文一字不差，缓存就会把
+        // 「已停止 / 已失败」的旧卡片原样吐回来。逐帧流式时更明显——最后一帧与已入库的
+        // 定稿正文相同，于是整页重建后气泡停在半截上（见 cacheValid）。
+        touchCache(msg, index);
+        // 下面 contentToHtml 写缓存时要记位置，而它的签名里没有下标
+        cacheIdxLocal.set(Integer.valueOf(index));
+        try {
+            return renderMessageDivBody(msg, index, idx, ctx);
+        } finally {
+            cacheIdxLocal.remove();
+        }
+    }
+
+    private static String renderMessageDivBody(Message msg, int index, String idx, Context ctx) {
         if (msg.isUser()) {
             StringBuilder sb = new StringBuilder();
             sb.append("<div class=\"msg user").append(msg.sendFailed ? " failed" : "")
@@ -556,9 +600,69 @@ public class MessageHtmlRenderer {
     }
 
     /**
-     * cacheable=false：流式每 200ms 的新正文都会产生一个新 key，若照常写入，
-     * 24 槽的 LRU 会被中间态轮占，历史消息缓存全被挤出，整页重灌时 40 条全 miss。
+     * 正文 → 上次渲染它时所在的消息下标。
+     *
+     * <p>用来发现「同一段正文换了位置」（删除中间一条后整体前移、插入历史消息等）：
+     * 卡片 HTML 里带着 {@code data-idx}，位置变了就必须重算，缓存不能复用。
      */
+    private static final Map<String, Integer> cacheIndex =
+            Collections.synchronizedMap(new LinkedHashMap<String, Integer>(32, 0.75f, true));
+
+    /**
+     * 正在渲染的消息下标，仅供上面那张表记账。
+     *
+     * <p>{@link #contentToHtml} 的签名里只有正文、拿不到下标，而缓存命中与写入都在
+     * 它内部。渲染都在后台线程，用 ThreadLocal 传参不会互相踩；不在消息卡片里
+     * （纯文本预览等）时为 null，此时不做位置校验。
+     */
+    private static final ThreadLocal<Integer> cacheIdxLocal = new ThreadLocal<Integer>();
+
+    /**
+     * 渲染缓存条目「是否还能代表这条消息」。
+     *
+     * <p>缓存 key 只有正文，但一张 AI 卡片的最终 HTML 还取决于这些字段：
+     * 停止标记、失败标记与错误详情、正文之外的思考/工具 trace、来源列表、附件。
+     * 任何一项变了而正文没变（停止正好停在最后一帧、失败后重试成功、来源晚到、
+     * 附件卡片补齐），旧 HTML 就会被原样吐回来。
+     *
+     * <p>还有一个更隐蔽的来源：{@link #contentToHtml} 在<b>流式中间帧</b>也会往
+     * 同一个 key 写缓存。中间帧与定稿正文一模一样时（模型最后一次只发了空 delta，
+     * 或收尾时最后一帧就是全文），整页重建就会命中那份「按半个气泡渲染」的中间结果。
+     *
+     * <p>所以在<b>渲染整条消息之前</b>就作废这类条目：只有「状态完全没变、位置没变」
+     * 的卡片才允许命中缓存。
+     */
+    private static void touchCache(Message msg, int index) {
+        String text = msg.content;
+        if (text == null || text.isEmpty()) return;
+        if (!renderCache.containsKey(text)) return;
+        if (!cacheValid(msg, index)) {
+            renderCache.remove(text);
+            LogUtil.d(TAG, "render cache dropped: state changed for idx=%d len=%d",
+                    index, text.length());
+            return;
+        }
+        // LRU 需要一次读才算「刚用过」；containsKey 不会更新访问顺序
+        renderCache.get(text);
+    }
+
+    /** 这条消息的 HTML 是否只由正文决定（见 {@link #touchCache}）。 */
+    private static boolean cacheValid(Message msg, int index) {
+        if (msg.interrupted || msg.sendFailed) return false;
+        if (msg.errorDetail != null && msg.errorDetail.length() > 0) return false;
+        if (msg.sources != null && !msg.sources.isEmpty()) return false;
+        if (msg.attachments != null && !msg.attachments.isEmpty()) return false;
+        // 思考块与工具卡片本身就是拼在正文里的标记，正文一致即一致；
+        // 但 trace 单独存在而正文没带上它时，渲染结果会不同
+        if (msg.toolHistory != null && msg.toolHistory.length() > 0) return false;
+        Integer at = cacheIndex.get(msg.content);
+        return at == null || at.intValue() == index;
+    }
+
+    private static String textOf(Message msg) {
+        return msg.content == null ? "" : msg.content;
+    }
+
     public static String contentToHtml(String text, Context ctx, boolean cacheable) {
         if (text == null || text.isEmpty()) return "";
         AppearanceManager am = null;
@@ -607,6 +711,12 @@ public class MessageHtmlRenderer {
                         totalBytes -= e.getValue().length();
                     }
                     renderCache.put(text, html);
+                    // 记下这条正文渲染时所在的位置，下一次换位置就作废（见 touchCache）
+                    Integer at = cacheIdxLocal.get();
+                    if (at != null) {
+                        if (cacheIndex.size() >= RENDER_CACHE_MAX_ENTRIES) cacheIndex.clear();
+                        cacheIndex.put(text, at);
+                    }
                 }
             }
             return html;

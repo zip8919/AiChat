@@ -157,6 +157,21 @@ public class MainActivity extends ThemedActivity {
     /** 渲染时列表被改动导致重来的次数，防止极端情况下连着重来。 */
     private int renderRetryCount = 0;
     private final java.util.ArrayDeque<String> pendingJs = new java.util.ArrayDeque<String>();
+    /**
+     * 每次整页重建时给「这一版页面画的那个 message 列表」发的编号。
+     *
+     * <p>页面版本号只回答「这一版上屏没有」，回答不了「脚本是不是发给它的」：
+     * 同一版页面可以被连灌两次（补灌），也可以在不同消息列表之间来回切。
+     * 追加类脚本带上这个编号，页面一比对就知道该不该处理——迟到的帧宁可丢掉，
+     * 也不能写进别人的气泡。
+     */
+    private final java.util.concurrent.atomic.AtomicInteger msgListId =
+            new java.util.concurrent.atomic.AtomicInteger();
+    /** 当前页面正在画的消息列表编号（未就绪时为新一版的编号）。 */
+    private volatile int curMsgListId = 0;
+    /** 最近一次追加到会话尾部的消息下标：页面就绪后用它核对这条是不是真的上屏了。 */
+    private volatile int lastAppendedIdx = -1;
+    private boolean lastAppendCheckPending = false;
     private Spinner modelSpinner;
     private Spinner thinkingSpinner;
     private View queueBar;
@@ -2728,8 +2743,13 @@ public class MainActivity extends ThemedActivity {
         LogUtil.d(TAG, "user message appended, total messages=%d", messages.size());
 
         // Append user message to WebView
-        String userHtml = MessageHtmlRenderer.renderMessageDiv(userMsg, messages.size() - 1, this);
-        appendHtml(userHtml);
+        int userIdx = messages.size() - 1;
+        String userHtml = MessageHtmlRenderer.renderMessageDiv(userMsg, userIdx, this);
+        appendHtml(userHtml, userIdx);
+        // 记下「刚发出去的这一条」：页面就绪后会先查它在不在 DOM 里，不在就重画整页。
+        // 这是最后一道保险——前面所有队列与版本判断只要有一处漏了，用户也不需要重进会话。
+        lastAppendedIdx = userIdx;
+        lastAppendCheckPending = true;
 
         Conversation conv = conversationManager.getCurrentConversation();
         boolean isFirstMsg = conv.messages.size() == 1;
@@ -2859,7 +2879,7 @@ public class MainActivity extends ThemedActivity {
                 } else {
                     webViewEvalJs(isResume
                             ? "clearAssistantFailed(" + placeholderIndex + ")"
-                            : "appendAiDiv()");
+                            : "appendAiDiv(" + placeholderIndex + ")");
                 }
             }
         });
@@ -2900,8 +2920,11 @@ public class MainActivity extends ThemedActivity {
                 .cont(cont)
                 .build();
 
+        final Channel channel = new Channel();
+        channel.uiIdx = aiIndex;
+        activeChannel = channel;
         final ChatStreamRunner runner =
-                new ChatStreamRunner(job, new Channel(), new GenerationSession(generation));
+                new ChatStreamRunner(job, channel, new GenerationSession(generation));
         currentRequestThread = new Thread(new Runnable() {
             public void run() {
                 runner.execute();
@@ -2912,14 +2935,30 @@ public class MainActivity extends ThemedActivity {
         LogUtil.d(TAG, "request thread started: %s", currentRequestThread.getName());
     }
 
+    /** 最近一次请求的视图通道：渐显定时器在 Activity 里跑，需要它的气泡下标。 */
+    private volatile Channel activeChannel;
+
     /** 把 Activity 的视图能力交给 {@link ChatStreamRunner}，每个方法都是一两行转发。 */
     private final class Channel implements ChatStreamRunner.Ui {
+        /**
+         * 这次请求当前对应的 AI 气泡下标。
+         *
+         * <p>流式脚本一律带上它。旧实现让页面自己找「最后一个 .msg.ai」，
+         * 只要页面在这期间被整页重建过（主题、上滑加载、另一版页面更晚上屏），
+         * 正文就会写进别的气泡，屏幕上看起来就是「发了消息没反应」。
+         */
+        private volatile int uiIdx = -1;
+
         public void runOnUi(Runnable task) {
             runOnUiThread(task);
         }
 
         public void evalJsHtml(String fn, String html) {
             webViewEvalJs(fn + "('" + jsEscape(html) + "')");
+        }
+
+        public void evalJsHtml(String fn, String html, int idx) {
+            webViewEvalJs(fn + "('" + jsEscape(html) + "'," + idx + ")");
         }
 
         public void evalJs(String code) {
@@ -2997,7 +3036,7 @@ public class MainActivity extends ThemedActivity {
 
         public void renderTailHtml(final String baseNow, final String html) {
             if (!smoothStream) {
-                evalJsHtml("streamTailHtml", html);
+                evalJsHtml("streamTailHtml", html, uiIdx);
                 return;
             }
             feedSmooth(html, MainActivity.this.requestGeneration.get());
@@ -3017,7 +3056,8 @@ public class MainActivity extends ThemedActivity {
             showHintScheduled = false;
             smoothTail.finish();
             webViewEvalJs("hideSmoothHint()");
-            webViewEvalJs("__smoothFinish('" + jsEscape(smoothTail.shownHtml()) + "')");
+            webViewEvalJs("__smoothFinish('" + jsEscape(smoothTail.shownHtml()) + "',"
+                    + smoothIdx() + ")");
             // 定时器下一拍会发现没有待显示内容并自行退出
         }
 
@@ -3060,7 +3100,8 @@ public class MainActivity extends ThemedActivity {
             runOnUiThread(new Runnable() {
                 public void run() {
                     if (requestGeneration.get() != generation) return;
-                    webViewEvalJs("liveTools('" + jsEscape(incrementalHtml) + "'," + reset + ")");
+                    webViewEvalJs("liveTools('" + jsEscape(incrementalHtml) + "'," + reset
+                            + "," + smoothIdx() + ")");
                 }
             });
         }
@@ -3209,8 +3250,9 @@ public class MainActivity extends ThemedActivity {
                             // updateLastMsg 会把全文写进 base 并清空 tail，所以这里不再
                             // 单独调用 streamFinalize —— 它只做「把 tail 搬进 base」，
                             // 而 tail 里的纯文本正好是要被替换掉的那一坨。
-                            webViewEvalJs("streamFinalize()");
-                            webViewEvalJs("updateLastMsg('" + jsEscape(html) + "')");
+                            webViewEvalJs("streamFinalize(" + finalIdx + ")");
+                            webViewEvalJs("updateLastMsg('" + jsEscape(html) + "',"
+                                    + finalIdx + ")");
                             // base 层此时等于这条消息的全文。不更新的话，续跑时增量渲染
                             // 会拿「旧 prefix」当基准，把已经显示的内容再追加一遍。
                             lastStreamTrace = settled.content == null ? "" : settled.content;
@@ -3394,7 +3436,8 @@ public class MainActivity extends ThemedActivity {
                                 webViewEvalJs("streamAppendBase('" + jsEscape(html) + "')");
                             } else {
                                 // 只写 base 层；tail 上正在流的内容原样保留
-                                webViewEvalJs("streamBase('" + jsEscape(html) + "')");
+                                webViewEvalJs("streamBase('" + jsEscape(html) + "',"
+                                        + aiIndex + ")");
                             }
                         }
                         if (status != null) {
@@ -3480,6 +3523,9 @@ public class MainActivity extends ThemedActivity {
         // 每次灌页换一版：页面 HTML 里带着这个号，回调读回来一比就知道 DOM 是哪一版。
         // 在真正下发之前，所有追加类脚本都排队，不会写进即将被冲掉的旧 DOM。
         final int myPageVersion = pageVersion.incrementAndGet();
+        // 这一版页面画的是哪个列表：追加脚本靠它认领自己的页面（见 __acMsgList）
+        final int myMsgListId = msgListId.incrementAndGet();
+        curMsgListId = myMsgListId;
         pageLoading = true;
         if (!recovery) pageReloadRetried = false;
         // 清掉针对旧页面排的队列：这一版页面会把当前列表整体画一遍，
@@ -3507,7 +3553,7 @@ public class MainActivity extends ThemedActivity {
                 String html = null;
                 try {
                     html = MessageHtmlRenderer.buildConversationHtml(
-                            snapshot, from, MainActivity.this, myPageVersion);
+                            snapshot, from, MainActivity.this, myPageVersion, myMsgListId);
                     LogUtil.d(TAG, "conversation html built: len=%d in %d ms",
                             html == null ? -1 : html.length(), System.currentTimeMillis() - t0);
                 } catch (Throwable t) {
@@ -3515,7 +3561,7 @@ public class MainActivity extends ThemedActivity {
                             String.valueOf(t));
                 }
                 final String page = html != null
-                        ? html : MarkdownPipeline.buildPage("", from, myPageVersion);
+                        ? html : MarkdownPipeline.buildPage("", from, myPageVersion, myMsgListId);
                 runOnUiThread(new Runnable() {
                     public void run() {
                         if (renderGeneration.get() != myRenderGen) {
@@ -3679,7 +3725,61 @@ public class MainActivity extends ThemedActivity {
         LogUtil.d(TAG, "page ready: v=%d, replay %d deferred js", version, pendingJs.size());
         flushPendingJs();
         finishConversationRender(false);
+        verifyLastAppend();
         if (conversationWebView != null) conversationWebView.invalidate();
+    }
+
+    /**
+     * 核对「刚发出去的那条消息」是否真的落进了 DOM。
+     *
+     * <p>前面已经有三道闸门（版本号、队列重放、页面归属），但闸门只保证「脚本发给了
+     * 正确的页面」，保证不了「脚本确实执行了」——页面此时可能正好被系统丢弃、
+     * 元素被同一帧的整页重建冲掉。这里读回一次 DOM 做最终确认，不认账就整页重画
+     * 一次（此时消息已在 messages 里，重画必然带上它）。
+     *
+     * <p>只核对一次：重画之后无论结果如何都收手，避免出错时死循环。
+     */
+    private void verifyLastAppend() {
+        if (!lastAppendCheckPending) return;
+        lastAppendCheckPending = false;
+        final int idx = lastAppendedIdx;
+        if (idx < 0 || android.os.Build.VERSION.SDK_INT < 19) return;
+        final WebView wv = conversationWebView;
+        if (wv == null) return;
+        final int versionAtCheck = pageVersion.get();
+        handler.postDelayed(new Runnable() {
+            public void run() {
+                if (versionAtCheck != pageVersion.get() || wv != conversationWebView) return;
+                try {
+                    wv.evaluateJavascript(
+                            "(function(){return document.querySelector('.msg[data-idx=\""
+                                    + idx + "\"]')?'1':'0';})()",
+                            new android.webkit.ValueCallback<String>() {
+                                public void onReceiveValue(String value) {
+                                    // evaluateJavascript 回传的是 JSON：'1' / '0'
+                                    boolean present = "1".equals(cleanJson(value));
+                                    LogUtil.d(TAG, "verify append idx=%d present=%s", idx, present);
+                                    if (present) return;
+                                    // 还不在这版页面上：整页重画一次，消息列表里已经有它了
+                                    LogUtil.w(TAG, "appended message missing from DOM, redraw once");
+                                    refreshWebView();
+                                }
+                            });
+                } catch (Throwable t) {
+                    LogUtil.w(TAG, "verify append failed: %s", String.valueOf(t));
+                }
+            }
+        }, 260);
+    }
+
+    /** evaluateJavascript 的回调值是 JSON：字符串带引号，null/undefined 各有写法。 */
+    private static String cleanJson(String raw) {
+        if (raw == null) return "";
+        String v = raw.trim();
+        if (v.length() >= 2 && v.charAt(0) == '"' && v.charAt(v.length() - 1) == '"') {
+            v = v.substring(1, v.length() - 1);
+        }
+        return "null".equals(v) ? "" : v;
     }
 
     /** 页面当前这版内容已经就绪：追加类脚本可以直接下发。 */
@@ -3727,10 +3827,11 @@ public class MainActivity extends ThemedActivity {
                 handler.postDelayed(this, 120);
                 return;
             }
+            final int idx = smoothIdx();
             if (smoothTail.hasPending()) {
-                webViewEvalJs("__smoothPush('" + jsEscape(smoothTail.pendingHtml()) + "')");
+                webViewEvalJs("__smoothPush('" + jsEscape(smoothTail.pendingHtml()) + "'," + idx + ")");
                 smoothTail.step();
-                webViewEvalJs("__smoothStep('" + jsEscape(smoothTail.shownHtml()) + "')");
+                webViewEvalJs("__smoothStep('" + jsEscape(smoothTail.shownHtml()) + "'," + idx + ")");
                 toldPageStop = false;
                 handler.postDelayed(this, 1000L / SmoothTail.STEPS_PER_SECOND);
                 return;
@@ -3765,7 +3866,7 @@ public class MainActivity extends ThemedActivity {
         if (!smoothStream || requestGeneration.get() != generation) return;
         smoothGeneration = generation;
         smoothTail.beginRound();
-        webViewEvalJs("__smoothStart()");
+        webViewEvalJs("__smoothStart(" + smoothIdx() + ")");
         if (!smoothRunning) {
             smoothRunning = true;
             handler.removeCallbacks(smoothTick);
@@ -3828,13 +3929,25 @@ public class MainActivity extends ThemedActivity {
         showHintScheduled = false;
         smoothTail.finish();
         webViewEvalJs("hideSmoothHint()");
-        webViewEvalJs("__smoothFinish('" + jsEscape(smoothTail.shownHtml()) + "')");
+        webViewEvalJs("__smoothFinish('" + jsEscape(smoothTail.shownHtml()) + "',"
+                + smoothIdx() + ")");
+    }
+
+    /** 渐显当前服务的气泡下标；拿不到（尚未起请求）时给 -1，由页面按最后一条兜底。 */
+    private int smoothIdx() {
+        Channel c = activeChannel;
+        return c == null ? -1 : c.uiIdx;
     }
 
     private void appendHtml(String msgHtml) {
+        appendHtml(msgHtml, -1);
+    }
+
+    /** @param idx 这条气泡的 data-idx；-1 表示不指定 */
+    private void appendHtml(String msgHtml, int idx) {
         String esc = jsEscape(msgHtml);
-        LogUtil.v(TAG, "webview js: appendMsg(len=%d)", esc.length());
-        evalAppendJs("appendMsg('" + esc + "')");
+        LogUtil.v(TAG, "webview js: appendMsg(idx=%d, len=%d)", idx, esc.length());
+        evalAppendJs("appendMsg('" + esc + "')", idx);
     }
 
     private void updateAiContent(final String content) {
@@ -3850,7 +3963,7 @@ public class MainActivity extends ThemedActivity {
                         if (renderGeneration.get() != myRenderGen) return;
                         String esc = jsEscape(html);
                         LogUtil.v(TAG, "webview js: updateLastMsg(htmlLen=%d)", esc.length());
-                        webViewEvalJs("updateLastMsg('" + esc + "')");
+                        webViewEvalJs("updateLastMsg('" + esc + "'," + smoothIdx() + ")");
                     }
                 });
             }
@@ -3915,15 +4028,25 @@ public class MainActivity extends ThemedActivity {
      * {@code appendAiDiv} 之前，否则 AI 气泡会跑到用户气泡上面。
      */
     private void evalAppendJs(final String js) {
+        evalAppendJs(js, -1);
+    }
+
+    /**
+     * @param idx 目标气泡的 data-idx；-1 表示由页面按「最后一条 AI」自己定位。
+     *            带上它之后，即使页面在这条消息之后又被整页重建过，脚本也能找到
+     *            正确的气泡——旧实现只认「最后一个 .msg.ai」，迟到一帧就写错地方。
+     */
+    private void evalAppendJs(final String js, final int idx) {
         if (android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) {
             handler.post(new Runnable() {
                 public void run() {
-                    evalAppendJs(js);
+                    evalAppendJs(js, idx);
                 }
             });
             return;
         }
         if (conversationWebView == null) return;
+        final String owned = ownedJs(js, idx);
         if (!pageReady()) {
             // 没有任何一版页面在加载（首次进入、上次加载被系统丢弃）：补一次整页灌入，
             // 否则这条气泡会一直排在队列里，直到用户手动重进会话才出现
@@ -3931,12 +4054,26 @@ public class MainActivity extends ThemedActivity {
                 LogUtil.w(TAG, "evalAppendJs: no page loaded, reloading conversation");
                 refreshWebView();
             }
-            if (pendingJs.size() < 300) pendingJs.add(js);
+            if (pendingJs.size() < 300) pendingJs.add(owned);
             LogUtil.d(TAG, "evalAppendJs: queued (loading=%s, loaded=%d, current=%d)",
                     pageLoading, loadedPageVersion, pageVersion.get());
             return;
         }
-        evalJsNow(conversationWebView, js);
+        evalJsNow(conversationWebView, owned);
+    }
+
+    /**
+     * 把脚本包一层「页面归属」判断：只在这一版页面确实画着当前消息列表时才执行。
+     *
+     * <p>为什么必须包：换版瞬间（loadDataWithBaseURL 之后到新页解析完之前）下发的脚本
+     * 会落在即将被替换掉的旧文档上，或者在两版页面之间串台。脚本执行了但 DOM 随后
+     * 被整页冲掉，用户看到的就是「发完消息毫无变化」。
+     */
+    private String ownedJs(String js, int idx) {
+        int list = curMsgListId;
+        String call = idx >= 0 ? js + "," + idx : js;
+        return "(function(){var m=window.__acMsgList;"
+                + "if(m===undefined||m===" + list + "){" + call + ";}})()";
     }
 
     // Execute JS in the conversation WebView: evaluateJavascript (API 19+) avoids a
@@ -3966,16 +4103,22 @@ public class MainActivity extends ThemedActivity {
                 LogUtil.w(TAG, "webViewEvalJs: no page loaded, reloading conversation");
                 refreshWebView();
             }
-            if (pendingJs.size() < 300) pendingJs.add(js);
+            if (pendingJs.size() < 300) pendingJs.add(ownedJs(js, -1));
             return;
         }
-        evalJsNow(wv, js);
+        evalJsNow(wv, ownedJs(js, -1));
     }
 
     /** 真正下发一段脚本；调用方负责线程与就绪判断。 */
     private void evalJsNow(WebView wv, String js) {
         if (android.os.Build.VERSION.SDK_INT >= 19) {
-            wv.evaluateJavascript(js, null);
+            try {
+                wv.evaluateJavascript(js, null);
+            } catch (Throwable t) {
+                // 页面正在销毁 / WebView 已 detach：这几帧本来也写不进去了，
+                // 抛出去会让调用方（UI 回调、定时器）整条链断掉
+                LogUtil.w(TAG, "evaluateJavascript failed: %s", String.valueOf(t));
+            }
         } else {
             wv.loadUrl("javascript:" + TextKit.forJsUrl(js));
         }
@@ -4054,7 +4197,7 @@ public class MainActivity extends ThemedActivity {
                     showHintScheduled = false;
                     webViewEvalJs("hideSmoothHint()");
                     webViewEvalJs("__smoothFinish('"
-                            + jsEscape(smoothTail.shownHtml()) + "')");
+                            + jsEscape(smoothTail.shownHtml()) + "'," + smoothIdx() + ")");
                 }
             });
         }
@@ -5145,8 +5288,11 @@ public class MainActivity extends ThemedActivity {
         // 新建的消息 sendFailed/errorDetail 均为默认值，失败标记自然被清除
         messages.add(um);
         conversationManager.getCurrentConversation().touch();
-        String userHtml = MessageHtmlRenderer.renderMessageDiv(um, messages.size() - 1, MainActivity.this);
-        appendHtml(userHtml);
+        int umIdx = messages.size() - 1;
+        String userHtml = MessageHtmlRenderer.renderMessageDiv(um, umIdx, MainActivity.this);
+        appendHtml(userHtml, umIdx);
+        lastAppendedIdx = umIdx;
+        lastAppendCheckPending = true;
         conversationManager.saveCurrentConversation();
         execStreamingRequest();
     }

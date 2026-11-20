@@ -344,7 +344,7 @@ final class RendererAssets {
             "var text=code?code.textContent:'';" +
             "if(window.Android)Android.previewCode(lang,text);};" +
             "pre.appendChild(pbtn);}}})" +
-            "(pres[i]);}}" +
+            "(pres[i]);}};" +
             // 长按目标必须在 touchstart 时就把 data-idx 解析出来：流式期间 tail
             // 每 200ms 整段重建，700ms 后原节点早已脱离文档，parentElement 链断掉，
             // 再向上找 data-idx 只会走到 null —— 菜单永远不弹。
@@ -677,12 +677,28 @@ final class RendererAssets {
             "var d=document.createElement('div');d.innerHTML=html;" +
             "var el=d.firstElementChild;" +
             "if(el){document.getElementById('msgs').appendChild(el);runScripts(el);}" +
-            "addCopyBtns();applyToolStates(document);smartScrollToBottom();};" +
+            // 刚发出的消息必须看得见：非强制滚动会被「用户上翻过」的标记拦住
+            "addCopyBtns();applyToolStates(document);if(el)window.__scrollNew();};" +
             // 状态行挂在 .msg.ai 下、.content 之外。以前它被拼进 .content 的
             // innerHTML，下一次 streamTail 重建容器时会被当作 base 的一部分留下，
             // 表现为「一直卡在正在整理搜索结果」。
             "window.__lastAi=function(){var a=document.querySelectorAll('.msg.ai');" +
             "return a.length?a[a.length-1]:null;};" +
+            // 追加类脚本可以带上目标气泡的下标：页面在这条消息之后又被整页重建过
+            // （主题切换、上滑加载、另一版页面就绪更晚），按「最后一个 .msg.ai」去找
+            // 会写进别人的气泡，再滚动到别处——用户看到的就是「发完消息没反应」。
+            // 带了 idx 就按下标精确找；找不到说明这一版根本没画这条消息，
+            // 交给下面按尾部气泡兜底（宁可写在最后，也不要什么都不写）。
+            "window.__msgAi=function(idx){" +
+            "if(idx==null||idx===''||idx==='-1')return window.__lastAi();" +
+            // 属性选择器必须带引号：不带引号时 data-idx=3 会被当成标签名解析
+            "var el=document.querySelector(\".msg.ai[data-idx='\"+idx+\"']\");" +
+            "return el||window.__lastAi();};" +
+            // 新消息追加后一律强制滚到底：非强制滚动会被「用户上翻过」的标记拦住，
+            // 而刚发出的气泡本就必须可见。
+            "window.__scrollNew=function(){smartScrollToBottom(true);};" +
+            "window.__aiContent=function(idx){" +
+            "var m=window.__msgAi(idx);return m?m.querySelector('.content'):null;};" +
             "window.setStatus=function(text){" +
             "var m=window.__lastAi();if(!m)return;" +
             "var s=m.querySelector('.tool-status');" +
@@ -736,13 +752,17 @@ final class RendererAssets {
             "if(s&&s.parentNode)s.parentNode.removeChild(s);" +
             // 移除后高度骤降，随后的错误卡片或收尾内容同样需要贴底
             "smartScrollToBottom();};" +
-            "window.updateLastMsg=function(html){" +
-            "var ms=document.querySelectorAll('.msg.ai .content');" +
+            "window.updateLastMsg=function(html,idx){" +
+            // 指定了目标气泡就按 data-idx 精确取，见 __msgAi
+            "var c=window.__aiContent(idx);" +
+            "if(!c){" +
+            // 页面里一条 AI 气泡都没有（换版瞬间、或只剩用户消息）：先建一个，
+            // 否则这段正文会被静默丢弃
+            "window.appendAiDiv(idx);c=window.__aiContent(idx);}" +
+            "if(!c)return;" +
             // 这里不缓存：它是「整条消息定稿」，多半发生在页面重灌之后，
             // 缓存下来的旧内容会在下一次新建气泡时被错误写入。页面未就绪的情况
             // 由 Java 侧的 JS 队列兜住（onPageFinished 后重放）。
-            "if(ms.length===0)return;" +
-            "var c=ms[ms.length-1];" +
             // html 是这条消息的完整内容，被闸门挡住的缓存帧已经在里面了：
             // 直接丢弃，否则收尾后 tail 会再追加一次，末尾一段重复。
             "window.__pendingTailHtml=null;window.__pendingTailText=null;" +
@@ -765,15 +785,17 @@ final class RendererAssets {
             "addCopyBtns();smartScrollToBottom();};" +
             // 收尾定型：先把被触摸闸门挡住的最后一帧落地，再把 tail 并进 base。
             // 顺序反了会把这帧搬到定型后的 base 后面，末尾一段重复。
-            "window.streamFinalize=function(){" +
-            "window.__flushPending();window.streamCommitTail();clearStatus();};" +
+            "window.streamFinalize=function(idx){" +
+            "window.__flushPending(idx);window.streamCommitTail(idx);clearStatus();};" +
             // 流式输出拆成两段：base（已完成的思考/工具卡片）+ tail（本轮增量）。
             // 以前每个分片都整体重设 .content，工具轮次结束后上面的卡片和已渲染好的
             // markdown 会被打回纯文本，看起来像「又变回没渲染的样子」。
-            "window.streamBase=function(html){" +
-            "var ms=document.querySelectorAll('.msg.ai .content');" +
-            "if(ms.length===0){window.__orphanBase=html;return;}" +
-            "var c=ms[ms.length-1];" +
+            "window.streamBase=function(html,idx){" +
+            // 指定了目标气泡就按 data-idx 精确取，见 __msgAi
+            "var c=window.__aiContent(idx);" +
+            "if(!c){" +
+            // 内容比气泡先到：记下来，appendAiDiv 建好气泡后会补写（见下）
+            "window.__orphanBase=html;return;}" +
             // 手指按在表格/代码块上：先缓存，抬手后由 __flushPending 写入。
             // 直接吞掉不行——Java 侧的 lastStreamTrace 已按「已推送」记账，
             // 这一帧丢了就再也不会补，卡片会凭空消失。
@@ -803,7 +825,7 @@ final class RendererAssets {
             "var out='',nodes=t.childNodes;" +
             "for(var i=0;i<nodes.length;i++){var n=nodes[i];" +
             "if(n.className&&(''+n.className).indexOf('tool-live')>=0)continue;" +
-            "var s=n.textContent||'';if(s.length)out+=(out?'\n':'')+s;}" +
+            "var s=n.textContent||'';if(s.length)out+=(out?String.fromCharCode(10):'')+s;}" +
             "if(!out.length)return null;" +
             "var pw=document.createElement('div');pw.className='stream-plain';pw.textContent=out;" +
             "return pw;};" +
@@ -811,9 +833,10 @@ final class RendererAssets {
             // 与 streamBase 的区别是不动已有子树——已经渲染好的公式图片、代码高亮、
             // 展开状态全部原样保留，也不重新解析几万字的历史 markdown。
             // 没有骨架时按 streamBase 的兜底把现有内容整体当 base，绝不丢内容。
-            "window.streamAppendBase=function(html){" +
-            "var ms=document.querySelectorAll('.msg.ai .content');" +
-            "if(ms.length===0)return;" +
+            "window.streamAppendBase=function(html,idx){" +
+            // 指定了目标气泡就按 data-idx 精确取，见 __msgAi
+            "var c=window.__aiContent(idx);" +
+            "if(!c)return;" +
             "var c=ms[ms.length-1];" +
             "var b=c.querySelector('.stream-base');" +
             "if(!b){" +
@@ -832,7 +855,7 @@ final class RendererAssets {
             // 不重新解码公式图片，视觉上完全不闪，内容也不会重复或丢字。
             // 骨架不存在时（收尾后 updateLastMsg 平铺、续跑的历史消息）必须现建：
             // 直接 return 会让 Java 侧以为 base 已推送，续跑时工具卡片永远不出现。
-            "window.streamCommitTail=function(){" +
+            "window.streamCommitTail=function(idx){" +
             // commit 已把本轮 tail 整体搬进 base，hold 期间缓存的那一帧也在其中。
             // 不清掉的话，抬手后 __flushPending 会把旧 tail 再写回新 tail，正文重复一遍。
             // 只清「帧缓存」，不清纯文本前缀：前缀就是上一轮已经流出去的正文，
@@ -840,9 +863,9 @@ final class RendererAssets {
             // 中间那段空白用户是看得见的）。
             "window.__pendingTailHtml=null;window.__pendingTailText=null;window.__pendingBaseHtml=null;" +
             "window.__endHold();" +
-            "var ms=document.querySelectorAll('.msg.ai .content');" +
-            "if(ms.length===0)return;" +
-            "var c=ms[ms.length-1];" +
+            // 指定了目标气泡就按 data-idx 精确取，见 __msgAi
+            "var c=window.__aiContent(idx);" +
+            "if(!c)return;" +
             "var b=c.querySelector('.stream-base');" +
             "var t=c.querySelector('.stream-tail');" +
             "if(!b||!t){" +
@@ -923,26 +946,26 @@ final class RendererAssets {
             // 两层各自有独立的运行状态，互不覆盖：ghost 只读 < 与 > 之外的字符，
             // shown 只收已经显示出来的前缀，表单里的输入值等 DOM 状态都留在原节点上。
             "window.__sm={on:false,pos:0,hold:false,arrived:'',shown:''};" +
-            "window.__smoothStart=function(){" +
-            "var ms=document.querySelectorAll('.msg.ai .content');if(ms.length===0)return;" +
-            "var t=ms[ms.length-1].querySelector('.stream-tail');if(!t)return;" +
+            "window.__smoothStart=function(idx){" +
+            "var c=window.__aiContent(idx);if(!c)return;" +
+            "var t=c.querySelector('.stream-tail');if(!t)return;" +
             // 每次都重新找：updateLastMsg 等函数会用 innerHTML 重建 tail
             "var g=t.querySelector('.stream-ghost'),s=t.querySelector('.stream-shown');" +
             "if(!g||!s)return;" +
             "window.__sm.on=true;window.__sm.pos=0;window.__sm.hold=false;" +
             "g.innerHTML='';s.innerHTML='';window.__sm.arrived='';window.__sm.shown='';" +
             "if(window.Android&&Android.smoothTimerStart)Android.smoothTimerStart();};" +
-            "window.__smoothPush=function(html){" +
+            "window.__smoothPush=function(html,idx){" +
             "if(!window.__sm.on||window.__sm.k)return;window.__sm.k=0;" +
-            "var ms=document.querySelectorAll('.msg.ai .content');if(ms.length===0)return;" +
-            "var t=ms[ms.length-1].querySelector('.stream-tail');if(!t)return;" +
+            "var c=window.__aiContent(idx);if(!c)return;" +
+            "var t=c.querySelector('.stream-tail');if(!t)return;" +
             "var g=t.querySelector('.stream-ghost'),s=t.querySelector('.stream-shown');" +
             "if(!g||!s)return;" +
             "window.__sm.arrived=html||'';g.innerHTML=window.__sm.arrived;};" +
-            "window.__smoothStep=function(shownHtml){" +
+            "window.__smoothStep=function(shownHtml,idx){" +
             "if(!window.__sm.on)return;" +
-            "var ms=document.querySelectorAll('.msg.ai .content');if(ms.length===0)return;" +
-            "var t=ms[ms.length-1].querySelector('.stream-tail');if(!t)return;" +
+            "var c=window.__aiContent(idx);if(!c)return;" +
+            "var t=c.querySelector('.stream-tail');if(!t)return;" +
             "var s=t.querySelector('.stream-shown');if(!s)return;" +
             // 只追加、不回写整段：定时器比渲染器快时 index 会重复，前缀可能比上一次短
             "var nx=shownHtml||'';if(nx===window.__sm.shown)return;" +
@@ -1006,18 +1029,18 @@ final class RendererAssets {
             // 让「当前这一帧」直接落地。只释放不清缓存的话，旧帧会在之后的
             // __flushPending 里再写一遍，末尾出现重复段落。
             "if(window.__holdExpired())window.__forceLand();};" +
-            "window.__flushPending=function(){" +
+            "window.__flushPending=function(idx){" +
             // 走到这里说明触摸手势结束了（抬手，或请求收尾）：解除闸门再落地。
             // 必须先落地再 commitTail —— 否则缓存帧会被搬进一个已经定型的 base，
             // 表现是最后一段内容重复出现。
             "window.__endHold();" +
             "var bh=window.__pendingBaseHtml;window.__pendingBaseHtml=null;" +
-            "if(bh!==null)window.streamBase(bh);" +          // hold 已清，这里可以正常写入
+            "if(bh!==null)window.streamBase(bh,idx);" +      // hold 已清，这里可以正常写入
             "var h=window.__pendingTailHtml,x=window.__pendingTailText;" +
             "window.__pendingTailHtml=null;window.__pendingTailText=null;" +
             "if(h===null&&x===null)return;" +
-            "var ms=document.querySelectorAll('.msg.ai .content');if(ms.length===0)return;" +
-            "var t=ms[ms.length-1].querySelector('.stream-tail');if(!t)return;" +
+            "var c=window.__aiContent(idx);if(!c)return;" +
+            "var t=c.querySelector('.stream-tail');if(!t)return;" +
             "if(h!==null)window.__applyTailHtml(t,h);else window.__applyTailText(t,x);};" +
             // 用「时间戳 + watchdog」而不是纯 token 判等：token 会被任意一次
             // 新 touchstart 作废，是原来闸门卡死的第二个来源。
@@ -1034,10 +1057,11 @@ final class RendererAssets {
             // 页面重新可见时也收一次：切后台/弹对话框回来，触摸序列可能已断。
             "document.addEventListener('visibilitychange',function(){" +
             "if(!document.hidden&&window.__holdRender){window.__endHold();window.__flushPending();}},true);" +
-            "window.streamTailHtml=function(html){" +
-            "var ms=document.querySelectorAll('.msg.ai .content');" +
-            "if(ms.length===0){window.__orphanTail={h:html,t:null};return;}" +
-            "var c=ms[ms.length-1];var t=c.querySelector('.stream-tail');" +
+            "window.streamTailHtml=function(html,idx){" +
+            // 指定了目标气泡就按 data-idx 精确取，见 __msgAi
+            "var c=window.__aiContent(idx);" +
+            "if(!c){window.__orphanTail={h:html,t:null};return;}" +
+            "var t=c.querySelector('.stream-tail');" +
             "if(!t){var b=c.querySelector('.stream-base');" +
             "var keep=b?b.innerHTML:c.innerHTML;" +
             "c.className='content';" +
@@ -1047,10 +1071,11 @@ final class RendererAssets {
             "window.__guardHold();" +
             "if(window.__holdRender){window.__pendingTailHtml=html;window.__pendingTailText=null;return;}" +
             "window.__applyTailHtml(t,html);};" +
-            "window.streamTailText=function(text){" +
-            "var ms=document.querySelectorAll('.msg.ai .content');" +
-            "if(ms.length===0){window.__orphanTail={h:null,t:text};return;}" +
-            "var c=ms[ms.length-1];var t=c.querySelector('.stream-tail');" +
+            "window.streamTailText=function(text,idx){" +
+            // 指定了目标气泡就按 data-idx 精确取，见 __msgAi
+            "var c=window.__aiContent(idx);" +
+            "if(!c){window.__orphanTail={h:null,t:text};return;}" +
+            "var t=c.querySelector('.stream-tail');" +
             "if(!t){var b=c.querySelector('.stream-base');" +
             "var keep=b?b.innerHTML:c.innerHTML;" +
             "c.innerHTML='<div class=\"stream-base\"></div><div class=\"stream-tail\"></div>';" +
@@ -1066,10 +1091,11 @@ final class RendererAssets {
             // 全部卡片；中途失败的轮次更是什么都留不下。这里提供一个临时容器，
             // 用纯 DOM 往 tail 里写卡片：不解析 markdown，开销远小于实时渲染，
             // 轮次结束时由 streamCommitTail 一并搬进 base。
-            "window.liveTools=function(html,reset){" +
+            "window.liveTools=function(html,reset,idx){" +
             "if(!html||html.length===0)return;" +
-            "var ms=document.querySelectorAll('.msg.ai .content');" +
-            "if(ms.length===0)return;" +
+            // 指定了目标气泡就按 data-idx 精确取，见 __msgAi
+            "var c=window.__aiContent(idx);" +
+            "if(!c)return;" +
             "var c=ms[ms.length-1];" +
             "var t=c.querySelector('.stream-tail');" +
             "if(!t){var b=c.querySelector('.stream-base');var keep=b?b.innerHTML:c.innerHTML;" +
@@ -1124,27 +1150,30 @@ final class RendererAssets {
             "var c=all[i].querySelector('.error-card');" +
             "if(c&&c.parentNode)c.parentNode.removeChild(c);" +
             "return;}}};" +
-            "window.updateLastText=function(text){" +
-            "var ms=document.querySelectorAll('.msg.ai .content');" +
-            "if(ms.length>0){ms[ms.length-1].textContent=text;}" +
-            "smartScrollToBottom();};" +
-            "window.setLastMsgStatus=function(text){" +
-            "var ms=document.querySelectorAll('.msg.ai .content');" +
-            "if(ms.length>0){ms[ms.length-1].textContent=text;}" +
-            "smartScrollToBottom();};" +
+            "window.updateLastText=function(text,idx){" +
+            // 指定了目标气泡就按 data-idx 精确取，见 __msgAi
+            "var c=window.__aiContent(idx);" +
+            "if(c)c.textContent=text;smartScrollToBottom();};" +
+            "window.setLastMsgStatus=function(text,idx){" +
+            "var c=window.__aiContent(idx);" +
+            "if(c)c.textContent=text;smartScrollToBottom();};" +
             // 骨架从第一帧就固定成 base + tail 两层：后续所有流式写入只动其中一层。
             // 以前这里只有一个空 .content，第一片到达时才在 JS 里临时拆骨架，
             // 而 updateLastMsg 又会把 .content 整个 innerHTML 重设，把正在流出的
             // tail 一起抹掉 —— 用户看到的就是「回答闪一下然后凭空消失」。
-            "window.appendAiDiv=function(){" +
+            "window.appendAiDiv=function(idx){" +
+            // 知道下标就先标上：流式帧一律按 data-idx 找气泡（见 __msgAi），
+            // 标成 -1 的话这一整轮回答的每一帧都只能退回「最后一个气泡」，
+            // 页面若在这期间被重建过，正文就会写进上一条回答里
+            "var start=(idx==null||idx===''||idx==='-1')?'-1':''+idx;" +
             "var d=document.createElement('div');" +
-            "d.className='msg ai';d.setAttribute('data-idx','-1');" +
+            "d.className='msg ai';d.setAttribute('data-idx',start);" +
             "d.innerHTML='<div class=\"content\"><div class=\"stream-base\"></div>" +
             "<div class=\"stream-tail\"><div class=\"stream-ghost\"></div>" +
             "<div class=\"stream-shown\"></div></div></div><div class=\"sources\"></div>" +
-            "<div class=\"ai-menu-wrap\"><button class=\"msg-menu-btn\" " +
-            "onclick=\"if(window.Android)Android.messageMenu(\\'-1\\');" +
-            "event.stopPropagation();return false;\">" +
+            "<div class=\"ai-menu-wrap\"><button class=&quot;msg-menu-btn&quot; " +
+            "onclick=&quot;if(window.Android)Android.messageMenu(&quot;-1&quot;);" +
+            "event.stopPropagation();return false;&quot;>" +
             "<span class=\"mdot\"></span><span class=\"mdot\"></span><span class=\"mdot\"></span>" +
             "</button></div>';" +
             "document.getElementById('msgs').appendChild(d);" +
@@ -1209,6 +1238,8 @@ final class RendererAssets {
             "if(tt)tt.className='stream-tail';" +
             "var btn=last.querySelector('.msg-menu-btn');" +
             "if(btn)btn.setAttribute('onclick'," +
+            // 这里拼的是一段内联事件代码：外层用双引号定界，参数里的单引号
+            // 直接写即可。用 ' 定界再往内容里塞 \' 会连成 \\'，整段脚本直接不执行
             "\"if(window.Android)Android.messageMenu('\"+idx+\"');event.stopPropagation();return false;\");" +
             "var c=last.querySelector('.content');if(c)runScripts(c);" +
             "}};" +

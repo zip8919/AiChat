@@ -396,6 +396,15 @@ final class MarkdownPipeline {
      *                    about:blank，除此之外没有别的办法分辨迟到的回调。
      */
     static String buildPage(String bodyHtml, int olderCount, int pageVersion) {
+        return buildPage(bodyHtml, olderCount, pageVersion, 0);
+    }
+
+    /**
+     * @param msgListId 这一版页面画的是哪个消息列表（宿主给每次灌页分配的编号）。
+     *                  页面把它记成 {@code window.__acMsgList}，追加类脚本带着同一个
+     *                  编号进来，对不上就说明脚本发给的是另一版页面，直接丢弃。
+     */
+    static String buildPage(String bodyHtml, int olderCount, int pageVersion, int msgListId) {
         // olderCount = 尚未渲染的更早消息条数；>0 时顶部显示上滑提示
         String hint = olderCount > 0
                 ? "<div id=\"older-hint\" onclick=\"loadOlderNow()\">"
@@ -418,6 +427,10 @@ final class MarkdownPipeline {
                "<style id=\"ac-font\">\n" + fontCss + "\n</style>\n" +
                "</head>\n<body data-ac-page=\"" + pageVersion + "\">\n" +
                hint +
+               // 这一版页面「只属于」哪个消息列表：宿主下发追加/流式脚本时会带上它，
+               // 页面一比对就知道脚本是不是发给自己的。不带的话，切会话/重建时两版
+               // 页面交错，迟到的帧会写进别人的气泡，或者写到页面外
+               "<script>\nwindow.__acMsgList=" + msgListId + ";\n</script>\n" +
                "<div id=\"msgs\">\n" + bodyHtml + "\n</div>\n" +
                "<script>\n" + RendererAssets.localize(RendererAssets.JS) + "\n</script>\n" +
                "</body>\n</html>";
