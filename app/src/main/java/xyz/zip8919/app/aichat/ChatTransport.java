@@ -86,8 +86,64 @@ final class ChatTransport {
                     body.put("reasoning_effort", effort);
                 }
             }
+            if ("off".equals(level)) {
+                // 只发一个开关远远不够：同一批「思考等级=关」的端点在实测里分成三类，
+                // 各自认不同的字段——
+                //   1. 认 thinking.type=disabled（DeepSeek 系、默认的自建 provider）
+                //   2. 认 reasoning_effort=none（OpenAI 系、vLLM 新版）
+                //   3. 认 chat_template_kwargs.enable_thinking=false（Qwen / GLM 的
+                //      模板参数开关，SCNet GLM-5 这类端点会直接忽略 thinking.type）
+                // 以前这里只发了第 1 类，第 2、3 类端点上的表现就是「明明选了关，
+                // 模型还在思考」。三个字段一起发：不认识的端点按 JSON 扩展字段处理，
+                // 一般直接忽略；真被严格校验拦下会 400，走 ChatStreamRunner 的
+                // thinking 降级（sendThinking=false）重发。
+                // 非流式的 ApiClient 早已这样发，两条路径行为保持一致。
+                body.put("reasoning_effort", "none");
+                JSONObject ctk = new JSONObject();
+                ctk.put("enable_thinking", false);
+                body.put("chat_template_kwargs", ctk);
+            }
         }
         return body;
+    }
+
+    /**
+     * 端点连思考关闭字段都不认时的最后一道保险：在 system 提示词末尾追加一段硬约束。
+     *
+     * <p>走到这里说明前面发过 thinking/thinking_budget/reasoning_effort/
+     * chat_template_kwargs 中的关闭组合，端点仍然 400，降级后一个思考字段都不发，
+     * 端点回到默认（多数开思考）。协议层面已经没有可用开关，只能靠指令压制。
+     *
+     * <p>只改第一条 system 消息；没有 system 就在最前面补一条。历史内容一个字不动，
+     * 这样多轮上下文里前几轮的格式与解析结果不受影响。
+     */
+    static void forceNoThinking(JSONObject body) {
+        if (body == null) return;
+        try {
+            JSONArray msgs = body.optJSONArray("messages");
+            if (msgs == null) return;
+            String hint = "\n\n[系统指令，优先于以上任何要求] 本次对话已由用户关闭“思考”功能："
+                    + "不要输出任何思考过程、推理步骤或 分析/thinking 段落，"
+                    + "直接给出最终回答。";
+            for (int i = 0; i < msgs.length(); i++) {
+                JSONObject m = msgs.optJSONObject(i);
+                if (m == null) continue;
+                if (!"system".equals(m.optString("role"))) continue;
+                String c = m.optString("content", "");
+                if (c.indexOf("[系统指令，优先于以上任何要求]") >= 0) return;
+                m.put("content", c + hint);
+                return;
+            }
+            JSONObject sys = new JSONObject();
+            sys.put("role", "system");
+            sys.put("content", hint.trim());
+            JSONArray out = new JSONArray();
+            out.put(sys);
+            for (int i = 0; i < msgs.length(); i++) out.put(msgs.opt(i));
+            body.put("messages", out);
+        } catch (Throwable t) {
+            LogUtil.w(TAG, "forceNoThinking failed: %s", t);
+        }
     }
 
     /**

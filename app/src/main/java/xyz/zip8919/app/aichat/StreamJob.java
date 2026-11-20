@@ -84,7 +84,7 @@ final class StreamJob {
     /** 是否请求服务端返回 token 用量（端点不支持时会被降级掉）。 */
     final boolean includeUsage;
     final boolean realtimeRender;
-    /** 正文逐字渐显；与 {@link #realtimeRender} 同时为真时才生效。 */
+    /** 正文逐字渐显；只要求流式，不要求实时渲染。 */
     final boolean smoothStream;
     final boolean webSearchEnabled;
     /** 是否向模型暴露 http_request 工具（默认关闭，设置页开启）。 */
@@ -128,7 +128,8 @@ final class StreamJob {
         this.streamEnabled = b.streamEnabled;
         this.includeUsage = b.includeUsage;
         this.realtimeRender = b.realtimeRender;
-        this.smoothStream = b.smoothStream && b.realtimeRender;
+        // 渐显只依赖流式：实时渲染关闭时 tail 是纯文本，照样按字浮出
+        this.smoothStream = b.smoothStream;
         this.webSearchEnabled = b.webSearchEnabled;
         this.httpToolEnabled = b.httpToolEnabled;
         this.vision = b.vision;

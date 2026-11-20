@@ -30,6 +30,10 @@
             <TextView android:id="@+id/loading_percent" android:textSize="11sp" android:textColor="@color/text_secondary" android:layout_marginTop="4dp" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="0%" />
         </LinearLayout>
         <TextView android:id="@+id/scroll_to_bottom_button" android:textSize="15sp" android:textStyle="bold" android:textColor="#FFFFFF" android:background="@drawable/bg_scroll_bubble" android:gravity="center" android:includeFontPadding="false" android:layout_gravity="end|bottom" android:layout_marginRight="14dp" android:layout_marginBottom="10dp" android:visibility="gone" android:layout_width="38dp" android:layout_height="38dp" android:text="↓" />
+<!-- 「直接显示」气泡：与「回到底部」同一套外观，浮在输入框左上方，
+             只在逐字渐显还没放完时出现；点击跳过渐显、直接显示完整内容。 -->
+        <TextView android:id="@+id/smooth_reveal_button" android:textSize="11sp" android:textColor="#FFFFFF" android:background="@drawable/bg_scroll_bubble" android:gravity="center" android:includeFontPadding="false" android:paddingLeft="10dp" android:paddingRight="10dp" android:layout_gravity="start|bottom" android:layout_marginLeft="14dp" android:layout_marginBottom="10dp" android:visibility="gone" android:layout_width="wrap_content" android:layout_height="30dp" android:minWidth="38dp" android:contentDescription="@string/mainactivity_181" android:text="@string/mainactivity_182" />
+        
     </FrameLayout>
     <LinearLayout android:id="@+id/queue_bar" android:gravity="center_vertical" android:orientation="horizontal" android:background="#FFF8E1" android:padding="4dp" android:visibility="gone" android:layout_width="match_parent" android:layout_height="wrap_content">
         <TextView android:id="@+id/queue_bar_text" android:textSize="12sp" android:textColor="#8D6E00" android:padding="4dp" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="@string/activity_main_004" />

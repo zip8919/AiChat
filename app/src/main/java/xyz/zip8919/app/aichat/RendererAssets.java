@@ -38,7 +38,10 @@ final class RendererAssets {
 
     /** 气泡、工具卡片、代码块、表格、错误卡片等全部样式。 */
     static final String CSS =
-            "*{margin:0;padding:0;box-sizing:border-box;}" +
+            // 通配符只把颜色钉成「继承」：逐字渐显靠「浅灰 → 正文色」的过渡，
+            // 主题层又要按 token 改正文颜色，两者都要求颜色能一路继承下去；
+            // 有通配符颜色时，子元素永远拿到通配符那一档，继承链就断了。
+            "*{margin:0;padding:0;box-sizing:border-box;color:inherit;}" +
             "body{font-family:Roboto,sans-serif;font-size:14px;color:#1a1a1a;" +
             "line-height:1.6;background:#fff;padding:8px;word-wrap:break-word;" +
             "-webkit-text-size-adjust:100%;}" +
@@ -254,13 +257,22 @@ final class RendererAssets {
             // 流式时正文分两段：base 是已完成的思考/工具卡片（渲染一次后不再动），
             // tail 是本轮增量。关掉实时渲染时 tail 走纯文本，保留换行，开销远小于 markdown
             ".stream-tail{word-wrap:break-word;position:relative;}" +
-            // 逐字渐显：.stream-ghost 是「已到达」的完整片段，透明、只负责占位排版；
-            // .stream-shown 叠在上面，只放已经显示出来的前缀。两层用同一套排版规则，
-            // 所以文字是一格一格浮出来的，后面的内容不会提前把版式挤乱。
-            // 浏览器不支持绝对定位的子层时（降级），两层就是上下依次排列，
-            // 内容仍然完整，只是没有渐显——不显示比显示残缺重要。
+            // 逐字渐显：把 tail 的正文片段切成「已经显示」与「还没显示」两段，
+            // 后者挂在 .stream-ghost 里（visibility:hidden，负责占位排版）。
+            // 不在上面叠一层绝对定位的副本：思考块、代码块在副本里会被整块压到
+            // 第一行上，并且副本与占位层的展开状态各走一套，屏幕上就会出现
+            // 「折叠了又冒出来一份」。
             ".stream-ghost{visibility:hidden;}" +
-            ".stream-shown{position:absolute;left:0;top:0;right:0;}" +
+            // 逐字渐显的深浅：新浮出的字先停在中性灰，再走一段 transition 落到正文色。
+            // 用 transition 而不是 animation：Chromium 30 上属性过渡在 GPU 渲染路径可用，
+            // 而 keyframes 只对 opacity 等合成属性生效，颜色动画会直接跳变（没有深浅变化）。
+            // 颜色值取中性灰（与主题底色叠加后仍是「浅」，深浅主题下都看得出过渡）。
+            ".stream-new{color:#b4bcc4;transition:color .55s linear;" +
+            "-webkit-transition:color .55s linear;}" +
+            // 进度节点（js-smooth）本身不可见：文字的显示量只由 ::before 撑开，
+            // 不再依赖真实文本节点——浏览器对文本节点差异更新是没有的，每次都要重建，
+            // 渐显每 11 毫秒重建一次就是「整段字反复重排、深浅也跟着断」。
+            ".smooth-seg{color:inherit;}" +
             // 逐字浮现：每一小段从浅到深淡入。时长拉到 .32s、曲线取标准缓入缓出，
             // 相邻几十个小段的淡入区间互相叠着，视觉上就是一条连续的「由浅变深」
             // 渐变带，而不是一块块往外冒。老 WebView 不支持动画时只是直接出现，
@@ -268,12 +280,10 @@ final class RendererAssets {
             "@keyframes acSmoothIn{from{opacity:0}to{opacity:1}}" +
             ".stream-chunk{animation:acSmoothIn .32s cubic-bezier(.4,0,.2,1);" +
             "-webkit-animation:acSmoothIn .32s cubic-bezier(.4,0,.2,1);}" +
-            // 「直接显示」：贴着气泡左上角的一条小提示，不占正文空间
-            ".msg.ai{position:relative;}" +
-            ".smooth-hint{position:absolute;left:0;top:-6px;z-index:5;padding:1px 8px;" +
-            "border:1px solid #bbdefb;border-radius:9px;background:#e3f2fd;color:#1565c0;" +
-            "font-size:11px;line-height:16px;cursor:pointer;" +
-            "-webkit-tap-highlight-color:rgba(100,180,255,0.3);}" +
+            // 「直接显示」不是网页里的一条提示，而是主界面输入框左上方那颗小气泡
+            // （与「回到底部」共用一套外观），由页面在文档底部留出一条空白给它浮上来：
+            // 固定悬浮的气泡会盖住正在输出的最后一行字。
+            "body{padding-bottom:52px;}" +
             ".stream-tail.plain{white-space:pre-wrap;}" +
             ".stream-tail.plain::after{content:'▍';color:#90a4ae;}" +
             // 关掉实时渲染时，每一轮的纯文本并进 base 后要包一层：base 本身不保留
@@ -780,7 +790,7 @@ final class RendererAssets {
             // 且永不消失（用户反馈的「生成完末尾多一行光标」）。
             "if(b){b.innerHTML=html;if(t){" +
             // 骨架补回渐显两层，否则续跑时渐显没有落点
-            "t.innerHTML='<div class=\"stream-ghost\"></div><div class=\"stream-shown\"></div>';" +
+            "t.innerHTML='';" +
             "t.className='stream-tail';}}" +
             "else{c.className='content';c.innerHTML=html;}" +
             "applyToolStates(c);" +
@@ -942,58 +952,205 @@ final class RendererAssets {
             "for(var i=0;i<a.length&&i<s.length;i++){" +
             "if(s[i][0])a[i].scrollLeft=s[i][0];if(s[i][1])a[i].scrollTop=s[i][1];}};" +
             // ---- 逐字渐显 ----
-            // 流式片段每帧都是整段重排好的 HTML，直接写进 tail 就是一大块字瞬间出现。
-            // 这里把它拆成两层：ghost 收完整片段（透明，撑出版式），shown 只放前 n 个字。
-            // Java 侧按固定节奏调 __smoothStep 往前推，收尾、停止、点「直接显示」都只是把 n 拉到末尾。
-            // 两层各自有独立的运行状态，互不覆盖：ghost 只读 < 与 > 之外的字符，
-            // shown 只收已经显示出来的前缀，表单里的输入值等 DOM 状态都留在原节点上。
-            "window.__sm={on:false,pos:0,hold:false,arrived:'',shown:''};" +
+            // tail 的正文片段每帧都是整段重排好的 HTML，直接写进 DOM 就是一大块字
+            // 瞬间出现。这里把它切成两段：前面的「已经显示」留在原位置，
+            // 后面的收进 .stream-ghost（visibility:hidden，照样占位排版）。
+            // Java 侧按固定节奏推「显示出第几个字」，收尾、点「直接显示」都只是把
+            // 这个数字拉到末尾，页面的 DOM 结构一次都不重建。
+            //
+            // 只用一层节点而不是「占位层 + 绝对定位副本」：副本里思考块、代码块
+            // 会被整块压到第一行上，展开与折叠也要各走一套状态，屏幕上就会出现
+            // 「折叠了又冒出来一份」。
+            "window.__sm={on:false,arrived:'',show:0,units:[],chars:0,cut:0,openStack:[],openSeen:[]};" +
+            // 每帧至少往前推这么多字符：尾巴里插了图片或表格之后，一字一字地放会让
+            // 高度一点一点往上挤，读起来像在抖。内容少时仍是一字一字地浮。
+            "window.__smMin=function(p){" +
+            "var r=p.length>6000?8:(p.length>2500?4:(p.length>800?2:1));" +
+            "return (p.match(/<(img|table|pre|svg)/g)||[]).length*12+r;};" +
+            "window.__smEsc=function(c){" +
+            "return c==='&'?'&amp;':(c==='<'?'&lt;':(c==='>'?'&gt;':c));};" +
+            "window.__smInline=function(nm){" +
+            "return nm==='span'||nm==='a'||nm==='strong'||nm==='em'||nm==='b'||nm==='i'||" +
+            "nm==='code'||nm==='del'||nm==='mark'||nm==='sup'||nm==='sub'||nm==='u'||nm==='small';};" +
+            // 正文 → 最小单位：每个字符一个单位、每段标签一个单位。
+            //
+            // 为什么不直接对 DOM 做文本差量：Chromium 30 对文本节点只替换不更新，
+            // 每次切点前移都要整段重做，公式位图、代码高亮、展开状态全跟着重建，
+            // 渐显就退化成「整段一闪一闪」。这里一帧只解析一次 HTML，之后所有帧
+            // 只在单位序列上移动切点——已显示的单位不再改动，字不会反复变浅变深。
+            //
+            // 包裹用的 div / 只含内联元素的小块直接摊开（不单独成单位）：
+            // 它们的开标签要等整块放完才该出现，留成「半开」状态会把标签画到屏幕上。
+            //
+            // 需要闭合才能定型的块（思考、工具卡片）单独处理：它们由服务端用
+            // [thinking]...[/thinking] 包起来，正文里只到达了开标记时，整块还在
+            // 持续增长。若按字符逐个放出，用户会先看到一个「思考中」的折叠条，
+            // 后面几秒的内容却在折叠条下面继续冒出来——正是「提前渲染」的观感。
+            // 所以未闭合的块整体当作一个不可分割的原子：等到闭合标记到达、块定型，
+            // 才连同内容一次性放进显示区。
+            "window.__smUnitize=function(html){" +
+            "var box=document.createElement('div');box.innerHTML=html||'';" +
+            "var units=[];" +
+            "var add=function(el){" +
+            "var kids=el.childNodes;" +
+            "for(var i=0;i<kids.length;i++){" +
+            "var n=kids[i];" +
+            "if(n.nodeType===1){" +
+            "var nm=n.tagName.toLowerCase();" +
+            // 还在增长的块：整体压成一个原子单位（hold），由切点规则一次放完
+            "if(window.__smGrowing(n)){units.push({hold:1,grow:1,el:n});continue;}" +
+            "if(nm==='div'||nm==='p'||nm==='section'||nm==='article'||nm==='li'||nm==='ul'||nm==='ol'||" +
+            "nm==='blockquote'||nm==='h1'||nm==='h2'||nm==='h3'||nm==='h4'||nm==='h5'||nm==='h6'){" +
+            "add(n);continue;}" +
+            "var keep='';var at=n.attributes;" +
+            "for(var a=0;a<at.length;a++){" +
+            "keep+=' '+at[a].name+'=\"'+(''+at[a].value).replace(/&/g,'&amp;').replace(/\"/g,'&quot;')+'\"';}" +
+            "units.push({tok:'<'+nm+keep+'>',open:nm+keep});" +
+            "add(n);" +
+            "units.push({tok:'</'+nm+'>',close:nm});}" +
+            "else if(n.nodeType===3){" +
+            "var tx=''+n.nodeValue;" +
+            "for(var q=0;q<tx.length;q++)units.push({ch:tx.charAt(q)});}" +
+            "else if(n.nodeType===8){units.push({tok:'<!--'+n.nodeValue+'-->'});}}};" +
+            "add(box);" +
+            // 原子块的 HTML 最后统一取：上面用的是占位 tok，这里换成序列化结果。
+            // 用序列化而不是记节点引用——原节点属于临时容器，取它的 outerHTML
+            // 会丢掉浏览器补全的闭合标签；序列化后的字符串是自洽的。
+            "for(var i=0;i<units.length;i++){" +
+            "var u=units[i];if(u.el&&u.grow)u.tok=u.el.outerHTML;delete u.el;}" +
+            "return units;};" +
+            // 一个块是不是「还没定型」：思考块以 data-think-live=1 标记未闭合；
+            // 工具卡片写在 .tool-live 容器里，容器被重写时卡片才刚落地，
+            // 这里按「容器内的卡片」整体原子化——卡片是整块插入的，内部不会
+            // 出现半截结构，不需要额外判断。
+            "window.__smGrowing=function(n){" +
+            "if(n.nodeType!==1)return false;" +
+            "var cn=' '+(n.className||'')+' ';" +
+            "if(cn.indexOf(' thinking-wrap ')>=0)return n.getAttribute('data-think-live')==='1';" +
+            "if(cn.indexOf(' tool-live ')>=0)return true;" +
+            "return false;};" +
+            "window.__smMark=function(st,units){" +
+            "var open=[],seen=[];" +
+            "for(var i=0;i<units.length;i++){" +
+            "var u=units[i];" +
+            "if(u.hold!==undefined){seen.push(i);open.push(null);}" +
+            "else if(u.open!==undefined){st.openSeen[st.openSeen.length]=i;open.push(u.open);seen.push(i);}" +
+            "else if(u.close!==undefined){open.pop();seen.pop();}}" +
+            // 原子块开标签的位置自然在单位序列里，仍然记在 openStack 中用于补闭合；
+            // 这里 open 里存的是 null，__smShown 补闭合时要跳过它
+            "st.openStack=open;st.openSeen=seen;};" +
+            // 已显示部分的 HTML：切点前的单位。最后一个可见字符单独成段并带深浅过渡，
+            // 其余字符统一放在一起（颜色交给主题，不再逐字动画）
+            "window.__smShown=function(st){" +
+            "var u=st.units,cut=st.cut,out='',last=-1;" +
+            "for(var i=cut-1;i>=0;i--){if(u[i].ch!==undefined){last=i;break;}}" +
+            "for(var j=0;j<cut;j++){" +
+            "var x=u[j];" +
+            "if(x.tok!==undefined){out+=x.tok;continue;}" +
+            "var c=window.__smEsc(x.ch);" +
+            "out+=(j===last)?('<span class=\"stream-new\">'+c+'</span>'):c;}" +
+            // 补上还没闭合的标签：切点落在元素中间时，前半段也必须是合法结构
+            "for(var k=0;k<st.openStack.length;k++){" +
+            "if(st.openStack[k]===null)continue;" +
+            "if(st.openSeen[k]>=cut)out+='</'+st.openStack[k]+'>';}" +
+            "return out;};" +
+            // 还没显示的部分：从切点开始，跨过切点的元素先补上开标签
+            "window.__smTailHtml=function(st){" +
+            "var out='';" +
+            "for(var k=0;k<st.openStack.length;k++){" +
+            "if(st.openStack[k]===null)continue;" +
+            "if(st.openSeen[k]<st.cut)out+='<'+st.openStack[k]+'>';}" +
+            "for(var j=st.cut;j<st.units.length;j++){" +
+            "var x=st.units[j];" +
+            "if(x.tok!==undefined){out+=x.tok;continue;}" +
+            "out+=window.__smEsc(x.ch);}" +
+            "return out;};" +
+            // 重画：把切点前的单位画进显示区，其余交给占位层（visibility:hidden，
+            // 照样占位排版，后面的内容提前到达也不会把已经显示的字挤走）
+            "window.__smPaint=function(st,t){" +
+            "var sh=t.querySelector('.smooth-shown');" +
+            "var gh=t.querySelector('.stream-ghost');" +
+            "if(!sh){sh=document.createElement('span');sh.className='smooth-shown';t.appendChild(sh);}" +
+            "if(!gh){gh=document.createElement('div');gh.className='stream-ghost';t.appendChild(gh);}" +
+            "sh.innerHTML=window.__smShown(st);" +
+            "gh.innerHTML=window.__smTailHtml(st);" +
+            "applyThinkingStates(t);};" +
+            // 每帧推进：先按「已到达字符数」把切点移到该到的位置，再往下画
+            "window.__smAdvance=function(st,t,adv){" +
+            "var a=adv|0;" +
+            "var cnt=0,i=0,u=st.units;" +
+            "for(;i<u.length;i++){" +
+            "if(cnt>=a)break;" +
+            "if(u[i].ch!==undefined)cnt++;}" +
+            // 切点正好落在原子块中间：整块往后退，等它定型后一次性放出。
+            // 半步放出的思考块/卡片没有任何意义，画面还会在上面再长出一份。
+            "for(var b=i-1;b>=0;b--){if(u[b].hold!==undefined){i=b;break;}}" +
+            "st.cut=i;" +
+            // 元素已经整体放出（开标签在切点之前）：可以整块搬进显示区
+            "var moved=false;" +
+            "for(var k=0;k<st.openStack.length;k++){" +
+            "if(st.openStack[k]!==null&&st.openSeen[k]<st.cut)moved=true;}" +
+            "window.__smPaint(st,t);" +
+            "return moved;};" +
+            // 关掉实时渲染时正文是纯文本：显示量直接切在文本上，占位层放在后面撑出版式
+            "window.__smPaintPlain=function(t,text,show){" +
+            "t.innerHTML='';" +
+            "var n=show<0?0:(show>text.length?text.length:show);" +
+            "t.appendChild(document.createTextNode(text.substring(0,n)));" +
+            "var g=document.createElement('div');g.className='stream-ghost';" +
+            "g.textContent=text.substring(n);t.appendChild(g);};" +
             "window.__smoothStart=function(idx){" +
             "var c=window.__aiContent(idx);if(!c)return;" +
             "var t=c.querySelector('.stream-tail');if(!t)return;" +
-            // 每次都重新找：updateLastMsg 等函数会用 innerHTML 重建 tail
-            "var g=t.querySelector('.stream-ghost'),s=t.querySelector('.stream-shown');" +
-            // streamCommitTail 搬完增量后把这两层一并清掉了：不补回来，
-            // 本轮后续的 __smoothPush/__smoothStep 全都找不到落点，
-            // 屏幕上这一段始终空着，直到收尾才一次性冒出来
-            "if(!g||!s){t.innerHTML='<div class=\"stream-ghost\"></div><div class=\"stream-shown\"></div>';" +
-            "g=t.querySelector('.stream-ghost');s=t.querySelector('.stream-shown');}" +
-            "if(!g||!s)return;" +
-            "window.__sm.on=true;window.__sm.pos=0;window.__sm.hold=false;" +
-            "g.innerHTML='';s.innerHTML='';window.__sm.arrived='';window.__sm.shown='';" +
-            "if(window.Android&&Android.smoothTimerStart)Android.smoothTimerStart();};" +
-            "window.__smoothPush=function(html,idx){" +
-            "if(!window.__sm.on||window.__sm.k)return;window.__sm.k=0;" +
-            "var c=window.__aiContent(idx);if(!c)return;" +
-            "var t=c.querySelector('.stream-tail');if(!t)return;" +
-            "var g=t.querySelector('.stream-ghost'),s=t.querySelector('.stream-shown');" +
-            "if(!g||!s)return;" +
-            "window.__sm.arrived=html||'';g.innerHTML=window.__sm.arrived;};" +
-            "window.__smoothStep=function(shownHtml,idx){" +
-            "if(!window.__sm.on)return;" +
-            "var c=window.__aiContent(idx);if(!c)return;" +
-            "var t=c.querySelector('.stream-tail');if(!t)return;" +
-            "var s=t.querySelector('.stream-shown');if(!s)return;" +
-            // 只追加、不回写整段：定时器比渲染器快时 index 会重复，前缀可能比上一次短
-            "var nx=shownHtml||'';if(nx===window.__sm.shown)return;" +
-            "if(window.__sm.shown.length>0&&nx.indexOf(window.__sm.shown)===0){" +
-            "var add=nx.substring(window.__sm.shown.length);" +
-            "var holder=document.createElement('div');holder.innerHTML=add;var frag=document.createDocumentFragment();" +
-            "while(holder.firstChild)frag.appendChild(holder.firstChild);" +
-            // 每次推进单独包一层：后续只在末尾追加，已经画出来的节点不再重排
-            "var chunk=document.createElement('span');chunk.className='stream-chunk';" +
-            "chunk.style.webkitAnimation='acSmoothIn .32s cubic-bezier(.4,0,.2,1)';" +
-            "chunk.style.animation='acSmoothIn .32s cubic-bezier(.4,0,.2,1)';" +
-            "chunk.appendChild(frag);s.appendChild(chunk);" +
-            "window.__sm.shown=nx;}else{s.innerHTML=nx;window.__sm.shown=nx;}" +
-            "smartScrollToBottom();};" +
-            // 停止只停在当前位置：用户按了停止，是想看已经流出来的内容，不是想被继续推着走
-            "window.__smoothStopPush=function(){window.__sm.k=1;};" +
-            "window.__smoothStop=function(){window.__sm.on=false;window.__sm.hold=false;};" +
-            // 收尾：剩下的全部放完，然后退出渐显
-            "window.__smoothFinish=function(shownHtml){" +
-            "if(window.__sm.on&&shownHtml!=null)window.__smoothStep(shownHtml);" +
-            "window.__sm.on=false;window.__sm.hold=false;};" +
+            // streamCommitTail 搬完增量后显示层会被一并清掉，下一帧重建
+            "var st=window.__sm;" +
+            "st.on=true;st.arrived='';st.show=0;st.units=[];st.chars=0;st.cut=0;st.plain=false;" +
+            "st.openStack=[];st.openSeen=[];};" +
+            // 已到达的完整片段 + 已经放出的字数：两者一起下发，进度落后时也不会漏内容
+            "window.__smoothPush=function(html,adv,idx,t){" +
+            "var st=window.__sm;if(!st.on)return false;" +
+            "if(!t||!t.parentNode){var c=window.__aiContent(idx);if(!c)return false;" +
+            "t=c.querySelector('.stream-tail');if(!t)return false;}" +
+            "var src=html||'',a=adv|0;if(a<0)a=0;" +
+            "if(src===st.arrived&&a===st.show)return false;" +
+            // 纯文本 tail（关掉实时渲染）：显示量直接切在文本上
+            "if((''+t.className).indexOf('plain')>=0){" +
+            "st.plain=true;st.arrived=src;st.chars=src.length;" +
+            "if(a>st.chars)a=st.chars;st.show=a;" +
+            "window.__smPaintPlain(t,src,a);return true;}" +
+            "var grew=src!==st.arrived;" +
+            "st.arrived=src;st.show=a;" +
+            "if(grew){" +
+            "st.units=window.__smUnitize(src);" +
+            "st.chars=0;for(var i=0;i<st.units.length;i++){if(st.units[i].ch!==undefined)st.chars++;}" +
+            "window.__smMark(st,st.units);}" +
+            "if(a>st.chars)a=st.chars;st.show=a;" +
+            "window.__smAdvance(st,t,a);return true;};" +
+            // 纯文本帧：显示量直接切在文本节点上，剩下的交给占位层撑出版式
+            "window.__smoothPushText=function(text){" +
+            "var st=window.__sm;if(!st.on)return;" +
+            "var c=window.__aiContent(-1);" +
+            "if(!c)return;var t=c.querySelector('.stream-tail');if(!t)return;" +
+            "var a=st.show|0;" +
+            "var tt=text||'';" +
+            "if(a>tt.length)a=tt.length;" +
+            "st.plain=true;st.arrived=tt;st.chars=tt.length;st.show=a;" +
+            "window.__smPaintPlain(t,tt,a);};" +
+            // 只推进度（新片段还没到）：不动片段，只把切点往后挪
+            "window.__smoothStep=function(adv,idx){" +
+            "var st=window.__sm;if(!st.on)return false;" +
+            "var a=adv|0;if(a<0)a=0;if(a>st.chars)a=st.chars;" +
+            "if(a===st.show)return false;st.show=a;" +
+            "var c=window.__aiContent(idx);if(!c)return false;" +
+            "var t=c.querySelector('.stream-tail');if(!t)return false;" +
+            "window.__smAdvance(st,t,a);return true;};" +
+            "window.__smoothStop=function(){window.__sm.on=false;};" +
+            // 收尾：按最终片段一次放完，然后退出渐显
+            "window.__smoothFinish=function(html,idx){" +
+            "var changed=false;" +
+            "if(html!=null&&window.__sm.on)changed=window.__smoothPush(html,999999,idx);" +
+            "window.__sm.on=false;" +
+            "return changed;};" +
             // 手指按在气泡上：暂停往前推，抬手后继续（滚动时不至于边滑边跳字）
             "document.addEventListener('touchstart',function(e){" +
             "var n=e.target;while(n&&n!==document.body){" +
@@ -1001,25 +1158,14 @@ final class RendererAssets {
             "n=n.parentNode;}},true);" +
             "document.addEventListener('touchend',function(){window.__sm.hold=false;},true);" +
             "document.addEventListener('touchcancel',function(){window.__sm.hold=false;},true);" +
-            // 「直接显示」气泡：长回答渐显时，已经全部到达但还在慢慢浮出，
-            // 想立刻看全文的人得有个出口。挂在最后一条 AI 气泡上方、靠左
-            // （.sources 与它同一列，绝对定位在最上面一条消息上）。
-            "window.showSmoothHint=function(){" +
-            "var ms=document.querySelectorAll('.msg.ai');if(ms.length===0)return;" +
-            "var m=ms[ms.length-1];" +
-            "if(m.querySelector('.smooth-hint'))return;" +
-            "var h=document.createElement('div');h.className='smooth-hint';" +
-            "h.textContent='@@L_SHOW_ALL@@';" +
-            "h.onclick=function(e){e.stopPropagation();e.preventDefault();" +
-            "if(window.Android&&Android.smoothReveal)Android.smoothReveal();};" +
-            "m.insertBefore(h,m.firstChild);};" +
-            "window.hideSmoothHint=function(){" +
-            "var hs=document.querySelectorAll('.smooth-hint');" +
-            "for(var i=0;i<hs.length;i++){if(hs[i].parentNode)hs[i].parentNode.removeChild(hs[i]);}};" +
             "window.__applyTailHtml=function(t,html){var s=window.__snapScroll(t);" +
             // 重建前不需要手动捕获：展开状态存在 __thinkOpen 里，重建后按 key 恢复
             "t.className='stream-tail';t.innerHTML=html;window.__restoreScroll(t,s);" +
-            "clearStatus();addCopyBtns(t);applyToolStates(t);smartScrollToBottom();};" +
+            "clearStatus();addCopyBtns(t);applyToolStates(t);" +
+            // 渐显正在进行：新到达的片段同样只显示到当前进度，别整段甩出来
+            "if(window.__sm.on)window.__smoothPush(html||'',window.__sm.show," +
+            "t);" +
+            "smartScrollToBottom();};" +
             "window.__applyTailText=function(t,text){var s=window.__snapScroll(t);" +
             // tail 里已经有实时写入的工具卡片时，纯文本帧会把它们整段抹掉——
             // 关掉实时渲染时「工具调用的卡片一闪就没了」就是这个原因。
@@ -1028,10 +1174,13 @@ final class RendererAssets {
             "window.__setLiveText(t,text);window.__restoreScroll(t,s);" +
             "clearStatus();smartScrollToBottom();return;}" +
             // 空文本不挂 plain：挂了就会画出一个孤零零的流式光标 ▍
-            "t.innerHTML='<div class=\"stream-ghost\"></div><div class=\"stream-shown\"></div>';" +
-            "t.className=text?'stream-tail plain':'stream-tail';t.textContent=text;" +
+            "t.innerHTML='';t.className=text?'stream-tail plain':'stream-tail';t.textContent=text;" +
             "window.__restoreScroll(t,s);" +
-            "clearStatus();smartScrollToBottom();};" +
+            "clearStatus();" +
+            // 关掉实时渲染时正文走纯文本：渐显直接在这个文本节点上切，占位层撑出版式，
+            // 流式光标 ▍ 由 .stream-tail.plain 的伪元素画在最后一行末尾
+            "if(window.__sm.on){window.__smoothPushText(text||'');}" +
+            "smartScrollToBottom();};" +
             "window.__guardHold=function(){" +
             // 每次渲染帧落地前先检查：闸门超时就强制释放并丢弃缓存帧，
             // 让「当前这一帧」直接落地。只释放不清缓存的话，旧帧会在之后的
@@ -1176,8 +1325,7 @@ final class RendererAssets {
             "var d=document.createElement('div');" +
             "d.className='msg ai';d.setAttribute('data-idx',start);" +
             "d.innerHTML='<div class=\"content\"><div class=\"stream-base\"></div>" +
-            "<div class=\"stream-tail\"><div class=\"stream-ghost\"></div>" +
-            "<div class=\"stream-shown\"></div></div></div><div class=\"sources\"></div>" +
+            "<div class=\"stream-tail\"></div></div><div class=\"sources\"></div>" +
             // 属性定界符必须是真引号（Java 侧 \"）：写成 &quot; 时它不是定界符，
             // 解码后会变成类名/处理代码里实实在在的引号字符——
             // class=&quot;msg-menu-btn&quot; 的类名带上了引号，CSS 匹配不上，
@@ -1242,8 +1390,7 @@ final class RendererAssets {
             "last.setAttribute('data-idx',''+idx);" +
             // 还在渐显的内容先全部放完：渐显层里透明压着的字，定型后就没人再推了
             "window.__smoothFinish(window.__sm.arrived);" +
-            "var hideBtn=last.querySelector('.smooth-hint');" +
-            "if(hideBtn&&hideBtn.parentNode)hideBtn.parentNode.removeChild(hideBtn);" +
+            "if(window.__sm){window.__sm.on=false;}" +
             // 定型后这条气泡不再是「流式中」：tail 里残留的 .plain 类会让
             // .stream-tail.plain::after 的流式光标 ▍ 一直挂在末尾，占掉一行。
             // 只摘类不动内容：中断路径下 tail 里可能还有没并进 base 的增量，

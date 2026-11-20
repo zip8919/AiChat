@@ -258,6 +258,10 @@ final class ChatStreamRunner {
             // 直接不下发，省掉一次必然的 400 降级请求。
             boolean sendThinking = !(job.isContinue() && job.cont.officialPrefix);
             boolean thinkingDowngraded = false;
+            // 思考等级=关 时，关闭参数不允许被「端点拒绝思考参数」的降级整包丢掉：
+            // 丢掉等于回到端点默认值（多数是开），用户选了关却还在思考。
+            // 这类端点（不认任何思考字段）只能靠提示词硬压，见下面的强约束段。
+            boolean thinkingOff = "off".equals(job.thinkingLevel);
             // 最近一次 429 的响应体。重试耗尽那一轮可能已读不到 body，用它兜底进错误卡片。
             String last429Body = "";
             /**
@@ -315,6 +319,11 @@ final class ChatStreamRunner {
                 JSONObject body = ChatTransport.buildRequestBody(job.modelName, job.provider,
                         job.thinkingLevel, conversation, job.streamEnabled,
                         toolsEnabled ? toolDefs : null, includeUsage, sendThinking);
+                // 端点连关闭字段都不认（上面降级过）：只能退到提示词层面硬压。
+                // 只加在 system 上，不动历史消息，避免影响多轮上下文的一致性。
+                if (thinkingOff && !sendThinking) {
+                    ChatTransport.forceNoThinking(body);
+                }
                 // 统计口径：一次 open 就是一次 HTTP 请求（含工具轮、含重试）。
                 // 重试另有 retries 计数，方便区分「请求多」是工具轮还是 429。
                 // 统计按「界面上的名字」记：用户看报表时要能对上模型下拉里的那一项

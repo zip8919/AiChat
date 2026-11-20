@@ -1614,6 +1614,14 @@ public class MainActivity extends ThemedActivity {
                 conversationWebView.loadUrl("javascript:smartScrollToBottom(true)");
             }
         });
+        // 「直接显示」：跳过本次逐字渐显。只对正在渐显的那一条回复有效，
+        // 旧气泡上的残留点击不会动到新回复。
+        findViewById(R.id.smooth_reveal_button).setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                LogUtil.d(TAG, "click: smooth reveal");
+                revealCurrentSmooth();
+            }
+        });
     }
 
     /**
@@ -2832,8 +2840,9 @@ public class MainActivity extends ThemedActivity {
         // 端点上次拒过 stream_options 就不再发，避免每次对话白吃一个 400
         final boolean includeUsage = streamEnabled && !isUsageUnsupported(provider.name);
         // 渐显只在流式、实时渲染时有意义：非流式是一次性拿到全文，纯文本 tail 也不需要渐显
-        smoothStream = SettingsActivity.isSmoothStreamEnabled(this)
-                && streamEnabled && jobRealtimeRender;
+        // 渐显只要求流式：实时渲染关掉时正文走纯文本 tail，同样是整段整段地到，
+        // 一样需要按字浮出（以前这里要求同时开启实时渲染，关掉它就等于关掉渐显）
+        smoothStream = SettingsActivity.isSmoothStreamEnabled(this) && streamEnabled;
         activeProviderName = provider.name;
         retryNowRequested.set(false);
 
@@ -3055,14 +3064,7 @@ public class MainActivity extends ThemedActivity {
         }
 
         public void smoothReveal(int generation) {
-            if (!smoothStream || requestGeneration.get() != generation) return;
-            handler.removeCallbacks(smoothHintTask);
-            showHintScheduled = false;
-            smoothTail.finish();
-            webViewEvalJs("hideSmoothHint()");
-            webViewEvalJs("__smoothFinish('" + jsEscape(smoothTail.shownHtml()) + "',"
-                    + smoothIdx() + ")");
-            // 定时器下一拍会发现没有待显示内容并自行退出
+            revealSmooth(generation);
         }
 
         public boolean smooth() {
@@ -3810,10 +3812,10 @@ public class MainActivity extends ThemedActivity {
     private volatile boolean smoothPaused;
     /** 渐显正在服务的那次请求代数：旧气泡上的「直接显示」不能打到新回复上。 */
     private volatile int smoothGeneration;
-    /** 上一拍已经推进到 ghost 层的片段：内容没变就不必让页面重解析整段 HTML。 */
+    /** 上一拍发给页面的整段片段：只推进度时不必重发同一份 HTML。 */
     private String smoothPushedHtml = "";
-    /** 上一拍已经显示到 shown 层的前缀：没变化就不用发整段前缀下去。 */
-    private String smoothShownHtml = "";
+    /** 上一拍已经显示到的字符数（页面侧同一份片段上的切点）。 */
+    private int smoothShownChars = -1;
     /** 显示已经追上到达，页面侧暂时不必再收新片段。 */
     private boolean toldPageStop;
     /** 「直接显示」挂出前的等待：至少要浮出一小段，否则看着像误触。 */
@@ -3839,45 +3841,42 @@ public class MainActivity extends ThemedActivity {
                 handler.postDelayed(this, 120);
                 return;
             }
-            final int idx = smoothIdx();
+            smoothTail.step();
+            pushSmoothFrame();
             if (smoothTail.hasPending()) {
-                // 只有片段真的变了才推 ghost：每拍整段 innerHTML 重解析是
-                // 渐显最大的开销，低端机上会把节拍拖到每秒个位数，
-                // 表现就是「半天不动、收尾一次性冒完」
-                String pending = smoothTail.pendingHtml();
-                if (!pending.equals(smoothPushedHtml)) {
-                    smoothPushedHtml = pending;
-                    webViewEvalJs("__smoothPush('" + jsEscape(pending) + "'," + idx + ")");
-                }
-                smoothTail.step();
-                String shown = smoothTail.shownHtml();
-                if (!shown.equals(smoothShownHtml)) {
-                    smoothShownHtml = shown;
-                    webViewEvalJs("__smoothStep('" + jsEscape(shown) + "'," + idx + ")");
-                }
-                toldPageStop = false;
                 handler.postDelayed(this, 1000L / SmoothTail.STEPS_PER_SECOND);
                 return;
             }
-            if (!toldPageStop) {
-                // 显示追上到达：让页面先别再收，下一帧到了再收（隐藏层整段重建开销不小）
-                toldPageStop = true;
-                webViewEvalJs("__smoothStopPush()");
-            }
+            // 显示追上到达：等着下一帧，别空转
             if (smoothTail.finished()) {
-                // 全部放完：收掉「直接显示」，退出循环
                 smoothRunning = false;
-                webViewEvalJs("hideSmoothHint()");
+                setRevealBubble(false);
                 return;
-            }
-            if (showHintScheduled) {
-                // 到点了才把「直接显示」挂出来，不会在刚开始输出时一闪而过
-                showHintScheduled = false;
-                webViewEvalJs("showSmoothHint()");
             }
             handler.postDelayed(this, 60);
         }
     };
+
+    /**
+     * 把「已到达的片段 + 已显示到第几字」推给页面。
+     *
+     * <p>片段没变时只发进度（页面按位置挪切点，不重建 DOM）；片段变了才整段重发。
+     * 两件事必须一起下发：只发进度会让页面在旧片段上切，只发片段会把进度丢掉。
+     */
+    private void pushSmoothFrame() {
+        final int idx = smoothIdx();
+        final String arrived = smoothTail.arrivedHtml();
+        final int adv = smoothTail.shownOffset();
+        if (arrived.equals(smoothPushedHtml)) {
+            if (adv == smoothShownChars) return;
+            smoothShownChars = adv;
+            webViewEvalJs("__smoothStep(" + adv + "," + idx + ")");
+            return;
+        }
+        smoothPushedHtml = arrived;
+        smoothShownChars = adv;
+        webViewEvalJs("__smoothPush('" + jsEscape(arrived) + "'," + adv + "," + idx + ")");
+    }
 
     /**
      * 新的一段正文开始渐显：清空缓冲，让第一屏内容立刻出现。
@@ -3890,7 +3889,7 @@ public class MainActivity extends ThemedActivity {
         smoothGeneration = generation;
         smoothTail.beginRound();
         smoothPushedHtml = "";
-        smoothShownHtml = "";
+        smoothShownChars = -1;
         webViewEvalJs("__smoothStart(" + smoothIdx() + ")");
         if (!smoothRunning) {
             smoothRunning = true;
@@ -3904,20 +3903,52 @@ public class MainActivity extends ThemedActivity {
 
     /** 把这一帧已到达的正文交给渐显：只记账，显示多少由定时器决定。 */
     private void feedSmooth(final String html, final int generation) {
-        if (!smoothStream || !smoothRunning || requestGeneration.get() != generation) return;
-        if (!smoothTail.onHtml(html)) return;
-        // 定时器发现没有待显示内容时会自己退出；有新内容就把它重新拉起来
-        if (!smoothTail.hasPending()) {
+        if (!smoothStream || requestGeneration.get() != generation) return;
+        if (!smoothRunning) {
+            // 上一段已经放完（定时器退出）或还没起步：内容到了就得把节奏拉起来，
+            // 否则这一段会压在缓冲里，直到收尾才一次性冒出来
+            smoothRunning = true;
             handler.removeCallbacks(smoothTick);
-            handler.postDelayed(smoothTick, 1000L / SmoothTail.STEPS_PER_SECOND);
         }
-        // 至少要浮一小段才值得给出口：刚出第一个字就挂气泡，看着像误触
-        if (!showHintScheduled && smoothTail.shownUnits() > 0
-                && smoothTail.unitCount() > 0) {
+        if (!smoothTail.onHtml(html)) return;
+        // 新片段立刻交给页面：占位层先把版式撑开，读起来不会「先变短再变长」
+        pushSmoothFrame();
+        handler.removeCallbacks(smoothTick);
+        handler.postDelayed(smoothTick, 1000L / SmoothTail.STEPS_PER_SECOND);
+        // 至少要浮出一小段才值得给出口：刚出第一个字就挂气泡，看着像误触
+        if (!showHintScheduled && smoothTail.shownChars() > 0
+                && smoothTail.charCount() > 0) {
             showHintScheduled = true;
             handler.removeCallbacks(smoothHintTask);
             handler.postDelayed(smoothHintTask, SMOOTH_HINT_DELAY_MS);
         }
+    }
+
+    /** 页面脚本与「直接显示」气泡共用的入口：只在 UI 线程动定时器与 View。 */
+    private void revealCurrentSmooth() {
+        runOnUiThread(new Runnable() {
+            public void run() {
+                // 只对「还在跑的那一条」生效：旧气泡上的残留按钮不碰当前回复
+                if (requestGeneration.get() != smoothGeneration) return;
+                revealSmooth(smoothGeneration);
+            }
+        });
+    }
+
+    /**
+     * 跳过本次渐显：剩下的字一次显示完，气泡收起，正文一个不少。
+     */
+    private void revealSmooth(final int generation) {
+        if (!smoothStream || smoothGeneration != generation) return;
+        handler.removeCallbacks(smoothTick);
+        handler.removeCallbacks(smoothHintTask);
+        showHintScheduled = false;
+        smoothTail.finish();
+        smoothRunning = false;
+        setRevealBubble(false);
+        pushSmoothFrame();
+        webViewEvalJs("__smoothFinish('" + jsEscape(smoothTail.arrivedHtml()) + "',"
+                + smoothIdx() + ")");
     }
 
     /**
@@ -3931,9 +3962,24 @@ public class MainActivity extends ThemedActivity {
         public void run() {
             showHintScheduled = false;
             if (!smoothRunning || smoothTail.finished()) return;
-            webViewEvalJs("showSmoothHint()");
+            setRevealBubble(true);
         }
     };
+
+    /** 「直接显示」气泡是否已经挂出来：只在状态真的变化时才动 View。 */
+    private volatile boolean revealBubbleShown;
+
+    /** 「直接显示」气泡的显隐。与「回到底部」同一套外观，浮在输入框左上方。 */
+    private void setRevealBubble(final boolean show) {
+        if (revealBubbleShown == show) return;
+        revealBubbleShown = show;
+        runOnUiThread(new Runnable() {
+            public void run() {
+                View b = findViewById(R.id.smooth_reveal_button);
+                if (b != null) b.setVisibility(revealBubbleShown ? View.VISIBLE : View.GONE);
+            }
+        });
+    }
 
     /** 停止渐显：停在当前显示的位置，不把剩下的字一次性甩出来。 */
     private void stopSmooth(final int generation) {
@@ -3942,8 +3988,8 @@ public class MainActivity extends ThemedActivity {
         smoothRunning = false;
         showHintScheduled = false;
         smoothPushedHtml = "";
-        smoothShownHtml = "";
-        webViewEvalJs("hideSmoothHint()");
+        smoothShownChars = -1;
+        setRevealBubble(false);
         webViewEvalJs("__smoothStop()");
     }
 
@@ -3956,9 +4002,9 @@ public class MainActivity extends ThemedActivity {
         showHintScheduled = false;
         smoothTail.finish();
         smoothPushedHtml = "";
-        smoothShownHtml = "";
-        webViewEvalJs("hideSmoothHint()");
-        webViewEvalJs("__smoothFinish('" + jsEscape(smoothTail.shownHtml()) + "',"
+        smoothShownChars = -1;
+        setRevealBubble(false);
+        webViewEvalJs("__smoothFinish('" + jsEscape(smoothTail.arrivedHtml()) + "',"
                 + smoothIdx() + ")");
     }
 
@@ -4217,18 +4263,7 @@ public class MainActivity extends ThemedActivity {
         @JavascriptInterface
         public void smoothReveal() {
             LogUtil.d(TAG, "JsBridge.smoothReveal");
-            runOnUiThread(new Runnable() {
-                public void run() {
-                    // 只对「还在跑的那一条」生效：旧气泡上的残留按钮不碰当前回复
-                    if (requestGeneration.get() != smoothGeneration) return;
-                    smoothTail.finish();
-                    handler.removeCallbacks(smoothHintTask);
-                    showHintScheduled = false;
-                    webViewEvalJs("hideSmoothHint()");
-                    webViewEvalJs("__smoothFinish('"
-                            + jsEscape(smoothTail.shownHtml()) + "'," + smoothIdx() + ")");
-                }
-            });
+            revealCurrentSmooth();
         }
 
         /** 手指按在气泡上：暂停往外放字，抬手后继续。 */
