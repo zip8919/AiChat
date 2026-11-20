@@ -2,6 +2,7 @@ package xyz.zip8919.app.aichat;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.BroadcastReceiver;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
@@ -662,6 +663,7 @@ public class MainActivity extends ThemedActivity {
         bindSendButton();
         bindScrollButton();
         bindClearButton();
+        bindOfflineBanner();
         bindThinkingSpinner();
         refreshModelSpinner();
     }
@@ -1624,6 +1626,112 @@ public class MainActivity extends ThemedActivity {
         });
     }
 
+    // ---- 无网络横幅 ----
+    // 只在「无网」时出现，有网就收起。不能做成常驻控件把消息区往下挤：
+    // 4.4 词典笔屏幕本来就矮，多一行之后就只剩三四行正文。
+    private BroadcastReceiver netReceiver;
+    /** 横幅当前是否可见。初值在 initOfflineBanner 里按真实状态校正，不写死。 */
+    private boolean offlineShown;
+    /** 断网轮询：部分定制 ROM 不发 CONNECTIVITY_ACTION，只能低频自查兜底。 */
+    private final Runnable offlineTick = new Runnable() {
+        public void run() {
+            applyOfflineState();
+            handler.removeCallbacks(this);
+            // 2.5 秒一次：断网是需要尽快反馈的状态（用户点了发送才发现发不出去最烦），
+            // 而读一次 ConnectivityManager 的开销可以忽略，不必拉到 10 秒。
+            handler.postDelayed(this, 2500);
+        }
+    };
+
+    private void bindOfflineBanner() {
+        View banner = findViewById(R.id.offline_banner);
+        if (banner == null) return;
+        View.OnClickListener go = new View.OnClickListener() {
+            public void onClick(View v) {
+                LogUtil.d(TAG, "click: offline banner -> network settings");
+                openNetworkSettings();
+            }
+        };
+        banner.setOnClickListener(go);
+        View action = findViewById(R.id.offline_banner_action);
+        if (action != null) action.setOnClickListener(go);
+    }
+
+    /**
+     * 进入界面时开始盯网络，离开时停掉。
+     *
+     * <p>初始化把 offlineShown 直接对齐真实状态（含横幅可见性），不当作「状态变化」，
+     * 否则一启动就会弹一次提示——用户明明只是在断网状态下打开应用看看历史消息。
+     */
+    private void startOfflineWatch() {
+        View banner = findViewById(R.id.offline_banner);
+        if (banner == null) return;
+        offlineShown = !NetworkState.isOnline(this);
+        banner.setVisibility(offlineShown ? View.VISIBLE : View.GONE);
+        if (netReceiver == null) {
+            netReceiver = NetworkState.listen(this, new Runnable() {
+                public void run() {
+                    handler.post(new Runnable() {
+                        public void run() {
+                            applyOfflineState();
+                        }
+                    });
+                }
+            });
+        }
+        handler.removeCallbacks(offlineTick);
+        handler.postDelayed(offlineTick, 2500);
+    }
+
+    private void stopOfflineWatch() {
+        handler.removeCallbacks(offlineTick);
+        if (netReceiver != null) {
+            NetworkState.unlisten(this, netReceiver);
+            netReceiver = null;
+        }
+    }
+
+    /**
+     * 打开系统的网络设置。
+     *
+     * <p>优先 {@code ACTION_WIRELESS_SETTINGS}：词典笔这类设备基本只有 WiFi，
+     * 直接落到 WiFi 列表比落到「设置」首页少点两层。个别 ROM 没有这个 Activity，
+     * 依次退到「设置」首页，再退到应用详情页，保证点击一定有反应。
+     */
+    private void openNetworkSettings() {
+        String[] actions = {
+                android.provider.Settings.ACTION_WIRELESS_SETTINGS,
+                android.provider.Settings.ACTION_SETTINGS,
+        };
+        for (String a : actions) {
+            try {
+                Intent it = new Intent(a);
+                it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(it);
+                return;
+            } catch (Throwable t) {
+                LogUtil.w(TAG, "open settings %s failed: %s", a, t);
+            }
+        }
+        AcToast.show(this, Strings.get(R.string.offline_open_settings_failed));
+    }
+
+    /** 重算一次并更新横幅。断网状态变化时弹一次提示，避免跨轮询反复打扰。 */
+    private void applyOfflineState() {
+        View banner = findViewById(R.id.offline_banner);
+        if (banner == null) return;
+        boolean online = NetworkState.isOnline(this);
+        if (online == !offlineShown) return; // 状态没变，不动 UI
+        offlineShown = !online;
+        banner.setVisibility(online ? View.GONE : View.VISIBLE);
+        LogUtil.d(TAG, "offline banner: %s", offlineShown ? "show" : "hide");
+        if (!offlineShown) return;
+        // 提示只在「刚从有网变成无网」时弹一次，5 分钟内不重复
+        if (NetworkState.shouldNotify(this, System.currentTimeMillis(), 5 * 60 * 1000L)) {
+            AcToast.show(this, Strings.get(R.string.offline_toast));
+        }
+    }
+
     /**
      * 清空输入：文字和待发附件一起清，先弹确认框。
      *
@@ -2557,6 +2665,8 @@ public class MainActivity extends ThemedActivity {
         super.onResume();
         LogUtil.d(TAG, "onResume");
         uiVisible = true;
+        // 回到前台先对一次网络状态：后台期间可能已经断网/恢复，广播不一定收得到
+        startOfflineWatch();
         // 后台期间渐显停住了：回到前台立刻接着放，别让用户看到半截回答
         if (smoothRunning) {
             handler.removeCallbacks(smoothTick);
@@ -2605,6 +2715,8 @@ public class MainActivity extends ThemedActivity {
         LogUtil.d(TAG, "onPause");
         uiVisible = false;
         super.onPause();
+        // 后台不必再盯网络：广播与轮询都停掉，回前台由 onResume 重新挂上并立刻对一次状态
+        stopOfflineWatch();
         conversationManager.saveCurrentConversation();
         // 这里不再 flushSaves：它是对主线程的阻塞等待（最长数秒），而 onPause 是
         // 用户切走的第一帧、也是 ANR 的高危窗口。保存在单线程队列里按序执行，
