@@ -261,10 +261,13 @@ final class RendererAssets {
             // 内容仍然完整，只是没有渐显——不显示比显示残缺重要。
             ".stream-ghost{visibility:hidden;}" +
             ".stream-shown{position:absolute;left:0;top:0;right:0;}" +
-            // 逐字浮现：每一小段单独淡入。优先用 CSS 动画，老 WebView 不支持就只是直接出现，
+            // 逐字浮现：每一小段从浅到深淡入。时长拉到 .32s、曲线取标准缓入缓出，
+            // 相邻几十个小段的淡入区间互相叠着，视觉上就是一条连续的「由浅变深」
+            // 渐变带，而不是一块块往外冒。老 WebView 不支持动画时只是直接出现，
             // 文字本身不依赖动画，不会出现「动了一遍变成空白」
             "@keyframes acSmoothIn{from{opacity:0}to{opacity:1}}" +
-            ".stream-chunk{animation:acSmoothIn .14s ease-out;}" +
+            ".stream-chunk{animation:acSmoothIn .32s cubic-bezier(.4,0,.2,1);" +
+            "-webkit-animation:acSmoothIn .32s cubic-bezier(.4,0,.2,1);}" +
             // 「直接显示」：贴着气泡左上角的一条小提示，不占正文空间
             ".msg.ai{position:relative;}" +
             ".smooth-hint{position:absolute;left:0;top:-6px;z-index:5;padding:1px 8px;" +
@@ -837,7 +840,6 @@ final class RendererAssets {
             // 指定了目标气泡就按 data-idx 精确取，见 __msgAi
             "var c=window.__aiContent(idx);" +
             "if(!c)return;" +
-            "var c=ms[ms.length-1];" +
             "var b=c.querySelector('.stream-base');" +
             "if(!b){" +
             "var keep=c.innerHTML;" +
@@ -951,6 +953,11 @@ final class RendererAssets {
             "var t=c.querySelector('.stream-tail');if(!t)return;" +
             // 每次都重新找：updateLastMsg 等函数会用 innerHTML 重建 tail
             "var g=t.querySelector('.stream-ghost'),s=t.querySelector('.stream-shown');" +
+            // streamCommitTail 搬完增量后把这两层一并清掉了：不补回来，
+            // 本轮后续的 __smoothPush/__smoothStep 全都找不到落点，
+            // 屏幕上这一段始终空着，直到收尾才一次性冒出来
+            "if(!g||!s){t.innerHTML='<div class=\"stream-ghost\"></div><div class=\"stream-shown\"></div>';" +
+            "g=t.querySelector('.stream-ghost');s=t.querySelector('.stream-shown');}" +
             "if(!g||!s)return;" +
             "window.__sm.on=true;window.__sm.pos=0;window.__sm.hold=false;" +
             "g.innerHTML='';s.innerHTML='';window.__sm.arrived='';window.__sm.shown='';" +
@@ -975,7 +982,8 @@ final class RendererAssets {
             "while(holder.firstChild)frag.appendChild(holder.firstChild);" +
             // 每次推进单独包一层：后续只在末尾追加，已经画出来的节点不再重排
             "var chunk=document.createElement('span');chunk.className='stream-chunk';" +
-            "chunk.style.webkitAnimation='acSmoothIn .14s ease-out';chunk.style.animation='acSmoothIn .14s ease-out';" +
+            "chunk.style.webkitAnimation='acSmoothIn .32s cubic-bezier(.4,0,.2,1)';" +
+            "chunk.style.animation='acSmoothIn .32s cubic-bezier(.4,0,.2,1)';" +
             "chunk.appendChild(frag);s.appendChild(chunk);" +
             "window.__sm.shown=nx;}else{s.innerHTML=nx;window.__sm.shown=nx;}" +
             "smartScrollToBottom();};" +
@@ -1096,7 +1104,6 @@ final class RendererAssets {
             // 指定了目标气泡就按 data-idx 精确取，见 __msgAi
             "var c=window.__aiContent(idx);" +
             "if(!c)return;" +
-            "var c=ms[ms.length-1];" +
             "var t=c.querySelector('.stream-tail');" +
             "if(!t){var b=c.querySelector('.stream-base');var keep=b?b.innerHTML:c.innerHTML;" +
             "c.className='content';" +
@@ -1171,9 +1178,16 @@ final class RendererAssets {
             "d.innerHTML='<div class=\"content\"><div class=\"stream-base\"></div>" +
             "<div class=\"stream-tail\"><div class=\"stream-ghost\"></div>" +
             "<div class=\"stream-shown\"></div></div></div><div class=\"sources\"></div>" +
-            "<div class=\"ai-menu-wrap\"><button class=&quot;msg-menu-btn&quot; " +
-            "onclick=&quot;if(window.Android)Android.messageMenu(&quot;-1&quot;);" +
-            "event.stopPropagation();return false;&quot;>" +
+            // 属性定界符必须是真引号（Java 侧 \"）：写成 &quot; 时它不是定界符，
+            // 解码后会变成类名/处理代码里实实在在的引号字符——
+            // class=&quot;msg-menu-btn&quot; 的类名带上了引号，CSS 匹配不上，
+            // 按钮就成了默认样式（「三个点样式异常」的根因）；
+            // onclick 同理解码出引号，脚本直接语法错误，点了没反应。
+            // 处理代码里的单引号用 &#39; 实体：JS 字符串本身以单引号定界，
+            // 裸单引号会把字符串截断。
+            "<div class=\"ai-menu-wrap\"><button class=\"msg-menu-btn\" " +
+            "onclick=\"if(window.Android)Android.messageMenu(&#39;-1&#39;);" +
+            "event.stopPropagation();return false;\">" +
             "<span class=\"mdot\"></span><span class=\"mdot\"></span><span class=\"mdot\"></span>" +
             "</button></div>';" +
             "document.getElementById('msgs').appendChild(d);" +

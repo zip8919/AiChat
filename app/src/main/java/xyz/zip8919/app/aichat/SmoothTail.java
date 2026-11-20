@@ -21,20 +21,22 @@ package xyz.zip8919.app.aichat;
  */
 final class SmoothTail {
 
-    /** 一次放出的单位数：每档 2 个字左右，既能看出逐字感，也不会让长文等太久。 */
-    static final int CHARS_PER_STEP = 2;
+    /** 一次放出的单位数：每档 1 个字，逐字感最细。 */
+    static final int CHARS_PER_STEP = 1;
 
     /**
      * 每秒放出的单位数。
      *
      * <p>取值偏快：低端机上一帧的排版开销本身就有一二十毫秒，
-     * 再慢就是「看着卡」而不是「看着流畅」。按 2 字一档、每秒 90 档，
-     * 大约是 180 字/秒——比模型的产出速度略快，缓冲不会越积越多。
+     * 再慢就是「看着卡」而不是「看着流畅」。每档 1 个字、每秒 90 档，
+     * 缓冲追不上时由 {@link #step()} 自动加档追平，不会越积越多。
      */
     static final int STEPS_PER_SECOND = 90;
 
     private String arrived = "";
     private int[] unitEnd;
+    /** 每个单位边界处累计的可见字符数（标签不计）：跨帧重扫时按它找回显示进度。 */
+    private int[] unitTextEnd;
     private int unitCount;
     private int shown;
 
@@ -90,7 +92,14 @@ final class SmoothTail {
             return true;
         }
         if (shown >= unitCount) return false;
-        shown = Math.min(unitCount, shown + CHARS_PER_STEP);
+        // 落后太多时按积压比例加档追赶：慢机型一拍本身就要几十毫秒，
+        // 固定小步长会让缓冲越积越多、收尾一次性甩出；追平后回落到
+        // 每档 1 个字，逐字感就在这里
+        int backlog = unitCount - shown;
+        int inc = CHARS_PER_STEP;
+        if (backlog > 24) inc = Math.min(16, backlog / 8);
+        else if (backlog > 8) inc = 2;
+        shown = Math.min(unitCount, shown + inc);
         return true;
     }
 
@@ -126,8 +135,15 @@ final class SmoothTail {
      */
     private void scan() {
         int len = arrived.length();
+        // 重扫前先把「已经显示到哪」换算成可见字符数：HTML 结构会随
+        // markdown 补全而重排（**bo → <strong>bo</strong>），单位下标与
+        // 字符偏移都不跨帧稳定，只有「已经显示了多少个字」是稳定刻度。
+        int shownText = (shown > 0 && unitTextEnd != null && shown <= unitCount)
+                ? unitTextEnd[shown - 1] : 0;
         int[] ends = new int[Math.max(8, len / 2)];
+        int[] texts = new int[Math.max(8, len / 2)];
         int n = 0;
+        int textCount = 0;
         int i = 0;
         while (i < len) {
             char c = arrived.charAt(i);
@@ -137,7 +153,9 @@ final class SmoothTail {
                 if (n == 0) {
                     // 开头就是标签：单独占一格，否则它永远没有可附着的字
                     ends = grow(ends, n);
+                    texts = grow(texts, n);
                     ends[n] = end;
+                    texts[n] = textCount;
                     n++;
                 } else {
                     // 标签并进前一个单位的末尾：渲染时与前面的文字同时出现
@@ -150,6 +168,8 @@ final class SmoothTail {
                 // 空白跟着前一个单位走；连续空白在 Java 侧已经被合并成一帧，
                 // 这里只把前缀延长到最后一个空白处
                 ends[n - 1] = i + 1;
+                textCount++;
+                texts[n - 1] = textCount;
                 i++;
                 continue;
             }
@@ -159,15 +179,27 @@ final class SmoothTail {
             }
             if (n == ends.length) {
                 ends = grow(ends, n);
+                texts = grow(texts, n);
             }
+            textCount++;
             ends[n] = i + 1;
+            texts[n] = textCount;
             n++;
             i++;
         }
         unitEnd = ends;
+        unitTextEnd = texts;
         unitCount = n;
-        // 切分总是对「当前这一整段」重算，下标与上一帧的 shown 不在同一刻度上
-        shown = 0;
+        // 找回进度：取第一个「累计可见字符数 ≥ 之前显示量」的单位。
+        // 宁可多露一个字（只往出的方向走），也不把已经显示的字缩回去——
+        // 缩回去的那一帧就是肉眼可见的「闪一下、字变少了」。
+        if (shownText <= 0) {
+            shown = 0;
+        } else {
+            int k = 0;
+            while (k < n && texts[k] < shownText) k++;
+            shown = Math.min(n, k + 1);
+        }
     }
 
     private static int[] grow(int[] a, int n) {

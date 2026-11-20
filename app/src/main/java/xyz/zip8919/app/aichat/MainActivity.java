@@ -3039,7 +3039,11 @@ public class MainActivity extends ThemedActivity {
                 evalJsHtml("streamTailHtml", html, uiIdx);
                 return;
             }
-            feedSmooth(html, MainActivity.this.requestGeneration.get());
+            // 渐显可能尚未起步：纯文本回答没有 trace 变化、工具轮次收轮后
+            // smoothRunning 已复位，内容到了却没人推，屏幕会一直空到收尾
+            final int gen = MainActivity.this.requestGeneration.get();
+            if (!smoothRunning || smoothGeneration != gen) beginSmoothRound(gen);
+            feedSmooth(html, gen);
         }
 
         public void smoothFinished(int generation) {
@@ -3374,9 +3378,13 @@ public class MainActivity extends ThemedActivity {
     private void renderTraceAsync(final String traceText, final int generation, final String status,
             final int aiIndex) {
         final String snapshot = traceText == null ? "" : traceText;
-        // 新一轮（工具卡片追加）开始：渐显从这一段起重新开始，
-        // 不把上一轮的显示进度带到新片段上
-        if (smoothStream && !snapshot.equals(lastStreamTrace)) beginSmoothRound(generation);
+        // 同一轮里 trace 追加（思考块/工具卡片）不重置渐显：beginSmoothRound
+        // 会清空缓冲、擦掉已显示的前缀，每次都重来一遍就像没开流式。
+        // 只有真正换段（收轮后 smoothRunning 复位）或换代才重新起步
+        if (smoothStream && !snapshot.equals(lastStreamTrace)
+                && (!smoothRunning || smoothGeneration != generation)) {
+            beginSmoothRound(generation);
+        }
         final String base0 = lastStreamTrace == null ? "" : lastStreamTrace;
 
         // 内容没变（最常见：只换了状态文案）就只写状态行。
@@ -3802,6 +3810,10 @@ public class MainActivity extends ThemedActivity {
     private volatile boolean smoothPaused;
     /** 渐显正在服务的那次请求代数：旧气泡上的「直接显示」不能打到新回复上。 */
     private volatile int smoothGeneration;
+    /** 上一拍已经推进到 ghost 层的片段：内容没变就不必让页面重解析整段 HTML。 */
+    private String smoothPushedHtml = "";
+    /** 上一拍已经显示到 shown 层的前缀：没变化就不用发整段前缀下去。 */
+    private String smoothShownHtml = "";
     /** 显示已经追上到达，页面侧暂时不必再收新片段。 */
     private boolean toldPageStop;
     /** 「直接显示」挂出前的等待：至少要浮出一小段，否则看着像误触。 */
@@ -3829,9 +3841,20 @@ public class MainActivity extends ThemedActivity {
             }
             final int idx = smoothIdx();
             if (smoothTail.hasPending()) {
-                webViewEvalJs("__smoothPush('" + jsEscape(smoothTail.pendingHtml()) + "'," + idx + ")");
+                // 只有片段真的变了才推 ghost：每拍整段 innerHTML 重解析是
+                // 渐显最大的开销，低端机上会把节拍拖到每秒个位数，
+                // 表现就是「半天不动、收尾一次性冒完」
+                String pending = smoothTail.pendingHtml();
+                if (!pending.equals(smoothPushedHtml)) {
+                    smoothPushedHtml = pending;
+                    webViewEvalJs("__smoothPush('" + jsEscape(pending) + "'," + idx + ")");
+                }
                 smoothTail.step();
-                webViewEvalJs("__smoothStep('" + jsEscape(smoothTail.shownHtml()) + "'," + idx + ")");
+                String shown = smoothTail.shownHtml();
+                if (!shown.equals(smoothShownHtml)) {
+                    smoothShownHtml = shown;
+                    webViewEvalJs("__smoothStep('" + jsEscape(shown) + "'," + idx + ")");
+                }
                 toldPageStop = false;
                 handler.postDelayed(this, 1000L / SmoothTail.STEPS_PER_SECOND);
                 return;
@@ -3866,6 +3889,8 @@ public class MainActivity extends ThemedActivity {
         if (!smoothStream || requestGeneration.get() != generation) return;
         smoothGeneration = generation;
         smoothTail.beginRound();
+        smoothPushedHtml = "";
+        smoothShownHtml = "";
         webViewEvalJs("__smoothStart(" + smoothIdx() + ")");
         if (!smoothRunning) {
             smoothRunning = true;
@@ -3916,6 +3941,8 @@ public class MainActivity extends ThemedActivity {
         handler.removeCallbacks(smoothHintTask);
         smoothRunning = false;
         showHintScheduled = false;
+        smoothPushedHtml = "";
+        smoothShownHtml = "";
         webViewEvalJs("hideSmoothHint()");
         webViewEvalJs("__smoothStop()");
     }
@@ -3928,6 +3955,8 @@ public class MainActivity extends ThemedActivity {
         smoothRunning = false;
         showHintScheduled = false;
         smoothTail.finish();
+        smoothPushedHtml = "";
+        smoothShownHtml = "";
         webViewEvalJs("hideSmoothHint()");
         webViewEvalJs("__smoothFinish('" + jsEscape(smoothTail.shownHtml()) + "',"
                 + smoothIdx() + ")");
