@@ -139,6 +139,12 @@ public class MessageHtmlRenderer {
         // 若把整个列表传进去、却按 start 标 data-idx，长会话（>40 条）里所有消息
         // 索引会整体偏移，长按菜单、复制、修改、删除、重试全部命中错的那一条。
         body.append(renderMessagesHtml(messages, start, start, ctx));
+        // 空对话：屏幕中央放一条随机欢迎语。
+        // 同时满足「一条消息都没有」和「没有更早的历史」两个条件——
+        // 上滑加载的分页页面上 total 也可能为 0，那种情况不该再画一次欢迎语。
+        if (total == 0 && start == 0) {
+            body.append(WelcomePhrases.buildHtml());
+        }
         String page = MarkdownPipeline.buildPage(body.toString(), start, pageVersion, msgListId);
         LogUtil.d(TAG, "buildConversationHtml done: rendered=%d, body=%d chars, page=%d chars in %d ms",
                 total - start, body.length(), page.length(), System.currentTimeMillis() - startTs);

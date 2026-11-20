@@ -423,6 +423,9 @@ final class MarkdownPipeline {
                "<meta charset=\"utf-8\">\n" +
                "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1,user-scalable=no\">\n" +
                "<style>\n" + RendererAssets.CSS + "\n</style>\n" +
+               // 欢迎语的样式放在主题层之前：主题层可以覆盖它（用户选了配色，
+               // 欢迎语跟着走才对），反过来就不行
+               "<style>\n" + WelcomePhrases.buildCss() + "\n</style>\n" +
                "<style id=\"ac-theme\">\n" + themeCss + "\n</style>\n" +
                "<style id=\"ac-font\">\n" + fontCss + "\n</style>\n" +
                "</head>\n<body data-ac-page=\"" + pageVersion + "\">\n" +
