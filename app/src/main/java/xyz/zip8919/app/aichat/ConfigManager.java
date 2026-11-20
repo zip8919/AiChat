@@ -210,6 +210,10 @@ public class ConfigManager {
             pj.put("thinking_type", p.thinkingType);
             pj.put("thinking_param_name", p.thinkingParamName);
             pj.put("supports_balance", p.supportsBalance);
+            // 余额查询改为「每个提供商都可查」之后新增的两项。
+            // 老版本读到这两个字段会直接忽略，配置文件双向兼容。
+            pj.put("balance_preset", p.balancePreset == null ? "" : p.balancePreset);
+            pj.put("balance_path", p.balancePath == null ? "" : p.balancePath);
             provArr.put(pj);
         }
         json.put("providers", provArr);
@@ -254,6 +258,10 @@ public class ConfigManager {
             p.thinkingType = pj.optString("thinking_type", "object");
             p.thinkingParamName = pj.optString("thinking_param_name", "thinking");
             p.supportsBalance = pj.optBoolean("supports_balance", false);
+            // 老配置没有这两项：balancePreset 留空 → 按 deepseek 处理，与升级前一致；
+            // balancePath 留空 → 用预设自带的 /user/balance。用户不需要重新配一遍。
+            p.balancePreset = pj.optString("balance_preset", "");
+            p.balancePath = pj.optString("balance_path", "");
             providers.add(p);
         }
 

@@ -68,9 +68,50 @@ public class ApiClient {
      * @return JSON string with balance info, or null on error
      */
     public static String queryBalance(ProviderInfo provider) {
+        return queryBalance(provider, "/user/balance");
+    }
+
+    /**
+     * 余额查询的完整结果：非 200 也把响应体和状态码带回来。
+     *
+     * <p>只返回 String 的老接口在非 200 时直接给 null，界面只能报「查询失败」，
+     * 而余额查不到的真实原因十有八九就在错误响应体里（余额接口路径不对 → 404 网关页、
+     * key 没有该接口权限 → 403 JSON 错误、平台根本不提供余额接口）。
+     * 用户要求「遇错可查看错误详情」，所以状态码与响应体都必须带出来。
+     */
+    static final class BalanceResponse {
+        int code;
+        /** 原始响应体（已清洗不可见字符）；网络层失败时为 null。 */
+        String body;
+        /** 网络层异常的说明；HTTP 层失败时为 null。 */
+        String error;
+        String url;
+
+        boolean ok() {
+            return code == 200 && body != null;
+        }
+    }
+
+    /**
+     * 按指定路径查询余额。
+     *
+     * @param path 相对 Base URL 的余额接口路径，由 {@link ProviderInfo#effectiveBalancePath()}
+     *             给出（用户填的优先，其次平台预设自带）。为空时退回 DeepSeek 的老路径。
+     * @return 原始响应体（已做不可见字符清洗），失败返回 null
+     */
+    public static String queryBalance(ProviderInfo provider, String path) {
+        BalanceResponse r = queryBalanceFull(provider, path);
+        return r.ok() ? r.body : null;
+    }
+
+    /** 余额查询完整版：带 HTTP 状态码与错误详情，供余额页展示原始 JSON 与失败原因。 */
+    static BalanceResponse queryBalanceFull(ProviderInfo provider, String path) {
+        BalanceResponse out = new BalanceResponse();
         HttpURLConnection conn = null;
         long startTs = System.currentTimeMillis();
-        String balanceUrl = Endpoint.join(provider.apiUrl, "/user/balance");
+        String p = (path == null || path.trim().length() == 0) ? "/user/balance" : path.trim();
+        String balanceUrl = Endpoint.join(provider.apiUrl, p);
+        out.url = balanceUrl;
         LogUtil.i(TAG, "queryBalance -> %s (%s)", balanceUrl, LogUtil.thread());
         try {
             URL url = new URL(balanceUrl);
@@ -91,13 +132,20 @@ public class ApiClient {
             }
 
             int code = conn.getResponseCode();
+            out.code = code;
             LogUtil.d(TAG, "queryBalance HTTP code=%d in %d ms", code, System.currentTimeMillis() - startTs);
-            if (code != 200) {
-                LogUtil.w(TAG, "queryBalance non-200: HTTP %d", code);
-                return null;
-            }
 
-            java.io.InputStream in = conn.getInputStream();
+            java.io.InputStream in;
+            if (code >= 200 && code < 300) {
+                in = conn.getInputStream();
+            } else {
+                // 非 200 时错误体在 ErrorStream 里，getInputStream 会直接抛异常，
+                // 错误原因就丢了
+                LogUtil.w(TAG, "queryBalance non-200: HTTP %d", code);
+                in = conn.getErrorStream();
+            }
+            if (in == null) return out;
+
             String enc = conn.getContentEncoding();
             if (enc != null && enc.toLowerCase().contains("gzip")) {
                 LogUtil.w(TAG, "queryBalance body gzip-encoded, decoding manually");
@@ -114,13 +162,17 @@ public class ApiClient {
                 reader.close();
             }
             String body = sb.toString().trim();
-            body = sanitizeJson(body);
+            // 错误响应不一定是 JSON（网关会回 HTML），只做不可见字符清洗，
+            // 不强求截到花括号，否则用户看到的是空串
+            body = (code >= 200 && code < 300) ? sanitizeJson(body) : body.trim();
+            out.body = body;
             LogUtil.i(TAG, "queryBalance <- len=%d body=%s", body.length(),
                     LogUtil.preview(body, 500));
-            return body;
+            return out;
         } catch (Exception e) {
             LogUtil.e(TAG, "queryBalance EXCEPTION: " + e.getMessage(), e);
-            return null;
+            out.error = e.getClass().getSimpleName() + ": " + e.getMessage();
+            return out;
         } finally {
             if (conn != null) conn.disconnect();
         }

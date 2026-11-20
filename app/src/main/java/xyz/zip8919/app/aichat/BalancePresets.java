@@ -1,0 +1,300 @@
+package xyz.zip8919.app.aichat;
+
+import java.util.ArrayList;
+import java.util.List;
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+/**
+ * 余额查询的平台适配：每个平台一条路径 + 一套解析规则。
+ *
+ * <p>为什么不能统一：余额接口从来不是标准 OpenAI 协议的一部分，各家返回结构完全不同。
+ * DeepSeek 是 {@code {is_available, balance_infos:[{currency,total_balance,...}]}}；
+ * 腾讯云 TokenHub 走 {@code /v1/usage}，余额与用量混在一个对象里；
+ * 一些中转站干脆返回 {@code {"data":{"quota":123456}}}，单位还是「点」而不是「元」。
+ * 用一个「万能解析」去猜字段名，结果就是余额显示成 0。
+ *
+ * <p>所以做成：<b>预设</b>（已知平台，路径与解析都预置好）+ <b>通用兜底</b>
+ * （按常见字段名依次找，找到就显示）。用户在设置页选平台即可，也能自己填路径。
+ */
+final class BalancePresets {
+
+    private static final String TAG = "BalancePresets";
+
+    /** 一个平台预设。 */
+    static final class Preset {
+        final String id;
+        final String label;
+        /** 余额接口路径，相对 Base URL。 */
+        final String path;
+        /** 该平台的说明，显示在设置页下方。 */
+        final String hint;
+
+        Preset(String id, String label, String path, String hint) {
+            this.id = id;
+            this.label = label;
+            this.path = path;
+            this.hint = hint;
+        }
+    }
+
+    /**
+     * 内置预设。第一项必须保持为 {@code deepseek}：
+     * 历史上余额查询只支持 DeepSeek，老配置迁移时默认落到它。
+     */
+    private static final Preset[] BUILTIN = {
+            new Preset("deepseek", "DeepSeek 官方", "/user/balance",
+                    "返回总余额、赠金余额与充值余额"),
+            new Preset("tencent_tokenhub", "腾讯云 TokenHub", "/v1/usage",
+                    "返回剩余额度与已用额度"),
+            new Preset("openai_compat", "通用 OpenAI 兼容平台", "/dashboard/billing/credit_grants",
+                    "适用于大多数中转站的额度接口"),
+            new Preset("siliconflow", "硅基流动 SiliconFlow", "/v1/user/info",
+                    "返回账户余额（单位：元）"),
+            new Preset("custom", "自定义", "",
+                    "自己填写余额接口路径，按常见字段自动解析"),
+    };
+
+    private BalancePresets() {
+    }
+
+    static Preset[] all() {
+        return BUILTIN;
+    }
+
+    static Preset byId(String id) {
+        if (id == null || id.length() == 0) return BUILTIN[0];
+        for (Preset p : BUILTIN) {
+            if (p.id.equals(id)) return p;
+        }
+        return BUILTIN[0];
+    }
+
+    /** 平台选择下拉里显示的文字（顺序与 all() 一致）。 */
+    static String[] labels() {
+        String[] out = new String[BUILTIN.length];
+        for (int i = 0; i < BUILTIN.length; i++) out[i] = BUILTIN[i].label;
+        return out;
+    }
+
+    static int indexOf(String id) {
+        if (id != null) {
+            for (int i = 0; i < BUILTIN.length; i++) {
+                if (BUILTIN[i].id.equals(id)) return i;
+            }
+        }
+        return 0;
+    }
+
+    /** 解析结果：成功时 fields 有内容，失败时 error 说明原因。 */
+    static final class Result {
+        boolean ok;
+        /** 已格式化的「名称：值」行，直接可显示。 */
+        final List<String[]> fields = new ArrayList<String[]>();
+        String error;
+        /** 原始响应，供「查看原 JSON」使用。 */
+        String raw;
+
+        void add(String name, String value) {
+            if (value == null) return;
+            String v = value.trim();
+            if (v.length() == 0) return;
+            fields.add(new String[] { name, v });
+        }
+
+        /** 纯文本形式，用于复制/日志。 */
+        String asText() {
+            if (!ok) return error == null ? "" : error;
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < fields.size(); i++) {
+                if (i > 0) sb.append('\n');
+                sb.append(fields.get(i)[0]).append("：").append(fields.get(i)[1]);
+            }
+            return sb.toString();
+        }
+    }
+
+    /**
+     * 解析余额响应。
+     *
+     * <p>先按预设走专用解析，再用通用规则补齐/兜底。任何一步失败都不抛异常——
+     * 余额页要能显示「解析失败 + 原始 JSON」，让用户自己判断是接口不对、
+     * 还是这个平台压根不提供余额查询。
+     */
+    static Result parse(String presetId, String body) {
+        Result r = new Result();
+        r.raw = body;
+        if (body == null || body.trim().length() == 0) {
+            r.error = "响应为空";
+            return r;
+        }
+        JSONObject json = null;
+        try {
+            json = new JSONObject(ApiClient.sanitizeJson(body));
+        } catch (Throwable t) {
+            LogUtil.w(TAG, "parse: not a JSON object: %s", t);
+        }
+
+        if (json != null) {
+            String pid = presetId == null ? "deepseek" : presetId;
+            if ("deepseek".equals(pid)) parseDeepSeek(json, r);
+            else if ("tencent_tokenhub".equals(pid)) parseTencent(json, r);
+            else if ("siliconflow".equals(pid)) parseSiliconFlow(json, r);
+            else if ("openai_compat".equals(pid)) parseOpenAiCompat(json, r);
+            // 预设没解析出东西时走通用兜底：自定义平台与结构有变化的老平台都靠它
+            if (r.fields.isEmpty()) parseGeneric(json, r);
+        }
+
+        if (r.fields.isEmpty()) {
+            // 一个字段都没解析出来：给出可读的原因，而不是空白的对话框
+            String err = json == null ? "返回内容不是 JSON" : "未能从返回内容中识别出余额字段";
+            String msg = json == null ? null : firstErrorMessage(json);
+            r.error = msg != null ? (err + "：" + msg) : err;
+            r.ok = false;
+        } else {
+            r.ok = true;
+        }
+        return r;
+    }
+
+    /** 服务端在错误体里给的提示（{"error":{"message":"..."}} 之类）。 */
+    private static String firstErrorMessage(JSONObject json) {
+        try {
+            JSONObject err = json.optJSONObject("error");
+            if (err != null) {
+                String m = err.optString("message", "");
+                if (m.length() > 0) return m;
+                m = err.optString("msg", "");
+                if (m.length() > 0) return m;
+            }
+            String m = json.optString("message", "");
+            if (m.length() > 0) return m;
+            m = json.optString("msg", "");
+            if (m.length() > 0) return m;
+        } catch (Throwable ignored) {
+        }
+        return null;
+    }
+
+    // ---- 各平台解析 ----
+
+    /** DeepSeek：{@code {is_available, balance_infos:[{currency,total_balance,topped_up_balance,granted_balance}]}} */
+    private static void parseDeepSeek(JSONObject json, Result r) {
+        if (json.has("is_available")) {
+            r.add("账户状态", json.optBoolean("is_available", false) ? "可用" : "不可用");
+        }
+        JSONArray infos = json.optJSONArray("balance_infos");
+        if (infos == null || infos.length() == 0) return;
+        for (int i = 0; i < infos.length(); i++) {
+            JSONObject info = infos.optJSONObject(i);
+            if (info == null) continue;
+            String cur = info.optString("currency", "CNY");
+            String suffix = infos.length() > 1 ? ("（" + cur + "）") : "";
+            r.add("总余额" + suffix, info.optString("total_balance", ""));
+            r.add("赠金余额" + suffix, info.optString("granted_balance", ""));
+            r.add("充值余额" + suffix, info.optString("topped_up_balance", ""));
+        }
+    }
+
+    /**
+     * 腾讯云 TokenHub：字段名不固定（不同版本叫 quota / balance / total_quota），
+     * 这里把能量到的都列出来，单位按接口原样显示，不做换算猜测。
+     */
+    private static void parseTencent(JSONObject json, Result r) {
+        JSONObject data = json.optJSONObject("data");
+        JSONObject src = data != null ? data : json;
+        r.add("剩余额度", pick(src, "remaining_quota", "remain_quota", "balance", "quota", "total_quota"));
+        r.add("已用额度", pick(src, "used_quota", "used", "consumed_quota"));
+        r.add("赠送额度", pick(src, "granted_quota", "free_quota"));
+        r.add("账户状态", pick(src, "status", "state"));
+    }
+
+    /** 硅基流动：{@code {data:{balance, chargeBalance, totalBalance}}} */
+    private static void parseSiliconFlow(JSONObject json, Result r) {
+        JSONObject data = json.optJSONObject("data");
+        JSONObject src = data != null ? data : json;
+        r.add("账户余额", pick(src, "balance", "totalBalance", "chargeBalance"));
+        r.add("赠送余额", pick(src, "chargeBalance"));
+        r.add("账户状态", pick(src, "status"));
+    }
+
+    /** 通用额度接口：{@code {total_granted, total_used, total_available}} 或 {@code {data:{quota}}} */
+    private static void parseOpenAiCompat(JSONObject json, Result r) {
+        JSONObject data = json.optJSONObject("data");
+        JSONObject src = data != null ? data : json;
+        r.add("总额度", pick(src, "total_granted", "total_quota", "total"));
+        r.add("已用额度", pick(src, "total_used", "used"));
+        r.add("剩余额度", pick(src, "total_available", "remaining", "quota", "balance"));
+    }
+
+    /**
+     * 通用兜底：按常见字段名在两层结构里找。
+     *
+     * <p>只在一层嵌套内找（顶层 + 常见的 data/result/account 子对象），
+     * 不做递归——余额响应里还会有 usage 明细，递归下去会把「本月已用 12.3」
+     * 当成余额显示出来，比不显示更误导。
+     */
+    private static void parseGeneric(JSONObject json, Result r) {
+        JSONObject[] scopes = scopesOf(json);
+        String bal = pickIn(scopes, "balance", "total_balance", "remaining_balance", "available_balance",
+                "total_available", "remain_quota", "remaining_quota", "quota", "credit", "credits");
+        if (bal != null) r.add("账户余额", bal);
+        String used = pickIn(scopes, "used_balance", "total_used", "used_quota", "used");
+        if (used != null) r.add("已用额度", used);
+        String granted = pickIn(scopes, "granted_balance", "free_balance", "gift_balance", "granted");
+        if (granted != null) r.add("赠送余额", granted);
+        String cur = pickIn(scopes, "currency", "unit");
+        if (cur != null) r.add("币种", cur);
+        String status = pickIn(scopes, "is_available", "status", "state");
+        if (status != null) r.add("账户状态", status);
+    }
+
+    private static JSONObject[] scopesOf(JSONObject json) {
+        List<JSONObject> list = new ArrayList<JSONObject>();
+        list.add(json);
+        String[] keys = { "data", "result", "account", "billing", "info" };
+        for (String k : keys) {
+            JSONObject sub = json.optJSONObject(k);
+            if (sub != null) list.add(sub);
+        }
+        return list.toArray(new JSONObject[0]);
+    }
+
+    private static String pickIn(JSONObject[] scopes, String... names) {
+        for (JSONObject s : scopes) {
+            String v = pick(s, names);
+            if (v != null) return v;
+        }
+        return null;
+    }
+
+    /**
+     * 取第一个存在且非空的字段，按原样转成字符串。
+     *
+     * <p>数字统一去掉多余的 {@code .0}：额度多是整数，直接 {@code optString}
+     * 会得到 {@code 12345.0}，看着像精度错乱。
+     */
+    private static String pick(JSONObject json, String... names) {
+        if (json == null) return null;
+        for (String n : names) {
+            if (!json.has(n) || json.isNull(n)) continue;
+            Object v = json.opt(n);
+            if (v == null) continue;
+            String s;
+            if (v instanceof Number) {
+                double d = ((Number) v).doubleValue();
+                if (d == Math.floor(d) && !Double.isInfinite(d) && Math.abs(d) < 1e15) {
+                    s = String.valueOf((long) d);
+                } else {
+                    s = String.valueOf(d);
+                }
+            } else if (v instanceof Boolean) {
+                s = ((Boolean) v) ? "可用" : "不可用";
+            } else {
+                s = String.valueOf(v);
+            }
+            if (s.trim().length() > 0) return s.trim();
+        }
+        return null;
+    }
+}

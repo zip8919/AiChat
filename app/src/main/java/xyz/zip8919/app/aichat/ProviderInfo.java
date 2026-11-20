@@ -16,11 +16,34 @@ public class ProviderInfo {
     public String thinkingType;      // "object" or "boolean"
     public String thinkingParamName; // "thinking" or "enable_thinking"
     public boolean supportsBalance;
+    /**
+     * 余额查询平台预设 id，见 {@link BalancePresets#all()}。
+     *
+     * <p>空值按 {@code deepseek} 处理：老配置里只有 DeepSeek 一家支持余额查询，
+     * 升级后行为与以前一致，用户不必重新配置。
+     */
+    public String balancePreset;
+    /**
+     * 余额接口路径（相对 Base URL）。非空时优先于预设自带的路径，
+     * 用来适配预设里没收录的平台。
+     */
+    public String balancePath;
 
     /** 界面上一律用它，读不到显示名就回退唯一标识。 */
     public String label() {
         if (displayName != null && displayName.trim().length() > 0) return displayName.trim();
         return name == null ? "" : name;
+    }
+
+    /** 这个提供商实际使用的余额接口路径：用户填的优先，其次预设默认值。 */
+    public String effectiveBalancePath() {
+        if (balancePath != null && balancePath.trim().length() > 0) return balancePath.trim();
+        return BalancePresets.byId(balancePreset).path;
+    }
+
+    /** 是否配了余额查询（有路径才查，全空表示不支持）。 */
+    public boolean hasBalance() {
+        return effectiveBalancePath().length() > 0;
     }
 
     public ProviderInfo copy() {
@@ -33,6 +56,8 @@ public class ProviderInfo {
         p.thinkingType = thinkingType;
         p.thinkingParamName = thinkingParamName;
         p.supportsBalance = supportsBalance;
+        p.balancePreset = balancePreset;
+        p.balancePath = balancePath;
         return p;
     }
 }

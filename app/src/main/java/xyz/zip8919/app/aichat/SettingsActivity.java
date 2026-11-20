@@ -697,72 +697,94 @@ public class SettingsActivity extends ThemedActivity {
         finish();
     }
 
+    /**
+     * 余额查询入口。
+     *
+     * <p>以前是「自动挑第一个 supportsBalance 的提供商」，用户没法选，也只能查 DeepSeek
+     * 那一种结构。现在改成先让用户选提供商，再按该提供商配置的平台预设与路径去查，
+     * 结果里同时给出解析后的字段与原始 JSON。
+     *
+     * <p>只有一个提供商时直接查，不弹选择框——只配了一家的人不该多点一次。
+     */
     private void queryBalance() {
-        ConfigManager configManager = ConfigManager.getInstance();
-        // 按 supportsBalance 选提供商，不再按名字硬编码（改名后按钮会永久误报未配置）
-        ProviderInfo balanceProvider = null;
-        List<ProviderInfo> providers = configManager.getProviders();
-        for (int i = 0; i < providers.size(); i++) {
-            if (providers.get(i).supportsBalance) { balanceProvider = providers.get(i); break; }
-        }
-        if (balanceProvider == null) balanceProvider = configManager.getProvider("DeepSeek");
-        if (balanceProvider == null || balanceProvider.apiKey == null || balanceProvider.apiKey.isEmpty()) {
-            LogUtil.w(TAG, "queryBalance aborted: provider=%s", balanceProvider == null ? "null" : "empty key");
+        final ConfigManager configManager = ConfigManager.getInstance();
+        final List<ProviderInfo> providers = configManager.getProviders();
+        if (providers == null || providers.isEmpty()) {
+            LogUtil.w(TAG, "queryBalance aborted: no provider");
             AcToast.show(this, Strings.get(R.string.settingsactivity_038));
             return;
         }
-        final ProviderInfo dsProvider = balanceProvider;
+        if (providers.size() == 1) {
+            runBalanceQuery(providers.get(0));
+            return;
+        }
+
+        // 只列出「能查余额」的：填了 key 且配了余额路径。全都不能查时退回列全部，
+        // 让用户点进去看到具体缺什么，比直接一句「未配置」有用。
+        List<ProviderInfo> usable = new ArrayList<ProviderInfo>();
+        for (int i = 0; i < providers.size(); i++) {
+            ProviderInfo p = providers.get(i);
+            if (p != null && p.apiKey != null && p.apiKey.length() > 0 && p.hasBalance()) usable.add(p);
+        }
+        if (usable.isEmpty()) usable = providers;
+
+        final ProviderInfo[] arr = usable.toArray(new ProviderInfo[0]);
+        String[] names = new String[arr.length];
+        for (int i = 0; i < arr.length; i++) {
+            names[i] = arr[i].label() + (arr[i].hasBalance() ? "" : "（未配置余额接口）");
+        }
+        AcDialog.builder(this)
+                .setTitle("查询哪个平台的余额")
+                .setItems(names, new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface d, int which) {
+                        if (which < 0 || which >= arr.length) return;
+                        runBalanceQuery(arr[which]);
+                    }
+                })
+                .setNegativeButton(Strings.get(R.string.settingsactivity_045), null)
+                .show();
+    }
+
+    /** 真正发起查询：按提供商的余额预设与路径查，结果交给 {@link BalanceDialog}。 */
+    private void runBalanceQuery(final ProviderInfo provider) {
+        if (provider == null) return;
+        if (provider.apiKey == null || provider.apiKey.isEmpty()) {
+            LogUtil.w(TAG, "runBalanceQuery aborted: empty key, provider=%s", provider.name);
+            AcToast.show(this, Strings.get(R.string.settingsactivity_038));
+            return;
+        }
+        if (!provider.hasBalance()) {
+            AcToast.show(this, "这个平台还没配置余额接口路径，请在提供商设置里选择平台或填写路径");
+            return;
+        }
         final CharSequence balanceBtnText = balanceButton.getText();
-        LogUtil.i(TAG, "queryBalance: provider=%s url=%s keyLen=%d", dsProvider.name, dsProvider.apiUrl, dsProvider.apiKey.length());
+        final String path = provider.effectiveBalancePath();
+        LogUtil.i(TAG, "runBalanceQuery: provider=%s preset=%s path=%s keyLen=%d",
+                provider.name, provider.balancePreset, path, provider.apiKey.length());
 
         balanceButton.setEnabled(false);
         balanceButton.setText(Strings.get(R.string.settingsactivity_039));
 
         new Thread(new Runnable() {
             public void run() {
-                final String result = ApiClient.queryBalance(dsProvider);
+                final ApiClient.BalanceResponse resp = ApiClient.queryBalanceFull(provider, path);
+                final BalancePresets.Result parsed =
+                        BalancePresets.parse(provider.balancePreset, resp.body);
                 runOnUiThread(new Runnable() {
                     public void run() {
-                        if (isFinishing() || isDestroyed()) return; // Activity 已结束，show() 会抛 BadTokenException
+                        if (isFinishing() || isDestroyed()) return;
                         balanceButton.setEnabled(true);
                         balanceButton.setText(balanceBtnText);
 
-                        if (result == null) {
-                            LogUtil.w(TAG, "queryBalance: result is null");
-                            AcToast.show(SettingsActivity.this, Strings.get(R.string.settingsactivity_040));
-                            return;
+                        if (resp.code <= 0 && resp.error != null) {
+                            // 连 HTTP 都没走到：域名解析失败 / 超时 / TLS 握手失败
+                            LogUtil.w(TAG, "runBalanceQuery network error: %s", resp.error);
+                        } else {
+                            LogUtil.i(TAG, "runBalanceQuery OK=%s bodyLen=%d",
+                                    parsed.ok ? "yes" : "no", resp.body == null ? 0 : resp.body.length());
                         }
-
-                        try {
-                            JSONObject json = new JSONObject(result);
-                            StringBuilder sb = new StringBuilder();
-                            sb.append(Strings.get(R.string.settingsactivity_041)).append(json.optBoolean("is_available", false) ? Strings.get(R.string.settingsactivity_042) : Strings.get(R.string.settingsactivity_043)).append("\n\n");
-
-                            org.json.JSONArray infos = json.optJSONArray("balance_infos");
-                            if (infos != null && infos.length() > 0) {
-                                JSONObject info = infos.getJSONObject(0);
-                                sb.append(Strings.get(R.string.settingsactivity_071)).append(info.optString("currency", "CNY")).append("\n");
-                                sb.append(Strings.get(R.string.settingsactivity_072)).append(info.optString("total_balance", "0")).append("\n");
-                                sb.append(Strings.get(R.string.settingsactivity_073)).append(info.optString("topped_up_balance", "0")).append("\n");
-                                sb.append(Strings.get(R.string.settingsactivity_074)).append(info.optString("granted_balance", "0")).append("\n");
-                            }
-                            LogUtil.i(TAG, "queryBalance OK: %s", sb.toString().replace("\n", " | "));
-
-                            AcDialog.builder(SettingsActivity.this)
-                                    .setTitle(Strings.get(R.string.settingsactivity_078, dsProvider.label()))
-                                    .setMessage(sb.toString())
-                                    .setPositiveButton(Strings.get(R.string.settingsactivity_045), null)
-                                    .show();
-                        } catch (Exception e) {
-                            // 把原始响应摘要一并带出来：4.4 上余额「解析错误」多为
-                            // 服务端返回了非 JSON（网关错误页 / 未解压的 gzip），
-                            // 只报「解析失败」永远定位不到是哪一种。
-                            LogUtil.e(TAG, "queryBalance parse failed: " + e.getMessage()
-                                    + " body=" + LogUtil.preview(result, 800), e);
-                            String brief = result.trim();
-                            if (brief.length() > 60) brief = TextKit.cut(brief, 60) + "…";
-                            AcToast.show(SettingsActivity.this, Strings.get(R.string.settingsactivity_046, brief));
-                        }
+                        BalanceDialog.show(SettingsActivity.this,
+                                provider.label() + " · 余额", parsed, resp);
                     }
                 });
             }

@@ -156,6 +156,43 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content" />
 
+        <!-- 余额查询配置：每个提供商都能配，平台预设决定路径与解析规则。
+             老配置没有这两项时按 DeepSeek 处理，行为与升级前一致。 -->
+        <TextView
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:textColor="@color/text_primary"
+            android:layout_marginTop="12dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="余额查询平台" />
+        <Spinner
+            android:id="@+id/pe_balance_preset"
+            android:background="@android:color/white"
+            android:padding="4dp"
+            android:layout_marginTop="2dp"
+            android:layout_width="match_parent"
+            android:layout_height="40dp" />
+        <EditText
+            android:id="@+id/pe_balance_path"
+            android:textSize="14sp"
+            android:singleLine="true"
+            android:inputType="textUri"
+            android:background="@drawable/edit_text_background"
+            android:padding="10dp"
+            android:layout_marginTop="6dp"
+            android:hint="/user/balance"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+        <TextView
+            android:id="@+id/pe_balance_hint"
+            android:textSize="11sp"
+            android:textColor="@color/text_secondary"
+            android:paddingTop="4dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="" />
+
         <Button
             android:id="@+id/pe_test"
             android:textSize="13sp"

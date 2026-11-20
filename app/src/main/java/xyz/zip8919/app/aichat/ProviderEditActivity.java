@@ -8,9 +8,12 @@ import android.os.Looper;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.view.View;
+import android.widget.AdapterView;
+import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.widget.Spinner;
 import android.widget.TextView;
 
 import java.util.ArrayList;
@@ -50,6 +53,12 @@ public class ProviderEditActivity extends ThemedActivity {
 
     private TextView title;
     private EditText nameEt, displayEt, baseEt, pathEt, keyEt;
+    /** 余额接口路径：留空时用所选平台预设自带的路径。 */
+    private EditText balancePathEt;
+    private Spinner balancePresetSp;
+    private TextView balanceHint;
+    /** 用户是否手动改过余额路径：改过就不再被预设覆盖。 */
+    private boolean balancePathTouched;
     private TextView finalUrl, testResult, modelsTitle, modelsHint, nameTip;
     private LinearLayout modelsBox;
     private Button testBtn, fetchBtn, addModelBtn, saveBtn, deleteBtn;
@@ -88,6 +97,10 @@ public class ProviderEditActivity extends ThemedActivity {
         baseEt = (EditText) findViewById(R.id.pe_base_url);
         pathEt = (EditText) findViewById(R.id.pe_chat_path);
         keyEt = (EditText) findViewById(R.id.pe_api_key);
+        balancePathEt = (EditText) findViewById(R.id.pe_balance_path);
+        balancePresetSp = (Spinner) findViewById(R.id.pe_balance_preset);
+        balanceHint = (TextView) findViewById(R.id.pe_balance_hint);
+        bindBalanceFields();
         finalUrl = (TextView) findViewById(R.id.pe_final_url);
         testResult = (TextView) findViewById(R.id.pe_test_result);
         modelsTitle = (TextView) findViewById(R.id.pe_models_title);
@@ -161,10 +174,72 @@ public class ProviderEditActivity extends ThemedActivity {
             // 已有提供商：地址再变也不改名（改名会波及模型引用，必须是显式行为）
             nameTouched = true;
             deleteBtn.setVisibility(View.VISIBLE);
+            // 余额：老配置两项都空 → 平台默认 DeepSeek、路径留空走预设
+            balancePresetSp.setSelection(BalancePresets.indexOf(editing.balancePreset));
+            String bp = editing.balancePath == null ? "" : editing.balancePath.trim();
+            balancePathEt.setText(bp);
+            balancePathTouched = bp.length() > 0;
         }
         updateFinalUrl();
         updateNameTip();
+        updateBalanceHint();
         refreshModels();
+    }
+
+    /**
+     * 余额平台下拉：选中某个预设时，把路径框填成预设自带的路径（用户改过则不动），
+     * 下方提示文案同步更新——否则用户不知道「自定义」到底该填什么。
+     */
+    private void bindBalanceFields() {
+        ArrayAdapter<String> ad = new ArrayAdapter<String>(this,
+                android.R.layout.simple_spinner_item, BalancePresets.labels());
+        ad.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        balancePresetSp.setAdapter(ad);
+        balancePresetSp.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                BalancePresets.Preset p = BalancePresets.all()[position];
+                // 路径框跟随预设，但用户手填过就不覆盖他的值
+                if (!balancePathTouched) {
+                    balancePathEt.setText(p.path);
+                }
+                updateBalanceHint();
+            }
+
+            public void onNothingSelected(AdapterView<?> parent) {
+            }
+        });
+        balancePathEt.addTextChangedListener(new TextWatcher() {
+            public void beforeTextChanged(CharSequence s, int a, int b, int c) {
+            }
+
+            public void onTextChanged(CharSequence s, int a, int b, int c) {
+            }
+
+            public void afterTextChanged(Editable s) {
+                // 只有用户真的改了内容才算「手填」；键盘弹出时的空变化不算
+                if (!s.toString().equals(BalancePresets.all()[balancePresetSp.getSelectedItemPosition()].path)) {
+                    balancePathTouched = true;
+                }
+                updateBalanceHint();
+            }
+        });
+    }
+
+    private void updateBalanceHint() {
+        if (balanceHint == null) return;
+        int pos = balancePresetSp.getSelectedItemPosition();
+        if (pos < 0 || pos >= BalancePresets.all().length) pos = 0;
+        BalancePresets.Preset p = BalancePresets.all()[pos];
+        String path = balancePathEt.getText().toString().trim();
+        StringBuilder sb = new StringBuilder();
+        sb.append(p.hint);
+        if (path.length() > 0) {
+            sb.append("\n最终地址：").append(Endpoint.join(baseEt.getText().toString(), path));
+            sb.append("\n留空则使用预设路径 ").append(p.path.length() == 0 ? "（需自己填）" : p.path);
+        } else {
+            sb.append("\n尚未填写余额路径，该提供商将无法查询余额");
+        }
+        balanceHint.setText(sb.toString());
     }
 
     /**
@@ -275,6 +350,14 @@ public class ProviderEditActivity extends ThemedActivity {
         if (target.thinkingParamName == null || target.thinkingParamName.length() == 0) {
             target.thinkingParamName = "thinking";
         }
+        // 余额：预设 id 与自定义路径一起落库。路径留空时由 ProviderInfo 回退到预设自带值，
+        // 所以这里不写死路径——以后修正预设路径，老提供商自动跟着改。
+        int bpos = balancePresetSp.getSelectedItemPosition();
+        target.balancePreset = BalancePresets.all()[bpos < 0 ? 0 : bpos].id;
+        target.balancePath = balancePathEt.getText().toString().trim();
+        // supportsBalance 是 1.21.5 之前的单选开关，现在每个提供商都能查，
+        // 但保留字段的语义：配了路径就算支持，兼容旧读法
+        target.supportsBalance = target.hasBalance();
         if (creating) {
             cfg.getProviders().add(target);
             editing = target;
