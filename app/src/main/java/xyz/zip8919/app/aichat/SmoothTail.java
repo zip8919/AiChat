@@ -31,6 +31,9 @@ final class SmoothTail {
     /** 每个字符（去标签后）在 {@link #arrived} 里的结尾偏移。 */
     private int[] charEnd = new int[16];
     private int charCount;
+    /** 已扫描到的源串位置与当时的字符计数：增长的帧只从这里往后扫。 */
+    private int scanAt;
+    private int scanChars;
     /** 已经放出的字符数。 */
     private int shown;
 
@@ -56,9 +59,11 @@ final class SmoothTail {
     boolean onHtml(String html) {
         String next = html == null ? "" : html;
         if (!plain && next.equals(arrived)) return false;
+        // 通道从纯文本切回来时扫描位置对不上，只能整段重扫一次
+        int from = plain ? -1 : (next.startsWith(arrived) ? charCount : -1);
         plain = false;
         arrived = next;
-        scan();
+        scan(from);
         return true;
     }
 
@@ -75,8 +80,7 @@ final class SmoothTail {
         boolean wasPlain = plain;
         plain = true;
         arrived = next;
-        scanPlain();
-        // 从 HTML 切到纯文本时引擎换了，已显示量按新口径重新夹紧
+        scanPlain();        // 从 HTML 切到纯文本时引擎换了，已显示量按新口径重新夹紧
         if (!wasPlain) shown = Math.min(shown, charCount);
         return true;
     }
@@ -103,6 +107,8 @@ final class SmoothTail {
     void restart() {
         arrived = "";
         charCount = 0;
+        scanAt = 0;
+        scanChars = 0;
         shown = 0;
         finished = false;
         draining = false;
@@ -190,31 +196,38 @@ final class SmoothTail {
     }
 
     /**
-     * 重扫：记下每个可见字符在源串里的结束偏移。
+     * 纯文本：每个字符在源串里占一位，偏移直接等于下标 + 1。
      *
-     * <p>只认标签之外的字符；标签整体跳过，空白照常计数（空白也是一个排版位置）。
-     * 代理对按两个字算——页面侧同样按 UTF-16 长度切，两边口径必须一致。
+     * <p>增长的帧不必重填整张表：{@code charEnd[k] == k + 1} 是恒定规律，
+     * 只要记下长度即可，所以 {@link #scanPlain()} 是 O(增长量) 的。
      */
     private void scanPlain() {
         int len = arrived.length();
-        if (charEnd.length < len + 1) {
-            charEnd = new int[Math.max(16, len + 1)];
-        }
-        for (int i = 0; i < len; i++) {
-            charEnd[i] = i + 1;
+        if (charEnd.length < len) {
+            charEnd = new int[Math.max(16, len)];
         }
         charCount = len;
+        scanAt = len;
+        scanChars = len;
         if (shown > charCount) shown = charCount;
     }
 
-    private void scan() {        int len = arrived.length();
+    /**
+     * HTML：记下每个可见字符（标签之外）在源串里的结束偏移。
+     *
+     * <p>{@code from} 是调用方交回来的「已扫描到的字符数」：与上一帧同一前缀时
+     * 只从上次的源串位置往后扫。整段重扫在几百 KB 的正文上是一帧几十毫秒，
+     * 而流式帧每拍都会来一次——正文越长越卡，根因就在这里。
+     */
+    private void scan(int from) {
+        int len = arrived.length();
+        int n = from >= 0 && from <= charCount ? from : 0;
+        int i = from >= 0 && from <= charCount ? scanAt : 0;
         if (charEnd.length < len + 1) {
             int[] bigger = new int[Math.max(16, len + 1)];
-            System.arraycopy(charEnd, 0, bigger, 0, Math.min(charEnd.length, charCount));
+            System.arraycopy(charEnd, 0, bigger, 0, Math.min(charEnd.length, n));
             charEnd = bigger;
         }
-        int n = 0;
-        int i = 0;
         while (i < len) {
             char c = arrived.charAt(i);
             if (c == '<') {
@@ -246,6 +259,8 @@ final class SmoothTail {
             charEnd[n++] = i;
         }
         charCount = n;
+        scanAt = len;
+        scanChars = n;
         if (shown > charCount) shown = charCount;
     }
 }

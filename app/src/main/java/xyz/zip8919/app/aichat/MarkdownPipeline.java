@@ -456,8 +456,15 @@ final class MarkdownPipeline {
             out.append("<p>"); visitChildren(p); out.append("</p>");
         }
         @Override public void visit(Text t) { out.append(Html.esc(t.getLiteral())); }
-        @Override public void visit(HtmlInline hi) { out.append(hi.getLiteral()); }
-        @Override public void visit(HtmlBlock hb) { out.append(hb.getLiteral()); }
+        // 模型裸写的 HTML 一律过一遍过滤器：<style>/<script> 直接拼进聊天页会把
+        // 整个页面改写掉（背景变白、按钮跑到正文里、脚本把 WebView 拖死），
+        // 见 HtmlSanitizer 的类注释。
+        @Override public void visit(HtmlInline hi) {
+            out.append(HtmlSanitizer.inline(hi.getLiteral()));
+        }
+        @Override public void visit(HtmlBlock hb) {
+            out.append(HtmlSanitizer.block(hb.getLiteral()));
+        }
         @Override public void visit(Emphasis e) {
             out.append("<em>"); visitChildren(e); out.append("</em>");
         }

@@ -4114,8 +4114,19 @@ public class MainActivity extends ThemedActivity {
                 webViewEvalJs("__smoothPlainStep(" + adv + "," + idx + ")");
                 return;
             }
-            smoothPushedHtml = arrived;
+            final boolean grew = arrived.length() > smoothPushedHtml.length()
+                    && arrived.startsWith(smoothPushedHtml);
             smoothShownChars = adv;
+            if (grew) {
+                // 只发这一帧新到的尾部：正文写到几万字时，每拍要跨的桥字节数
+                // 仍然是「新增长度」而不是「总长度」，帧耗时不随正文增长
+                final String delta = arrived.substring(smoothPushedHtml.length());
+                smoothPushedHtml = arrived;
+                webViewEvalJs("__smoothPlainAppend('" + jsEscape(delta) + "',"
+                        + arrived.length() + "," + adv + "," + idx + ")");
+                return;
+            }
+            smoothPushedHtml = arrived;
             webViewEvalJs("__smoothPlainSet('" + jsEscape(arrived) + "'," + adv + "," + idx + ")");
             return;
         }
@@ -4152,6 +4163,7 @@ public class MainActivity extends ThemedActivity {
         // 这一代已经收尾：后面的帧直接落地，不能把整条回答从头再浮一遍
         if (smoothSettledGeneration == generation) return;
         final boolean restarted = smoothGeneration != generation;
+        final boolean wasPlain = smoothPlainMode;
         smoothGeneration = generation;
         // 换了一条回答才清空缓冲；同一条回答里（工具轮次、卡片落地、续跑）
         // 继续往后写，屏幕上已经画出的字不回退
@@ -4163,6 +4175,13 @@ public class MainActivity extends ThemedActivity {
             smoothTail.beginRound();
         }
         smoothPlainMode = !channelRealtime();
+        // 通道换了，页面侧的计字口径也跟着换：不把「已推送长度」清掉的话，
+        // 换通道后的第一帧会被当成「上一帧的延长」，只收到一截增量，
+        // 页面上前面那半段就永久缺了
+        if (smoothPlainMode != wasPlain) {
+            smoothPushedHtml = "";
+            smoothShownChars = -1;
+        }
         webViewEvalJs("__smoothStart(" + smoothIdx() + ",'" + smoothKey(generation) + "')");
         if (!smoothRunning) {
             smoothRunning = true;
@@ -4567,11 +4586,14 @@ public class MainActivity extends ThemedActivity {
         if (s == null) return "";
         // 单遍扫描，等价于原先 6 次 String.replace 的链式结果：
         // 每类字符只按原字符映射一次，不会二次转义新插入的反斜杠。
-        StringBuilder out = new StringBuilder(s.length() + 16);
+        StringBuilder out = new StringBuilder(s.length() + Math.max(16, s.length() / 8));
         for (int i = 0; i < s.length(); i++) {
             char c = s.charAt(i);
             switch (c) {
                 case '\\': out.append("\\\\"); break;
+                // 反引号也转义：两种定界符（' 与 `）都是合法的 JS 字符串边界，
+                // 免得正文里的反引号提前把字面量截断
+                case '`': out.append("\\`"); break;
                 case '\'': out.append("\\'"); break;
                 case '\n': out.append("\\n"); break;
                 case '\r': out.append("\\r"); break;

@@ -719,19 +719,23 @@ public class SettingsActivity extends ThemedActivity {
             return;
         }
 
-        // 只列出「能查余额」的：填了 key 且配了余额路径。全都不能查时退回列全部，
+        // 只列出「能查余额」的：填了凭据且能查到余额。全都不能查时退回列全部，
         // 让用户点进去看到具体缺什么，比直接一句「未配置」有用。
+        //
+        // 不能用 hasBalance() 当唯一判据：腾讯云走云 API 签名，本来就没有余额接口路径，
+        // 它的 hasBalance() 恒为 false。以前这里只认 hasBalance()，于是填好
+        // SecretId / SecretKey 之后，只要还配了别的平台，腾讯云就永远不在这份名单里。
         List<ProviderInfo> usable = new ArrayList<ProviderInfo>();
         for (int i = 0; i < providers.size(); i++) {
             ProviderInfo p = providers.get(i);
-            if (p != null && p.hasBalance() && canQueryBalance(p)) usable.add(p);
+            if (p != null && balanceSupported(p) && canQueryBalance(p)) usable.add(p);
         }
         if (usable.isEmpty()) usable = providers;
 
         final ProviderInfo[] arr = usable.toArray(new ProviderInfo[0]);
         String[] names = new String[arr.length];
         for (int i = 0; i < arr.length; i++) {
-            names[i] = arr[i].label() + (arr[i].hasBalance() ? "" : "（未配置余额接口）");
+            names[i] = arr[i].label() + (balanceSupported(arr[i]) ? "" : "（未配置余额接口）");
         }
         AcDialog.builder(this)
                 .setTitle("查询哪个平台的余额")
@@ -743,6 +747,17 @@ public class SettingsActivity extends ThemedActivity {
                 })
                 .setNegativeButton(Strings.get(R.string.settingsactivity_045), null)
                 .show();
+    }
+
+    /**
+     * 这个提供商配没配「余额查询」。
+     *
+     * <p>普通平台看余额接口路径；腾讯云走云 API 签名，没有路径这一说，
+     * 只要预选派生是签名通道就算配了（缺凭据由 {@link #canQueryBalance} 单独判）。
+     */
+    private static boolean balanceSupported(ProviderInfo p) {
+        if (p == null) return false;
+        return p.hasBalance() || p.signedBalance();
     }
 
     /**

@@ -78,7 +78,10 @@ final class RendererAssets {
             // 让 pre 老实按容器宽排版，超长的行在内部横向滚动。
             "pre{position:relative;display:block;background:#f6f8fa;border:1px solid #e1e4e8;" +
             "border-radius:4px;padding:0 12px 10px 12px;margin:8px 0;" +
-            "width:auto;max-width:100%;overflow-x:auto;overflow-y:hidden;" +
+            // width:100% 而不是 auto：auto 在老 WebKit 上是「先按内容收缩再夹到
+            // max-width」，中间那一步会把文档宽度顶出去（代码块右侧溢出到屏幕外、
+            // 整页能左右拖）。给一个确定的宽度，里面多长的行都只能在 pre 里横滚。
+            "width:100%;min-width:0;max-width:100%;overflow-x:auto;overflow-y:hidden;" +
             "-webkit-overflow-scrolling:touch;}" +
             "pre .code-head{display:block;height:28px;font-size:0;line-height:0;}" +
             // display:inline-block + min-width:100%：代码块按最长行决定滚动宽度，
@@ -1261,29 +1264,113 @@ final class RendererAssets {
             "var sp=ns[j];" +
             "if((''+sp.className).indexOf('stream-new')<0)continue;" +
             "len++;sp.style.opacity=(Math.round((len/GRAD)*10)/10);}};" +
+            // 纯文本进度独立成一状态，不和 HTML 的单位序列混用：
+            // 两套口径（偏移 / 字数）混在一起时，一个「<」就能让显示量跳掉几十字
+            //
+            // 正文按「块」存放（chunks）：每帧只从队头取要显示的那几个字，取过的块
+            // 不再搬运。旧版每帧都把整段文本写进一个文本节点、每帧 substring 一遍
+            // 全文、渐变 span 只增不减（2 万字时约 1800 个），单帧耗时随正文长度线性
+            // 增长，越写越慢就是这么来的。
+            "window.__smPlain={on:false,shown:0,drawn:0,len:0,box:null," +
+            "chunks:[],ci:0,co:0,win:[],settle:'',cls:'',tail:null};" +
+            "window.__smGRAD=24;" +
+            // 到达的文本入队：只追加，不复制
+            "window.__smPlainAdd=function(d){" +
+            "var s=window.__smPlain;if(d==null)return;d=''+d;if(!d.length)return;" +
+            "s.chunks.push(d);s.len+=d.length;" +
+            // 队列只保留「还没画完」的那一段：前面已经画过的块整体丢掉
+            "if(s.ci>256){s.chunks=s.chunks.slice(s.ci);s.ci=0;}};" +
+            // 从队头取 k 个字。每块只被取一次，整轮下来是线性的
+            "window.__smPlainNext=function(k){" +
+            "var s=window.__smPlain,out='';" +
+            "while(k>0&&s.ci<s.chunks.length){" +
+            "var cur=s.chunks[s.ci],av=cur.length-s.co;" +
+            "if(av<=0){s.ci++;s.co=0;continue;}" +
+            "var take=av<k?av:k;" +
+            "out+=cur.substr(s.co,take);s.co+=take;k-=take;" +
+            "if(s.co>=cur.length){s.ci++;s.co=0;}}" +
+            "return out;};" +
+            // 窗口外的字合并进文本节点：节点数不随正文长度增长。攒够一批再插一个
+            // 节点，避免「一个字一次 appendData」把文本节点的缓冲反复搬家
+            "window.__smPlainFlush=function(){" +
+            "var s=window.__smPlain,box=s.box;if(!box||!s.settle.length)return;" +
+            "var buf=s.settle;" +
+            "var tn=document.createTextNode(buf);s.settle='';" +
+            // 锚点必须是「窗口里第一颗 span」：box 在没卡片时就是 t 本身，
+            // 拿 t 当参照会把这一段插到气泡外面去
+            "var anchor=s.win.length?s.win[0]:null,h=s.tail,joined=false;" +
+            // 并入上一段文本节点：每帧新插一个文本节点的话，节点数会随帧数
+            // 一直涨（4 万字时一千多个），每帧排版都要过一遍全部兄弟节点
+            "if(h&&h.nodeType===3&&h.parentNode===box){" +
+            "if(anchor&&anchor.previousSibling===h){h.appendData(buf);joined=true;}" +
+            "else if(!anchor&&h===box.lastChild){h.appendData(buf);joined=true;}}" +
+            "if(joined)return;" +
+            "if(anchor&&anchor.parentNode===box)box.insertBefore(tn,anchor);" +
+            "else box.appendChild(tn);s.tail=tn;};" +
+            // 透明度按「离末尾的距离」给：末尾几乎看不见，往前一路加深到正文色
+            "window.__smPlainTint=function(){" +
+            "var s=window.__smPlain,G=window.__smGRAD,w=s.win.length,i,o,d;" +
+            "for(i=0;i<w;i++){d=w-1-i;o=Math.round(((d+1)/G)*10)/10;if(o>1)o=1;" +
+            "s.win[i].style.opacity=o;}};" +
+            // 画一段字：只有末尾 GRAD 个建 span（它们在渐变窗口里），更早的落成文本
+            "window.__smPlainDraw=function(piece){" +
+            "var s=window.__smPlain,box=s.box;if(!box||!piece.length)return;" +
+            "var G=window.__smGRAD,i,sp,head=piece.length>G?piece.length-G:0;" +
+            "if(head>0)s.settle+=piece.substring(0,head);" +
+            "for(i=head;i<piece.length;i++){" +
+            "sp=document.createElement('span');sp.className='stream-new';" +
+            "sp.appendChild(document.createTextNode(piece.charAt(i)));" +
+            "box.appendChild(sp);s.win.push(sp);}" +
+            "var drop=s.win.length-G;" +
+            "if(drop>0){" +
+            "for(i=0;i<drop;i++){s.settle+=s.win[i].textContent;" +
+            "if(s.win[i].parentNode)box.removeChild(s.win[i]);}" +
+            "s.win.splice(0,drop);}" +
+            // 每帧末尾统一落一次：攒到一定量才插节点的话，那几千个字其实一直
+            // 躺在变量里没进 DOM，屏幕上的正文会比进度短一大截
+            "window.__smPlainFlush();" +
+            "window.__smPlainTint();};" +
+            // 显示层被换掉（tail 重建、切会话）：从队头按当前进度重画一遍
+            "window.__smPlainRedraw=function(){" +
+            "var s=window.__smPlain,box=s.box;if(!box)return;" +
+            "while(box.firstChild)box.removeChild(box.firstChild);" +
+            "s.ci=0;s.co=0;s.drawn=0;s.win=[];s.settle='';s.tail=null;" +
+            "if(s.shown>0){var piece=window.__smPlainNext(s.shown);" +
+            "if(piece.length){s.drawn=piece.length;window.__smPlainDraw(piece);}}};" +
+            // 推进一帧：把「该显示的字数」和「已经画出的字数」之间的差补上
+            "window.__smPlainAdvance=function(idx){" +
+            "var s=window.__smPlain;if(!s.on)return false;" +
+            "var k=s.shown-s.drawn;if(k<=0)return false;" +
+            "var t=window.__ensureTail(idx);if(!t)return false;" +
+            "var box=window.__smPlainBox(t);if(!box)return false;" +
+            "if(box!==s.box){s.box=box;window.__smPlainRedraw();" +
+            "window.__smPlainMark(t);return true;}" +
+            "var piece=window.__smPlainNext(k);" +
+            "if(!piece.length)return false;" +
+            "s.drawn+=piece.length;" +
+            "window.__smPlainDraw(piece);" +
+            "window.__smPlainMark(t);return true;};" +
+            // 光标（.plain 的伪元素）与滚动：class 没变就不重写，一次赋值会触发
+            // 整棵子树的样式重算，逐帧写等于每帧重排一遍正文
+            "window.__smPlainMark=function(t){" +
+            "var s=window.__smPlain;" +
+            "if(s.box===t){var want=s.shown<s.len?'stream-tail plain':'stream-tail';" +
+            "if(s.cls!==want){t.className=want;s.cls=want;}}" +
+            "window.__clearStatusIn(t);" +
+            "if(!window.__userUp)smartScrollToBottom();};" +
             "window.__smPaintPlain=function(t,text,show){" +
             // 显示量缺失（NaN）时按 0 处理：NaN 会让后面每个比较都判假，
             // 文本既不画出来也不清掉，屏幕上就是一片空白
-            "var n=show>0?Math.floor(show):0;" +
-            "if(n>text.length)n=text.length;" +
-            "var box=window.__smPlainBox(t);" +
-            "var st=window.__smPlain;var prev=st.box===box?st.prev:0;" +
-            // 已经画出去的尾部（含窗口前的裸文本）保持原样，只画新到的那几个字。
-            // 进度为 0 时不进这段（keep 也是 0，会走进「重建」分支把已有内容全清掉）。
-            "var keep=(prev>n?0:prev);" +
-            "if(n>0){" +
-            "if(keep<=0&&box.lastChild&&box.lastChild.nodeType===1)keep=prev>0?prev:0;" +
-            "window.__smFadeText(box,text.substring(0,n),keep);}" +
-            "else if(box===t){while(t.firstChild)t.removeChild(t.firstChild);}" +
-            "st.box=box;st.prev=n;" +
-            "if(box===t)t.className=n<text.length?'stream-tail plain':'stream-tail';" +
-            // 重设 class 会把「流式光标 ▍」那个伪元素也带回来：整条写完之后
-            // 这里再跑一次就会在末尾多出一个光标，所以只在还没写完时留光标
-            "window.__clearStatusIn(t);" +
-            "if(!window.__userUp)smartScrollToBottom();};" +
-            // 纯文本进度独立成一状态，不和 HTML 的单位序列混用：
-            // 两套口径（偏移 / 字数）混在一起时，一个「<」就能让显示量跳掉几十字
-            "window.__smPlain={on:false,text:'',shown:0,box:null,prev:0};" +
+            "var s=window.__smPlain,n=show>0?Math.floor(show):0;" +
+            "var box=window.__smPlainBox(t);if(!box)return;" +
+            "s.on=true;s.box=box;s.chunks=[];s.ci=0;s.co=0;s.len=0;" +
+            "s.win=[];s.settle='';s.drawn=0;s.shown=0;" +
+            "while(box.firstChild)box.removeChild(box.firstChild);" +
+            "window.__smPlainAdd(text);" +
+            "if(n>s.len)n=s.len;s.shown=n;" +
+            "if(n>0){var piece=window.__smPlainNext(n);s.drawn=piece.length;" +
+            "window.__smPlainDraw(piece);}" +
+            "window.__smPlainMark(t);};" +
             "window.__ensureTail=function(idx){" +
             "var c=window.__aiContent(idx);if(!c)return null;" +
             "var t=c.querySelector('.stream-tail');" +
@@ -1291,23 +1378,49 @@ final class RendererAssets {
             "c.innerHTML='<div class=\"stream-base\"></div><div class=\"stream-tail\"></div>';" +
             "c.querySelector('.stream-base').innerHTML=keep;t=c.querySelector('.stream-tail');}" +
             "return t;};" +
+            // 整段重设：内容被改写（换轮、重试、收尾补最后一帧）时才走这里
+            // 渐显是否正在进行（HTML 或纯文本任一通道）。关掉实时渲染时只有后者会置位
+            "window.__smoothPlainActive=function(){" +
+            "return !!(window.__sm.on||window.__smPlain.on);};" +
             "window.__smoothPlainSet=function(text,adv,idx){" +
             "var t=window.__ensureTail(idx);if(!t)return false;" +
-            "var st=window.__smPlain,tt=text||'';" +
-            "var a=adv>0?Math.floor(adv):0;if(a>tt.length)a=tt.length;" +
-            "st.on=true;st.text=tt;st.shown=a;" +
-            "window.__smPaintPlain(t,tt,a);return true;};" +
+            "var tt=text||'',a=adv>0?Math.floor(adv):0;" +
+            "var s=window.__smPlain;" +
+            "s.on=true;" +
+            "var box=window.__smPlainBox(t);if(!box)return false;" +
+            "while(box.firstChild)box.removeChild(box.firstChild);" +
+            "window.__smPlainReset();" +
+            "s.box=box;" +
+            "window.__smPlainAdd(tt);" +
+            "if(a>s.len)a=s.len;s.shown=a;" +
+            "if(a>0){var piece=window.__smPlainNext(a);s.drawn=piece.length;" +
+            "window.__smPlainDraw(piece);}" +
+            "window.__smPlainMark(t);return true;};" +
+            // 只追加到达的增量：正文越长，这一帧要传的字节也不变
+            "window.__smoothPlainAppend=function(delta,total,adv,idx){" +
+            "var s=window.__smPlain;" +
+            "s.on=true;" +
+            "window.__smPlainAdd(delta);" +
+            "if(total>s.len)s.len=total;" +
+            "var a=adv>0?Math.floor(adv):0;if(a>s.len)a=s.len;" +
+            "s.shown=a;" +
+            "window.__smPlainAdvance(idx);return true;};" +
             "window.__smoothPlainStep=function(adv,idx){" +
-            "var st=window.__smPlain;if(!st.on)return false;" +
-            "var a=adv>0?Math.floor(adv):0;if(a>st.text.length)a=st.text.length;" +
-            "if(a===st.shown)return false;st.shown=a;" +
-            "var t=window.__ensureTail(idx);if(!t)return false;" +
-            "window.__smPaintPlain(t,st.text,a);return true;};" +
+            "var s=window.__smPlain;if(!s.on)return false;" +
+            "var a=adv>0?Math.floor(adv):0;if(a>s.len)a=s.len;" +
+            "if(a===s.shown)return false;s.shown=a;" +
+            "window.__smPlainAdvance(idx);return true;};" +
+            // 复位：整段丢弃缓冲与已画的节点引用。内容被外部改写（换轮、重试、
+            // 页面重建）时才走这里；正常流式帧一律走 Append / Step，不重扫全文
+            "window.__smPlainReset=function(){" +
+            "var s=window.__smPlain;" +
+            "s.chunks=[];s.ci=0;s.co=0;s.len=0;s.win=[];s.settle='';s.tail=null;" +
+            "s.drawn=0;s.shown=0;s.box=null;s.cls='';};" +
             "window.__smoothPlainFinish=function(idx){" +
-            "var st=window.__smPlain;if(!st.on)return false;" +
-            "var t=window.__ensureTail(idx);" +
-            "if(t)window.__smPaintPlain(t,st.text,st.text.length);" +
-            "st.on=false;st.shown=st.text.length;return true;};" +
+            "var s=window.__smPlain;if(!s.on)return false;" +
+            "s.shown=s.len;" +
+            "window.__smPlainAdvance(idx);" +
+            "s.on=false;return true;};" +
             // 新一轮：复位渐显状态。key 相同表示还是同一条回答（同一代、同一段正文），
             // 此时只复位计数器、不动已经画在屏幕上的字——旧版每次都把缓冲清空，
             // 而调用方（每一轮新请求、每一帧 base 补渲染）都可能触发，屏幕上就
@@ -1324,8 +1437,8 @@ final class RendererAssets {
             "st.on=true;st.arrived='';st.show=0;st.units=[];st.chars=0;st.cut=0;st.plain=false;" +
             "st.root=null;st.cur=0;st.paintUnits=null;st.fi=null;st.gi=null;" +
             "st.stack=[];st.grad=[];" +
-            "window.__smPlain.on=false;window.__smPlain.text='';window.__smPlain.shown=0;" +
-            "window.__smPlain.box=null;window.__smPlain.prev=0;};" +
+            "window.__smPlain.on=false;" +
+            "window.__smPlainReset();};" +
             // 已到达的完整片段 + 已经放出的字数：两者一起下发，进度落后时也不会漏内容
             "window.__smoothPush=function(html,adv,idx,t){" +
             "var st=window.__sm;if(!st.on)return false;" +
@@ -1337,7 +1450,7 @@ final class RendererAssets {
             "if((''+t.className).indexOf('plain')>=0){" +
             "st.plain=true;st.arrived=src;st.chars=src.length;" +
             "if(a>st.chars)a=st.chars;st.show=a;" +
-            "window.__smPaintPlain(t,src,a);return true;}" +
+            "window.__smoothPlainSet(src,a,idx);return true;}" +
             "var grew=src!==st.arrived;" +
             "st.arrived=src;st.show=a;" +
             "if(grew){st.units=window.__smUnitize(src,st);}" +
@@ -1388,16 +1501,19 @@ final class RendererAssets {
             "if(t.querySelector('.tool-live')){" +
             "window.__setLiveText(t,text);window.__restoreScroll(t,s);" +
             "clearStatus();smartScrollToBottom();return;}" +
-            "if(window.__sm.on){" +
+            // 关掉实时渲染的整段落地同样要经过渐显层。早先这里判的是 HTML 通道的
+            // 状态位（__sm.on），而纯文本通道用的是另一颗状态（__smPlain.on），
+            // 关掉实时渲染时它恒为假——于是每一次整段写入都走下面的裸写分支，
+            // 「关闭实时渲染后逐字渐显失效」就是这么来的。
+            "if(window.__smoothPlainActive()){" +
             // 第一帧：先把全文放进缓冲、进度从 0 起步，再交给渐显层。
             // 直接按「当前进度」画会画个空，屏幕上要等下一拍才出字。
-            "var wasOn=window.__smPlain.on;" +
-            "window.__smPlain.on=true;window.__smPlain.text=text||'';" +
+            "var st=window.__smPlain;" +
+            "var grow=!st.on;" +
             // 第一次进入纯文本通道：从零起步（真正的逐字浮出）。
             // 已经在通道里：保留当前进度，内容只在到达量内往前长，不会倒退。
-            "var grow=(text||'').length>window.__smPlain.text.length;" +
-            "window.__smPlain.box=null;window.__smPlain.prev=0;" +
-            "window.__smPaintPlain(t,text||'',grow?window.__smPlain.shown:(text||'').length);" +
+            "var a=grow?st.shown:(text||'').length;" +
+            "window.__smoothPlainSet(text||'',a,t);" +
             "window.__restoreScroll(t,s);window.__clearStatusIn(t);smartScrollToBottom();return;}" +
             // 空文本不挂 plain：挂了就会画出一个孤零零的流式光标 ▍
             "t.innerHTML='';t.className=text?'stream-tail plain':'stream-tail';t.textContent=text;" +
@@ -1504,9 +1620,7 @@ final class RendererAssets {
             "if(!text||text.length===0)return;" +
             // 渐显进行中：正文由渐显层画。直接写进去的话，下一帧渐显又会把
             // 这一段按字数重画一遍，屏幕上先整段出现、再缩回几个字。
-            "if(window.__sm.on){window.__smPlain.on=true;window.__smPlain.text=text;" +
-            "window.__smPlain.box=null;window.__smPlain.prev=0;" +
-            "window.__smPaintPlain(t,text,window.__smPlain.shown);return;}" +
+            "if(window.__smoothPlainActive()){window.__smoothPlainSet(text,window.__smPlain.shown,t);return;}" +
             "var ps=t.querySelectorAll('.stream-plain');" +
             "var last=ps.length?ps[ps.length-1]:null;" +
             // 只有最后一个节点是纯文本时才续写，否则说明卡片之后还没有正文段落
