@@ -41,6 +41,14 @@ final class SmoothTail {
     private boolean finished;
 
     /**
+     * 收尾追赶：生成已经结束，剩下的字按「每拍 1/4 积压」快速放完。
+     *
+     * <p>不是立即放完——立即放完等于没有可跳过的区间，「直接显示」也就没有意义了。
+     * 也不是保持原速——几万字的积压按每拍 1 字要放十几分钟。
+     */
+    private boolean draining;
+
+    /**
      * 记下这一帧到达的完整片段。
      *
      * @return 缓冲内容是否有变化；false 表示文本没长，宿主不必重扫
@@ -84,7 +92,13 @@ final class SmoothTail {
         charCount = 0;
         shown = 0;
         finished = false;
+        draining = false;
         plain = false;
+    }
+
+    /** 生成本轮结束、显示还在追赶：进入快速放完模式，但保留「还没放完」的区间。 */
+    void drain() {
+        draining = true;
     }
 
     /** 本轮结束或用户要求直接显示：剩下的字一次性放完。 */
@@ -117,6 +131,11 @@ final class SmoothTail {
         // 固定小步长会让缓冲越积越多、收尾一次性甩出；追平后回落到
         // 每档 1 个字，逐字感就在这里
         int backlog = charCount - shown;
+        if (draining) {
+            // 追赶期：每拍放掉四分之一，长回答也会在一两秒内收口
+            shown = Math.min(charCount, shown + Math.max(4, backlog / 4));
+            return true;
+        }
         int inc = CHARS_PER_STEP;
         if (backlog > 24) inc = Math.min(16, backlog / 8);
         else if (backlog > 8) inc = 2;
@@ -186,6 +205,21 @@ final class SmoothTail {
                 int close = arrived.indexOf('>', i + 1);
                 i = close < 0 ? len : close + 1;
                 continue;
+            }
+            // 实体（&amp; / &lt; / &#39;）在页面上只占一个字：源串里算 5 位，
+            // 页面按字符数切时会被当成 5 个字，切点就跑到前面去了。
+            if (c == '&') {
+                int semi = arrived.indexOf(';', i + 1);
+                if (semi > i + 1 && semi - i <= 8) {
+                    i = semi + 1;
+                    if (n == charEnd.length) {
+                        int[] bigger = new int[charEnd.length * 2];
+                        System.arraycopy(charEnd, 0, bigger, 0, charEnd.length);
+                        charEnd = bigger;
+                    }
+                    charEnd[n++] = i;
+                    continue;
+                }
             }
             i++;
             if (n == charEnd.length) {

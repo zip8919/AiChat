@@ -3166,6 +3166,11 @@ public class MainActivity extends ThemedActivity {
             // 渐显可能尚未起步：纯文本回答没有 trace 变化、工具轮次收轮后
             // smoothRunning 已复位，内容到了却没人推，屏幕会一直空到收尾
             final int gen = MainActivity.this.requestGeneration.get();
+            // 这一代已经收尾（追平或用户点了直接显示）：后续帧直接落地
+            if (smoothSettledGeneration == gen) {
+                evalJsHtml("streamTailHtml", html, uiIdx);
+                return;
+            }
             if (!smoothRunning || smoothGeneration != gen) beginSmoothRound(gen);
             feedSmooth(html, gen);
         }
@@ -3178,6 +3183,10 @@ public class MainActivity extends ThemedActivity {
             // 纯文本帧不写完整内容：整段写下去就是「一大块字瞬间出现」，渐显等于没开。
             // 这里只把「已到达的全文」记进缓冲，屏幕上显示多少由定时器按字推进。
             final int gen = MainActivity.this.requestGeneration.get();
+            if (smoothSettledGeneration == gen) {
+                evalJsHtml("streamTailText", plain);
+                return;
+            }
             if (!smoothRunning || smoothGeneration != gen) beginSmoothRound(gen);
             feedSmoothText(plain, gen);
         }
@@ -3311,6 +3320,8 @@ public class MainActivity extends ThemedActivity {
         final boolean failed = settled.failed;
         renderSeq.incrementAndGet(); // 作废进行中的流式渲染
         traceRenderSeq.incrementAndGet(); // 定稿后不许旧 trace 结果再改写 base
+        // 收尾是否要等渐显追平：等的话，队列的放行权也一起押后到定稿之后
+        final boolean[] deferred = new boolean[] { false };
         new Thread(new Runnable() {
             public void run() {
                 try {
@@ -3346,6 +3357,9 @@ public class MainActivity extends ThemedActivity {
                     // 预热只负责把它写进缓存，安排在定稿帧之后（见 scheduleWarmUp）。
                     scheduleWarmUp(settled.content, settled.generation);
                     if (requestGeneration.get() != settled.generation) return;
+                    // 定稿这一帧要等「逐字渐显」把已到达的字追平之后再写：
+                    // 追赶期就是「直接显示」唯一有意义的时间窗。没有积压时直接写。
+                    deferred[0] = smoothStream && smoothTail.hasPending();
                     runOnUiThread(new Runnable() {
                         public void run() {
                             if (requestGeneration.get() != settled.generation) return;
@@ -3376,39 +3390,51 @@ public class MainActivity extends ThemedActivity {
                                     done.tokensEstimated = true;
                                 }
                             }
-                            // 渐显里还压着没浮出来的字：先全部放完再定稿，
-                            // 否则最后一段会在同一帧里「跳」出来，前面的平滑感就断了
-                            finishSmooth(settled.generation);
-                            // 先收掉流式骨架（清空 tail、隐藏光标），再写入完整渲染结果。
-                            // updateLastMsg 会把全文写进 base 并清空 tail，所以这里不再
-                            // 单独调用 streamFinalize —— 它只做「把 tail 搬进 base」，
-                            // 而 tail 里的纯文本正好是要被替换掉的那一坨。
-                            webViewEvalJs("streamFinalize(" + finalIdx + ")");
-                            webViewEvalJs("updateLastMsg('" + jsEscape(html) + "',"
-                                    + finalIdx + ")");
-                            // base 层此时等于这条消息的全文。不更新的话，续跑时增量渲染
-                            // 会拿「旧 prefix」当基准，把已经显示的内容再追加一遍。
-                            lastStreamTrace = settled.content == null ? "" : settled.content;
-                            // 来源区独立渲染在 .content 之外，默认折叠
-                            Message am = finalIdx >= 0 && finalIdx < messages.size()
-                                    ? messages.get(finalIdx) : null;
-                            String srcHtml = MessageHtmlRenderer.renderSourcesInner(
-                                    am == null ? null : am.sources);
-                            webViewEvalJs("updateLastSources('" + jsEscape(srcHtml) + "')");
-                            // 时间/用量/速度和来源一样挂在 .content 之外，
-                            // 必须在 finalizeLast 之前写，之后 DOM 下标就不是 -1 了
-                            webViewEvalJs("updateLastMeta('"
-                                    + jsEscape(MessageHtmlRenderer.renderMeta(am)) + "')");
-                            webViewEvalJs("finalizeLast(" + finalIdx + ")");
-                            updateUsageBar();
-                            conversationManager.saveCurrentConversation();
+                            final Runnable commitUi = new Runnable() {
+                                public void run() {
+                                    if (requestGeneration.get() != settled.generation) return;
+                                    // 先收掉流式骨架（清空 tail、隐藏光标），再写入完整渲染结果。
+                                    // updateLastMsg 会把全文写进 base 并清空 tail，所以这里不再
+                                    // 单独调用 streamFinalize —— 它只做「把 tail 搬进 base」，
+                                    // 而 tail 里的纯文本正好是要被替换掉的那一坨。
+                                    webViewEvalJs("__smoothStop()");
+                                    webViewEvalJs("streamFinalize(" + finalIdx + ")");
+                                    webViewEvalJs("updateLastMsg('" + jsEscape(html) + "',"
+                                            + finalIdx + ")");
+                                    // base 层此时等于这条消息的全文。不更新的话，续跑时增量渲染
+                                    // 会拿「旧 prefix」当基准，把已经显示的内容再追加一遍。
+                                    lastStreamTrace = settled.content == null ? "" : settled.content;
+                                    // 来源区独立渲染在 .content 之外，默认折叠
+                                    Message am = finalIdx >= 0 && finalIdx < messages.size()
+                                            ? messages.get(finalIdx) : null;
+                                    String srcHtml = MessageHtmlRenderer.renderSourcesInner(
+                                            am == null ? null : am.sources);
+                                    webViewEvalJs("updateLastSources('" + jsEscape(srcHtml) + "')");
+                                    // 时间/用量/速度和来源一样挂在 .content 之外，
+                                    // 必须在 finalizeLast 之前写，之后 DOM 下标就不是 -1 了
+                                    webViewEvalJs("updateLastMeta('"
+                                            + jsEscape(MessageHtmlRenderer.renderMeta(am)) + "')");
+                                    webViewEvalJs("finalizeLast(" + finalIdx + ")");
+                                    updateUsageBar();
+                                    conversationManager.saveCurrentConversation();
+                                    // 追赶期占着队列的放行权：定稿落地后才允许下一条发出去
+                                    if (deferred[0]) {
+                                        deferred[0] = false;
+                                        finishRequestAndDrain();
+                                    }
+                                }
+                            };
+                            if (!drainSmooth(settled.generation, commitUi)) commitUi.run();
                         }
                     });
                 } catch (Exception e) {
                     LogUtil.e(TAG, "final commit failed: %s", e.getMessage(), e);
                 } finally {
-                    // 最后才放行队列：先 drain 会让新请求自增代数，使这条回复被代数守卫丢弃
-                    if (requestGeneration.get() == settled.generation) finishRequestAndDrain();
+                    // 最后才放行队列：先 drain 会让新请求自增代数，使这条回复被代数守卫丢弃。
+                    // 定稿被押到渐显追平之后时，放行权也交给那段收尾代码。
+                    if (!deferred[0] && requestGeneration.get() == settled.generation) {
+                        finishRequestAndDrain();
+                    }
                 }
             }
         }).start();
@@ -3939,6 +3965,14 @@ public class MainActivity extends ThemedActivity {
     private volatile boolean smoothPaused;
     /** 渐显正在服务的那次请求代数：旧气泡上的「直接显示」不能打到新回复上。 */
     private volatile int smoothGeneration;
+    /**
+     * 已经收尾（追平或用户点了「直接显示」）的请求代数。
+     *
+     * <p>收尾之后这条回复的内容任何一帧都不该再重新启动渐显：旧实现只在
+     * 「smoothRunning 已复位」时判断要不要重开一轮，于是收尾后只要 trace 再变一次
+     * （思考块合并、工具卡片落地），整条回答就会从头再浮一遍。
+     */
+    private volatile int smoothSettledGeneration = -1;
     /** 上一拍发给页面的整段片段：只推进度时不必重发同一份 HTML。 */
     private String smoothPushedHtml = "";
     /** 上一拍已经显示到的字符数（页面侧同一份片段上的切点）。 */
@@ -3974,15 +4008,30 @@ public class MainActivity extends ThemedActivity {
                 handler.postDelayed(this, 1000L / SmoothTail.STEPS_PER_SECOND);
                 return;
             }
-            // 显示追上到达：等着下一帧，别空转
-            if (smoothTail.finished()) {
-                smoothRunning = false;
-                setRevealBubble(false);
-                return;
+            // 显示追上到达：停下等下一帧。收尾阶段的「补完」在这里落地——
+            // 生成已经结束、只剩下还没浮出来的字，跑完才允许写定稿 HTML。
+            smoothRunning = false;
+            setRevealBubble(false);
+            // 只有「生成已结束、正在追平」这一种情况才算这一代到此为止；
+            // 流式途中缓冲被追平只是暂时没字可放，下一帧到达会重新起表
+            if (smoothDrainingGeneration == smoothGeneration) {
+                smoothDrainingGeneration = -1;
+                smoothSettledGeneration = smoothGeneration;
+                runSmoothAfterDrain();
             }
-            handler.postDelayed(this, 60);
         }
     };
+
+    /** 生成已结束、显示还在追赶时挂起的定稿动作；跑完或点「直接显示」后执行。 */
+    private Runnable smoothAfterDrain;
+    /** 正在追平的请求代数；-1 表示流式仍在进行（不是收尾）。 */
+    private volatile int smoothDrainingGeneration = -1;
+
+    private void runSmoothAfterDrain() {
+        Runnable r = smoothAfterDrain;
+        smoothAfterDrain = null;
+        if (r != null) r.run();
+    }
 
     /**
      * 把「已到达的片段 + 已显示到第几字」推给页面。
@@ -3993,9 +4042,13 @@ public class MainActivity extends ThemedActivity {
     private void pushSmoothFrame() {
         final int idx = smoothIdx();
         final String arrived = smoothTail.arrivedHtml();
-        // 纯文本按「第几个字」推进；HTML 按「源串偏移」推进，两套口径不能混用，
-        // 否则纯文本里的标签字符会被当成结构、显示量直接跳字。
-        final int adv = smoothTail.isPlain() ? smoothTail.shownChars() : smoothTail.shownOffset();
+        // 两种模式都按「已经放出多少个字」推进。
+        //
+        // 旧版 HTML 模式传的是「源串偏移」：标签、属性、实体都算进偏移里，
+        // 页面却按字符数切。一份带 100 个段落的正文，偏移涨得比字数快几倍，
+        // 切点很快就会越过全部字——表现就是「前几帧还在一字一字地浮，
+        // 中途突然整段出现」。字数口径两边一致，才是真的逐字。
+        final int adv = smoothTail.shownChars();
         if (smoothTail.isPlain()) {
             if (arrived.equals(smoothPushedHtml)) {
                 if (adv == smoothShownChars) return;
@@ -4027,6 +4080,8 @@ public class MainActivity extends ThemedActivity {
      */
     private void beginSmoothRound(final int generation) {
         if (!smoothStream || requestGeneration.get() != generation) return;
+        // 这一代已经收尾：后面的帧直接落地，不能把整条回答从头再浮一遍
+        if (smoothSettledGeneration == generation) return;
         smoothGeneration = generation;
         smoothTail.beginRound();
         smoothPushedHtml = "";
@@ -4039,7 +4094,7 @@ public class MainActivity extends ThemedActivity {
         }
     }
 
-    /** 「直接显示」提示是否已经排在一秒后挂出来；只在第一次进入时调度。 */
+    /** 「直接显示」气泡是否已经排在该挂的时候；避免重复调度。 */
     private boolean showHintScheduled;
 
     /** 把这一帧已到达的正文交给渐显：只记账，显示多少由定时器决定。 */
@@ -4052,17 +4107,10 @@ public class MainActivity extends ThemedActivity {
             handler.removeCallbacks(smoothTick);
         }
         if (!smoothTail.onHtml(html)) return;
-        // 新片段立刻交给页面：占位层先把版式撑开，读起来不会「先变短再变长」
+        // 新片段立刻交给页面：先把已显示的部分画出来，其余由定时器按字推进
         pushSmoothFrame();
         handler.removeCallbacks(smoothTick);
         handler.postDelayed(smoothTick, 1000L / SmoothTail.STEPS_PER_SECOND);
-        // 至少要浮出一小段才值得给出口：刚出第一个字就挂气泡，看着像误触
-        if (!showHintScheduled && smoothTail.shownChars() > 0
-                && smoothTail.charCount() > 0) {
-            showHintScheduled = true;
-            handler.removeCallbacks(smoothHintTask);
-            handler.postDelayed(smoothHintTask, SMOOTH_HINT_DELAY_MS);
-        }
     }
 
     /** 把这一帧已到达的纯文本交给渐显：口径与 {@link #feedSmooth} 相同。 */
@@ -4076,12 +4124,6 @@ public class MainActivity extends ThemedActivity {
         pushSmoothFrame();
         handler.removeCallbacks(smoothTick);
         handler.postDelayed(smoothTick, 1000L / SmoothTail.STEPS_PER_SECOND);
-        if (!showHintScheduled && smoothTail.shownChars() > 0
-                && smoothTail.charCount() > 0) {
-            showHintScheduled = true;
-            handler.removeCallbacks(smoothHintTask);
-            handler.postDelayed(smoothHintTask, SMOOTH_HINT_DELAY_MS);
-        }
     }
 
     /** 页面脚本与「直接显示」气泡共用的入口：只在 UI 线程动定时器与 View。 */
@@ -4103,25 +4145,73 @@ public class MainActivity extends ThemedActivity {
         handler.removeCallbacks(smoothTick);
         handler.removeCallbacks(smoothHintTask);
         showHintScheduled = false;
+        smoothSettledGeneration = generation;
+        smoothDrainingGeneration = -1;
         smoothTail.finish();
         smoothRunning = false;
         setRevealBubble(false);
         pushSmoothFrame();
         webViewEvalJs("__smoothFinish('" + jsEscape(smoothTail.arrivedHtml()) + "',"
                 + smoothIdx() + ")");
+        runSmoothAfterDrain();
     }
 
     /**
-     * 「直接显示」的挂出时机。
+     * 生成已经结束、屏幕上还在一个字一个字地追：让剩下的字快速放完，
+     * 同时在输入栏上方挂出「直接显示」。放完（或用户点掉）再执行 {@code after}。
      *
-     * <p>等文字已经全部到达、只剩浮出动画时才挂，才是真正「点了有区别」的时刻；
-     * 提前挂出来，用户点完看到的还是同一段慢慢浮的字，会觉得没反应。
-     * 一律从当前一拍开始算延迟，快速连续的小帧不会反复重置。
+     * <p>以前收尾是「立刻把剩下的字全画出来」，所以「直接显示」根本没有可跳过的
+     * 区间：气泡要么一直挂着（从回答第一帧就挂出来），要么点了也只是重新跑一遍
+     * 渐显。现在把定稿 HTML 的写入推迟到追平之后，气泡的语义才对上——
+     * 它只在这段追赶期出现，点一下立刻补齐并进入定稿。
+     *
+     * @param after 追平后要执行的动作（写定稿 HTML、落盘、收尾）
+     * @return true 表示还有没显示完的字，调用方不能再立刻写定稿
+     */
+    private boolean drainSmooth(final int generation, final Runnable after) {
+        if (!smoothStream) return false;
+        if (smoothGeneration != generation) return false;
+        if (!smoothTail.hasPending()) {
+            smoothSettledGeneration = generation;
+            smoothTail.finish();
+            webViewEvalJs("__smoothFinish('" + jsEscape(smoothTail.arrivedHtml()) + "',"
+                    + smoothIdx() + ")");
+            return false;
+        }
+        smoothAfterDrain = after;
+        smoothDrainingGeneration = generation;
+        smoothTail.drain();
+        smoothRunning = true;
+        handler.removeCallbacks(smoothTick);
+        handler.postDelayed(smoothTick, 1000L / SmoothTail.STEPS_PER_SECOND);
+        // 只在「正文已经全部到达、只剩浮出」时挂气泡，这才是点了有区别的时刻
+        if (!showHintScheduled && !revealBubbleShown) {
+            showHintScheduled = true;
+            handler.removeCallbacks(smoothHintTask);
+            handler.postDelayed(smoothHintTask, SMOOTH_HINT_DELAY_MS);
+        }
+        // 兜底：页面被切走、定时器被系统掐掉时不能把定稿动作永远挂在那里
+        handler.postDelayed(new Runnable() {
+            public void run() {
+                if (smoothAfterDrain != null) {
+                    smoothTail.finish();
+                    smoothRunning = false;
+                    setRevealBubble(false);
+                    runSmoothAfterDrain();
+                }
+            }
+        }, 4000);
+        return true;
+    }
+
+    /**
+     * 「直接显示」的挂出时机：进入追赶期 700ms 后。挂出来就代表「点一下能立刻看完」，
+     * 不再像旧版那样从回答第一帧挂到最后。
      */
     private final Runnable smoothHintTask = new Runnable() {
         public void run() {
             showHintScheduled = false;
-            if (!smoothRunning || smoothTail.finished()) return;
+            if (!smoothRunning || !smoothTail.hasPending()) return;
             setRevealBubble(true);
         }
     };
@@ -4149,6 +4239,9 @@ public class MainActivity extends ThemedActivity {
         showHintScheduled = false;
         smoothPushedHtml = "";
         smoothShownChars = -1;
+        smoothSettledGeneration = generation;
+        smoothDrainingGeneration = -1;
+        smoothAfterDrain = null;
         setRevealBubble(false);
         webViewEvalJs("__smoothStop()");
     }

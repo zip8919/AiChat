@@ -102,6 +102,12 @@ final class ChatTransport {
                 JSONObject ctk = new JSONObject();
                 ctk.put("enable_thinking", false);
                 body.put("chat_template_kwargs", ctk);
+                // Qwen / 混元 / 豆包这一系只认顶层 enable_thinking，
+                // thinking.type 与 chat_template_kwargs 都会被静默忽略。
+                // 只对已知家族发：严格的 OpenAI 端点对多余顶层字段会 400。
+                if (ReasoningProfiles.of(model).topLevelEnableThinking) {
+                    body.put("enable_thinking", false);
+                }
             }
         }
         return body;
@@ -159,7 +165,12 @@ final class ChatTransport {
             ConfigManager cfg = ConfigManager.getInstance();
             String providerName = provider == null ? null : provider.name;
             ModelInfo m = cfg.findModel(providerName, model);
-            if (m == null || !m.levelsProbed()) return globalLevel;
+            if (m == null || !m.levelsProbed()) {
+                // 没探测过：按模型家族先验落档（xhigh → high、minimal → 家族最低档）。
+                // 旧版原样下发，端点不认识的词会被静默忽略，界面上选的和实际生效的
+                // 完全对不上。
+                return ReasoningProfiles.clamp(globalLevel, model);
+            }
             String actual = ThinkingLevels.resolve(globalLevel, m.levelList());
             if (!actual.equals(globalLevel)) {
                 LogUtil.d(TAG, "thinking level %s -> %s (model %s supports %s)",

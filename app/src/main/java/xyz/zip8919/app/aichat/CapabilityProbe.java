@@ -8,6 +8,7 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 import javax.net.ssl.HttpsURLConnection;
 
@@ -161,15 +162,23 @@ final class CapabilityProbe {
         }
 
         String url = Endpoint.chatUrl(snap);
-        int accepts = 0;
 
-        // ---- 思考档位，逐档 ----
-        for (int i = 0; i < ThinkingLevels.ORDER.size(); i++) {
+        // ---- 思考档位 ----
+        // 候选档位优先取「模型家族知识」：端点对不认识的字段一律回 200，
+        // 逐档打请求只能证明「没报错」，证明不了「这一档真的生效」。
+        // 家族已知时只探它自家的几档；家族未知时才退回六档全集，且全部 200
+        // 只记「不可验证」，不再声称六档都支持（旧版就是把 200 当成支持）。
+        ReasoningProfiles.Profile prof = ReasoningProfiles.of(model);
+        List<String> candidates = prof.levels.isEmpty()
+                ? new ArrayList<String>(ThinkingLevels.ORDER) : prof.levels;
+        int accepts = 0;
+        boolean evidence = false;
+        for (int i = 0; i < candidates.size(); i++) {
             if (stop != null && stop.stopped()) {
                 rep.error = Strings.get(R.string.capabilityprobe_006);
                 return finish(rep, rep.levels, rep.vision, rep.unverifiable);
             }
-            String level = ThinkingLevels.ORDER.get(i);
+            String level = candidates.get(i);
             Raw r = post(url, snap.apiKey, thinkingBody(snap, model, level));
             if (r.error != null) {
                 // 网络层失败：后面的档位也是同样的错，直接收工
@@ -180,17 +189,24 @@ final class CapabilityProbe {
             if (r.httpCode >= 200 && r.httpCode < 300) {
                 accepts++;
                 rep.levels.add(level);
+                if (!evidence && hasReasoningEvidence(r.body)) evidence = true;
                 continue;
             }
             if (!isRejection(r.httpCode)) {
                 // 401/403/404/429/5xx 不是档位问题：后面的档位也是同样的错，
-                // 继续探下去只会把「认证失败」误判成「六档全被拒绝」
+                // 继续探下去只会把「认证失败」误判成「各档全被拒绝」
                 rep.error = ProviderTester.describeFailure(snap, r.httpCode, r.body, model);
                 return rep;
             }
         }
 
-        rep.unverifiable = accepts == ThinkingLevels.ORDER.size();
+        // 全部 200 且回复里没有任何推理痕迹：端点只是没报错，结论不可验证。
+        // 家族已知时保留家族档位（用户仍能选到「端点认的那几个词」，
+        // 只是强度未必真生效）；家族未知时不把 200 当成支持。
+        if (accepts == candidates.size() && !evidence) {
+            rep.unverifiable = true;
+            if (prof.levels.isEmpty()) rep.levels.clear();
+        }
 
         // ---- 图片输入 ----
         // 与档位结论互不影响：不支持思考参数的模型也可能能看图，所以六档全被拒绝时
@@ -200,8 +216,14 @@ final class CapabilityProbe {
         }
 
         if (rep.levels.isEmpty()) {
-            rep.levelsRejected = true;
-            rep.error = Strings.get(R.string.capabilityprobe_009);
+            if (rep.unverifiable) {
+                // 端点对什么都回 200、回复里也没有推理痕迹：只能说「测不出来」，
+                // 不能像旧版那样报成「全部被拒绝」（用户会以为模型不能思考）。
+                rep.note = Strings.get(R.string.capabilityprobe_023);
+            } else {
+                rep.levelsRejected = true;
+                rep.error = Strings.get(R.string.capabilityprobe_009);
+            }
         }
         return finish(rep, rep.levels, rep.vision, rep.unverifiable);
     }
@@ -334,6 +356,50 @@ final class CapabilityProbe {
         rep.note = sb.toString();
         if (rep.error == null) rep.error = "";
         return rep;
+    }
+
+    /**
+     * 回复里有没有「真的思考过」的痕迹。
+     *
+     * <p>这是逐档 200 之外唯一可用的实证：能关/开思考的端点通常在
+     * {@code reasoning_content} 或 {@code completion_tokens_details.reasoning_tokens}
+     * 里留下记录。两者都没有时只能说「不可验证」，不能反推支持。
+     */
+    static boolean hasReasoningEvidence(String body) {
+        if (body == null || body.length() == 0) return false;
+        String t = body.toLowerCase(Locale.US);
+        int at = t.indexOf("reasoning_content");
+        if (at >= 0 && fieldHasText(t, at + "reasoning_content".length())) return true;
+        at = t.indexOf("\"reasoning\"");
+        if (at >= 0 && fieldHasText(t, at + "\"reasoning\"".length())) return true;
+        at = t.indexOf("reasoning_tokens");
+        if (at >= 0) {
+            int p = at + "reasoning_tokens".length();
+            while (p < t.length() && (t.charAt(p) == ' ' || t.charAt(p) == ':')) p++;
+            int q = p;
+            while (q < t.length() && Character.isDigit(t.charAt(q))) q++;
+            if (q > p) {
+                try {
+                    if (Integer.parseInt(t.substring(p, q)) > 0) return true;
+                } catch (NumberFormatException ignored) {
+                    // 数字过长按「没有」处理，不影响结论
+                }
+            }
+        }
+        return false;
+    }
+
+    /** 字段值是不是非空字符串（{@code "reasoning_content":"..."} 里有内容）。 */
+    private static boolean fieldHasText(String s, int from) {
+        int i = from;
+        while (i < s.length() && (s.charAt(i) == ' ' || s.charAt(i) == ':')) i++;
+        if (i >= s.length() || s.charAt(i) != '"') return false;
+        int j = i + 1;
+        while (j < s.length() && s.charAt(j) != '"') {
+            if (s.charAt(j) != ' ' && s.charAt(j) != '\n') return true;
+            j++;
+        }
+        return false;
     }
 
     /** 400/422 视为「参数不被接受」；其余 4xx/5xx 不是档位本身的问题。 */

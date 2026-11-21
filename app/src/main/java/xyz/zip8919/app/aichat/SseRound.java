@@ -36,6 +36,12 @@ final class SseRound {
          * 原样传回，否则后续轮次直接 400；展示用的 display 带标记，不能拿来回传。
          */
         final StringBuilder reasoning = new StringBuilder();
+        /**
+         * 用户关掉了思考：reasoning 仍然照收（DeepSeek 系要求原样回传），
+         * 但<b>不写进 display</b>。端点不认关闭字段时仍会思考，界面不该
+         * 把「已经关掉的思考」再展示一遍。
+         */
+        boolean dropReasoning;
         final JSONArray toolCalls = new JSONArray();
         /**
          * 服务端返回的用量对象（prompt_tokens / completion_tokens / total_tokens），
@@ -97,7 +103,16 @@ final class SseRound {
      */
     static Result read(boolean stream, InputStream in, Progress progress, Abort abort,
             Result[] partialOut) throws Exception {
+        return read(stream, in, progress, abort, partialOut, false);
+    }
+
+    /**
+     * @param dropReasoning 用户关掉了思考：照收 reasoning（回传协议需要），但不展示
+     */
+    static Result read(boolean stream, InputStream in, Progress progress, Abort abort,
+            Result[] partialOut, boolean dropReasoning) throws Exception {
         Result r = new Result();
+        r.dropReasoning = dropReasoning;
         if (partialOut != null) partialOut[0] = r;
         if (stream) readStream(in, progress, abort, r);
         else readWhole(in, r);
@@ -214,7 +229,9 @@ final class SseRound {
         String reasoning = message.has("reasoning_content") && !message.isNull("reasoning_content")
                 ? message.optString("reasoning_content", "") : "";
         if (reasoning.length() > 0) {
-            r.display.append("[thinking]").append(reasoning).append("[/thinking]");
+            if (!r.dropReasoning) {
+                r.display.append("[thinking]").append(reasoning).append("[/thinking]");
+            }
             r.thinkingChunks++;
             r.reasoning.append(reasoning);
         }
@@ -316,12 +333,14 @@ final class SseRound {
                     String rc = delta.optString("reasoning_content", "");
                     if (rc.length() > 0) {
                         r.thinkingChunks++;
-                        if (!thinkingActive) {
-                            thinkingActive = true;
-                            r.display.append("[thinking]");
-                            LogUtil.d(TAG, "thinking phase START at chunk#%d", r.chunks);
+                        if (!r.dropReasoning) {
+                            if (!thinkingActive) {
+                                thinkingActive = true;
+                                r.display.append("[thinking]");
+                                LogUtil.d(TAG, "thinking phase START at chunk#%d", r.chunks);
+                            }
+                            r.display.append(rc);
                         }
-                        r.display.append(rc);
                         r.reasoning.append(rc);
                         if (LogUtil.ENABLED) {
                             LogUtil.v(TAG, "reasoning chunk#%d: %s",

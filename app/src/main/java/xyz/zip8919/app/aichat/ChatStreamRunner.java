@@ -262,6 +262,7 @@ final class ChatStreamRunner {
             // 丢掉等于回到端点默认值（多数是开），用户选了关却还在思考。
             // 这类端点（不认任何思考字段）只能靠提示词硬压，见下面的强约束段。
             boolean thinkingOff = "off".equals(job.thinkingLevel);
+            st.dropReasoning = thinkingOff;
             // 最近一次 429 的响应体。重试耗尽那一轮可能已读不到 body，用它兜底进错误卡片。
             String last429Body = "";
             /**
@@ -671,7 +672,7 @@ final class ChatStreamRunner {
                         public boolean isAborted() {
                             return !session.isAlive(job.generation);
                         }
-                    }, partial);
+                    }, partial, st.dropReasoning);
         } catch (Exception e) {
             // 断流（读超时、连接重置、TLS 中断）不是「什么都没发生」：调用方会走失败
             // 链路，用 st.trace 重写气泡并落盘。这里不把半截 display 补进 trace，
@@ -803,6 +804,9 @@ final class ChatStreamRunner {
          * 必须能从续跑基准里截掉，否则新旧两份回答会连在一起。
          */
         int partialStart = -1;
+
+        /** 用户关掉了思考：reasoning 照收但不上屏，见 SseRound.Result#dropReasoning。 */
+        boolean dropReasoning;
 
         /**
          * 累加一轮的 usage。工具轮次会发多次请求，逐轮相加才是这条消息的真实消耗；

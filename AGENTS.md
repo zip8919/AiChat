@@ -55,7 +55,7 @@ Java 源码**单包平铺**，不按功能拆 package。这是既有结构：角
 | **渲染** | 消息 → HTML → WebView；Markdown、公式、代码高亮 | `MessageHtmlRenderer` `MarkdownPipeline` `MathRenderer` `RendererAssets` `CodeHighlighter` `Html` `TextKit` `MarkdownPage` `SourcePage` |
 | **界面与交互** | 主界面、查看器、输入、排队、附件、裁剪、扫描、小工具 | `MainActivity` `ViewerController` `ViewerBg` `ViewerExport` `FullscreenInputActivity` `MessageQueue` `AttachmentText` `AttachmentFiles` `ImageTokens` `CropActivity` `CropView` `FileKinds` `FileIcons` `FileIconBinder` `FileActions` `ScanActivity` `ToolsActivity` `JsRunnerActivity` |
 | **外观与主题** | 显示大小、字号、字体、明暗、4 套内置主题与自定义主题 | `AppearanceManager` `AppearanceStore` `AppearanceState` `ThemeApplier` `ThemeRecolor` `ThemeTokens` `ThemeResolver` `ThemeCssBuilder` `ThemeRepository` `ThemeValidator` `BuiltinThemes` `ThemeText` `ScalePolicy` `FontRepository` `WebViewRefresher` `ThemedActivity` `AcDialog` `AcToast` + 7 个页面 |
-| **配置与模型** | 提供商、模型、提示词预设、连通性测试 | `ConfigManager` `ProviderInfo` `ModelInfo` `Endpoint` `PresetStore` `ProviderTester` `CapabilityProbe` `VisionJudge` `ThinkingLevels` `SettingsActivity` `ModelConfigActivity` `ProviderEditActivity` `ModelEditActivity` `PresetManagerActivity` `ModelSpinnerAdapter` `ConfigRowAdapter` |
+| **配置与模型** | 提供商、模型、提示词预设、连通性测试 | `ConfigManager` `ProviderInfo` `ModelInfo` `Endpoint` `PresetStore` `ProviderTester` `CapabilityProbe` `VisionJudge` `ThinkingLevels` `ReasoningProfiles` `SettingsActivity` `ModelConfigActivity` `ProviderEditActivity` `ModelEditActivity` `PresetManagerActivity` `ModelSpinnerAdapter` `ConfigRowAdapter` |
 | **数据与平台** | 会话落盘、存储治理、上限、日志、崩溃、TLS | `ConversationManager` `ConversationIndex` `Conversation` `Message` `StorageManager` `StorageRefs` `StorageScanner` `StorageReport` `StorageCleaner` `Limits` `SystemInfo` `LogUtil` `CrashCatcher` `TlsCompat` `ConvTime` `TitleGenerator` `HelpText` `ExportHelper` |
 
 三个子系统需要额外说明：
@@ -179,7 +179,7 @@ Android/data/xyz.zip8919.app.aichat/files/
 | `Endpoint` | 地址拼装纯函数：`join` / `chatUrl` / `tidyChatPath` / `deriveName` | 不发请求，不读配置 |
 | `PresetStore` | 提示词预设存取（上限 20，重名自动编号） | 不碰 UI，不认识 SettingsActivity |
 | `ProviderTester` | 连通性探测 + 远端模型列表解析 + 错误归类 | 不写 UI，不改配置 |
-| `CapabilityProbe` | 能力探测：逐档测思考档位是否被接受（看状态码）+ 换两张不同数字的图各问一次测图片输入 | 不改配置，不落库（结论由调用方写回 `ModelInfo`） |
+| `CapabilityProbe` | 能力探测：先按 `ReasoningProfiles` 的模型家族取候选档位，再逐档看端点是否接受、回复里有没有推理痕迹；换两张不同数字的图各问一次测图片输入 | 不改配置，不落库（结论由调用方写回 `ModelInfo`） |
 | `VisionJudge` | 图片输入判定：解析回复正文，两轮各读对应图内数字，两张都读对才算支持 | 只给结论与原因码，不产出界面文字；不碰网络、资源与 Android |
 | `ThinkingLevels` | 六档定义与排序、`resolve` 落档、`reasoning_effort` / `thinking_budget` 映射 | 纯函数，不读配置 |
 | `AppearanceManager` | 外观系统唯一门面，working / committed 双态 | 不直接落盘，不做 View 变换 |

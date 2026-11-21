@@ -143,8 +143,9 @@
     <string name="capabilityprobe_010">未能判定：%1$s</string>
     <string name="capabilityprobe_012">第二张图未测：已停止</string>
     <string name="capabilityprobe_013">端点拒绝：%1$s</string>
+    <string name="capabilityprobe_023">端点对任何思考参数都返回成功，但回复里没有推理内容，测不出档位；请在模型设置里手动选择可用档位</string>
     <string name="capabilityprobe_014">思考可用：%1$s</string>
-    <string name="capabilityprobe_015">（该服务不区分思考档位，六档均按可用处理）</string>
+    <string name="capabilityprobe_015">（该服务对思考参数一律返回成功，档位强度无法逐档验证）</string>
     <string name="capabilityprobe_016">支持图片输入（两张图均读出数字）</string>
     <string name="capabilityprobe_017">不支持图片输入</string>
     <string name="capabilityprobe_018">请求内容为空，请重试</string>
