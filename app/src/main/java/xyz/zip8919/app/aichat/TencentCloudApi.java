@@ -21,12 +21,26 @@ import org.json.JSONObject;
  * 按 API Key 查不到任何余额。账户余额与 Token Plan 余量只存在于腾讯云云 API，
  * 需要 SecretId + SecretKey 现场签名，密钥不能离开设备。
  *
- * <p>本类只跑两个只读接口：
+ * <p>本类只跑只读接口，分两组：
+ *
+ * <p><b>金额</b>（费用中心口径，按量付费看这里）：
  * <ul>
- *   <li>{@code billing / DescribeAccountBalance}：账户可用余额（费用中心口径）；</li>
+ *   <li>{@code billing / DescribeAccountBalance}：账户可用余额、冻结、欠费。</li>
+ * </ul>
+ *
+ * <p><b>TokenHub 用量与套餐</b>：
+ * <ul>
+ *   <li>{@code tokenhub / DescribePaymentSummary}：计费方式汇总（后付费是否开通、限额）；</li>
+ *   <li>{@code tokenhub / DescribeInferPageOverview}：推理服务页 KPI 汇总（近期用量）；</li>
  *   <li>{@code tokenhub / DescribeTokenPlanPersonalPackage}：Token Plan 个人版套餐额度。</li>
  * </ul>
  * 不要在这里加任何会改动账户的接口。
+ *
+ * <p><b>为什么是「探测式」而不是写死解析</b>：腾讯云的用量/计费类接口字段经常
+ * 按版本增减，且个人账号与企业账号返回的结构并不一致（未开通的项常常整段缺失）。
+ * 这里逐个调、逐个把返回里的数字与字符串摊成「名称：值」，某个接口不可用就
+ * 记一条原因继续下一个，最终显示「有什么就显示什么」，不会因为一个接口不支持
+ * 就整页空白。诊断模式还会把每个接口的原始返回一并列出，便于核对字段。
  *
  * <p>签名按官方 TC3 文档实现：规范请求串 → 待签串 → 派生签名密钥 → 授权头。
  * 时间戳必须用 UTC，且与腾讯云服务器偏差超过 5 分钟会被拒（AuthFailure.SignatureExpire），
@@ -46,6 +60,18 @@ final class TencentCloudApi {
         int code;
         String url;
         java.util.List<String[]> fields = new java.util.ArrayList<String[]>();
+        /** 逐接口的调用结果（名称、动作、状态、说明），诊断模式直接展示。 */
+        java.util.List<String[]> probes = new java.util.ArrayList<String[]>();
+        /** 逐接口的原始返回（标题 + 响应体），诊断模式用。 */
+        java.util.List<String[]> raws = new java.util.ArrayList<String[]>();
+
+        void probe(String name, String action, String status, String detail) {
+            probes.add(new String[] { name, action, status, detail });
+        }
+
+        void raw(String title, String body) {
+            if (body != null && body.length() > 0) raws.add(new String[] { title, body });
+        }
 
         void add(String name, String value) {
             if (value == null) return;
@@ -66,18 +92,56 @@ final class TencentCloudApi {
      * @param region    地域，billing 接口用空串（全局接口），传空即可
      */
     static Result accountBalance(String secretId, String secretKey, String region) {
-        return call(secretId, secretKey, region,
+        Result r = call(secretId, secretKey, region,
                 "billing.tencentcloudapi.com", "billing", "2023-07-01",
                 "DescribeAccountBalance", new JSONObject(), false);
+        r.raw("账户余额 DescribeAccountBalance", r.body);
+        return r;
+    }
+
+    /**
+     * 查 TokenHub 的用量与计费概览（按量付费主要看这一块）。
+     *
+     * <p>两个接口都是只读汇总，不传业务参数（按当前主账号聚合）：
+     * <ul>
+     *   <li>{@code DescribePaymentSummary}：计费方式汇总；</li>
+     *   <li>{@code DescribeInferPageOverview}：推理服务页 KPI 汇总。</li>
+     * </ul>
+     * 任一接口不被账号支持（未开通、无权限、入参不匹配）时只记一条原因，
+     * 不影响另一个接口的结果。
+     */
+    static Result tokenHubUsage(String secretId, String secretKey, String region) {
+        Result merged = new Result();
+        String[][] jobs = {
+                { "计费方式汇总", "DescribePaymentSummary" },
+                { "推理用量汇总", "DescribeInferPageOverview" },
+        };
+        String firstErr = null;
+        for (int i = 0; i < jobs.length; i++) {
+            Result r = call(secretId, secretKey, region,
+                    "tokenhub.tencentcloudapi.com", "tokenhub", "2026-03-22",
+                    jobs[i][1], new JSONObject(), true);
+            merged.raw(jobs[i][0] + " " + jobs[i][1], r.body);
+            if (r.ok) {
+                merged.fields.addAll(r.fields);
+                merged.probe(jobs[i][0], jobs[i][1], "可用",
+                        r.fields.isEmpty() ? "返回里没有可展示的字段" : ("返回 " + r.fields.size() + " 项"));
+            } else {
+                String why = r.error == null ? "未知原因" : r.error;
+                merged.probe(jobs[i][0], jobs[i][1], "不可用", why);
+                if (firstErr == null) firstErr = jobs[i][0] + "：" + why;
+            }
+        }
+        merged.ok = !merged.fields.isEmpty();
+        if (!merged.ok && firstErr != null) merged.error = firstErr;
+        merged.note = "用量按当前计费周期汇总，与腾讯云控制台的统计口径一致。";
+        return merged;
     }
 
     /** 查 Token Plan 个人版套餐额度（含通用与混元两个产品类型）。 */
     static Result tokenPlanPackage(String secretId, String secretKey, String region) {
         Result merged = new Result();
         String[] types = { "personal", "personal-hunyuan" };
-        String lastBody = null;
-        int lastCode = 0;
-        String lastUrl = null;
         String firstErr = null;
         for (int i = 0; i < types.length; i++) {
             JSONObject p = new JSONObject();
@@ -89,25 +153,104 @@ final class TencentCloudApi {
             Result r = call(secretId, secretKey, region,
                     "tokenhub.tencentcloudapi.com", "tokenhub", "2026-03-22",
                     "DescribeTokenPlanPersonalPackage", p, true);
-            lastBody = r.body;
-            lastCode = r.code;
-            lastUrl = r.url;
+            merged.raw("Token Plan " + types[i], r.body);
             if (r.ok) {
                 // 没买过这个系列时接口回「未购买」，属于正常结果，不当失败
                 merged.fields.addAll(r.fields);
-            } else if (firstErr == null) {
-                firstErr = r.error;
+                merged.probe("Token Plan " + types[i], "DescribeTokenPlanPersonalPackage",
+                        "可用", r.fields.isEmpty() ? "未购买" : ("返回 " + r.fields.size() + " 项"));
+            } else {
+                String why = r.error == null ? "未知原因" : r.error;
+                merged.probe("Token Plan " + types[i], "DescribeTokenPlanPersonalPackage",
+                        "无套餐", why);
+                if (firstErr == null) firstErr = why;
             }
         }
         merged.ok = !merged.fields.isEmpty();
-        merged.body = lastBody;
-        merged.code = lastCode;
-        merged.url = lastUrl;
-        if (!merged.ok) {
-            merged.error = firstErr == null ? "未获取到套餐信息" : firstErr;
-        }
+        if (!merged.ok) merged.error = firstErr == null ? "未获取到套餐信息" : firstErr;
         merged.note = "套餐额度按当前周期统计，用尽后需等下一个订阅周期恢复。";
         return merged;
+    }
+
+    /**
+     * 合并三组查询的结果：有字段的进正文，没字段的进「说明」，全部进诊断。
+     *
+     * <p>合并顺序固定为「账户余额 → TokenHub 用量 → Token Plan」：用户最关心
+     * 的「还有多少钱」必须第一眼看到，套餐额度是补充。
+     */
+    static Result collect(String secretId, String secretKey, boolean diagnostic) {
+        Result all = new Result();
+        Result bal = accountBalance(secretId, secretKey, "");
+        Result usage = tokenHubUsage(secretId, secretKey, "ap-guangzhou");
+        Result plan = tokenPlanPackage(secretId, secretKey, "ap-guangzhou");
+
+        all.fields.addAll(bal.fields);
+        all.fields.addAll(usage.fields);
+        all.fields.addAll(plan.fields);
+        all.probes.addAll(bal.probes);
+        all.probes.addAll(usage.probes);
+        all.probes.addAll(plan.probes);
+        all.raws.addAll(bal.raws);
+        all.raws.addAll(usage.raws);
+        all.raws.addAll(plan.raws);
+
+        all.code = bal.code > 0 ? bal.code : (usage.code > 0 ? usage.code : plan.code);
+        all.url = bal.url;
+        all.body = bal.body != null ? bal.body : (usage.body != null ? usage.body : plan.body);
+
+        all.ok = !all.fields.isEmpty();
+        if (!all.ok) {
+            all.error = bal.error != null ? bal.error
+                    : (usage.error != null ? usage.error : plan.error);
+        }
+        StringBuilder note = new StringBuilder();
+        if (bal.note != null) note.append(bal.note);
+        // 没开通用量统计或没买套餐都是常态：说清「没查到什么」比留白有用
+        if (usage.fields.isEmpty() && usage.error != null) {
+            append(note, "TokenHub 用量：" + usage.error);
+        }
+        if (plan.fields.isEmpty() && plan.error != null) {
+            append(note, "Token Plan：" + plan.error);
+        }
+        if (usage.fields.size() > 0 && usage.note != null) append(note, usage.note);
+        if (plan.fields.size() > 0 && plan.note != null) append(note, plan.note);
+        if (diagnostic) {
+            append(note, "诊断模式：逐个接口的调用结果与原始返回见下方，可复制反馈。");
+        } else {
+            append(note, "长按「查询余额」可查看各接口的诊断信息。");
+        }
+        all.note = note.toString();
+        return all;
+    }
+
+    /**
+     * 诊断视图：逐接口的调用结果 + 每个接口的原始返回，拼成可复制的一段文本。
+     *
+     * <p>字段名以腾讯云实际返回为准，不靠文档猜：这里是唯一能确认
+     * 「量到底在哪个字段里」的地方。
+     */
+    static String diagnosticText(Result r) {
+        if (r == null) return "";
+        StringBuilder sb = new StringBuilder();
+        sb.append("接口调用结果\n");
+        for (int i = 0; i < r.probes.size(); i++) {
+            String[] p = r.probes.get(i);
+            sb.append(p[0]).append("（").append(p[1]).append("）：")
+              .append(p[2]);
+            if (p[3] != null && p[3].length() > 0) sb.append(" —— ").append(p[3]);
+            sb.append('\n');
+        }
+        for (int i = 0; i < r.raws.size(); i++) {
+            String[] x = r.raws.get(i);
+            sb.append('\n').append("== ").append(x[0]).append(" ==\n").append(x[1]).append('\n');
+        }
+        return sb.toString();
+    }
+
+    private static void append(StringBuilder sb, String line) {
+        if (line == null || line.length() == 0) return;
+        if (sb.length() > 0) sb.append('\n');
+        sb.append(line);
     }
 
     /**
@@ -215,8 +358,11 @@ final class TencentCloudApi {
             }
             if ("billing".equals(service)) {
                 parseBalance(resp, out);
-            } else {
+            } else if ("DescribeTokenPlanPersonalPackage".equals(action)) {
                 parsePackage(resp, action, out);
+            } else {
+                // 用量 / 计费类接口：字段按版本变动，统一摊平，不写死字段名
+                flatten(resp, "", out);
             }
             out.ok = !out.fields.isEmpty();
             if (!out.ok) out.error = "接口返回里没有可展示的额度字段";
@@ -310,6 +456,77 @@ final class TencentCloudApi {
         }
         String cycle = number(resp.opt("CycleCredits"));
         if (cycle != null) out.add(type + " · 单周期额度", cycle);
+    }
+
+    /**
+     * 把一份返回体摊成「名称：值」行。
+     *
+     * <p>只收两类叶子：数字（额度、次数、百分比）与短字符串（状态、计费方式、
+     * 到期时间）。布尔值只在为 true 时收（{@code "后付费已开通：是"} 有用，
+     * 一屏的 false 只会把真正的数字挤下去）。空串、null、长文本一律跳过。
+     *
+     * <p>嵌套对象拼成「父 / 子」，数组按序号展开（最多前 5 项）：用量汇总常有
+     * 「按模型/按日」的数组，全展开会把弹窗撑到几十屏，只取前几项足以说明情况。
+     */
+    private static void flatten(JSONObject obj, String prefix, Result out) {
+        if (obj == null) return;
+        java.util.Iterator<?> it = obj.keys();
+        while (it.hasNext()) {
+            String key = String.valueOf(it.next());
+            // RequestId 只是排障用的关联号，不属于「额度」
+            if ("RequestId".equals(key)) continue;
+            Object v = obj.opt(key);
+            String name = prefix.length() == 0 ? key : (prefix + " / " + key);
+            if (v == null || JSONObject.NULL.equals(v)) continue;
+            if (v instanceof JSONObject) {
+                JSONObject sub = (JSONObject) v;
+                // 一行里塞太多字段会盖住真正的金额，浅层展开即可
+                if (depth(name) < 3) flatten(sub, name, out);
+                continue;
+            }
+            if (v instanceof org.json.JSONArray) {
+                org.json.JSONArray arr = (org.json.JSONArray) v;
+                for (int i = 0; i < arr.length() && i < 5; i++) {
+                    Object e = arr.opt(i);
+                    if (e instanceof JSONObject) {
+                        flatten((JSONObject) e, name + "[" + i + "]", out);
+                    } else if (e != null && !JSONObject.NULL.equals(e)) {
+                        out.add(name + "[" + i + "]", leaf(e));
+                    }
+                }
+                continue;
+            }
+            String text = leaf(v);
+            if (text == null) continue;
+            out.add(name, text);
+        }
+    }
+
+    /** 名称里有几段（用「 / 」分隔），用来限层。 */
+    private static int depth(String name) {
+        int n = 1, i = 0;
+        while ((i = name.indexOf(" / ", i)) >= 0) {
+            n++;
+            i += 3;
+        }
+        return n;
+    }
+
+    /** 叶子值 → 展示文本；不值得展示时返回 null。 */
+    private static String leaf(Object v) {
+        if (v instanceof Boolean) {
+            return ((Boolean) v).booleanValue() ? "是" : null;
+        }
+        if (v instanceof Number) {
+            return trimZero(((Number) v).doubleValue());
+        }
+        String s = String.valueOf(v).trim();
+        if (s.length() == 0 || s.length() > 60) return null;
+        // ISO8601 时间只留到分钟，秒与毫秒对「什么时候到期」没有意义
+        if (s.length() >= 19 && s.charAt(4) == '-' && s.charAt(10) == 'T') {
+            return s.substring(0, 16).replace('T', ' ');
+        }
+        return s;
     }
 
     private static String describeStatus(String s) {

@@ -106,6 +106,20 @@ final class BalanceDialog {
             plain.append(m).append('\n');
         }
 
+        // 诊断模式：逐接口结果与原始返回，正文里直接展开（不用再点「原始返回」）
+        final String diag = resp == null ? null : resp.diagnostic;
+        if (diag != null && diag.length() > 0) {
+            TextView dv = new TextView(act);
+            dv.setTextSize(11);
+            dv.setTypeface(android.graphics.Typeface.MONOSPACE);
+            dv.setTextColor(ThemeTokens.getSafe(act, ThemeTokens.AC_TEXT_SECONDARY));
+            dv.setPadding(0, dp(act, 10), 0, dp(act, 4));
+            dv.setTextIsSelectable(true);
+            dv.setText(diag);
+            box.addView(dv);
+            plain.append(diag).append('\n');
+        }
+
         final String rawText = rawOf(res, resp);
 
         ScrollView sv = new ScrollView(act);

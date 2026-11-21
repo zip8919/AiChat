@@ -266,6 +266,15 @@ public class SettingsActivity extends ThemedActivity {
         balanceButton.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) { LogUtil.d(TAG, "click: query balance"); queryBalance(); }
         });
+        // 长按进诊断：逐个接口列调用结果与原始返回。只读、不改任何配置，
+        // 用来回答「为什么只显示了一部分」—— 不靠猜字段名
+        balanceButton.setOnLongClickListener(new View.OnLongClickListener() {
+            public boolean onLongClick(View v) {
+                LogUtil.d(TAG, "long click: query balance (diagnostic)");
+                queryBalance(true);
+                return true;
+            }
+        });
         manageModelsButton.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 LogUtil.d(TAG, "click: manage models -> ModelConfigActivity");
@@ -707,6 +716,14 @@ public class SettingsActivity extends ThemedActivity {
      * <p>只有一个提供商时直接查，不弹选择框——只配了一家的人不该多点一次。
      */
     private void queryBalance() {
+        queryBalance(false);
+    }
+
+    /**
+     * @param diagnostic true 表示逐个接口列调用结果与原始返回（长按「查询余额」进入）。
+     *                   排查「为什么只显示了一部分」时用，平时不打扰界面。
+     */
+    private void queryBalance(final boolean diagnostic) {
         final ConfigManager configManager = ConfigManager.getInstance();
         final List<ProviderInfo> providers = configManager.getProviders();
         if (providers == null || providers.isEmpty()) {
@@ -715,7 +732,7 @@ public class SettingsActivity extends ThemedActivity {
             return;
         }
         if (providers.size() == 1) {
-            runBalanceQuery(providers.get(0));
+            runBalanceQuery(providers.get(0), diagnostic);
             return;
         }
 
@@ -742,7 +759,7 @@ public class SettingsActivity extends ThemedActivity {
                 .setItems(names, new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int which) {
                         if (which < 0 || which >= arr.length) return;
-                        runBalanceQuery(arr[which]);
+                        runBalanceQuery(arr[which], diagnostic);
                     }
                 })
                 .setNegativeButton(Strings.get(R.string.settingsactivity_045), null)
@@ -777,6 +794,10 @@ public class SettingsActivity extends ThemedActivity {
 
     /** 真正发起查询：按提供商的余额预设与路径查，结果交给 {@link BalanceDialog}。 */
     private void runBalanceQuery(final ProviderInfo provider) {
+        runBalanceQuery(provider, false);
+    }
+
+    private void runBalanceQuery(final ProviderInfo provider, final boolean diagnostic) {
         if (provider == null) return;
         if (!canQueryBalance(provider)) {
             LogUtil.w(TAG, "runBalanceQuery aborted: credentials missing, provider=%s preset=%s",
@@ -804,35 +825,25 @@ public class SettingsActivity extends ThemedActivity {
                 final ApiClient.BalanceResponse resp;
                 final BalancePresets.Result parsed;
                 if (provider.signedBalance()) {
-                    // 腾讯云：账户余额 + Token Plan 套餐额度，各查一次再合并展示
-                    final TencentCloudApi.Result bal = TencentCloudApi.accountBalance(
-                            provider.secretId, provider.secretKey, "");
-                    final TencentCloudApi.Result plan = TencentCloudApi.tokenPlanPackage(
-                            provider.secretId, provider.secretKey, "ap-guangzhou");
+                    // 腾讯云：账户余额 + TokenHub 用量/计费 + Token Plan 套餐，
+                    // 三组一起查再合并展示——按量付费的钱在账户余额里，
+                    // 用量在 TokenHub 汇总里，套餐是补充，缺任一项都不能算查全
+                    final TencentCloudApi.Result all = TencentCloudApi.collect(
+                            provider.secretId, provider.secretKey, diagnostic);
                     resp = new ApiClient.BalanceResponse();
-                    resp.code = bal.code > 0 ? bal.code : plan.code;
-                    resp.url = bal.url;
-                    resp.body = bal.body;
-                    if (bal.error != null) resp.error = bal.error;
+                    resp.code = all.code;
+                    resp.url = all.url;
+                    resp.body = all.body;
+                    resp.diagnostic = diagnostic ? TencentCloudApi.diagnosticText(all) : null;
+                    if (all.error != null) resp.error = all.error;
                     parsed = new BalancePresets.Result();
-                    parsed.fields.addAll(bal.fields);
-                    parsed.fields.addAll(plan.fields);
-                    parsed.raw = plan.body != null && plan.body.length() > 0 ? plan.body : bal.body;
+                    parsed.fields.addAll(all.fields);
+                    parsed.raw = all.body;
                     parsed.ok = !parsed.fields.isEmpty();
                     if (!parsed.ok) {
-                        parsed.error = bal.error != null ? bal.error : plan.error;
+                        parsed.error = all.error;
                     } else {
-                        StringBuilder note = new StringBuilder();
-                        if (bal.note != null) note.append(bal.note);
-                        if (plan.fields.isEmpty() && plan.error != null) {
-                            if (note.length() > 0) note.append('\n');
-                            // 没买过套餐是常态，说清楚而不是报错
-                            note.append("Token Plan：").append(plan.error);
-                        } else if (plan.note != null) {
-                            if (note.length() > 0) note.append('\n');
-                            note.append(plan.note);
-                        }
-                        parsed.note = note.toString();
+                        parsed.note = all.note;
                     }
                 } else {
                     resp = ApiClient.queryBalanceFull(provider, path);

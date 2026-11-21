@@ -86,6 +86,8 @@ public class ApiClient {
         /** 网络层异常的说明；HTTP 层失败时为 null。 */
         String error;
         String url;
+        /** 诊断信息（逐接口调用结果 + 原始返回）；非诊断模式下为 null。 */
+        String diagnostic;
 
         boolean ok() {
             return code == 200 && body != null;
