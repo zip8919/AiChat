@@ -4190,10 +4190,15 @@ public class MainActivity extends ThemedActivity {
             handler.removeCallbacks(smoothHintTask);
             handler.postDelayed(smoothHintTask, SMOOTH_HINT_DELAY_MS);
         }
-        // 兜底：页面被切走、定时器被系统掐掉时不能把定稿动作永远挂在那里
+        // 兜底：页面被切走、定时器被系统掐掉时不能把定稿动作永远挂在那里。
+        // 必须认代数：4 秒内可能已经发出下一条，这条定时器不能去掐新一轮的渐显。
+        final int gen = generation;
         handler.postDelayed(new Runnable() {
             public void run() {
+                if (smoothDrainingGeneration != gen) return;
                 if (smoothAfterDrain != null) {
+                    smoothDrainingGeneration = -1;
+                    smoothSettledGeneration = gen;
                     smoothTail.finish();
                     smoothRunning = false;
                     setRevealBubble(false);
