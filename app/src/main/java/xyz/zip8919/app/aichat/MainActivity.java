@@ -1648,7 +1648,7 @@ public class MainActivity extends ThemedActivity {
         if (banner == null) return;
         View.OnClickListener go = new View.OnClickListener() {
             public void onClick(View v) {
-                LogUtil.d(TAG, "click: offline banner -> network settings");
+                LogUtil.d(TAG, "click: offline banner -> settings home");
                 openNetworkSettings();
             }
         };
@@ -1695,16 +1695,17 @@ public class MainActivity extends ThemedActivity {
     }
 
     /**
-     * 打开系统的网络设置。
+     * 打开系统设置的首页。
      *
-     * <p>优先 {@code ACTION_WIRELESS_SETTINGS}：词典笔这类设备基本只有 WiFi，
-     * 直接落到 WiFi 列表比落到「设置」首页少点两层。个别 ROM 没有这个 Activity，
-     * 依次退到「设置」首页，再退到应用详情页，保证点击一定有反应。
+     * <p>只跳 {@code ACTION_SETTINGS}：以前优先跳 {@code ACTION_WIRELESS_SETTINGS}，
+     * 在词典笔上会直接落到 WiFi 列表，用户从应用点「去设置」后找不到设置首页，
+     * 也回不到别的设置项。排序上的「少点两层」不值得牺牲可预期性。
+     * 个别 ROM 没有设置首页，退到无线和网络，再退到应用详情页，保证点击一定有反应。
      */
     private void openNetworkSettings() {
         String[] actions = {
-                android.provider.Settings.ACTION_WIRELESS_SETTINGS,
                 android.provider.Settings.ACTION_SETTINGS,
+                android.provider.Settings.ACTION_WIRELESS_SETTINGS,
         };
         for (String a : actions) {
             try {

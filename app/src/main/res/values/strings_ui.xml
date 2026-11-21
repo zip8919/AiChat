@@ -2230,5 +2230,5 @@
     <string name="offline_banner_text">当前无网络连接，无法发送消息</string>
     <string name="offline_banner_action">去设置</string>
     <string name="offline_toast">网络已断开，请检查 WiFi 或热点连接</string>
-    <string name="offline_open_settings_failed">无法打开系统设置，请手动前往「设置 - 无线和网络」</string>
+    <string name="offline_open_settings_failed">无法打开设置，请在设备上打开「设置」后进入「无线和网络」</string>
 </resources>
