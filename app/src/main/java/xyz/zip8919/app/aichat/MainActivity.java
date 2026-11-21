@@ -3239,8 +3239,18 @@ public class MainActivity extends ThemedActivity {
             return smoothStream;
         }
 
+        /**
+         * 流式帧的 markdown → HTML。
+         *
+         * <p>走增量入口：只渲染「还没定稿的尾段」，已定稿的前缀直接复用上一帧的结果。
+         * 旧实现每帧把本轮全部正文重新解析一遍，成本随正文长度线性增长，
+         * 分片又快过它时渲染就永久落后——实时渲染开着时「越写越卡」的根源。
+         *
+         * <p>只用于流式（{@code cacheable=false}）：定稿渲染走整段，结果要进
+         * 渲染缓存、且不能被流式的前缀状态影响。
+         */
         public String renderHtml(String markdown) {
-            return MessageHtmlRenderer.contentToHtml(markdown, MainActivity.this, false);
+            return MessageHtmlRenderer.contentToHtmlIncremental(markdown, MainActivity.this);
         }
 
         public void setContent(int aiIndex, String content) {
@@ -4026,6 +4036,18 @@ public class MainActivity extends ThemedActivity {
     private volatile int smoothSettledGeneration = -1;
     /** 上一拍发给页面的整段片段：只推进度时不必重发同一份 HTML。 */
     private String smoothPushedHtml = "";
+    /**
+     * 上一帧已推送片段里「已经定稿的前缀」有多长（来自增量渲染的切点）。
+     *
+     * <p>流式每帧的 HTML 都是「前缀 + 尾段」，前缀逐字节不变、尾段每帧都在长。
+     * 整段比较必然不是前缀关系（差异就在尾段里），于是每帧都得把整份 HTML
+     * 重新过一遍 jsEscape、再跨桥复制一次——正文越长这一项越贵。
+     *
+     * <p>记住前缀长度后，只要这一帧的前缀仍是上一帧那个（增量渲染命中），
+     * 就可以只把「上一帧尾段 + 这一帧尾段」这一段发下去。页面侧自己决定
+     * 已显示到哪、要补哪几个单位，不需要完整源码。
+     */
+    private int smoothPushedPrefix = -1;
     /** 上一拍已经显示到的字符数（页面侧同一份片段上的切点）。 */
     private int smoothShownChars = -1;
     /**
@@ -4136,7 +4158,39 @@ public class MainActivity extends ThemedActivity {
             webViewEvalJs("__smoothStep(" + adv + "," + idx + ")");
             return;
         }
+        // 只发「上一帧尾段 + 这一帧尾段」：整段下发时每拍都要把几万字的 HTML
+        // 过一遍 jsEscape、再跨 JsBridge 复制一次，帧耗时随正文长度线性增长。
+        //
+        // 页面侧收到后自己拼回完整片段（它要拿完整源码做增量 unitize），
+        // 所以这里必须保证发出去的两段「首尾相接」。
+        final String prev = smoothPushedHtml;
+        final int prefixNow = MessageHtmlRenderer.incrementalPrefixLength();
+        final int prefixPrev = smoothPushedPrefix;
+        if (prefixNow > 0 && prefixNow == prefixPrev && prev.length() >= prefixNow
+                && arrived.length() >= prefixNow
+                && arrived.startsWith(prev.substring(0, prefixNow))) {
+            // 前缀没变：从「上一帧尾段的起点」开始发。这样既不会重复、也不会漏字，
+            // 且长度只有「两个尾段」，与正文总长无关。
+            final String delta = arrived.substring(prefixNow);
+            smoothPushedHtml = arrived;
+            smoothPushedPrefix = prefixNow;
+            smoothShownChars = adv;
+            webViewEvalJs("__smoothAppend('" + jsEscape(delta) + "'," + adv + ","
+                    + idx + "," + prefixNow + ")");
+            return;
+        }
+        // 上一帧整体是这一帧的前缀（尾段没变、只是又多了几个字）：同样只发增量
+        if (arrived.length() > prev.length() && arrived.startsWith(prev)) {
+            final String delta = arrived.substring(prev.length());
+            smoothPushedHtml = arrived;
+            smoothPushedPrefix = prefixNow;
+            smoothShownChars = adv;
+            webViewEvalJs("__smoothAppend('" + jsEscape(delta) + "'," + adv + ","
+                    + idx + "," + prev.length() + ")");
+            return;
+        }
         smoothPushedHtml = arrived;
+        smoothPushedPrefix = prefixNow;
         smoothShownChars = adv;
         webViewEvalJs("__smoothPush('" + jsEscape(arrived) + "'," + adv + "," + idx + ")");
     }

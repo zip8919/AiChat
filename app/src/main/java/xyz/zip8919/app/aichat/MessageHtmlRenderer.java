@@ -669,6 +669,95 @@ public class MessageHtmlRenderer {
         return msg.content == null ? "" : msg.content;
     }
 
+    /**
+     * 流式渲染的前缀缓存：同一段正文的前半部分只渲染一次。
+     *
+     * <p>流式每帧的正文都是「上一帧 + 末尾一小段」，但旧实现每帧把<b>全部</b>
+     * 正文重新走一遍 markdown 流水线，成本随正文长度线性增长；分片源源进来时
+     * 渲染就永远追不上，表现为「越写越卡，最后不动」（实时渲染开着时最明显）。
+     *
+     * <p>这里把「已定稿的前缀 → 已渲染的 HTML」记下来，下一帧只渲染新增的尾段。
+     * 切点由 {@link MarkdownChunker} 保证落在顶层块边界上，所以前缀单独渲染
+     * 与「前缀 + 尾段」一起渲染的前半部分逐字节相同。
+     *
+     * <p>只保留一份：流式是按时间单向推进的，跨请求、跨消息的前缀复用既没有
+     * 命中率，又会把几份长正文的 HTML 长期占在内存里（每份可能是几百 KB）。
+     */
+    private static String incSrc = "";
+    private static String incHtml = "";
+    /** 上一帧的切点：切点必须稳定，否则前缀每帧都变、增量永远命中不了。 */
+    private static int incCut = -1;
+    /** 记录时的颜色签名：换肤后前缀里的公式位图是旧色，必须作废。 */
+    private static String incSig = "";
+
+    /**
+     * 流式帧的渲染入口：能增量就增量，不能就整段。
+     *
+     * <p>不能增量情况一律退回整段渲染，正确性优先：
+     * <ul>
+     *   <li>正文带 {@code [thinking]} / {@code [tool]} 结构化块——这些块由
+     *       {@link #contentWithBlocks} 整体解析，切点语义与纯 markdown 不同；</li>
+     *   <li>{@link MarkdownChunker#splitPoint} 找不到安全切点（长代码块、
+     *       超长段落、正在思考中）；</li>
+     *   <li>尾段比上一帧还长一截且前缀没命中（换了一段回答、用户编辑了正文）。</li>
+     * </ul>
+     */
+    static String contentToHtmlIncremental(String text, Context ctx) {
+        if (text == null || text.isEmpty()) return "";
+        if (text.indexOf("[thinking]") >= 0 || text.indexOf(WebSearchTool.TRACE_START) >= 0) {
+            // 结构化块逐帧整体重建：块本身很短，重建代价远小于切点判断出错的风险
+            incSrc = "";
+            incHtml = "";
+            incCut = -1;
+            return contentToHtml(text, ctx, false);
+        }
+        int cut = MarkdownChunker.splitPoint(text, incCut);
+        if (cut < 0) {
+            // 没有安全切点（正文还短、或在长代码块/长段落里）：整段渲染。
+            // 这里不记前缀：整段都算「尾段」，下一帧的切点可能落在它内部。
+            incSrc = "";
+            incHtml = "";
+            incCut = -1;
+            return contentToHtml(text, ctx, false);
+        }
+        // 必须先走一次签名校验，incSig 与它比较才有意义
+        ensureCacheSig(ctx);
+        String sig = renderCacheSig;
+        String prefix = text.substring(0, cut);
+        if (prefix.equals(incSrc) && incHtml.length() > 0 && sig.equals(incSig)) {
+            // 前缀命中：只渲染尾段，前缀直接用上一帧的结果。
+            // 这是流式的常态路径——切点稳定，一次渲染的前缀会被后面几十帧复用。
+            incCut = cut;
+            return incHtml + MarkdownPipeline.render(text.substring(cut), ctx);
+        }
+        // 前缀是新的（第一帧、切点前移、换了一段回答）：渲染前缀并记下来。
+        //
+        // 前缀单独渲染的结果与「前缀 + 尾段」一起渲染时的前半段逐字节相同，
+        // 由 MarkdownChunker 的切点条件保证（顶层块边界 + 空行之后、不与上一个块
+        // 同类可合并、不在围栏代码 / 未闭合的结构化块里）——已用整篇一致性用例验证。
+        // 注意不要「整段渲染一遍再切前缀」：那等于白渲染一次，增量就没意义了。
+        String prefixHtml = MarkdownPipeline.render(prefix, ctx);
+        rememberPrefix(prefix, prefixHtml, sig);
+        incCut = cut;
+        return prefixHtml + MarkdownPipeline.render(text.substring(cut), ctx);
+    }
+
+    /**
+     * 最近一次增量渲染里「定稿前缀」的长度；0 表示这一帧是整段渲染的。
+     *
+     * <p>宿主用它决定能不能只发增量：前缀没变时，两帧的 HTML 从这一位往后才可能
+     * 不同，发「上一帧尾段 + 这一帧尾段」就够了，不必整份重发。
+     */
+    static int incrementalPrefixLength() {
+        return incHtml.length();
+    }
+
+    private static void rememberPrefix(String src, String html, String sig) {
+        incSrc = src;
+        incHtml = html;
+        incSig = sig;
+    }
+
     public static String contentToHtml(String text, Context ctx, boolean cacheable) {
         if (text == null || text.isEmpty()) return "";
         AppearanceManager am = null;

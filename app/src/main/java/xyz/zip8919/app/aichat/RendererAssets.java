@@ -450,9 +450,25 @@ final class RendererAssets {
             "if(cn.indexOf('stream-tail')>=0)return true;" +
             "if(cn.indexOf('stream-base')>=0)return false;" +
             "p=p.parentElement||p.parentNode;}return false;};" +
+            // 同一个容器上、连续多少帧内不重复扫：流式每帧都会调到这里，而思考块与
+            // 工具卡片只在「块数变化」或「用户点了折叠」时才需要重新套状态。
+            // 旧实现每帧 querySelectorAll 一遍整棵 tail 子树 —— 长回答里 tail 有
+            // 几千个节点，这个扫描本身就随正文线性增长，是「越写越卡」的第二个来源。
+            // 用内容指纹（子节点数 + 末节点）判断有没有新块进来：没有就整趟跳过。
+            "window.__smScanMem=window.__smScanMem||{};" +
+            "window.__smScanKey=function(root,cls){" +
+            "var n=root.querySelectorAll?root.querySelectorAll(cls):null;" +
+            "return n?(n.length+'/'+(n.length?n[n.length-1].textContent.length:0)):'';};" +
             "window.applyThinkingStates=function(root){" +
             "if(!root||!root.querySelectorAll)return;" +
             "var w=root.querySelectorAll('.thinking-wrap');" +
+            // 没有思考块就没什么可恢复的：绝大多数流式帧都走这里直接返回
+            "if(w.length===0)return;" +
+            // 块数与末块文本长度都没变，说明这一帧没有新增/改写思考块；
+            // 只有用户点了折叠才需要重扫，那个路径走 toggleThinking 自己处理
+            "var sig=w.length+'/'+(''+w[w.length-1].textContent).length;" +
+            "if(window.__thinkSig===sig&&window.__thinkSigRoot===root)return;" +
+            "window.__thinkSig=sig;window.__thinkSigRoot=root;" +
             "for(var i=0;i<w.length;i++){" +
             "var k=w[i].getAttribute('data-think-key');" +
             "var b=w[i].querySelector('.thinking-block');" +
@@ -482,11 +498,18 @@ final class RendererAssets {
             "var t=parseInt(btn.getAttribute('data-tok'),10);" +
             "if(!(t>0))t=Math.max(1,Math.round(b.textContent.length*2/3));" +
             "btn.textContent='@@L_EXPAND@@'+window.fmtTok(t)+' tokens）──';}" +
-            "if(k)window.__thinkOpen[k]=open;};" +
+            "if(k)window.__thinkOpen[k]=open;" +
+            // 手动改过状态，指纹缓存作废：下一帧必须重新套一遍
+            "window.__thinkSig=null;};" +
             "window.__toolOpen=window.__toolOpen||{};" +
             "window.applyToolStates=function(root){" +
             "if(!root||!root.querySelectorAll)return;" +
             "var cards=root.querySelectorAll('.tool-card');" +
+            "if(cards.length===0)return;" +
+            // 与思考块同理：卡片集合没变就不必再扫一遍
+            "var tsig=cards.length+'/'+(''+cards[cards.length-1].textContent).length;" +
+            "if(window.__toolSig===tsig&&window.__toolSigRoot===root)return;" +
+            "window.__toolSig=tsig;window.__toolSigRoot=root;" +
             "for(var i=0;i<cards.length;i++){" +
             "var k=cards[i].getAttribute('data-tool-key');" +
             "var b=cards[i].querySelector('.tool-body');" +
@@ -558,7 +581,8 @@ final class RendererAssets {
             "var a=h.querySelector('.tool-arrow');var hint=h.querySelector('.tool-hint');" +
             "if(a)a.textContent=open?'▼':'▶';" +
             "if(hint)hint.textContent=open?'':'@@L_TAP@@';" +
-            "if(k)window.__toolOpen[k]=open;};" +
+            "if(k)window.__toolOpen[k]=open;" +
+            "window.__toolSig=null;};" +
             "window.toggleSources=function(h){" +
             "var b=h.nextElementSibling;if(!b)return;" +
             "var open=b.style.display==='none';" +
@@ -674,12 +698,9 @@ final class RendererAssets {
             // 会永远停在视口下方，看起来就是「滚到底了但最后两行被挡住」。
             // 上限外再给 200px，剩下的交给浏览器自己夹。同一次任务里不重复设置：
             // 值没变时写 scrollTo 也会触发一次排版，压帧率。
-            "var maxY=Math.max(document.documentElement.scrollHeight||0," +
-            "document.body.scrollHeight||0);" +
-            "var topY=maxY-(document.documentElement.clientHeight||document.body.clientHeight||0)+200;" +
-            "if(topY<maxY)topY=maxY;" +
-            // 同一次任务里不重复设置：值没变时写 scrollTo 也会触发一次排版，压帧率。
-            // 实际位置没跟上（新内容又把页面顶高了）就再补一次，直到贴底或连续两次无效。
+            // 读 scrollHeight / clientHeight 会强制排版（回流）。这里必须只读一次：
+            // 旧实现在同一个函数体里把同一段计算写了两遍，每帧多出两次同步回流，
+            // 而流式每 100ms 就调一次——长回答上这是掉帧的固定开销。
             "var maxY=Math.max(document.documentElement.scrollHeight||0," +
             "document.body.scrollHeight||0);" +
             "var topY=maxY-(document.documentElement.clientHeight||document.body.clientHeight||0)+200;" +
@@ -1454,6 +1475,30 @@ final class RendererAssets {
             "var grew=src!==st.arrived;" +
             "st.arrived=src;st.show=a;" +
             "if(grew){st.units=window.__smUnitize(src,st);}" +
+            "if(a>st.chars)a=st.chars;st.show=a;" +
+            "window.__smAdvance(st,t,a);return true;};" +
+            // 只追加到达的增量：与 __smoothPush 的唯一区别是「上一帧的片段是这一帧的前缀」，
+            // 由调用方保证。正文写到几万字时，每拍要跨 JsBridge 的字节数从「总长度」
+            // 降到「本次新增长度」，帧耗时不再随正文增长。
+            //
+            // 必须先把旧片段与新片段拼成完整的 arrived：__smUnitize 依赖 st.arrived
+            // 判断能不能只解析尾段（st.fi 之后的裸文本），跳过拼接会让前缀丢字。
+            // replaceFrom 可选：这一帧的片段从该下标起才可能不同，之前的都是上一帧的原样
+            // 前缀。给了它就把 arrived 按前缀截断再接 delta，而不是直接拼接——流式的
+            // 尾段每帧都在长（"<p>abc" → "<p>abcd"），只拼会叠出旧尾段。
+            "window.__smoothAppend=function(delta,adv,idx,replaceFrom){" +
+            "var st=window.__sm;if(!st.on)return false;" +
+            "var c=window.__aiContent(idx);if(!c)return false;" +
+            "var t=c.querySelector('.stream-tail');if(!t)return false;" +
+            "if((''+t.className).indexOf('plain')>=0)return false;" +
+            "if(!delta)return window.__smoothPush('',adv,idx,t);" +
+            "var base=st.arrived||'';" +
+            "if(replaceFrom!=null&&replaceFrom>=0&&replaceFrom<=base.length){" +
+            "base=base.substring(0,replaceFrom);}" +
+            "var src=base+delta;" +
+            "var a=adv|0;if(a<0)a=0;" +
+            "st.arrived=src;st.show=a;" +
+            "st.units=window.__smUnitize(src,st);" +
             "if(a>st.chars)a=st.chars;st.show=a;" +
             "window.__smAdvance(st,t,a);return true;};" +
             // 纯文本帧：保持当前进度，只把到达的全文记下来

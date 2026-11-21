@@ -16,11 +16,18 @@ package xyz.zip8919.app.aichat;
  *
  * <p>处理原则：<b>不猜模型意图，只保证页面不变形</b>。
  * <ul>
- *   <li>块里出现成体系的页面元素（style/script/html/head/body/iframe/form 等）：
+ *   <li>块里出现成体系的页面元素（style/script/html/head/body/iframe/form/input 等）：
  *       整块转义成代码块，内容一个字不少，用户看到的就是「这段是代码」；</li>
  *   <li>其余零散标签：保留标签本身（{@code <br>}、{@code <details>} 这类有用），
- *       去掉事件属性、脚本式链接与能改布局的 style 声明。</li>
+ *       去掉事件属性、脚本式链接与能改布局的 style 声明；</li>
+ *   <li>标签之间的文本原样带过、绝不二次转义：{@code &lt;} 再转一次会变成
+ *       {@code &amp;lt;，屏幕上直接露出「&lt;div&gt;」这样的标签源码。</li>
  * </ul>
+ *
+ * <p><b>两条路径，别混用</b>：本类只处理「模型写在回答里的原始 HTML」。
+ * 应用自己拼出来的界面 HTML（思考折叠条、工具卡片、代码块）不经过这里——
+ * 那些标签是界面的骨架，套一遍过滤器会把 {@code details}/{@code summary}/带 id 的
+ * 元素剥掉，折叠区与卡片就消失了。
  */
 final class HtmlSanitizer {
 
@@ -39,6 +46,30 @@ final class HtmlSanitizer {
             "html", "base", "link", "meta", "form", "input", "button", "textarea",
             "select", "option", "optgroup", "frame", "frameset", "applet", "basefont",
             "marquee", "param", "source", "track", "template", "noscript", "colgroup",
+    };
+
+    /**
+     * 允许原样重建的标签：都是「语义 + 排版」用途，改不了页面结构与交互。
+     *
+     * <p>白名单而不是黑名单，是为了让未知/拼错的标签按文本展示——模型想写
+     * {@code <details>} 被写坏成 {@code <detail>} 时，用户看到的是这段源码，
+     * 而不是一个半残的折叠框。
+     */
+    private static final String[] KEEP_TAGS = {
+            // 行内语义
+            "b", "strong", "i", "em", "u", "s", "del", "ins", "mark", "small", "big",
+            "sub", "sup", "code", "kbd", "samp", "var", "abbr", "cite", "q", "dfn",
+            "span", "a", "br", "wbr", "img", "ruby", "rt", "rp", "bdi", "bdo",
+            // 块级排版
+            "p", "div", "blockquote", "pre", "hr", "ul", "ol", "li", "dl", "dt", "dd",
+            "h1", "h2", "h3", "h4", "h5", "h6", "figure", "figcaption",
+            // 表格
+            "table", "caption", "thead", "tbody", "tfoot", "tr", "th", "td",
+            "col", "colgroup",
+            // 折叠区
+            "details", "summary",
+            // 媒体（只留安全 src）
+            "video", "audio", "picture",
     };
 
     /** style 属性里允许保留的声明：纯排版，动不了页面结构。 */
@@ -109,12 +140,24 @@ final class HtmlSanitizer {
             String name = tagName(tag);
             if (name == null) {
                 out.append(tag);          // 注释、doctype、<?xml>
-            } else if (!isDrop(name)) {
+            } else if (!isDrop(name) && isKnown(name)) {
                 out.append(rebuild(tag, name));
+            } else if (!isDrop(name)) {
+                // 不认识的标签按文本展示：原样转义，能看见「这里原本是个标签」，
+                // 又不会让浏览器按未知元素去猜结构
+                out.append(Html.esc(tag));
             }
+            // 丢掉危险标签（含成对标签的结束标签，如 </script>）
             i = gt + 1;
         }
         return out.toString();
+    }
+
+    private static boolean isKnown(String name) {
+        for (int i = 0; i < KEEP_TAGS.length; i++) {
+            if (KEEP_TAGS[i].equals(name)) return true;
+        }
+        return false;
     }
 
     private static boolean isDrop(String name) {
