@@ -394,6 +394,7 @@ KEYSTORE_PASSWORD=<口令> KEY_ALIAS=mc ./tools/build_debug.sh
 1. 改 `app/build.gradle`：`versionCode` 单调 +1，`versionName` 按语义化递增。
 2. 更新 `.github/RELEASE_NOTES.md`：CI 用 `body_path` 把它当 Release 正文。写用户能看懂的变更，不写内部实现过程。
 3. 提交并推送到 `master`。
+   - 推送前先读远端 `master` 的最新提交，确认本地已包含远端全部改动。沙箱里 `git push` / `git fetch` 常因网络中断失败，此时用 GitHub Git Data API：`blobs` → `tree`（`base_tree` 取远端最新 tree）→ `commit` → 更新 ref。**跳过读远端这一步，会把别人刚推上去的提交覆盖掉。**
 4. 在 `master` 当前提交上打标签 `vX.Y.Z`，推送标签。
 5. 等 GitHub Actions 的 `Release APK` 跑完，**以最终状态为准**，不中途假定成功。
 6. 确认 Release 里有 5 个 APK + `speedtest.txt`。不从 GitHub 回下载正式包，不校验包内容。
