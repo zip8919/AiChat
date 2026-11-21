@@ -261,24 +261,18 @@ final class RendererAssets {
             // 未显示的部分不建节点——旧版把剩余内容挂在 visibility:hidden 的占位层里，
             // 每帧整段重解析一次 HTML，既拖慢低端机，也让滚动高度先跳到底、文字后到。
             ".smooth-shown{word-wrap:break-word;}" +
-            // 逐字渐显的深浅：新浮出的字从半透明过渡到正文色。
+            // 逐字渐显的深浅：末尾的字浅、往前逐渐加深。
             //
-            // 用 opacity 而不是写死一个浅色的 color：4.4 的 WebView 重绘 color
-            // 过渡很贵，而且必须写死色值——#b4bcc4 在深色主题下是亮灰，浅色主题下
-            // 才是浅灰，两套主题没法共用。opacity 只影响透明度，字色继续继承主题，
-            // 浅色主题上是「淡灰→深灰」，深色主题上是「暗灰→浅灰」，都看得出过渡。
+            // 深浅不用 CSS 过渡写死：定了时长，打字速度一快，刚浮出的字还没过渡完
+            // 就已经被推到「末尾之外」，屏幕上就是一串同样灰度的字。现在由脚本
+            // 按「离末尾几个字」逐帧给每个字设透明度（越靠末尾越浅，末尾几乎看不见），
+            // 读者看到的就是一段连续变淡的尾巴，而不是一块同色的灰。
             //
-            // 每个字独立成 span 且创建后不再重建，过渡才会真的走完；旧实现每帧
-            // 重建整段 innerHTML，过渡刚起步就被销毁，屏幕上完全没有深浅变化。
-            ".stream-new{opacity:.5;transition:opacity .45s linear;" +
-            "-webkit-transition:opacity .45s linear;}" +
-            // 逐字浮现：每一小段从浅到深淡入。时长拉到 .32s、曲线取标准缓入缓出，
-            // 相邻几十个小段的淡入区间互相叠着，视觉上就是一条连续的「由浅变深」
-            // 渐变带，而不是一块块往外冒。老 WebView 不支持动画时只是直接出现，
-            // 文字本身不依赖动画，不会出现「动了一遍变成空白」
-            "@keyframes acSmoothIn{from{opacity:0}to{opacity:1}}" +
-            ".stream-chunk{animation:acSmoothIn .32s cubic-bezier(.4,0,.2,1);" +
-            "-webkit-animation:acSmoothIn .32s cubic-bezier(.4,0,.2,1);}" +
+            // 字色继续继承主题：透明度不影响色相，深浅主题下都是「淡→浓」。
+            // 不写死过渡时长：4.4 的 WebView 重绘 opacity 过渡很贵，一百多个字同时
+            // 过渡时每帧都要合成一层，低端机上会明显掉帧，所以这里只保留一组
+            // 静态透明度，由脚本逐帧改写。
+            ".stream-new{opacity:1;}" +
             // 「直接显示」不是网页里的一条提示，而是主界面输入框左上方那颗小气泡
             // （与「回到底部」共用一套外观），由页面在文档底部留出一条空白给它浮上来：
             // 固定悬浮的气泡会盖住正在输出的最后一行字。
@@ -672,9 +666,25 @@ final class RendererAssets {
             // 非强制滚动时只看用户意图，不看距离：内容长高造成的落后必须继续跟随，
             // 否则生成越快越容易「自动滚动停住」。用户真的往上翻时 __userUp 已置位。
             "if(!force&&window.__userUp)return;" +
-            "window.scrollTo(0,Math.max(" +
-            "document.documentElement.scrollHeight||0," +
-            "document.body.scrollHeight||0));" +
+            // 浏览器允许滚动的范围是「内容高 - 视口高」，直接写内容高会被夹到上限；
+            // 夹不上去时（低端机上 innerHeight 与外层布局偶尔对不上）末尾那几行
+            // 会永远停在视口下方，看起来就是「滚到底了但最后两行被挡住」。
+            // 上限外再给 200px，剩下的交给浏览器自己夹。同一次任务里不重复设置：
+            // 值没变时写 scrollTo 也会触发一次排版，压帧率。
+            "var maxY=Math.max(document.documentElement.scrollHeight||0," +
+            "document.body.scrollHeight||0);" +
+            "var topY=maxY-(document.documentElement.clientHeight||document.body.clientHeight||0)+200;" +
+            "if(topY<maxY)topY=maxY;" +
+            // 同一次任务里不重复设置：值没变时写 scrollTo 也会触发一次排版，压帧率。
+            // 实际位置没跟上（新内容又把页面顶高了）就再补一次，直到贴底或连续两次无效。
+            "var maxY=Math.max(document.documentElement.scrollHeight||0," +
+            "document.body.scrollHeight||0);" +
+            "var topY=maxY-(document.documentElement.clientHeight||document.body.clientHeight||0)+200;" +
+            "if(topY<maxY)topY=maxY;" +
+            "var real=(document.documentElement.scrollTop||document.body.scrollTop||0)" +
+            "+document.documentElement.clientHeight;" +
+            "if(window.__smLastTop!==topY||real<maxY-40){" +
+            "window.__smLastTop=topY;window.scrollTo(0,topY);}" +
             // 滚到底了，气泡立刻收起来，不用等下一次 scroll 事件（force 滚动不一定触发）
             "if(window.Android&&Android.setScrollBubble)Android.setScrollBubble(false);};" +
             "window.runScripts=function(root){" +
@@ -901,6 +911,7 @@ final class RendererAssets {
             // 骨架不存在时（收尾后 updateLastMsg 平铺、续跑的历史消息）必须现建：
             // 直接 return 会让 Java 侧以为 base 已推送，续跑时工具卡片永远不出现。
             "window.streamCommitTail=function(idx){" +
+            "window.__smSettle(idx>=0?window.__aiContent(idx):null);" +
             // commit 已把本轮 tail 整体搬进 base，hold 期间缓存的那一帧也在其中。
             // 不清掉的话，抬手后 __flushPending 会把旧 tail 再写回新 tail，正文重复一遍。
             // 只清「帧缓存」，不清纯文本前缀：前缀就是上一轮已经流出去的正文，
@@ -996,21 +1007,49 @@ final class RendererAssets {
             // 折叠条外面、样式接不上（「展开思考不是蓝色、点不动」就是这么来的）。
             //
             // 现在一律按真实结构进出栈，没有任何「等块闭合」的闸门；已显示的节点
-            // 只追加不重建，结构变了（markdown 补全）才整段重画，重画时已显示过的
-            // 字不再带渐入过渡，屏幕上不会闪。
+            // 只追加不重建。
+            //
+            // 「回答写了一半整段消失、回到顶部再一个字一个字地长回来」的根因不在这里，
+            // 而在调用方：新一轮开始、甚至只是补一帧 base，都会把渐显缓冲清空重画。
+            // 现在重新起步由 Java 侧用一个稳定键压制（__smoothStart 的 key），
+            // 这里只负责「同一份内容永远往同一个方向长」。
             "window.__sm={on:false,arrived:'',show:0,units:[],chars:0,cut:0," +
-            "stack:[],grad:[],root:null,cur:0,paintUnits:null,fadeFrom:0};" +
+            "stack:[],root:null,cur:0,paintUnits:null,fi:null,gi:null};" +
             "window.__smEsc=function(c){" +
             "return c==='&'?'&amp;':(c==='<'?'&lt;':(c==='>'?'&gt;':c));};" +
             // 正文 → 最小单位：每个字符一个单位、每段标签一个单位。
+            // 每个单位记下它在源码里的位置（at），末段内容没变时直接截断复用前缀，
+            // 不必重新解析整份 HTML——长回答每帧都重新解析才是「越写越慢」的主因。
             //
             // 为什么不直接对 DOM 做文本差量：Chromium 30 对文本节点只替换不更新，
             // 每次切点前移都要整段重做，公式位图、代码高亮、展开状态全跟着重建，
             // 渐显就退化成「整段一闪一闪」。这里一帧只解析一次 HTML，之后所有帧
             // 只在单位序列上移动切点。
-            "window.__smUnitize=function(html){" +
-            "var box=document.createElement('div');box.innerHTML=html||'';" +
-            "var units=[];" +
+            "window.__smUnitize=function(html,st){" +
+            "var s=html||'';" +
+            // 末段一旦不是文本（HTML 已闭合、或尾部是卡片），就不再复用：
+            // 前缀必须停在标签边界上，截半截标签再解析会把后面的结构全带歪。
+            "var reuse=st&&st.fi!=null&&st.fi>=0&&st.fi<=s.length&&s.indexOf('<',st.fi)<0" +
+            "&&st.paintUnits&&st.cur<=st.units.length;" +
+            "if(!reuse){" +
+            // 全量重建也必须把 fi 记下来：它是「末尾那段裸文本」的起点，
+            // 清成 null 的话下一帧又只能全量解析，长回答每帧重解析一遍 HTML。
+            "var all=window.__smParse(s,0);" +
+            "if(st){st.chars=all.cnt;st.fi=all.fi;}" +
+            "return all.units;}" +
+            // 续写：只解析新增的那一小段，单位接到已有序列后面
+            "var add=window.__smParse(s.substring(st.fi),st.fi);" +
+            "var units=st.units;" +
+            "if(units.length>st.cur)units.length=st.cur;" +
+            "for(var k=0;k<add.units.length;k++)units.push(add.units[k]);" +
+            "st.fi=add.fi;st.chars=add.cnt;" +
+            "return units;};" +
+            // 把一段 HTML 解析成单位序列；nat 是这段源码在整个正文里的起点。
+            // 每个单位记下位置（at）：续写时只解析尾部，不必每帧重解析整份 HTML——
+            // 长回答每帧都重新解析才是「越写越慢」的主因。
+            "window.__smParse=function(src,nat){" +
+            "var box=document.createElement('div');box.innerHTML=src;" +
+            "var units=[];var cnt=0;var fi=nat;" +
             // 空元素没有闭合标签，单独标 void：既不压栈，也不生成关闭单位
             "var VOID={br:1,img:1,hr:1,input:1,meta:1,link:1,source:1,wbr:1," +
             "area:1,base:1,col:1,embed:1,param:1,track:1};" +
@@ -1025,33 +1064,43 @@ final class RendererAssets {
             "keep+=' '+at[a].name+'=\"'+(''+at[a].value)" +
             ".replace(/&/g,'&amp;').replace(/\"/g,'&quot;')+'\"';}" +
             "var vo=VOID[nm]?1:0;" +
-            "units.push({tok:'<'+nm+keep+'>',open:nm+keep,tag:nm,void:vo});" +
-            "if(!vo){add(n);units.push({tok:'</'+nm+'>',close:nm});}}" +
+            "units.push({tok:'<'+nm+keep+'>',open:nm+keep,tag:nm,void:vo,at:nat});" +
+            "nat+=units[units.length-1].tok.length;fi=nat;" +
+            "if(!vo){add(n);units.push({tok:'</'+nm+'>',close:nm,at:nat});" +
+            "nat+=nm.length+3;fi=nat;}}" +
             "else if(n.nodeType===3){" +
             "var tx=''+n.nodeValue;" +
-            "for(var q=0;q<tx.length;q++)units.push({ch:tx.charAt(q)});}" +
-            "else if(n.nodeType===8){units.push({tok:'<!--'+n.nodeValue+'-->'});}}};" +
+            "for(var q=0;q<tx.length;q++){units.push({ch:tx.charAt(q),at:nat});nat++;cnt++;}" +
+            "fi=nat;}" +
+            "else if(n.nodeType===8){units.push({tok:'<!--'+n.nodeValue+'-->',at:nat});" +
+            "nat+=n.nodeValue.length+7;fi=nat;}}};" +
             "add(box);" +
-            "return units;};" +
+            "return {units:units,fi:fi,cnt:cnt};};" +
             // 重画：只往已显示区追加新增单位，已画过的节点一律不动。
             "window.__smPaint=function(st,t){" +
             "var root=t.querySelector('.smooth-shown');" +
             "if(!root){root=document.createElement('div');root.className='smooth-shown';" +
-            "t.insertBefore(root,t.firstChild);}" +
+            "if(t.firstChild)t.insertBefore(root,t.firstChild);else t.appendChild(root);}" +
+            // 显示层一旦被换掉（换版、tail 重建），旧栈里的元素全作废：
+            // 不重置的话，下一次追加会写进一个已经脱离文档的节点，
+            // 屏幕上就一直停在旧内容，看起来像「卡住了」。
+            "if(st.root&&st.root!==root){st.root=null;st.cur=0;st.gi=null;st.fi=null;" +
+            "st.paintUnits=null;st.stack=[];}" +
             "var u=st.units,cut=st.cut;" +
             "var same=(st.root===root)&&cut>=st.cur&&window.__smSamePrefix(st,u);" +
+            "var prevCur=st.cur;" +
             "if(!same){" +
-            // 结构变化才整段重画；重画时把「原本已经显示过的字数」记进 fadeFrom，
-            // 这些字直接落成文本，不再走 0.35 → 1 的淡入（否则每帧都闪一次）
-            "var prev=st.cur|0;" +
-            "root.innerHTML='';st.root=root;st.stack=[{el:root,n:''}];st.cur=0;st.grad=[];" +
-            "st.fadeFrom=prev<cut?prev:cut;" +
-            "}else{st.fadeFrom=st.cur;}" +
-            "window.__smAppend(st,u,st.cur,cut);" +
+            // 结构变了（markdown 补全、代码高亮落地）才整段重画
+            "root.innerHTML='';st.root=root;st.stack=[{el:root,n:''}];st.cur=0;" +
+            "st.gi=null;prevCur=0;" +
+            "}" +
+            // 从「已经画到哪」接着画；重画后从 0 开始整段补一次
+            "window.__smAppend(st,u,prevCur,cut);" +
             "st.cur=cut;st.paintUnits=u;" +
+            "window.__smFade(st);" +
             "applyThinkingStates(t);" +
             // 正文已经出来，进度提示（正在整理搜索结果…）就该收掉：
-            // 它挂在 .content 之后，不收的话正文会一直显示在它上方
+            // 它挂在 .content 之后，不收的话正文会一直显示在提示上方
             "window.__clearStatusIn(t);" +
             // 跟着内容走：逐字期间高度一直在长，不滚就停在半截。
             // 100ms 一次足够跟手：滚到底要读 scrollHeight（强制排版），
@@ -1061,36 +1110,44 @@ final class RendererAssets {
             "window.__smScrollAt=now;if(!window.__userUp)smartScrollToBottom();}};" +
             // 前缀是否与上一帧绘制时一致：一致才能接着往后追加
             "window.__smSamePrefix=function(st,u){" +
-            "var old=st.paintUnits;if(!old)return false;" +
+            "var old=st.paintUnits;" +
+            // 没有上一帧、或单位序列被增量接长（旧数组后面多了新单位）都不能
+            // 当成「前缀一致」：此时 u 与 old 是同一个对象，逐项比较必然相等，
+            // 但屏幕上画出来的只有 st.cur 之前的内容——后面那截永远不会被补上。
+            "if(!old||old===u)return false;" +
             "if(st.cur>u.length||st.cur>old.length)return false;" +
             "for(var i=0;i<st.cur;i++){" +
             "var a=u[i],b=old[i];" +
             "if(a.ch!==b.ch||a.tok!==b.tok)return false;}" +
             "return true;};" +
-            // 追加单位：逐字建 span（各自带过渡），标签按真实结构进出栈。
+            // 重画后找回上一个仍在文档里的渐变节点，接着往后挂
+            "window.__smLastNew=function(root){" +
+            "var ns=root.querySelectorAll('.stream-new');" +
+            "return ns.length?ns[ns.length-1]:null;};" +
+            // 追加单位：逐字建 span，标签按真实结构进出栈。
             // 不写闭合标签：DOM 元素本身就是「开着」的，把追加位置退回父级
             // 就等于闭合了它，序列化时浏览器会自动补全。
+            //
+            // 渐显范围由 __smFade 统一设置，这里只负责建节点。旧版把「最近 36 字」
+            // 降级成裸文本、却从不收掉旧 span 的 .stream-new，于是正文越长、
+            // 带半透明样的字越多——「工具上方最后几个字一直是灰色」就是这么来的。
             "window.__smAppend=function(st,u,from,to){" +
-            // 渐变窗口：只有最近 36 个字带过渡。节点数不随回答长度无限增长，
-            // 窗口外的旧字降级成纯文本节点（合并进相邻文本节点）
-            "var GRAD=36;" +
             "for(var i=from;i<to;i++){" +
             "var x=u[i];" +
             "var top=st.stack[st.stack.length-1].el;" +
+            "var lastCh=null;" +
             "if(x.ch!==undefined){" +
-            "if(i<st.fadeFrom){" +
+            // 直接 appendChild：Chromium 30 上 innerHTML 那一套会把相邻节点合并，
+            //「按节点定位渐变窗口」就失效了
+            // appendData 而不是 appendChild：同一段连续文字写进一个文本节点，
+            // 否则 WebView 会把几百个相邻文本节点一个个当排版单元，长回答明显变卡
             "var lc=top.lastChild;" +
-            "if(lc&&lc.nodeType===3)lc.appendData(x.ch);" +
-            "else top.appendChild(document.createTextNode(x.ch));" +
-            "continue;}" +
-            "var sp=document.createElement('span');sp.className='stream-new';" +
-            "sp.appendChild(document.createTextNode(x.ch));top.appendChild(sp);" +
-            "st.grad.push(sp);" +
-            "while(st.grad.length>GRAD){" +
-            "var g=st.grad.shift();if(!g.parentNode)continue;" +
-            "var tn=g.textContent;var prev=g.previousSibling;" +
-            "if(prev&&prev.nodeType===3){prev.appendData(tn);g.parentNode.removeChild(g);}" +
-            "else g.parentNode.replaceChild(document.createTextNode(tn),g);}" +
+            "var tn=(lc&&lc.nodeType===3)?(lc.appendData(x.ch),lc):null;" +
+            "if(!tn){tn=document.createTextNode(x.ch);top.appendChild(tn);}" +
+            // 渐变锚点指在文本节点上，由 __smFade 按需切开成 span。
+            // 不再「一字一 span」：一屏几百个 span 在 4.4 的 WebView 上排版很贵，
+            // 而且每个都要单独设 opacity，滚动跟随时会明显掉帧。
+            "st.gi=tn;lastCh=tn;" +
             "continue;}" +
             "if(x.close!==undefined){" +
             "for(var k=st.stack.length-1;k>0;k--){" +
@@ -1103,14 +1160,71 @@ final class RendererAssets {
             "continue;}" +
             // 注释 / 无法归类的原样片段
             "if(x.tok!==undefined){top.insertAdjacentHTML('beforeend',x.tok);}" +
-            "}};" +
+            "}" +
+            // 追加结束后把锚点指到「最后一个字所在的元素」：本帧新写的字如果
+            // 落在新开的代码块/段落里，锚点还停在上一个段落的话，渐变窗口
+            // 就找不到这一帧真正的尾巴，新字会一直停在正文色、看不出渐现。
+            "if(lastCh&&lastCh.parentNode)st.gi=lastCh;};" +
+            // 渐变窗口：从「最新显示的那个字」往前数 GRAD 个字保留浅色，
+            // 再往前的一律落成正文色。
+            // 窗口是按节点位置倒着数的，不是按创建顺序：这样窗口里永远是「末尾那一串」，
+            // 不会因为答得长、写得快而把整页字都留在半透明状态。
+            "window.__smFade=function(st){" +
+            "if(!st.root)return;" +
+            "var GRAD=24;" +
+            // 这一帧新写的字所在的那个裸文本节点就是锚点。
+            // 上一帧切开之后，新字跟在「最后一个渐变 span」后面，锚点要顺着找回来。
+            "var g=st.gi;" +
+            "while(g&&g.nodeType===1&&(''+g.className).indexOf('stream-new')>=0){" +
+            "g=g.lastChild;}" +
+            "var anchor=(g&&g.nodeType===3&&g.parentNode)?g:null;" +
+            // 先收掉旧的渐变字：留最后一颗当「认领」标记，用来认出同一个括号里
+            // 已经切好的窗口；更早的全部落回裸文本，节点数不随回答长度增长
+            "var old=st.root.getElementsByTagName('span'),lastSp=null,list=[];" +
+            "for(var i=old.length-1;i>=0;i--){" +
+            "if((''+old[i].className).indexOf('stream-new')<0)continue;" +
+            "list.push(old[i]);}" +
+            // 保留「最后一个」当锚点：新写的字就接在它后面
+            "for(var i=0;i<list.length;i++){" +
+            "var sp=list[i];" +
+            "if(i===0){lastSp=sp;continue;}" +
+            "var tn=sp.textContent,prev=sp.previousSibling;" +
+            "if(prev&&prev.nodeType===3){prev.appendData(tn);sp.parentNode.removeChild(sp);}" +
+            "else sp.parentNode.replaceChild(document.createTextNode(tn),sp);}" +
+            // 收完之后把锚点交给「最后一个字」：新写的字总是接在它后面
+            "if(!anchor||!anchor.parentNode)anchor=lastSp;" +
+            // 从锚点取最后 GRAD 个字切开：同一段文本一旦切开，切出来的字就在
+            // 锚点后面，下一次锚点自然移到新写的字上，窗口随之前移
+            "if(anchor){" +
+            "var t=anchor.nodeValue||'';" +
+            "var keep=t.length>GRAD?t.length-GRAD:0;" +
+            "var tail=t.substring(keep);" +
+            "if(keep>0)anchor.nodeValue=t.substring(0,keep);" +
+            "else anchor.nodeValue='';" +
+            "var fr=document.createDocumentFragment();" +
+            "for(var q=0;q<tail.length;q++){" +
+            "var sp2=document.createElement('span');sp2.className='stream-new';" +
+            // 数字越小离末尾越近、越浅：末尾的字几乎看不见，往前一路加深到正文色
+            "sp2.style.opacity=(Math.round(((tail.length-q)/GRAD)*10)/10);" +
+            "sp2.appendChild(document.createTextNode(tail.charAt(q)));" +
+            "fr.appendChild(sp2);}" +
+            // 空文本节点留着（挪到前面），下次的锚点还能顺着「最后一个 span」找回来
+            "anchor.parentNode.insertBefore(fr,anchor.nextSibling);}" +
+            "st.gi=null;};" +
+            // 换段之前把尾巴上的字一次落定：换段后显示区会被搬走，渐变窗口
+            // 从零开始，留在旧位置的半透明字就再也没人加深了（停在灰色）。
+            "window.__smSettle=function(t){" +
+            "if(!t)return;" +
+            "var ns=t.querySelectorAll?t.querySelectorAll('.stream-new'):[];" +
+            "for(var i=0;i<ns.length;i++){ns[i].style.opacity=1;}" +
+            "window.__sm.gi=null;};" +
             // 每帧推进：把切点按「已到达字符数」移到该到的位置
             "window.__smAdvance=function(st,t,adv){" +
             "var a=adv|0,cnt=0,i=0,u=st.units;" +
             "for(;i<u.length;i++){if(cnt>=a)break;if(u[i].ch!==undefined)cnt++;}" +
             "st.cut=i;" +
             "window.__smPaint(st,t);return true;};" +
-            // 纯文本渐显：只在正文节点上挪切点，不重建任何结构。
+            // 纯文本渐显：只在正文节点上挪内容，不重建任何结构。
             //
             // 关掉实时渲染时 tail 有两种形态：直接承载正文（这一轮还没调工具），
             // 或 tail > .tool-live(卡片) + .stream-plain(正文)。后者只能改最后一段
@@ -1123,19 +1237,53 @@ final class RendererAssets {
             "if(last&&last===t.lastElementChild)return last;" +
             "var pw=document.createElement('div');pw.className='stream-plain';" +
             "t.appendChild(pw);return pw;};" +
+            // 尾部渐变：末尾 GRAD 个字各包一颗 span，越靠末尾越浅；前面的落成裸文本。
+            // 只在「新显示的一段字」上重建，不碰更早的节点，所以已加深的字不会闪。
+            "window.__smFadeText=function(el,text,from){" +
+            "var GRAD=24,n=text.length,start=from>0?from:0;" +
+            "if(start>0&&el.firstChild&&el.firstChild.nodeType===3){" +
+            "el.firstChild.nodeValue=text.substring(0,Math.min(start,Math.max(0,n-GRAD)));" +
+            "}else{" +
+            "while(el.firstChild)el.removeChild(el.firstChild);" +
+            "start=Math.max(0,n-GRAD);" +
+            "if(start>0)el.appendChild(document.createTextNode(text.substring(0,start)));}" +
+            "for(var i=start;i<n;i++){" +
+            "var sp=document.createElement('span');sp.className='stream-new';" +
+            "sp.style.opacity=(Math.round(((n-i)/GRAD)*10)/10);" +
+            "sp.appendChild(document.createTextNode(text.charAt(i)));el.appendChild(sp);}" +
+            // 重新标一遍透明度：旧节点的位置会随新字到来前移，不重算的话
+            // 它们会停在「刚出现时那一档浅色」，一直不变深
+            "window.__smRestyle(el,GRAD);};" +
+            "window.__smRestyle=function(el,GRAD){" +
+            "var ns=el.getElementsByTagName('span'),cnt=0,len=0,j;" +
+            "for(j=0;j<ns.length;j++)if((''+ns[j].className).indexOf('stream-new')>=0)cnt++;" +
+            "for(j=ns.length-1;j>=0;j--){" +
+            "var sp=ns[j];" +
+            "if((''+sp.className).indexOf('stream-new')<0)continue;" +
+            "len++;sp.style.opacity=(Math.round((len/GRAD)*10)/10);}};" +
             "window.__smPaintPlain=function(t,text,show){" +
-            "var n=show<0?0:(show>text.length?text.length:show);" +
+            // 显示量缺失（NaN）时按 0 处理：NaN 会让后面每个比较都判假，
+            // 文本既不画出来也不清掉，屏幕上就是一片空白
+            "var n=show>0?Math.floor(show):0;" +
+            "if(n>text.length)n=text.length;" +
             "var box=window.__smPlainBox(t);" +
-            "box.textContent=text.substring(0,n);" +
-            // 纯文本不加占位层：占位层是块级元素，会把 .plain 的流式光标 ▍
-            // 挤到隐藏区之后（看起来在屏幕外）。逐字增长本身就是打字机效果，
-            // 高度随字上长、滚动跟随，不需要提前撑满。
+            "var st=window.__smPlain;var prev=st.box===box?st.prev:0;" +
+            // 已经画出去的尾部（含窗口前的裸文本）保持原样，只画新到的那几个字。
+            // 进度为 0 时不进这段（keep 也是 0，会走进「重建」分支把已有内容全清掉）。
+            "var keep=(prev>n?0:prev);" +
+            "if(n>0){" +
+            "if(keep<=0&&box.lastChild&&box.lastChild.nodeType===1)keep=prev>0?prev:0;" +
+            "window.__smFadeText(box,text.substring(0,n),keep);}" +
+            "else if(box===t){while(t.firstChild)t.removeChild(t.firstChild);}" +
+            "st.box=box;st.prev=n;" +
             "if(box===t)t.className=n<text.length?'stream-tail plain':'stream-tail';" +
+            // 重设 class 会把「流式光标 ▍」那个伪元素也带回来：整条写完之后
+            // 这里再跑一次就会在末尾多出一个光标，所以只在还没写完时留光标
             "window.__clearStatusIn(t);" +
             "if(!window.__userUp)smartScrollToBottom();};" +
             // 纯文本进度独立成一状态，不和 HTML 的单位序列混用：
             // 两套口径（偏移 / 字数）混在一起时，一个「<」就能让显示量跳掉几十字
-            "window.__smPlain={on:false,text:'',shown:0};" +
+            "window.__smPlain={on:false,text:'',shown:0,box:null,prev:0};" +
             "window.__ensureTail=function(idx){" +
             "var c=window.__aiContent(idx);if(!c)return null;" +
             "var t=c.querySelector('.stream-tail');" +
@@ -1146,12 +1294,12 @@ final class RendererAssets {
             "window.__smoothPlainSet=function(text,adv,idx){" +
             "var t=window.__ensureTail(idx);if(!t)return false;" +
             "var st=window.__smPlain,tt=text||'';" +
-            "var a=adv|0;if(a<0)a=0;if(a>tt.length)a=tt.length;" +
+            "var a=adv>0?Math.floor(adv):0;if(a>tt.length)a=tt.length;" +
             "st.on=true;st.text=tt;st.shown=a;" +
             "window.__smPaintPlain(t,tt,a);return true;};" +
             "window.__smoothPlainStep=function(adv,idx){" +
             "var st=window.__smPlain;if(!st.on)return false;" +
-            "var a=adv|0;if(a<0)a=0;if(a>st.text.length)a=st.text.length;" +
+            "var a=adv>0?Math.floor(adv):0;if(a>st.text.length)a=st.text.length;" +
             "if(a===st.shown)return false;st.shown=a;" +
             "var t=window.__ensureTail(idx);if(!t)return false;" +
             "window.__smPaintPlain(t,st.text,a);return true;};" +
@@ -1160,16 +1308,24 @@ final class RendererAssets {
             "var t=window.__ensureTail(idx);" +
             "if(t)window.__smPaintPlain(t,st.text,st.text.length);" +
             "st.on=false;st.shown=st.text.length;return true;};" +
-            "window.__smoothStart=function(idx){" +
-            // 续跑/继续生成时 tail 骨架可能已经被搬空，交给 __ensureTail 补回来，
-            // 否则 st.on 一直是 false，这一整轮都不渐显
+            // 新一轮：复位渐显状态。key 相同表示还是同一条回答（同一代、同一段正文），
+            // 此时只复位计数器、不动已经画在屏幕上的字——旧版每次都把缓冲清空，
+            // 而调用方（每一轮新请求、每一帧 base 补渲染）都可能触发，屏幕上就
+            // 「整段消失，再一个字一个字地从头长回来」。
+            "window.__smoothStart=function(idx,key){" +
             "var t=window.__ensureTail(idx);if(!t)return;" +
-            // streamCommitTail 搬完增量后显示层会被一并清掉，下一帧重建
             "var st=window.__sm;" +
+            "if(key&&st.key===key){" +
+            // 只复位渐变锚点，不动已经画出的节点；中间被换成纯文本/被清空过才重建
+            "st.on=true;" +
+            "if(!st.root||!t.contains(st.root)){st.root=null;st.cur=0;st.paintUnits=null;}" +
+            "window.__smPlain.on=false;return;}" +
+            "st.key=key||'';" +
             "st.on=true;st.arrived='';st.show=0;st.units=[];st.chars=0;st.cut=0;st.plain=false;" +
-            "st.root=null;st.cur=0;st.paintUnits=null;st.fadeFrom=0;" +
+            "st.root=null;st.cur=0;st.paintUnits=null;st.fi=null;st.gi=null;" +
             "st.stack=[];st.grad=[];" +
-            "window.__smPlain.on=false;window.__smPlain.text='';window.__smPlain.shown=0;};" +
+            "window.__smPlain.on=false;window.__smPlain.text='';window.__smPlain.shown=0;" +
+            "window.__smPlain.box=null;window.__smPlain.prev=0;};" +
             // 已到达的完整片段 + 已经放出的字数：两者一起下发，进度落后时也不会漏内容
             "window.__smoothPush=function(html,adv,idx,t){" +
             "var st=window.__sm;if(!st.on)return false;" +
@@ -1184,9 +1340,7 @@ final class RendererAssets {
             "window.__smPaintPlain(t,src,a);return true;}" +
             "var grew=src!==st.arrived;" +
             "st.arrived=src;st.show=a;" +
-            "if(grew){" +
-            "st.units=window.__smUnitize(src);" +
-            "st.chars=0;for(var i=0;i<st.units.length;i++){if(st.units[i].ch!==undefined)st.chars++;}}" +
+            "if(grew){st.units=window.__smUnitize(src,st);}" +
             "if(a>st.chars)a=st.chars;st.show=a;" +
             "window.__smAdvance(st,t,a);return true;};" +
             // 纯文本帧：保持当前进度，只把到达的全文记下来
@@ -1234,13 +1388,21 @@ final class RendererAssets {
             "if(t.querySelector('.tool-live')){" +
             "window.__setLiveText(t,text);window.__restoreScroll(t,s);" +
             "clearStatus();smartScrollToBottom();return;}" +
+            "if(window.__sm.on){" +
+            // 第一帧：先把全文放进缓冲、进度从 0 起步，再交给渐显层。
+            // 直接按「当前进度」画会画个空，屏幕上要等下一拍才出字。
+            "var wasOn=window.__smPlain.on;" +
+            "window.__smPlain.on=true;window.__smPlain.text=text||'';" +
+            // 第一次进入纯文本通道：从零起步（真正的逐字浮出）。
+            // 已经在通道里：保留当前进度，内容只在到达量内往前长，不会倒退。
+            "var grow=(text||'').length>window.__smPlain.text.length;" +
+            "window.__smPlain.box=null;window.__smPlain.prev=0;" +
+            "window.__smPaintPlain(t,text||'',grow?window.__smPlain.shown:(text||'').length);" +
+            "window.__restoreScroll(t,s);window.__clearStatusIn(t);smartScrollToBottom();return;}" +
             // 空文本不挂 plain：挂了就会画出一个孤零零的流式光标 ▍
             "t.innerHTML='';t.className=text?'stream-tail plain':'stream-tail';t.textContent=text;" +
             "window.__restoreScroll(t,s);" +
             "clearStatus();" +
-            // 关掉实时渲染时正文走纯文本：渐显直接在这个文本节点上切，占位层撑出版式，
-            // 流式光标 ▍ 由 .stream-tail.plain 的伪元素画在最后一行末尾
-            "if(window.__sm.on){window.__smoothPushText(text||'');}" +
             "smartScrollToBottom();};" +
             "window.__guardHold=function(){" +
             // 每次渲染帧落地前先检查：闸门超时就强制释放并丢弃缓存帧，
@@ -1340,6 +1502,11 @@ final class RendererAssets {
             // 地方插卡片，实测表现是卡片被正文顶到气泡外面。
             "window.__setLiveText=function(t,text){" +
             "if(!text||text.length===0)return;" +
+            // 渐显进行中：正文由渐显层画。直接写进去的话，下一帧渐显又会把
+            // 这一段按字数重画一遍，屏幕上先整段出现、再缩回几个字。
+            "if(window.__sm.on){window.__smPlain.on=true;window.__smPlain.text=text;" +
+            "window.__smPlain.box=null;window.__smPlain.prev=0;" +
+            "window.__smPaintPlain(t,text,window.__smPlain.shown);return;}" +
             "var ps=t.querySelectorAll('.stream-plain');" +
             "var last=ps.length?ps[ps.length-1]:null;" +
             // 只有最后一个节点是纯文本时才续写，否则说明卡片之后还没有正文段落
@@ -1379,6 +1546,10 @@ final class RendererAssets {
             // 而 updateLastMsg 又会把 .content 整个 innerHTML 重设，把正在流出的
             // tail 一起抹掉 —— 用户看到的就是「回答闪一下然后凭空消失」。
             "window.appendAiDiv=function(idx){" +
+            // 新回答：记下「当前这一版页面里最后一条 AI 是它」。
+            // 页面一旦换版，气泡跟着一起没了，onPageFinished 后按这个标记补建，
+            // 不让内容落空（否则整段回答会写进旧文档，屏幕上空空如也）。
+            "window.__needLastAi=true;" +
             // AI 占位也可能先于用户消息落地（队列/重发路径），一并摘掉欢迎语
             "window.__dropWelcome();" +
             // 知道下标就先标上：流式帧一律按 data-idx 找气泡（见 __msgAi），
@@ -1443,6 +1614,8 @@ final class RendererAssets {
             "var cur=parseInt(all[i].getAttribute('data-idx'));" +
             "if(cur>=start)all[i].setAttribute('data-idx',''+(cur-1));}};" +
             "window.finalizeLast=function(idx){" +
+            // 收尾之后这条消息已经在列表里，重新灌页自然会画出来，不再需要补建
+            "window.__needLastAi=false;" +
             // 这条气泡不再是「流式中」：之后任何缓存帧都不该再落到它身上
             // （失败路径紧接着会用完整内容重写 base，残留的 tail 帧会重复）
             "window.__pendingTailHtml=null;window.__pendingTailText=null;" +
@@ -1486,5 +1659,10 @@ final class RendererAssets {
             "addCopyBtns();" +
             "applyToolStates(document);" +
             "window.scrollTo(0,document.body.scrollHeight);" +
+            // 页面就绪这一刻把「最后一条气泡」补出来：内容若早于页面到达
+            // （气泡先建在即将被冲掉的旧文档上），这里补一次，不让它落空。
+            "if(window.__needLastAi){window.__needLastAi=false;" +
+            "var la=window.__lastAi();" +
+            "if(!la||la.querySelector('.content').childNodes.length===0){window.appendAiDiv(-1);}}" +
             "})();";
 }

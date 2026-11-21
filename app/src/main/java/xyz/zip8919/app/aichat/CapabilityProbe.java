@@ -18,13 +18,17 @@ import org.json.JSONObject;
 /**
  * 模型能力探测：逐档验证思考档位是否被端点接受，并验证图片输入是否可用。
  *
- * <p><b>判定依据是 HTTP 状态码，不是回复内容</b>：端点接受某个档位就返回 200，
- * 拒绝就是 400/422。这比「看回复里有没有 reasoning_content」可靠得多 ——
- * 很多端点开了思考也不回传推理过程，按内容判会把能用的模型判成不能用。
+ * <p><b>判定依据分两层</b>：
+ * <ul>
+ *   <li><b>端点行为</b>：400/422 明确拒绝这一档，其余状态码不算拒绝；</li>
+ *   <li><b>真实痕迹</b>：回复里有没有推理内容（{@code reasoning_content}）
+ *       或推理 token 计数。端点对不认识的字段几乎一律回 200，只看状态码会把
+ *       「静默忽略」判成「支持」——这正是旧版探测「怎么都不对」的原因。</li>
+ * </ul>
  *
- * <p><b>为什么每档都发一次请求</b>：用户要的是「逐档记录」。多探几档的代价是
- * 每个模型最多 6 次请求（max_tokens 都很小），换来的是「这个模型只认 max」
- * 这种真实存在的情况不会被误判。
+ * <p><b>为什么还要分档打请求</b>：同一句话、按档位强弱各发一次，比较推理痕迹的
+ * 多少（token 数或字数）。档位之间拉不开差距，说明端点只吃了参数没真生效，
+ * 这时结论写成「不可验证」，而不是把端点认的每个词都当成一档。
  *
  * <p>全部方法<b>阻塞</b>，调用方放工作线程；进度回调由调用方决定在哪个线程。
  */
@@ -54,6 +58,17 @@ final class CapabilityProbe {
      * 提示词同一类），也避免静态字段在 {@code Strings} 初始化之前取不到值。
      */
     private static final String VISION_ASK = "图中的数字是多少？只回答数字，不要解释。";
+
+    /**
+     * 思考探测用的问题。
+     *
+     * <p>旧版只发一句 {@code hi}：这类寒暄模型往往不思考就直接回答，
+     * 「回复里没有推理内容」也就说明不了端点没开思考。换成一道必须推算的题，
+     * 开启了思考的模型才会留下推理痕迹，档位之间也才有可比较的高低。
+     */
+    private static final String THINK_ASK =
+            "一件商品原价128元，先打八折，再在折后价基础上加收5%的手续费，最后又减了9元。"
+            + "请一步一步算出最终价格，最后一行只写数字。";
 
     /**
      * 探测图 A：128×128 白底黑字「93」，灰度 PNG，约 1.4 KB；B 为「7」，约 0.7 KB。
@@ -173,6 +188,10 @@ final class CapabilityProbe {
                 ? new ArrayList<String>(ThinkingLevels.ORDER) : prof.levels;
         int accepts = 0;
         boolean evidence = false;
+        // 各档位对应的推理痕迹量：level → 推理 token 数（缺失时按推理字数估）。
+        // 只有「有痕迹」且「强弱之间拉开差距」才认定这些档位真的生效。
+        List<String> accepted = new ArrayList<String>();
+        List<Integer> signals = new ArrayList<Integer>();
         for (int i = 0; i < candidates.size(); i++) {
             if (stop != null && stop.stopped()) {
                 rep.error = Strings.get(R.string.capabilityprobe_006);
@@ -181,31 +200,52 @@ final class CapabilityProbe {
             String level = candidates.get(i);
             Raw r = post(url, snap.apiKey, thinkingBody(snap, model, level));
             if (r.error != null) {
-                // 网络层失败：后面的档位也是同样的错，直接收工
-                rep.error = ProviderTester.explainNetwork(snap, r.error);
-                if (rep.levels.size() > 0) rep.note = Strings.get(R.string.capabilityprobe_007, rep.levels.size());
-                return rep;
+                rep.note = ProviderTester.explainNetwork(snap, r.error);
+                break;
             }
             if (r.httpCode >= 200 && r.httpCode < 300) {
                 accepts++;
-                rep.levels.add(level);
-                if (!evidence && hasReasoningEvidence(r.body)) evidence = true;
+                accepted.add(level);
+                int sig = reasoningSignal(r.body);
+                signals.add(Integer.valueOf(sig));
+                if (sig > 0) evidence = true;
                 continue;
             }
             if (!isRejection(r.httpCode)) {
                 // 401/403/404/429/5xx 不是档位问题：后面的档位也是同样的错，
                 // 继续探下去只会把「认证失败」误判成「各档全被拒绝」
                 rep.error = ProviderTester.describeFailure(snap, r.httpCode, r.body, model);
-                return rep;
+                return finish(rep, rep.levels, rep.vision, rep.unverifiable);
             }
         }
 
-        // 全部 200 且回复里没有任何推理痕迹：端点只是没报错，结论不可验证。
-        // 家族已知时保留家族档位（用户仍能选到「端点认的那几个词」，
-        // 只是强度未必真生效）；家族未知时不把 200 当成支持。
-        if (accepts == candidates.size() && !evidence) {
-            rep.unverifiable = true;
-            if (prof.levels.isEmpty()) rep.levels.clear();
+        if (accepted.size() > 0) {
+            if (!evidence) {
+                // 全 200、回复里没有任何推理痕迹：端点只是没报错，结论不可验证。
+                // 家族已知时保留家族档位（用户仍能选到「端点认的那几个词」，
+                // 只是强度未必真生效）；家族未知时不把 200 当成支持。
+                rep.unverifiable = true;
+                rep.levels.addAll(prof.levels.isEmpty()
+                        ? new ArrayList<String>() : prof.levels);
+                if (prof.levels.isEmpty()) rep.levels.clear();
+            } else if (spread(signals)) {
+                // 有痕迹、且强弱之间明显拉开差距：这些档位确实在起作用
+                rep.levels.addAll(accepted);
+            } else {
+                // 有痕迹但各档一模一样：端点吃了参数却没按档位调强度。
+                // 只保留最高的那一档（至少能证明「思考是开着的」），其余不写，
+                // 免得用户以为切档有用。
+                String top = accepted.get(accepted.size() - 1);
+                int best = -1;
+                for (int i = 0; i < accepted.size(); i++) {
+                    if (signals.get(i).intValue() > best) {
+                        best = signals.get(i).intValue();
+                        top = accepted.get(i);
+                    }
+                }
+                rep.levels.add(top);
+                rep.unverifiable = true;
+            }
         }
 
         // ---- 图片输入 ----
@@ -359,6 +399,83 @@ final class CapabilityProbe {
     }
 
     /**
+     * 这一档的推理痕迹有多大：优先取推理 token 数，其次取推理正文的长度。
+     *
+     * <p>0 表示「没有任何痕迹」。分档对照时用的是这个量而不是布尔值——
+     * 只看有无，端点随便抖一个字就会被判成「这一档生效了」。
+     */
+    static int reasoningSignal(String body) {
+        if (body == null || body.length() == 0) return 0;
+        int tokens = firstInt(body, "reasoning_tokens");
+        if (tokens > 0) return tokens;
+        int n = firstInt(body, "thinking_tokens");
+        if (n > 0) return n;
+        String text = firstText(body, "reasoning_content");
+        if (text == null) text = firstText(body, "reasoning");
+        if (text == null) return 0;
+        // 没有 token 计数时按推理正文的长度估：中文约 1.5 字/token
+        return Math.max(1, text.trim().length() * 2 / 3);
+    }
+
+    /** 各档位的痕迹量是否拉开差距：最大与最小的差达到最大值的 20%（至少 8）。 */
+    static boolean spread(List<Integer> signals) {
+        if (signals == null || signals.size() < 2) return false;
+        int max = -1;
+        int min = Integer.MAX_VALUE;
+        for (int i = 0; i < signals.size(); i++) {
+            int v = signals.get(i).intValue();
+            if (v > max) max = v;
+            if (v < min) min = v;
+        }
+        int need = Math.max(8, max / 5);
+        return max - min >= need;
+    }
+
+    /** 取 JSON 里某个整数字段的值（不看层级，端点把它放在哪一层都认）。 */
+    private static int firstInt(String body, String key) {
+        int at = body.indexOf("\"" + key + "\"");
+        while (at >= 0) {
+            int p = at + key.length() + 2;
+            while (p < body.length() && (body.charAt(p) == ' ' || body.charAt(p) == ':')) p++;
+            int q = p;
+            while (q < body.length() && Character.isDigit(body.charAt(q))) q++;
+            if (q > p) {
+                try {
+                    return Integer.parseInt(body.substring(p, q));
+                } catch (NumberFormatException ignored) {
+                    return 0;
+                }
+            }
+            at = body.indexOf("\"" + key + "\"", at + key.length() + 2);
+        }
+        return 0;
+    }
+
+    /** 取 JSON 里某个字符串字段的值；没有则返回 null。 */
+    private static String firstText(String body, String key) {
+        int at = body.indexOf("\"" + key + "\"");
+        if (at < 0) return null;
+        int p = at + key.length() + 2;
+        while (p < body.length() && (body.charAt(p) == ' ' || body.charAt(p) == ':')) p++;
+        if (p >= body.length() || body.charAt(p) != '"') return null;
+        StringBuilder sb = new StringBuilder();
+        int q = p + 1;
+        while (q < body.length() && body.charAt(q) != '"') {
+            char c = body.charAt(q);
+            if (c == '\\' && q + 1 < body.length()) {
+                char n = body.charAt(q + 1);
+                // 码点转义按长度折算即可，不必真的解码：这里只比较长短
+                sb.append(n == 'u' ? 'x' : n);
+                q += n == 'u' ? 6 : 2;
+                continue;
+            }
+            sb.append(c);
+            q++;
+        }
+        return sb.toString();
+    }
+
+    /**
      * 回复里有没有「真的思考过」的痕迹。
      *
      * <p>这是逐档 200 之外唯一可用的实证：能关/开思考的端点通常在
@@ -421,18 +538,35 @@ final class CapabilityProbe {
      * 真实聊天却 400，结论就没意义了。
      */
     static String thinkingBody(ProviderInfo p, String model, String level) {
+        return thinkingBody(p, model, level, true);
+    }
+
+    /**
+     * @param includeThinking 是否带思考参数。带上应答格式（非流式）与探针问题，
+     *                        与真实聊天一致；分析推理痕迹时用不带思考的同题请求
+     *                        做基线，两者之差才是思考真正用掉的量。
+     */
+    static String thinkingBody(ProviderInfo p, String model, String level, boolean includeThinking) {
         try {
             JSONObject body = baseBody(model, THINKING_MAX_TOKENS);
-            if ("boolean".equals(p.thinkingType)) {
-                body.put(p.thinkingParamName, true);
-                body.put("thinking_budget", ThinkingLevels.budget(level));
-            } else {
-                JSONObject t = new JSONObject();
-                t.put("type", "enabled");
-                body.put(p.thinkingParamName, t);
-                String effort = ThinkingLevels.reasoningEffort(level);
-                if (effort != null) body.put("reasoning_effort", effort);
+            if (includeThinking) {
+                if ("boolean".equals(p.thinkingType)) {
+                    body.put(p.thinkingParamName, true);
+                    body.put("thinking_budget", ThinkingLevels.budget(level));
+                } else {
+                    JSONObject t = new JSONObject();
+                    t.put("type", "enabled");
+                    body.put(p.thinkingParamName, t);
+                    String effort = ThinkingLevels.reasoningEffort(level);
+                    if (effort != null) body.put("reasoning_effort", effort);
+                }
             }
+            JSONArray msgs = new JSONArray();
+            JSONObject m = new JSONObject();
+            m.put("role", "user");
+            m.put("content", THINK_ASK);
+            msgs.put(m);
+            body.put("messages", msgs);
             return body.toString();
         } catch (Exception e) {
             return "{\"model\":\"" + model + "\",\"max_tokens\":" + THINKING_MAX_TOKENS

@@ -753,7 +753,9 @@ public class MessageHtmlRenderer {
                     // 不带 toggle 的裸块，于是「多一份无法折叠的思考内容」。
                     // 这里复用闭合分支的同一套折叠结构，流式阶段也能展开/收起。
                     String thinking = text.substring(ts + 10);
-                    int thinkTok = estimateTokens(thinking);
+                    // 还在输出的思考没有 [/thinking] 收尾，直接估会把标记本身也算进去；
+                    // 尾部可能还有半句被截断的 markdown，按原样渲染即可。
+                    int thinkTok = estimateTokens(thinking.replace("[thinking]", ""));
                     // 流式每个分片都会整段重建 HTML，思考块的展开状态必须靠一个
                     // 稳定 key 跨重建恢复。取「开头 64 字」做指纹：流式内容只在
                     // 末尾增长，前缀不变；同一段思考在「未闭合 → 闭合」两种形态

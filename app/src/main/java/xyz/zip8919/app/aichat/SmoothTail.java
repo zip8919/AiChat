@@ -21,11 +21,11 @@ final class SmoothTail {
     /**
      * 每秒放出的单位数。
      *
-     * <p>取值偏快：低端机上一帧的排版开销本身就有一二十毫秒，
-     * 再慢就是「看着卡」而不是「看着流畅」。每档 1 个字、每秒 90 档，
-     * 缓冲追不上时由 {@link #step()} 自动加档追平，不会越积越多。
+     * <p>取值偏「看得清」：每档 1 个字、每秒 45 档，约等于 40~50 字/秒的阅读速度。
+     * 再快就成了整段跳出，渐显的尾巴也就看不出来；缓冲落后太多时由
+     * {@link #step()} 自动加档追平，不会越积越多。
      */
-    static final int STEPS_PER_SECOND = 90;
+    static final int STEPS_PER_SECOND = 45;
 
     private String arrived = "";
     /** 每个字符（去标签后）在 {@link #arrived} 里的结尾偏移。 */
@@ -86,8 +86,21 @@ final class SmoothTail {
         return plain;
     }
 
-    /** 新一轮正文开始：清空缓冲，从零开始渐显。 */
+    /**
+     * 同一份回答里换段（工具轮次结束、卡片落地）：继续往后写，不清已经放出的量。
+     *
+     * <p>旧版这里把 {@code shown} 清零，配合页面的「重新起步」，屏幕上就是
+     * 「写到一半整段消失、再从第一个字长回来」。换段只是「后面还会来字」，
+     * 前面那些字已经在屏幕上了，没有理由重来。
+     */
     void beginRound() {
+        finished = false;
+        draining = false;
+        if (shown > charCount) shown = charCount;
+    }
+
+    /** 全新的一条回答：缓冲与进度一起清零。 */
+    void restart() {
         arrived = "";
         charCount = 0;
         shown = 0;
@@ -136,8 +149,11 @@ final class SmoothTail {
             shown = Math.min(charCount, shown + Math.max(4, backlog / 4));
             return true;
         }
+        // 落后越多放得越多，但上限压低到 4 个字：追赶这一步也保持「一行一行地
+        // 往外浮」，不会出现整段突然跳出来的断层
         int inc = CHARS_PER_STEP;
-        if (backlog > 24) inc = Math.min(16, backlog / 8);
+        if (backlog > 60) inc = 4;
+        else if (backlog > 24) inc = 3;
         else if (backlog > 8) inc = 2;
         shown = Math.min(charCount, shown + inc);
         return true;

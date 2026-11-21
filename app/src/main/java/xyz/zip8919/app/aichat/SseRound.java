@@ -333,7 +333,11 @@ final class SseRound {
                     String rc = delta.optString("reasoning_content", "");
                     if (rc.length() > 0) {
                         r.thinkingChunks++;
-                        if (!r.dropReasoning) {
+                        // 思考块一旦闭合就不再往里追加：有的端点在正文开始之后
+                        // 还会补一小段 reasoning（或干脆把正文混进 reasoning 流），
+                        // 继续追加会把正文推到思考块里、跑到已经显示的回答下面，
+                        // 屏幕上表现为「文字忽隐忽现、顺序乱掉」。
+                        if (!r.dropReasoning && !thinkingFinished) {
                             if (!thinkingActive) {
                                 thinkingActive = true;
                                 r.display.append("[thinking]");

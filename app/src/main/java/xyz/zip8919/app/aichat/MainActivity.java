@@ -342,6 +342,7 @@ public class MainActivity extends ThemedActivity {
         LogUtil.i(TAG, "========== onCreate: savedInstanceState=%s, thread=%s ==========",
                 savedInstanceState, LogUtil.thread());
         setContentView(R.layout.activity_main);
+        bindRevealBubbleDismiss(findViewById(R.id.main_root));
 
         if (savedInstanceState != null) {
             String pendingShot = savedInstanceState.getString(STATE_CAMERA_OUTPUT);
@@ -932,6 +933,25 @@ public class MainActivity extends ThemedActivity {
         });
 
         refreshSendButton();
+    }
+
+    /**
+     * 用户一碰屏幕，「直接显示」气泡就收起。
+     *
+     * <p>气泡的语义是「点一下能立刻看完」。手指本来就在屏幕上（正在往上翻、
+     * 正在读上面几段），气泡还挂着只会挡住正文；点它跳到底反而打断了阅读。
+     * 收起不等于放弃渐显：字照样继续浮，只是不再提这个入口。
+     */
+    private void bindRevealBubbleDismiss(final View root) {
+        if (root == null) return;
+        root.setOnTouchListener(new View.OnTouchListener() {
+            public boolean onTouch(View v, MotionEvent event) {
+                if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
+                    if (revealBubbleShown) setRevealBubble(false);
+                }
+                return false;
+            }
+        });
     }
 
     /** 生成中且输入框为空：此时按钮是「停止」。 */
@@ -3008,6 +3028,13 @@ public class MainActivity extends ThemedActivity {
             }
         });
 
+        // 新一代请求：渐显从零开始。「已收尾」标记只对上一代有效，不清的话，
+        // 上一条回答被停止/跳过之后，新的回答会被当成「已定稿」，一句话都不渐显。
+        smoothSettledGeneration = -1;
+        smoothDrainingGeneration = -1;
+        smoothRunning = false;
+        handler.removeCallbacks(smoothTick);
+        handler.removeCallbacks(smoothHintTask);
         setRequestInProgress(true);
         LogUtil.i(TAG, ">>> request START: gen=%d url=%s model=%s thinking=%s webSearch=%s backend=%s",
                 generation, Endpoint.chatUrl(provider), currentModel, thinkingLevel,
@@ -3046,6 +3073,7 @@ public class MainActivity extends ThemedActivity {
 
         final Channel channel = new Channel();
         channel.uiIdx = aiIndex;
+        channel.realtime = jobRealtimeRender;
         activeChannel = channel;
         final ChatStreamRunner runner =
                 new ChatStreamRunner(job, channel, new GenerationSession(generation));
@@ -3163,6 +3191,9 @@ public class MainActivity extends ThemedActivity {
                 evalJsHtml("streamTailHtml", html, uiIdx);
                 return;
             }
+            // 渲染开关在请求中途改过：这一帧是 HTML，就按 HTML 渐显，
+            // 不能因为上次是纯文本帧就继续按字数切（会切出半截标签）。
+            smoothPlainMode = false;
             // 渐显可能尚未起步：纯文本回答没有 trace 变化、工具轮次收轮后
             // smoothRunning 已复位，内容到了却没人推，屏幕会一直空到收尾
             final int gen = MainActivity.this.requestGeneration.get();
@@ -3180,6 +3211,7 @@ public class MainActivity extends ThemedActivity {
                 evalJsHtml("streamTailText", plain);
                 return;
             }
+            smoothPlainMode = true;
             // 纯文本帧不写完整内容：整段写下去就是「一大块字瞬间出现」，渐显等于没开。
             // 这里只把「已到达的全文」记进缓冲，屏幕上显示多少由定时器按字推进。
             final int gen = MainActivity.this.requestGeneration.get();
@@ -3234,6 +3266,13 @@ public class MainActivity extends ThemedActivity {
 
         public void renderTrace(String trace, int generation, String status, int aiIndex) {
             renderTraceAsync(trace, generation, status, aiIndex);
+        }
+
+        /** 这一次请求期间「实时渲染」是不是开着；纯文本帧按它决定渐显走哪条通道。 */
+        volatile boolean realtime;
+
+        public boolean realtimeRender() {
+            return realtime;
         }
 
         public void renderLiveTools(final String incrementalHtml, final boolean reset) {
@@ -3376,6 +3415,9 @@ public class MainActivity extends ThemedActivity {
                                 // 命中数来自 usage 里的 prompt cache 字段：
                                 // 只有真拿到值才写，估算分支不能再拿它编数
                                 done.cachedTokens = settled.cachedTokens;
+                                // 末尾那串浅色字一次性落定：定稿会把整条重写一遍，
+                                // 不落定的话，末尾几个字在定稿前会一直是灰色。
+                                webViewEvalJs("__smSettle(document.querySelector('.msg.ai'))");
                                 // 工具轮次会发多次请求：round 是 0 起的轮次下标，
                                 // 加一才是这次回复真正发出去的请求数
                                 done.requestCount = settled.round + 1;
@@ -3397,7 +3439,8 @@ public class MainActivity extends ThemedActivity {
                                     // updateLastMsg 会把全文写进 base 并清空 tail，所以这里不再
                                     // 单独调用 streamFinalize —— 它只做「把 tail 搬进 base」，
                                     // 而 tail 里的纯文本正好是要被替换掉的那一坨。
-                                    webViewEvalJs("__smoothStop()");
+                                    webViewEvalJs("__smoothStop();window.__smSettle(" +
+                                            "document.querySelector('.msg.ai[data-idx=\\\"' + finalIdx + '\\\"]'))");
                                     webViewEvalJs("streamFinalize(" + finalIdx + ")");
                                     webViewEvalJs("updateLastMsg('" + jsEscape(html) + "',"
                                             + finalIdx + ")");
@@ -3570,8 +3613,11 @@ public class MainActivity extends ThemedActivity {
         // 前提由 ChatStreamRunner 保证：trace 的每次追加都以完整的
         // [thinking]…[/thinking] 或 [tool]…[/tool] 块为单位，边界处切分不会
         // 破坏 markdown 结构。
+        // 关掉实时渲染也要走增量追加：思考块与工具卡片是结构化渲染的结果，
+        // 与「正文要不要逐帧转 HTML」是两件事。旧版在这里额外要求实时渲染开着，
+        // 关掉之后每一张卡片都退回整段重建，而且重建的只是「新增的那一段」——
+        // 前面已经落地的思考块、卡片全被覆盖掉，屏幕上就只剩最后一轮的内容。
         final boolean append = isRequestInProgress.get()
-                && SettingsActivity.isRealtimeRenderEnabled(this)
                 && base0.length() > 0 && snapshot.startsWith(base0);
         final String part = append ? snapshot.substring(base0.length()) : snapshot;
 
@@ -3596,7 +3642,8 @@ public class MainActivity extends ThemedActivity {
                             // 正文纯文本，DOM 里正文在 tail 上，追加进去会让屏幕上多一份。
                             // 纯文本模式下统一走 streamBase 重建，并把 tail 的正文带过来。
                             if (append) {
-                                webViewEvalJs("streamAppendBase('" + jsEscape(html) + "')");
+                                webViewEvalJs("streamAppendBase('" + jsEscape(html) + "',"
+                                        + aiIndex + ")");
                             } else {
                                 // 只写 base 层；tail 上正在流的内容原样保留
                                 webViewEvalJs("streamBase('" + jsEscape(html) + "',"
@@ -3749,6 +3796,10 @@ public class MainActivity extends ThemedActivity {
                         // 整页重建，DOM 里不存在上一次流式留下的 base 骨架，
                         // 「已推送基准」必须作废，否则下一次 trace 渲染会误走增量
                         lastStreamTrace = "";
+                        // 流式途中换版（主题、字号、上滑加载历史都会重灌）：拼页取的是
+                        // 「已落盘的消息」，没有正在写的那条。不补建的话，这一轮的字
+                        // 会被写进即将被冲掉的旧文档，屏幕上停在半截。补建由页面在
+                        // 脚本就绪时按 __needLastAi 完成，紧接着的增量帧就能落进去。
                         conversationWebView.loadDataWithBaseURL(null, page, "text/html", "UTF-8", null);
                         // 从现在起开始确认这一版有没有上屏。onPageFinished 一般会来，
                         // 但程序化写 DOM 时它不保证触发，所以另起一个短周期探测兜底。
@@ -3977,6 +4028,11 @@ public class MainActivity extends ThemedActivity {
     private String smoothPushedHtml = "";
     /** 上一拍已经显示到的字符数（页面侧同一份片段上的切点）。 */
     private int smoothShownChars = -1;
+    /**
+     * 最近一帧是纯文本还是 HTML。纯文本按字数切、HTML 按单位序列切，
+     * 用错的通道会把标签切碎或让字数对不上。
+     */
+    private volatile boolean smoothPlainMode = true;
     /** 显示已经追上到达，页面侧暂时不必再收新片段。 */
     private boolean toldPageStop;
     /** 「直接显示」挂出前的等待：至少要浮出一小段，否则看着像误触。 */
@@ -4049,7 +4105,9 @@ public class MainActivity extends ThemedActivity {
         // 切点很快就会越过全部字——表现就是「前几帧还在一字一字地浮，
         // 中途突然整段出现」。字数口径两边一致，才是真的逐字。
         final int adv = smoothTail.shownChars();
-        if (smoothTail.isPlain()) {
+        // 通道由「这一帧是什么」决定，不看开关的瞬时值：关掉实时渲染的请求里
+        // 也可能有一帧是对工具卡片做的 HTML 渲染，按纯文本切会把标签切碎。
+        if (smoothPlainMode) {
             if (arrived.equals(smoothPushedHtml)) {
                 if (adv == smoothShownChars) return;
                 smoothShownChars = adv;
@@ -4073,25 +4131,50 @@ public class MainActivity extends ThemedActivity {
     }
 
     /**
-     * 新的一段正文开始渐显：清空缓冲，让第一屏内容立刻出现。
+     * 这条消息的「渐显身份」。同一代请求、同一条气泡就是同一条回答：
      *
-     * <p>同时把定时器拉起来。只有真正有文字到达时才会拿到这个调用，
-     * 所以不必在发请求那一刻就空转。
+     * <p>工具轮次里每条工具结果都会走一遍 {@code renderTrace}，旧实现在那里
+     * 「重新起步」（清空缓冲、把已显示的字擦掉），于是每次工具返回都把整条回答
+     * 从零再浮一遍——用户看到的就是「写到一半整段消失，回到顶部再很快地长回来」。
+     * 现在起步动作带着这个 key，页面比对一致就只复位节奏、不动已经画出的字。
+     */
+    private String smoothKey(final int generation) {
+        return generation + ":" + smoothIdx();
+    }
+
+    /**
+     * 新的一段正文开始渐显：复位节奏，让第一屏内容立刻出现。
+     *
+     * <p>只有真正有文字到达时才会拿到这个调用，所以不必在发请求那一刻就空转。
      */
     private void beginSmoothRound(final int generation) {
         if (!smoothStream || requestGeneration.get() != generation) return;
         // 这一代已经收尾：后面的帧直接落地，不能把整条回答从头再浮一遍
         if (smoothSettledGeneration == generation) return;
+        final boolean restarted = smoothGeneration != generation;
         smoothGeneration = generation;
-        smoothTail.beginRound();
-        smoothPushedHtml = "";
-        smoothShownChars = -1;
-        webViewEvalJs("__smoothStart(" + smoothIdx() + ")");
+        // 换了一条回答才清空缓冲；同一条回答里（工具轮次、卡片落地、续跑）
+        // 继续往后写，屏幕上已经画出的字不回退
+        if (restarted) {
+            smoothTail.restart();
+            smoothPushedHtml = "";
+            smoothShownChars = -1;
+        } else {
+            smoothTail.beginRound();
+        }
+        smoothPlainMode = !channelRealtime();
+        webViewEvalJs("__smoothStart(" + smoothIdx() + ",'" + smoothKey(generation) + "')");
         if (!smoothRunning) {
             smoothRunning = true;
             handler.removeCallbacks(smoothTick);
             handler.postDelayed(smoothTick, 1000L / SmoothTail.STEPS_PER_SECOND);
         }
+    }
+
+    /** 当前请求开没开实时渲染；拿不到通道时按「开着」处理（HTML 通道更通用）。 */
+    private boolean channelRealtime() {
+        Channel c = activeChannel;
+        return c == null || c.realtimeRender();
     }
 
     /** 「直接显示」气泡是否已经排在该挂的时候；避免重复调度。 */
@@ -4236,19 +4319,29 @@ public class MainActivity extends ThemedActivity {
         });
     }
 
-    /** 停止渐显：停在当前显示的位置，不把剩下的字一次性甩出来。 */
-    private void stopSmooth(final int generation) {
+    /** 收掉这一代的渐显节奏：定时器、气泡、页面侧标志，一次清干净。 */
+    private void cancelSmoothTimers() {
         handler.removeCallbacks(smoothTick);
         handler.removeCallbacks(smoothHintTask);
         smoothRunning = false;
         showHintScheduled = false;
         smoothPushedHtml = "";
         smoothShownChars = -1;
-        smoothSettledGeneration = generation;
         smoothDrainingGeneration = -1;
         smoothAfterDrain = null;
         setRevealBubble(false);
         webViewEvalJs("__smoothStop()");
+    }
+
+    /**
+     * 停止渐显：停在当前显示的位置，不把剩下的字一次性甩出来。
+     *
+     * <p>停下的这一代不再自动重新起步（{@code smoothSettledGeneration} 会给它
+     * 打上「已收尾」）。用户点「继续」时发的是新一代请求，渐显自然重新打开。
+     */
+    private void stopSmooth(final int generation) {
+        cancelSmoothTimers();
+        smoothSettledGeneration = generation;
     }
 
     /** 收尾：剩下的全部放完，随后由完整渲染接管这条气泡。 */
@@ -4412,6 +4505,8 @@ public class MainActivity extends ThemedActivity {
     // Execute JS in the conversation WebView: evaluateJavascript (API 19+) avoids a
     // full page navigation per call; loadUrl fallback for API 18.
     private void webViewEvalJs(final String js) {
+        // 流式帧逐字下发，同一段文本反复出现在日志里只会把有用的行冲掉
+        LogUtil.v(TAG, "webview js: %s", LogUtil.preview(js, 120));
         // WebView 的所有方法都必须在创建它的线程（主线程）上调用，否则抛
         // RuntimeException("A WebView method was called on thread ...")。
         // 请求线程会通过 Ui.onStatus / onTrace 回调直接走到这里（第一轮 trace 为空时

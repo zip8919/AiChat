@@ -442,7 +442,10 @@ final class ChatStreamRunner {
                     return;
                 }
 
-                renderer.beginRound();
+                // 工具轮次的「新一轮」只是同一份回答换一次请求，不是换一条消息：
+                // 这里不重置渐显。重置会让已画出的字被搬进 base、渐变窗口清零，
+                // 屏幕上表现为整段回答消失、再从第一个字快速长回来。
+                // 真正的新回答由宿主按请求代数重新起步。
                 SseRound.Result rr = readRound(conn, st, renderer);
                 st.chunks = rr.chunks;
                 // 统计要的是「本轮这一发」的用量，而 st 里是跨轮累计值。
@@ -541,11 +544,9 @@ final class ChatStreamRunner {
                     ToolExecutor.Outcome outcome = ToolExecutor.run(rr.toolCalls,
                             job.maxCallsPerRound, conversation, st.toolHistory, st.trace,
                             st.sources, job.question, toolHost);
-                    // 关掉实时渲染时补上这一轮的工具卡片：trace 追加过（没被裁剪）
-                    // 才有增量片段，写进 tail 后立刻可见，不必等轮次结束。
-                    if (!job.realtimeRender && !outcome.aborted
-                            && st.trace.length() > traceBefore && traceBefore == baseBefore.length()) {
-                        ui.renderLiveTools(st.trace.substring(traceBefore), true);
+                    if (!outcome.aborted && traceBefore != baseBefore.length()) {
+                        // trace 在这一轮里被裁剪过：增量基准已经失效，补一帧整段重建
+                        ui.renderTrace(st.trace.toString(), job.generation, null, job.aiIndex);
                     }
                     if (outcome.aborted) {
                         LogUtil.i(TAG, "tool loop aborted at round %d", round);
@@ -589,6 +590,10 @@ final class ChatStreamRunner {
                 job.aiMessage.toolHistory = st.toolHistory.toString();
             }
             st.content = st.trace.toString();
+            // 最后一轮正文不能在这里搬进 base：搬移会先让宿主「一次放完」渐显，
+            // 等于把还没浮出来的正文整段甩出来，收尾的「直接显示」就没有可跳过的区间了。
+            // 最后一帧已经由 readRound 的收尾帧落到 tail 并交给渐显缓冲，
+            // 剩下的交给 settleStream 在追平之后整段定稿。
             LogUtil.i(TAG, "rounds done: sources=%d apiText=%d toolHistory=%d",
                     job.aiMessage.sources.size(), st.apiText.length(), st.toolHistory.length());
             ui.nextSeq();

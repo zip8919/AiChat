@@ -418,8 +418,14 @@ public class CodeHighlighter {
             }
 
             // 3. XML / SVG / HTML tags — highlight element names and attributes
+            //
+            // 「<」不等于标签：html 代码块里内嵌 JS/CSS 太常见了（if (n < answer)、
+            // a<b、x <= 100）。以前只要见到「<」就进标签分支，比较符后面的内容会被
+            // 当成属性名往下吞，属性循环里又把每段空白压成单个空格——整段 JS 的换行
+            // 就是这么没的：152 行的代码块被拼成 131 行，最长「一行」416 字符，
+            // pre 里的 code 宽到 3000px 以上，用户看到的就是「内容溢出、显示异常」。
             if (("xml".equals(lang) || "html".equals(lang) || "svg".equals(lang))
-                    && code.charAt(i) == '<') {
+                    && code.charAt(i) == '<' && looksLikeTag(code, i, len)) {
                 Set<String> attrSet = LANG_KEYWORDS.get(lang + "_attrs");
 
                 // Handle CDATA section
@@ -486,7 +492,16 @@ public class CodeHighlighter {
                         out.append(Html.esc(attrName));
 
                     // Skip whitespace before =
-                    while (i < len && Character.isWhitespace(code.charAt(i))) { out.append(' '); i++; }
+                    //
+                    // 必须原样搬：以前每个空白字符都写成一个空格，标签里跨行写的属性
+                    // （或误判成标签的比较符后面那一整段代码）里的 \n 会被就地吃掉，
+                    // 多行代码合并成一行——代码块横向溢出就是这么来的。
+                    if (i < len && Character.isWhitespace(code.charAt(i))) {
+                        int wsEnd = i;
+                        while (wsEnd < len && Character.isWhitespace(code.charAt(wsEnd))) wsEnd++;
+                        out.append(code, i, wsEnd);
+                        i = wsEnd;
+                    }
 
                     // = and value
                     if (i < len && code.charAt(i) == '=') {
@@ -554,6 +569,32 @@ public class CodeHighlighter {
 
         LogUtil.v(TAG, "highlight done: lang=%s %d chars -> %d chars", lang, len, out.length());
         return out.toString();
+    }
+
+    /**
+     * 这个「<」是不是真的标签开头。
+     *
+     * <p>判据：{@code </}、{@code <!}、{@code <?} 一律算标签；否则要求「<」后面是字母，
+     * 且标签名之后紧跟空白、{@code >}、{@code /}（或已到串尾）。比较符后面通常是空白
+     * 或数字（{@code n < answer}、{@code i<10}），即使写成 {@code i<j} 也几乎不会紧跟
+     * 空白或「&gt;」——判错一次的代价是紧接着的整段代码被当成属性吞掉、换行全丢，
+     * 宁可漏认一个标签，也不能误吞代码。
+     */
+    private static boolean looksLikeTag(String code, int i, int len) {
+        int j = i + 1;
+        if (j >= len) return false;
+        char c = code.charAt(j);
+        if (c == '!' || c == '?') return true;
+        if (c == '/') return j + 1 < len && Character.isLetter(code.charAt(j + 1));
+        if (!Character.isLetter(c)) return false;
+        while (j < len) {
+            char d = code.charAt(j);
+            if (Character.isLetterOrDigit(d) || d == '-' || d == '_' || d == ':') j++;
+            else break;
+        }
+        if (j >= len) return false;
+        char e = code.charAt(j);
+        return Character.isWhitespace(e) || e == '>' || e == '/';
     }
 
     private static Matcher[] buildMatchers(Rule[] rules, String code) {
