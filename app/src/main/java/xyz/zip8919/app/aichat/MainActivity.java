@@ -3170,6 +3170,18 @@ public class MainActivity extends ThemedActivity {
             feedSmooth(html, gen);
         }
 
+        public void renderTailText(final String baseNow, final String plain) {
+            if (!smoothStream) {
+                evalJsHtml("streamTailText", plain);
+                return;
+            }
+            // 纯文本帧不写完整内容：整段写下去就是「一大块字瞬间出现」，渐显等于没开。
+            // 这里只把「已到达的全文」记进缓冲，屏幕上显示多少由定时器按字推进。
+            final int gen = MainActivity.this.requestGeneration.get();
+            if (!smoothRunning || smoothGeneration != gen) beginSmoothRound(gen);
+            feedSmoothText(plain, gen);
+        }
+
         public void smoothFinished(int generation) {
             finishSmooth(generation);
         }
@@ -3981,7 +3993,21 @@ public class MainActivity extends ThemedActivity {
     private void pushSmoothFrame() {
         final int idx = smoothIdx();
         final String arrived = smoothTail.arrivedHtml();
-        final int adv = smoothTail.shownOffset();
+        // 纯文本按「第几个字」推进；HTML 按「源串偏移」推进，两套口径不能混用，
+        // 否则纯文本里的标签字符会被当成结构、显示量直接跳字。
+        final int adv = smoothTail.isPlain() ? smoothTail.shownChars() : smoothTail.shownOffset();
+        if (smoothTail.isPlain()) {
+            if (arrived.equals(smoothPushedHtml)) {
+                if (adv == smoothShownChars) return;
+                smoothShownChars = adv;
+                webViewEvalJs("__smoothPlainStep(" + adv + "," + idx + ")");
+                return;
+            }
+            smoothPushedHtml = arrived;
+            smoothShownChars = adv;
+            webViewEvalJs("__smoothPlainSet('" + jsEscape(arrived) + "'," + adv + "," + idx + ")");
+            return;
+        }
         if (arrived.equals(smoothPushedHtml)) {
             if (adv == smoothShownChars) return;
             smoothShownChars = adv;
@@ -4031,6 +4057,25 @@ public class MainActivity extends ThemedActivity {
         handler.removeCallbacks(smoothTick);
         handler.postDelayed(smoothTick, 1000L / SmoothTail.STEPS_PER_SECOND);
         // 至少要浮出一小段才值得给出口：刚出第一个字就挂气泡，看着像误触
+        if (!showHintScheduled && smoothTail.shownChars() > 0
+                && smoothTail.charCount() > 0) {
+            showHintScheduled = true;
+            handler.removeCallbacks(smoothHintTask);
+            handler.postDelayed(smoothHintTask, SMOOTH_HINT_DELAY_MS);
+        }
+    }
+
+    /** 把这一帧已到达的纯文本交给渐显：口径与 {@link #feedSmooth} 相同。 */
+    private void feedSmoothText(final String text, final int generation) {
+        if (!smoothStream || requestGeneration.get() != generation) return;
+        if (!smoothRunning) {
+            smoothRunning = true;
+            handler.removeCallbacks(smoothTick);
+        }
+        if (!smoothTail.onText(text)) return;
+        pushSmoothFrame();
+        handler.removeCallbacks(smoothTick);
+        handler.postDelayed(smoothTick, 1000L / SmoothTail.STEPS_PER_SECOND);
         if (!showHintScheduled && smoothTail.shownChars() > 0
                 && smoothTail.charCount() > 0) {
             showHintScheduled = true;

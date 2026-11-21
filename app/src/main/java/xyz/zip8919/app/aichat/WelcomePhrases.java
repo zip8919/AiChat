@@ -104,15 +104,16 @@ final class WelcomePhrases {
         // 不用 top:50% + transform 居中：部分 4.4 ROM 的 WebView 会忽略 transform，
         // 卡片会被顶到屏幕上半截以外。
         //
-        // 定位父级是 body：绝对定位的包含块取最近的已定位祖先，而 #msgs 没有定位
-        // （它的高度由内容撑开，空对话时高度为 0）。这里给 body 补 position:relative
-        // 与 100% 高度，卡片才是相对「窗口」居中，而不是相对某个零高度容器。
+        // 用 fixed 而不是「给 body 补 position:relative + height:100%」：这套样式
+        // 会注入到每一页，包括有几十条消息的长会话。把 body 高度钉成 100% 之后，
+        // 正文溢出 body 只能靠视口滚动兜，部分 4.4 ROM 上会连带把「回到底部」的
+        // 高度算错。fixed 直接相对视口定位，不碰 body 的布局，空对话和有消息时
+        // 都安全；空对话本来也不滚动，不存在 fixed 跟随滚动的抖动。
+        //
         // 颜色一律 inherit，不写死：#37474f / #90a4ae 在深色主题下是「深底深字」，
         // 欢迎语直接看不见。继承 body 的颜色后，浅色主题是深灰、深色主题是浅灰，
         // 提示行靠透明度降一级，不需要为两套主题各写一份。
-        return "html,body{height:100%;}"
-                + "body{position:relative;}"
-                + ".welcome-empty{position:absolute;left:0;right:0;top:0;bottom:0;"
+        return ".welcome-empty{position:fixed;left:0;right:0;top:0;bottom:0;"
                 + "display:table;width:100%;height:100%;"
                 + "padding:0 28px;-webkit-box-sizing:border-box;box-sizing:border-box;}"
                 + ".welcome-inner{display:table-cell;vertical-align:middle;text-align:center;}"

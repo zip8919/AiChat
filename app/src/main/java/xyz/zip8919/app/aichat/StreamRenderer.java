@@ -92,6 +92,16 @@ final class StreamRenderer {
          */
         void renderTailHtml(String baseNow, String html);
 
+        /**
+         * 非实时渲染的一帧正文（纯文本）已经产出。
+         *
+         * <p>与 {@link #renderTailHtml} 并列存在，而不是「纯文本也转成 HTML 再走上面」：
+         * 关掉实时渲染就是为了不解析 markdown，逐字渐显时若为了统一路径又把每帧
+         * 转成 HTML，等于把省下的开销又加回来。纯文本的渐显只是在一个文本节点上
+         * 挪切点，比 DOM 重建便宜得多。
+         */
+        void renderTailText(String baseNow, String plain);
+
         /** 本轮正文已经全部到达：剩余内容可以一次放完。 */
         void smoothFinished(int generation);
 
@@ -348,7 +358,7 @@ final class StreamRenderer {
                     if (ui.currentSeq() != mySeq) return;
                     if (!ui.isCurrent(generation)) return;
                     ui.setContent(aiIndex, baseNow + roundNow);
-                    ui.evalJsHtml("streamTailText", tailPlain);
+                    ui.renderTailText(baseNow, tailPlain);
                     guard.landed(System.currentTimeMillis(), 0);
                 }
             });
@@ -380,7 +390,7 @@ final class StreamRenderer {
                             ui.evalJsHtml("streamBase", baseHtml, aiIndex);
                             ui.noteBaseRendered(baseNow);
                         }
-                        ui.evalJsHtml("streamTailText", tailPlain);
+                        ui.renderTailText(baseNow, tailPlain);
                         guard.landed(System.currentTimeMillis(), queuedRef[0]);
                     }
                 });

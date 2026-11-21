@@ -34,6 +34,9 @@ final class SmoothTail {
     /** 已经放出的字符数。 */
     private int shown;
 
+    /** 已到达的正文是不是纯文本（关掉实时渲染时走这条）。 */
+    private boolean plain;
+
     /** 宿主收尾时置位：之后 {@link #step()} 一次放完。 */
     private boolean finished;
 
@@ -44,10 +47,35 @@ final class SmoothTail {
      */
     boolean onHtml(String html) {
         String next = html == null ? "" : html;
-        if (next.equals(arrived)) return false;
+        if (!plain && next.equals(arrived)) return false;
+        plain = false;
         arrived = next;
         scan();
         return true;
+    }
+
+    /**
+     * 记下这一帧到达的纯文本（关掉实时渲染）。
+     *
+     * <p>不能用 {@link #onHtml}：纯文本里的 {@code <} 是字面量，而 scan 会把它当
+     * 标签开头、跳到下一个 {@code >}，偏移算出来是乱的，显示量就会跳字。
+     * 纯文本的每个字符都在源串里占一位，偏移直接等于字符下标 +1。
+     */
+    boolean onText(String text) {
+        String next = text == null ? "" : text;
+        if (plain && next.equals(arrived)) return false;
+        boolean wasPlain = plain;
+        plain = true;
+        arrived = next;
+        scanPlain();
+        // 从 HTML 切到纯文本时引擎换了，已显示量按新口径重新夹紧
+        if (!wasPlain) shown = Math.min(shown, charCount);
+        return true;
+    }
+
+    /** 当前是不是纯文本模式。宿主据此选页面脚本（纯文本直接切在文本上）。 */
+    boolean isPlain() {
+        return plain;
     }
 
     /** 新一轮正文开始：清空缓冲，从零开始渐显。 */
@@ -56,6 +84,7 @@ final class SmoothTail {
         charCount = 0;
         shown = 0;
         finished = false;
+        plain = false;
     }
 
     /** 本轮结束或用户要求直接显示：剩下的字一次性放完。 */
@@ -131,8 +160,19 @@ final class SmoothTail {
      * <p>只认标签之外的字符；标签整体跳过，空白照常计数（空白也是一个排版位置）。
      * 代理对按两个字算——页面侧同样按 UTF-16 长度切，两边口径必须一致。
      */
-    private void scan() {
+    private void scanPlain() {
         int len = arrived.length();
+        if (charEnd.length < len + 1) {
+            charEnd = new int[Math.max(16, len + 1)];
+        }
+        for (int i = 0; i < len; i++) {
+            charEnd[i] = i + 1;
+        }
+        charCount = len;
+        if (shown > charCount) shown = charCount;
+    }
+
+    private void scan() {        int len = arrived.length();
         if (charEnd.length < len + 1) {
             int[] bigger = new int[Math.max(16, len + 1)];
             System.arraycopy(charEnd, 0, bigger, 0, Math.min(charEnd.length, charCount));
