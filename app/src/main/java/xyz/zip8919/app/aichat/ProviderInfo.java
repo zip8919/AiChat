@@ -37,6 +37,11 @@ public class ProviderInfo {
 
     /** 这个提供商实际使用的余额接口路径：用户填的优先，其次预设默认值。 */
     public String effectiveBalancePath() {
+        // TokenHub 例外：旧配置里存的是 /v1/usage，那条路在推理域名下恒为 404。
+        // 路径以预设为准，否则升级后还在查一个网页不存在的接口。
+        if ("tencent_tokenhub".equals(balancePreset)) {
+            return BalancePresets.byId(balancePreset).path;
+        }
         if (balancePath != null && balancePath.trim().length() > 0) return balancePath.trim();
         return BalancePresets.byId(balancePreset).path;
     }

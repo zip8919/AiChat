@@ -3,9 +3,7 @@ package xyz.zip8919.app.aichat;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.DialogInterface;
-import android.text.InputType;
 import android.view.View;
-import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -69,6 +67,17 @@ final class BalanceDialog {
                  .append(res != null && res.error != null ? res.error : "未知原因").append('\n');
         }
 
+        // ---- 说明（平台没有余额接口时的去处指引） ----
+        if (res != null && res.note != null && res.note.length() > 0) {
+            TextView note = new TextView(act);
+            note.setTextSize(12);
+            note.setTextColor(ThemeTokens.getSafe(act, ThemeTokens.AC_TEXT_SECONDARY));
+            note.setPadding(0, dp(act, 8), 0, dp(act, 2));
+            note.setText(res.note);
+            box.addView(note);
+            plain.append(res.note).append('\n');
+        }
+
         // ---- 请求信息（失败时最有价值） ----
         if (resp != null) {
             TextView meta = new TextView(act);
@@ -128,19 +137,22 @@ final class BalanceDialog {
     private static void showRaw(Activity act, String rawText) {
         String formatted = pretty(rawText);
         final String body = formatted.length() == 0 ? "（没有返回内容）" : formatted;
-        EditText et = new EditText(act);
-        et.setTextSize(11);
-        et.setTypeface(android.graphics.Typeface.MONOSPACE);
-        et.setTextColor(ThemeTokens.getSafe(act, ThemeTokens.AC_TEXT));
-        et.setInputType(InputType.TYPE_NULL);
-        et.setTextIsSelectable(true);
-        et.setBackgroundDrawable(null);
-        et.setText(body);
+        // 用 TextView 而不是 EditText：EditText 在这套主题下是单行输入框，
+        // 换行会被 SingleLineTransformationMethod 折成空格 —— 排版好的 JSON
+        // 于是在屏幕上又变回「一行，字段之间只有空白」。TextView 不折行，
+        // 只读也不需要输入法，正好。
+        TextView tv = new TextView(act);
+        tv.setTextSize(11);
+        tv.setTypeface(android.graphics.Typeface.MONOSPACE);
+        tv.setTextColor(ThemeTokens.getSafe(act, ThemeTokens.AC_TEXT));
+        tv.setTextIsSelectable(true);
+        tv.setHorizontallyScrolling(false);
+        tv.setText(body);
 
         ScrollView sv = new ScrollView(act);
         int pad = dp(act, 12);
         sv.setPadding(pad, pad, pad, 0);
-        sv.addView(et);
+        sv.addView(tv);
 
         AcDialog.builder(act)
                 .setTitle("原始返回")
@@ -162,20 +174,123 @@ final class BalanceDialog {
      * 一行横向滚到天荒地老，字段名和值对不上号。缩进后每行一个字段，扫一眼就能
      * 找到 total_balance 在哪。
      *
-     * <p>不是 JSON 时原样返回：网关错误页、纯文本提示都要能看见，不能因为
-     * 「格式化失败」就显示成空白。
+     * <p>两级格式化：<b>先交给 org.json</b>（合法 JSON 的缩进最标准）；
+     * <b>解析不了再自己按括号走一遍</b>。后者是为了半截响应、带前缀的响应
+     * （{@code data: {...}}、{@code HTTP 500: {...}}）也能排出多行 —— 以前只在
+     * org.json 成功时才排版，一次解析失败就退回原文，屏幕上就剩一整行。
+     *
+     * <p>完全不像 JSON 的内容原样返回：网关错误页、纯文本提示都要能看见，
+     * 不能因为「格式化失败」就显示成空白或被拆得乱七八糟。
      */
     private static String pretty(String raw) {
         if (raw == null) return "";
         String t = raw.trim();
         if (t.length() == 0) return "";
+
+        int start = jsonStart(t);
+        if (start < 0) return t;
+        String head = t.substring(0, start).trim();
+        // 前缀像 HTML 错误页时不动它：页面里的 JS 花括号被当成 JSON 排版只会更乱
+        if (head.length() > 70 || head.indexOf('<') >= 0) return t;
+        String body = formatJson(t.substring(start));
+        if (body.length() == 0) return t;
+        return head.length() == 0 ? body : (head + "\n" + body);
+    }
+
+    /** 第一个 {@code {} / {@code [} 的位置；两者都找不到返回 -1。 */
+    private static int jsonStart(String t) {
+        int a = t.indexOf('{');
+        int b = t.indexOf('[');
+        if (a < 0) return b;
+        if (b < 0) return a;
+        return Math.min(a, b);
+    }
+
+    /** 尝试标准解析，失败则走容错排版；不像 JSON 时返回空串。 */
+    private static String formatJson(String json) {
         try {
-            if (t.charAt(0) == '{') return new org.json.JSONObject(t).toString(2);
-            if (t.charAt(0) == '[') return new org.json.JSONArray(t).toString(2);
+            if (json.charAt(0) == '{') return new org.json.JSONObject(json).toString(2);
+            if (json.charAt(0) == '[') return new org.json.JSONArray(json).toString(2);
         } catch (Throwable ignored) {
-            // 半截 JSON / 非 JSON：走原文
+            // 半截 / 前后缀多余 / 非法转义：往下走容错排版
         }
-        return t;
+        if (!looksJson(json)) return "";
+        return indent(json);
+    }
+
+    /** 粗略判断是不是 JSON 片段：看着像才排版，避免把普通文本拆散。 */
+    private static boolean looksJson(String s) {
+        if (s.length() < 2) return false;
+        char c = s.charAt(0);
+        if (c != '{' && c != '[') return false;
+        return s.indexOf(':') >= 0 && s.indexOf('"') >= 0;
+    }
+
+    /**
+     * 按括号与逗号换行的容错排版。
+     *
+     * <p>不要求 JSON 合法：括号没闭合、末尾被截断也能排出来，这对「响应太大被截断」
+     * 和「网关回了一段不完整的 JSON」都有效。字符串内部的括号、逗号不参与缩进。
+     */
+    private static String indent(String s) {
+        StringBuilder sb = new StringBuilder(s.length() + 96);
+        int depth = 0;
+        boolean inStr = false;
+        boolean justOpened = false;
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (inStr) {
+                sb.append(c);
+                if (c == '\\' && i + 1 < s.length()) {
+                    sb.append(s.charAt(++i));
+                } else if (c == '"') {
+                    inStr = false;
+                }
+                continue;
+            }
+            if (c == ' ' || c == '\t' || c == '\n' || c == '\r') continue;
+
+            if (justOpened) {
+                justOpened = false;
+                if (c == '}' || c == ']') {
+                    // 空对象 / 空数组：{} 连在一起写，别拆成两行
+                    depth = depth > 0 ? depth - 1 : 0;
+                    sb.append(c);
+                    continue;
+                }
+                newline(sb, depth);
+            }
+
+            if (c == '"') {
+                inStr = true;
+                sb.append(c);
+            } else if (c == '{' || c == '[') {
+                sb.append(c);
+                depth++;
+                justOpened = true;
+            } else if (c == '}' || c == ']') {
+                depth = depth > 0 ? depth - 1 : 0;
+                newline(sb, depth);
+                sb.append(c);
+            } else if (c == ',') {
+                sb.append(c);
+                newline(sb, depth);
+            } else if (c == ':') {
+                sb.append(": ");
+            } else {
+                sb.append(c);
+            }
+        }
+        return sb.toString().trim();
+    }
+
+    private static void newline(StringBuilder sb, int depth) {
+        int n = sb.length();
+        while (n > 0 && (sb.charAt(n - 1) == ' ' || sb.charAt(n - 1) == '\t')) {
+            sb.setLength(--n);
+        }
+        sb.append('\n');
+        for (int i = 0; i < depth; i++) sb.append("  ");
     }
 
     private static String rawOf(BalancePresets.Result res, ApiClient.BalanceResponse resp) {
