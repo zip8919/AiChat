@@ -6,20 +6,26 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 /**
- * 余额查询的平台适配：每个平台一条路径 + 一套解析规则。
+ * 余额查询的平台适配：每个平台一条路径或一套签名规则 + 一套解析规则。
  *
  * <p>为什么不能统一：余额接口从来不是标准 OpenAI 协议的一部分，各家返回结构完全不同。
  * DeepSeek 是 {@code {is_available, balance_infos:[{currency,total_balance,...}]}}；
- * 腾讯云 TokenHub 走 {@code /v1/usage}，余额与用量混在一个对象里；
  * 一些中转站干脆返回 {@code {"data":{"quota":123456}}}，单位还是「点」而不是「元」。
  * 用一个「万能解析」去猜字段名，结果就是余额显示成 0。
  *
  * <p>所以做成：<b>预设</b>（已知平台，路径与解析都预置好）+ <b>通用兜底</b>
  * （按常见字段名依次找，找到就显示）。用户在设置页选平台即可，也能自己填路径。
+ *
+ * <p>腾讯云是唯一一个「不查余额接口、改走云 API 签名」的平台：它的推理地址
+ * 按 API Key 查不到余额，账户余额与套餐余量只能用 SecretId/SecretKey 调
+ * {@code billing} / {@code tokenhub} 云接口，见 {@link TencentCloudApi}。
  */
 final class BalancePresets {
 
     private static final String TAG = "BalancePresets";
+
+    /** 走云 API 签名的预设 id；提供商设置页据此显示签名相关字段。 */
+    static final String ID_TENCENT = "tencent_cloud";
 
     /** 一个平台预设。 */
     static final class Preset {
@@ -36,6 +42,11 @@ final class BalancePresets {
             this.path = path;
             this.hint = hint;
         }
+
+        /** 用云 API 签名查询，不需要余额接口路径。 */
+        boolean signed() {
+            return ID_TENCENT.equals(id);
+        }
     }
 
     /**
@@ -45,14 +56,11 @@ final class BalancePresets {
     private static final Preset[] BUILTIN = {
             new Preset("deepseek", "DeepSeek 官方", "/user/balance",
                     "返回总余额、赠金余额与充值余额"),
-            // TokenHub 的推理域名（tokenhub.tencentmaas.com）只开了 /v1/models、
-            // /v1/chat/completions 这几条路，没有任何余额接口；余额与套餐余量
-            // 只存在于腾讯云管控面 API（需 SecretId/SecretKey 签名）。
-            // 这里退一步：用 /v1/models 验证 Key 是否真能调用，并列出可用模型，
-            // 至少能分清「Key 失效」「额度耗尽」「平台不支持查询」这三种情况。
-            new Preset("tencent_tokenhub", "腾讯云 TokenHub", "/v1/models",
-                    "检查 Key 是否可用、能调用哪些模型；TokenHub 不提供按 API Key"
-                            + "查余额的接口，余额与用量在腾讯云控制台查看"),
+            // 旧配置里存的是推理地址的余额路径，那条路恒为 404；
+            // 现在改为用 SecretId/SecretKey 调云 API 取真实余额。
+            new Preset(ID_TENCENT, "腾讯云（余额 / Token Plan）", "",
+                    "用 SecretId 与 SecretKey 查询账户可用余额和 Token Plan 套餐额度，"
+                            + "与腾讯云控制台一致；推理用的 API Key 查不到余额"),
             new Preset("openai_compat", "通用 OpenAI 兼容平台", "/dashboard/billing/credit_grants",
                     "适用于大多数中转站的额度接口"),
             new Preset("siliconflow", "硅基流动 SiliconFlow", "/v1/user/info",
@@ -73,6 +81,16 @@ final class BalancePresets {
         for (Preset p : BUILTIN) {
             if (p.id.equals(id)) return p;
         }
+        // 1.21.12 及以前的「腾讯云 TokenHub」预设 id：升级后自动切到能查真实余额的通道，
+        // 否则老配置还在查一个不存在的接口
+        if ("tencent_tokenhub".equals(id)) return byIdOf(ID_TENCENT);
+        return BUILTIN[0];
+    }
+
+    private static Preset byIdOf(String id) {
+        for (Preset p : BUILTIN) {
+            if (p.id.equals(id)) return p;
+        }
         return BUILTIN[0];
     }
 
@@ -88,6 +106,7 @@ final class BalancePresets {
             for (int i = 0; i < BUILTIN.length; i++) {
                 if (BUILTIN[i].id.equals(id)) return i;
             }
+            if ("tencent_tokenhub".equals(id)) return indexOf(ID_TENCENT);
         }
         return 0;
     }
@@ -98,7 +117,7 @@ final class BalancePresets {
         /** 已格式化的「名称：值」行，直接可显示。 */
         final List<String[]> fields = new ArrayList<String[]>();
         String error;
-        /** 补充说明，显示在字段下方（如「余额需去控制台看」）。 */
+        /** 补充说明，显示在字段下方。 */
         String note;
         /** 原始响应，供「查看原 JSON」使用。 */
         String raw;
@@ -153,7 +172,7 @@ final class BalancePresets {
             if (!applyPreset(pid, json, r)) {
                 // 预设选错 / 用户把别家的 key 填在「自定义」里：按返回结构认一遍。
                 // 顺序按「结构最独特」排，DeepSeek 的 balance_infos 不会误命中别家。
-                String[] order = { "deepseek", "tencent_tokenhub", "siliconflow", "openai_compat" };
+                String[] order = { "deepseek", "siliconflow", "openai_compat" };
                 for (int i = 0; i < order.length; i++) {
                     if (order[i].equals(pid)) continue;
                     if (applyPreset(order[i], json, r)) break;
@@ -190,6 +209,7 @@ final class BalancePresets {
             m = json.optString("msg", "");
             if (m.length() > 0) return m;
         } catch (Throwable ignored) {
+            // 错误体结构不固定，取不到就退回通用文案
         }
         return null;
     }
@@ -198,7 +218,6 @@ final class BalancePresets {
     private static boolean applyPreset(String id, JSONObject json, Result r) {
         int before = r.fields.size();
         if ("deepseek".equals(id)) parseDeepSeek(json, r);
-        else if ("tencent_tokenhub".equals(id)) parseTencent(json, r);
         else if ("siliconflow".equals(id)) parseSiliconFlow(json, r);
         else if ("openai_compat".equals(id)) parseOpenAiCompat(json, r);
         return r.fields.size() > before;
@@ -231,70 +250,6 @@ final class BalancePresets {
             r.add("赠金余额" + suffix, pick(info, "granted_balance"));
             r.add("充值余额" + suffix, pick(info, "topped_up_balance"));
         }
-    }
-
-    /**
-     * 腾讯云 TokenHub：字段名不固定（不同版本叫 quota / balance / total_quota），
-     * 这里把能量到的都列出来，单位按接口原样显示，不做换算猜测。
-     */
-    private static void parseTencent(JSONObject json, Result r) {
-        JSONArray models = json.optJSONArray("data");
-        if (models != null && isModelList(models)) {
-            parseModelList(models, r);
-            return;
-        }
-        JSONObject data = json.optJSONObject("data");
-        if (data == null) data = json.optJSONObject("Response");
-        JSONObject src = data != null ? data : json;
-        r.add("剩余额度", pick(src, "remaining_quota", "remain_quota", "balance", "quota", "total_quota"));
-        r.add("已用额度", pick(src, "used_quota", "used", "consumed_quota"));
-        r.add("总容量", pick(src, "total_quota", "total", "total_amount"));
-        r.add("赠送额度", pick(src, "granted_quota", "free_quota"));
-        r.add("账户状态", pick(src, "status", "state"));
-    }
-
-    /**
-     * TokenHub {@code /v1/models} 的返回是不是模型清单。
-     *
-     * <p>不能只看 {@code data} 是数组：余额接口也常把 {@code data} 做成数组。
-     * 这里认「元素里有 id」且「元素有 model/status 这类模型专有字段」。
-     */
-    private static boolean isModelList(JSONArray arr) {
-        if (arr.length() == 0) return false;
-        JSONObject m = arr.optJSONObject(0);
-        if (m == null || m.optString("id", "").length() == 0) return false;
-        return "model".equalsIgnoreCase(m.optString("object", ""))
-                || m.has("status") || m.has("context_length") || m.has("owned_by");
-    }
-
-    /**
-     * 展示模型清单：能列出来就说明 Key 有效。
-     *
-     * <p>为什么这也算「余额查询」：TokenHub 没有余额接口，用户点查询想知道的其实是
-     * 「这个 Key 还能不能用、额度是不是已经耗尽」。额度耗尽时调用会被拒，而
-     * {@code /v1/models} 只看鉴权，所以这里如实写清楚它能说明什么、不能说明什么，
-     * 别让人误以为「可用」等于「还有钱」。
-     */
-    private static void parseModelList(JSONArray arr, Result r) {
-        int online = 0;
-        StringBuilder sample = new StringBuilder();
-        for (int i = 0; i < arr.length(); i++) {
-            JSONObject m = arr.optJSONObject(i);
-            if (m == null) continue;
-            String id = m.optString("id", "");
-            if (id.length() == 0) continue;
-            String st = m.optString("status", "online");
-            if (st.length() == 0 || "online".equalsIgnoreCase(st)) online++;
-            if (sample.length() < 72 && sample.indexOf(id) < 0) {
-                if (sample.length() > 0) sample.append('、');
-                sample.append(id);
-            }
-        }
-        r.add("Key 状态", "可用（鉴权通过）");
-        r.add("在线模型", online + " 个");
-        if (sample.length() > 0) r.add("模型示例", sample.toString() + (arr.length() > 4 ? " 等" : ""));
-        r.note = "TokenHub 的推理地址不提供余额接口，这里只能确认 Key 有效、额度未在鉴权层被拦。"
-                + "账户余额与套餐余量请在腾讯云 TokenHub 控制台查看。";
     }
 
     /** 硅基流动：{@code {data:{balance, chargeBalance, totalBalance}}} */
@@ -340,8 +295,8 @@ final class BalancePresets {
     private static JSONObject[] scopesOf(JSONObject json) {
         List<JSONObject> list = new ArrayList<JSONObject>();
         list.add(json);
-        // Response 是腾讯云云 API 的固定外壳（{Response:{Total,Used}}），
-        // 有的网关会原样透传；不认它就只能看见一个空对象。
+        // Response 是腾讯云云 API 的固定外壳，有的网关会原样透传；
+        // 不认它就只能看见一个空对象。
         String[] keys = { "data", "result", "account", "billing", "info", "Response" };
         for (String k : keys) {
             JSONObject sub = json.optJSONObject(k);
@@ -362,8 +317,7 @@ final class BalancePresets {
      * 取第一个存在且非空的字段，按原样转成字符串。
      *
      * <p>先精确匹配，再忽略大小写找一遍：腾讯云云 API 的字段是 {@code Total} /
-     * {@code Used} 这种大驼峰，网关透传时保持原样，按小写名永远匹配不到，
-     * 界面上就会「余额查到了但一行都不显示」。
+     * {@code Used} 这种大驼峰，按小写名永远匹配不到。
      *
      * <p>数字统一去掉多余的 {@code .0}：额度多是整数，直接 {@code optString}
      * 会得到 {@code 12345.0}，看着像精度错乱。

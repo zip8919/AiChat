@@ -193,8 +193,63 @@
             android:layout_height="wrap_content"
             android:text="" />
 
+        <!-- 腾讯云访问密钥：只有余额平台选「腾讯云」时显示。
+             余额与套餐余量只能通过腾讯云云 API 签名查询，推理 Key 查不到。 -->
+        <LinearLayout
+            android:id="@+id/pe_secret_box"
+            android:orientation="vertical"
+            android:visibility="gone"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content">
+            <TextView
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:textColor="@color/text_primary"
+                android:layout_marginTop="10dp"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="腾讯云 SecretId" />
+            <EditText
+                android:id="@+id/pe_secret_id"
+                android:textSize="14sp"
+                android:singleLine="true"
+                android:inputType="text"
+                android:background="@drawable/edit_text_background"
+                android:padding="10dp"
+                android:hint="AKID…"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content" />
+            <TextView
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:textColor="@color/text_primary"
+                android:layout_marginTop="8dp"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="腾讯云 SecretKey" />
+            <EditText
+                android:id="@+id/pe_secret_key"
+                android:textSize="14sp"
+                android:singleLine="true"
+                android:inputType="textPassword"
+                android:background="@drawable/edit_text_background"
+                android:padding="10dp"
+                android:hint="SecretKey"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content" />
+            <TextView
+                android:id="@+id/pe_secret_tip"
+                android:textSize="11sp"
+                android:textColor="@color/text_secondary"
+                android:paddingTop="4dp"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="" />
+        </LinearLayout>
+
         <Button
             android:id="@+id/pe_test"
+
             android:textSize="13sp"
             android:layout_marginTop="10dp"
             android:layout_width="match_parent"

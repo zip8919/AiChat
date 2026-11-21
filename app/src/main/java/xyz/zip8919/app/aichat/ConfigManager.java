@@ -214,6 +214,10 @@ public class ConfigManager {
             // 老版本读到这两个字段会直接忽略，配置文件双向兼容。
             pj.put("balance_preset", p.balancePreset == null ? "" : p.balancePreset);
             pj.put("balance_path", p.balancePath == null ? "" : p.balancePath);
+            // 腾讯云余额走云 API 签名，需要 SecretId/SecretKey；其它平台为空。
+            // 与 api_key 同等对待：明文存在本机配置里，不上传、不进日志。
+            pj.put("secret_id", p.secretId == null ? "" : p.secretId);
+            pj.put("secret_key", p.secretKey == null ? "" : p.secretKey);
             provArr.put(pj);
         }
         json.put("providers", provArr);
@@ -262,6 +266,8 @@ public class ConfigManager {
             // balancePath 留空 → 用预设自带的 /user/balance。用户不需要重新配一遍。
             p.balancePreset = pj.optString("balance_preset", "");
             p.balancePath = pj.optString("balance_path", "");
+            p.secretId = pj.optString("secret_id", "");
+            p.secretKey = pj.optString("secret_key", "");
             providers.add(p);
         }
 

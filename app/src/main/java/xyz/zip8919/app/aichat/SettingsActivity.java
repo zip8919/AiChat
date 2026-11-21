@@ -724,7 +724,7 @@ public class SettingsActivity extends ThemedActivity {
         List<ProviderInfo> usable = new ArrayList<ProviderInfo>();
         for (int i = 0; i < providers.size(); i++) {
             ProviderInfo p = providers.get(i);
-            if (p != null && p.apiKey != null && p.apiKey.length() > 0 && p.hasBalance()) usable.add(p);
+            if (p != null && p.hasBalance() && canQueryBalance(p)) usable.add(p);
         }
         if (usable.isEmpty()) usable = providers;
 
@@ -745,38 +745,91 @@ public class SettingsActivity extends ThemedActivity {
                 .show();
     }
 
+    /**
+     * 这个提供商现在能不能查余额。
+     *
+     * <p>普通平台看推理 Key；腾讯云走云 API 签名，看的是 SecretId/SecretKey，
+     * 与推理 Key 无关——它有 Key 也可能没有访问密钥。
+     */
+    private static boolean canQueryBalance(ProviderInfo p) {
+        if (p == null) return false;
+        if (p.signedBalance()) {
+            return p.secretId != null && p.secretId.trim().length() > 0
+                    && p.secretKey != null && p.secretKey.trim().length() > 0;
+        }
+        return p.apiKey != null && p.apiKey.length() > 0;
+    }
+
     /** 真正发起查询：按提供商的余额预设与路径查，结果交给 {@link BalanceDialog}。 */
     private void runBalanceQuery(final ProviderInfo provider) {
         if (provider == null) return;
-        if (provider.apiKey == null || provider.apiKey.isEmpty()) {
-            LogUtil.w(TAG, "runBalanceQuery aborted: empty key, provider=%s", provider.name);
-            AcToast.show(this, Strings.get(R.string.settingsactivity_038));
+        if (!canQueryBalance(provider)) {
+            LogUtil.w(TAG, "runBalanceQuery aborted: credentials missing, provider=%s preset=%s",
+                    provider.name, provider.balancePreset);
+            AcToast.show(this, provider.signedBalance()
+                    ? Strings.get(R.string.settingsactivity_080)
+                    : Strings.get(R.string.settingsactivity_038));
             return;
         }
-        if (!provider.hasBalance()) {
-            AcToast.show(this, "这个平台还没配置余额接口路径，请在提供商设置里选择平台或填写路径");
+        if (!provider.hasBalance() && !provider.signedBalance()) {
+            AcToast.show(this, Strings.get(R.string.settingsactivity_081));
             return;
         }
         final CharSequence balanceBtnText = balanceButton.getText();
         final String path = provider.effectiveBalancePath();
         LogUtil.i(TAG, "runBalanceQuery: provider=%s preset=%s path=%s keyLen=%d",
-                provider.name, provider.balancePreset, path, provider.apiKey.length());
+                provider.name, provider.balancePreset, path,
+                provider.apiKey == null ? 0 : provider.apiKey.length());
 
         balanceButton.setEnabled(false);
         balanceButton.setText(Strings.get(R.string.settingsactivity_039));
 
         new Thread(new Runnable() {
             public void run() {
-                final ApiClient.BalanceResponse resp = ApiClient.queryBalanceFull(provider, path);
-                final BalancePresets.Result parsed =
-                        BalancePresets.parse(provider.balancePreset, resp.body);
+                final ApiClient.BalanceResponse resp;
+                final BalancePresets.Result parsed;
+                if (provider.signedBalance()) {
+                    // 腾讯云：账户余额 + Token Plan 套餐额度，各查一次再合并展示
+                    final TencentCloudApi.Result bal = TencentCloudApi.accountBalance(
+                            provider.secretId, provider.secretKey, "");
+                    final TencentCloudApi.Result plan = TencentCloudApi.tokenPlanPackage(
+                            provider.secretId, provider.secretKey, "ap-guangzhou");
+                    resp = new ApiClient.BalanceResponse();
+                    resp.code = bal.code > 0 ? bal.code : plan.code;
+                    resp.url = bal.url;
+                    resp.body = bal.body;
+                    if (bal.error != null) resp.error = bal.error;
+                    parsed = new BalancePresets.Result();
+                    parsed.fields.addAll(bal.fields);
+                    parsed.fields.addAll(plan.fields);
+                    parsed.raw = plan.body != null && plan.body.length() > 0 ? plan.body : bal.body;
+                    parsed.ok = !parsed.fields.isEmpty();
+                    if (!parsed.ok) {
+                        parsed.error = bal.error != null ? bal.error : plan.error;
+                    } else {
+                        StringBuilder note = new StringBuilder();
+                        if (bal.note != null) note.append(bal.note);
+                        if (plan.fields.isEmpty() && plan.error != null) {
+                            if (note.length() > 0) note.append('\n');
+                            // 没买过套餐是常态，说清楚而不是报错
+                            note.append("Token Plan：").append(plan.error);
+                        } else if (plan.note != null) {
+                            if (note.length() > 0) note.append('\n');
+                            note.append(plan.note);
+                        }
+                        parsed.note = note.toString();
+                    }
+                } else {
+                    resp = ApiClient.queryBalanceFull(provider, path);
+                    parsed = BalancePresets.parse(provider.balancePreset, resp.body);
+                }
                 runOnUiThread(new Runnable() {
                     public void run() {
                         if (isFinishing() || isDestroyed()) return;
                         balanceButton.setEnabled(true);
                         balanceButton.setText(balanceBtnText);
 
-                        if (resp.code <= 0 && resp.error != null) {
+                        if (resp.code <= 0 && resp.error != null && !provider.signedBalance()) {
                             // 连 HTTP 都没走到：域名解析失败 / 超时 / TLS 握手失败
                             LogUtil.w(TAG, "runBalanceQuery network error: %s", resp.error);
                         } else {

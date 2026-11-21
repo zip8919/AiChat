@@ -152,7 +152,8 @@ Android/data/xyz.zip8919.app.aichat/files/
 | `TraceKit` | trace 长度上限，只在块边界裁剪 | 不做渲染，不判断内容语义 |
 | `RetryPolicy` | 429 重试：退避、`Retry-After`、上限、可打断等待 | 不判断 HTTP 状态，不写 UI |
 | `ErrorReport` | 错误详情归类 | 不进任何 API 请求体 |
-| `ApiClient` | 非流式调用：标题生成、余额查询 | 不参与对话主链路 |
+| `ApiClient` | 非流式调用：标题生成、余额查询（普通平台走 HTTP 接口） | 不参与对话主链路 |
+| `TencentCloudApi` | 腾讯云余额与 Token Plan 余量：TC3-HMAC-SHA256 签名调云 API | 只调只读接口，不加改动账户的调用 |
 | `HttpRequestTool` | `http_request`：内网拦截、禁跟跳转、响应截断 | 不决定是否启用（由设置 + `StreamJob` 传入） |
 | `NetSecurity` | 内网访问 / 证书校验的进程内开关（默认严格） | 纯容器，不读配置 |
 | `WebSearchTool` | 联网工具：搜索、抓取、工具定义、结果整理 | 不直接发 HTTP（交给 `TavilyTool` / DeepSeek 后端） |

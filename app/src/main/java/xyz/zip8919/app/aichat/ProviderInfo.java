@@ -28,6 +28,15 @@ public class ProviderInfo {
      * 用来适配预设里没收录的平台。
      */
     public String balancePath;
+    /**
+     * 腾讯云 SecretId / SecretKey（可空）。
+     *
+     * <p>只有余额平台选「腾讯云」时才用得上：账户余额与 Token Plan 余量只存在于
+     * 腾讯云云 API，必须现场签名，推理用的 API Key 拿不到。其它平台留空即可。
+     * 与 {@link #apiKey} 一样明文存在 config.json 里，仅本机使用。
+     */
+    public String secretId;
+    public String secretKey;
 
     /** 界面上一律用它，读不到显示名就回退唯一标识。 */
     public String label() {
@@ -35,13 +44,17 @@ public class ProviderInfo {
         return name == null ? "" : name;
     }
 
+    /** 当前余额平台是否走云 API 签名（目前只有腾讯云）。 */
+    public boolean signedBalance() {
+        return BalancePresets.byId(balancePreset).signed();
+    }
+
     /** 这个提供商实际使用的余额接口路径：用户填的优先，其次预设默认值。 */
     public String effectiveBalancePath() {
-        // TokenHub 例外：旧配置里存的是 /v1/usage，那条路在推理域名下恒为 404。
-        // 路径以预设为准，否则升级后还在查一个网页不存在的接口。
-        if ("tencent_tokenhub".equals(balancePreset)) {
-            return BalancePresets.byId(balancePreset).path;
-        }
+        // 签名平台没有余额接口路径，查的是云 API
+        if (signedBalance()) return "";
+        // 旧配置的「腾讯云 TokenHub」id 已在 BalancePresets.byId 里映射到新预设，
+        // 走的也是签名通道，不会再去拼一个 404 的路径
         if (balancePath != null && balancePath.trim().length() > 0) return balancePath.trim();
         return BalancePresets.byId(balancePreset).path;
     }
@@ -63,6 +76,8 @@ public class ProviderInfo {
         p.supportsBalance = supportsBalance;
         p.balancePreset = balancePreset;
         p.balancePath = balancePath;
+        p.secretId = secretId;
+        p.secretKey = secretKey;
         return p;
     }
 }

@@ -55,6 +55,10 @@ public class ProviderEditActivity extends ThemedActivity {
     private EditText nameEt, displayEt, baseEt, pathEt, keyEt;
     /** 余额接口路径：留空时用所选平台预设自带的路径。 */
     private EditText balancePathEt;
+    /** 腾讯云访问密钥：只有余额平台选「腾讯云」时才显示并生效。 */
+    private EditText secretIdEt, secretKeyEt;
+    private TextView secretTip;
+    private LinearLayout secretBox;
     private Spinner balancePresetSp;
     private TextView balanceHint;
     /** 用户是否手动改过余额路径：改过就不再被预设覆盖。 */
@@ -98,6 +102,10 @@ public class ProviderEditActivity extends ThemedActivity {
         pathEt = (EditText) findViewById(R.id.pe_chat_path);
         keyEt = (EditText) findViewById(R.id.pe_api_key);
         balancePathEt = (EditText) findViewById(R.id.pe_balance_path);
+        secretBox = (LinearLayout) findViewById(R.id.pe_secret_box);
+        secretIdEt = (EditText) findViewById(R.id.pe_secret_id);
+        secretKeyEt = (EditText) findViewById(R.id.pe_secret_key);
+        secretTip = (TextView) findViewById(R.id.pe_secret_tip);
         balancePresetSp = (Spinner) findViewById(R.id.pe_balance_preset);
         balanceHint = (TextView) findViewById(R.id.pe_balance_hint);
         bindBalanceFields();
@@ -179,9 +187,12 @@ public class ProviderEditActivity extends ThemedActivity {
             String bp = editing.balancePath == null ? "" : editing.balancePath.trim();
             balancePathEt.setText(bp);
             balancePathTouched = bp.length() > 0;
+            secretIdEt.setText(editing.secretId == null ? "" : editing.secretId);
+            secretKeyEt.setText(editing.secretKey == null ? "" : editing.secretKey);
         }
         updateFinalUrl();
         updateNameTip();
+        updateSecretVisibility();
         updateBalanceHint();
         refreshModels();
     }
@@ -202,6 +213,7 @@ public class ProviderEditActivity extends ThemedActivity {
                 if (!balancePathTouched) {
                     balancePathEt.setText(p.path);
                 }
+                updateSecretVisibility();
                 updateBalanceHint();
             }
 
@@ -225,6 +237,26 @@ public class ProviderEditActivity extends ThemedActivity {
         });
     }
 
+    /**
+     * 腾讯云通道的显隐：路径框只在普通平台有意义，密钥框只在腾讯云有意义。
+     *
+     * <p>把两套字段同时摆在页面上会让用户以为「腾讯云也要填余额路径」，
+     * 而那条路上根本没有余额接口——填了只会得到 404。
+     */
+    private void updateSecretVisibility() {
+        if (secretBox == null) return;
+        int pos = balancePresetSp.getSelectedItemPosition();
+        if (pos < 0 || pos >= BalancePresets.all().length) pos = 0;
+        boolean signed = BalancePresets.all()[pos].signed();
+        secretBox.setVisibility(signed ? View.VISIBLE : View.GONE);
+        balancePathEt.setVisibility(signed ? View.GONE : View.VISIBLE);
+        if (signed) {
+            secretTip.setText(Strings.get(R.string.providereditactivity_065));
+            // 推理 Key 在腾讯云通道里不需要，但不要清空：用户可能还在用它对话
+            secretIdEt.setHint("AKID…");
+        }
+    }
+
     private void updateBalanceHint() {
         if (balanceHint == null) return;
         int pos = balancePresetSp.getSelectedItemPosition();
@@ -233,6 +265,10 @@ public class ProviderEditActivity extends ThemedActivity {
         String path = balancePathEt.getText().toString().trim();
         StringBuilder sb = new StringBuilder();
         sb.append(p.hint);
+        if (p.signed()) {
+            balanceHint.setText(sb.toString());
+            return;
+        }
         if (path.length() > 0) {
             sb.append("\n最终地址：").append(Endpoint.join(baseEt.getText().toString(), path));
             sb.append("\n留空则使用预设路径 ").append(p.path.length() == 0 ? "（需自己填）" : p.path);
@@ -355,9 +391,11 @@ public class ProviderEditActivity extends ThemedActivity {
         int bpos = balancePresetSp.getSelectedItemPosition();
         target.balancePreset = BalancePresets.all()[bpos < 0 ? 0 : bpos].id;
         target.balancePath = balancePathEt.getText().toString().trim();
+        target.secretId = secretIdEt.getText().toString().trim();
+        target.secretKey = secretKeyEt.getText().toString().trim();
         // supportsBalance 是 1.21.5 之前的单选开关，现在每个提供商都能查，
-        // 但保留字段的语义：配了路径就算支持，兼容旧读法
-        target.supportsBalance = target.hasBalance();
+        // 但保留字段的语义：配了路径（或选了签名平台）就算支持，兼容旧读法
+        target.supportsBalance = target.hasBalance() || target.signedBalance();
         if (creating) {
             cfg.getProviders().add(target);
             editing = target;
