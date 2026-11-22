@@ -124,6 +124,7 @@ final class RendererAssets {
             ".math-block img,.math-block svg{max-width:100%;}" +
             ".math-block img{height:auto;}" +
             "svg.math-inline{display:inline;vertical-align:middle;}" +
+            "img.math-inline{display:inline;height:1.6em;width:auto;vertical-align:middle;}" +
             ".math-inline img,.math-inline svg{height:1.6em;vertical-align:middle;}" +
             "ul,ol{padding-left:24px;margin:4px 0;}" +
             "li{margin:2px 0;}" +
@@ -1067,7 +1068,8 @@ final class RendererAssets {
             // 这里只负责「同一份内容永远往同一个方向长」。
             "window.__sm={on:false,arrived:'',show:0,units:[],chars:0,cut:0," +
             "stack:[],root:null,cur:0,paintUnits:null,fi:null,gi:null," +
-            "advA:null,advI:null,run:null,natLast:0,stackChars:null,stackPending:null};" +
+            "advA:null,advI:null,run:null,natLast:0,stackChars:null,stackPending:null," +
+            "src:'',common:0};" +
             "window.__smEsc=function(c){" +
             "return c==='&'?'&amp;':(c==='<'?'&lt;':(c==='>'?'&gt;':c));};" +
             // 正文 → 最小单位：每个字符一个单位、每段标签一个单位。
@@ -1078,21 +1080,50 @@ final class RendererAssets {
             // 每次切点前移都要整段重做，公式位图、代码高亮、展开状态全跟着重建，
             // 渐显就退化成「整段一闪一闪」。这里一帧只解析一次 HTML，之后所有帧
             // 只在单位序列上移动切点。
-            "window.__smUnitize=function(html,st){" +
+            "window.__smUnitize=function(html,st,from){" +
             "var s=html||'';" +
-            // 末尾纯文本续写：这是流式输出最典型的帧——段落还在写，只有最后一段
-            // 文字后面又多出几个字，前面的标签、闭合结构一个字都没变。
+            // 片段没变（只推进显示进度）：单位序列就是当前这份，直接交回去。
+            // 少了这一条，每一拍都要把整份 HTML 重新解析一遍才算「什么都没变」。
+            "if(st&&st.units&&st.src===s)return st.units;" +
+            // ---- 一档：末尾续写几个字（流式最常见的帧）----
+            //
+            // 最后一段文字后面又多了几个字，前面的标签、公式、代码块一个字都没变。
+            // 只要把新字补进单位序列就行，不必重解析整份 HTML——一帧几万字、
+            // 单位两万个，4.4 上单帧几十毫秒，用户看到的就是「越写越慢」。
+            //
+            // 切点 `from` 由调用方给出（Java 侧增量渲染算出的精确前缀长度），
+            // 不靠 at 反推：at 是估算值，实体与自闭合标签会让它和源码错开几格。
+            "if(from>0&&st&&st.units&&st.src!==undefined&&st.chars>=0){" +
+            "var o0=st.src;" +
+            "if(from<o0.length&&from<s.length&&o0.substring(0,from)===s.substring(0,from)){" +
+            // 公共后缀：末尾那串闭合标签通常没动
+            "var q=0,mq=Math.min(o0.length-from,s.length-from,512);" +
+            "while(q<mq&&o0.charAt(o0.length-1-q)===s.charAt(s.length-1-q))q++;" +
+            "var co=o0.substring(from,o0.length-q),cn=s.substring(from,s.length-q);" +
+            "var io=co.lastIndexOf('>'),in2=cn.lastIndexOf('>');" +
+            // 最后一个「>」之前的标签序列逐字节相同：结构没变，只有它之后的文字在长
+            "if(io>=0&&in2>=0&&co.substring(0,io+1)===cn.substring(0,in2+1)){" +
+            "var del=co.substring(io+1),ins=cn.substring(in2+1);" +
+            "if(del.indexOf('<')<0&&ins.indexOf('<')<0&&del.indexOf('&')<0&&ins.indexOf('&')<0" +
+            "&&ins.indexOf(del)===0&&ins.length>del.length){" +
+            "var after=window.__smTextChars(s.substring(s.length-q));" +
+            "var nu=window.__smSplice(st,del,ins.substring(del.length),after);" +
+            "if(nu){st.src=s;return nu;}" +
+            "}}}}" +
+            // ---- 二档：末段是没有闭合标签的裸文字 ----
             //
             // 判定用「三段式」：开头（到末段文字起点）、末段文字本身、结尾闭合标签。
-            // 开头与结尾都一样、只有末段文字在后面接长，就说明结构完全没变：
-            // 只要把新增的字补进单位序列，下一帧绘图时直接写进原来那个文本节点，
-            // 完全不用把几万字的 HTML 重新解析一遍（这正是长回答越写越卡的主因）。
+            // 开头与结尾都一样、只有末段文字在后面接长，就说明结构完全没变。
+            // 这一档只在 HTML 以「未闭合的文字」收尾时命中（卡片、代码块内部），
+            // 段落永远以 </p> 收尾，所以真正兜住流式的是上面那一档。
+            // d 为空说明这一帧的差异不在末段文字里：必须往下走整份解析，
+            // 直接返回旧序列会把这一帧的字整批丢掉（改完不显示、要等下一帧才补）。
             "if(st&&st.run&&st.stackChars){" +
             "var r=window.__smRun(s);" +
             "if(r&&r.rs===st.run.rs&&r.head===st.run.head&&r.tail===st.run.tail" +
             "&&r.raw.length>=st.run.raw.length&&r.raw.indexOf(st.run.raw)===0){" +
             "var d=r.raw.substring(st.run.raw.length);" +
-            "if(d.indexOf('<')<0&&d.indexOf('&')<0){" +
+            "if(d.length>0&&d.indexOf('<')<0&&d.indexOf('&')<0){" +
             "var u0=st.units,nat0=st.natLast;" +
             // 新字必须插在「上一帧遗留在末尾的闭合标签」之前。
             //
@@ -1106,15 +1137,15 @@ final class RendererAssets {
             "for(var q0=0;q0<d.length;q0++){" +
             "u0.push({ch:d.charAt(q0),at:nat0});nat0++;}" +
             "if(tl)for(var t0=0;t0<tl.length;t0++)u0.push(tl[t0]);" +
-            "st.natLast=nat0;st.chars+=d.length;st.run=r;" +
+            "st.natLast=nat0;st.chars+=d.length;st.run=r;st.common=li+1;" +
             // 追加要从「上一帧最后那个字所在的元素」里接，不能从根节点接：
             // 结构没变，所以那串元素引用仍然有效
             "st.stackPending=st.stackChars;" +
             "return u0;}}}" +
-            // 全量解析后记下三段式，供下一帧判定用
+            // ---- 三档：整份解析 ----
             "var all=window.__smParse(s,0);" +
-            "if(st){st.chars=all.cnt;st.natLast=all.fi;st.run=window.__smRun(s);" +
-            "st.advA=null;st.advI=null;st.stackChars=null;st.stackPending=null;}" +
+            "if(st){st.chars=all.cnt;st.natLast=all.fi;st.run=window.__smRun(s);st.src=s;" +
+            "st.common=0;st.advA=null;st.advI=null;st.stackChars=null;st.stackPending=null;}" +
             "return all.units;};" +
             // 把一份 HTML 切成「开头 / 末段文字 / 结尾闭合标签」三段。
             // 结尾必须是闭合标签，否则没有稳定的追加锚点。
@@ -1154,6 +1185,47 @@ final class RendererAssets {
             "nat+=n.nodeValue.length+7;fi=nat;}}};" +
             "add(box);" +
             "return {units:units,fi:fi,cnt:cnt};};" +
+            // 一段 HTML 里有多少「正文字符」（标签不算，实体按一个字算）。
+            // 用来定位末尾续写的插入点：单位序列里每个字都带 ci，
+            // 「从末尾倒数 after 个字」就是插入位置，与源码偏移无关。
+            "window.__smTextChars=function(x){" +
+            "if(!x)return 0;var n=0,i=0,L=x.length;" +
+            "while(i<L){" +
+            "var c=x.charAt(i);" +
+            "if(c==='<'){var g=x.indexOf('>',i);if(g<0)break;i=g+1;continue;}" +
+            "if(c==='&'){var sc=x.indexOf(';',i);if(sc>i&&sc-i<=8){i=sc+1;n++;continue;}}" +
+            "i++;n++;}" +
+            "return n;};" +
+            // 把末尾新到的几个字补进单位序列，返回新的单位序列（失败返回 null）。
+            //
+            // 为什么重建数组而不是就地插入：绘图层的「上一帧画到哪」是按单位下标记的，
+            // 就地插入会让新旧数组变成同一个对象，差分判定（old===u）直接短路，
+            // 这一帧的改动就看不见了。新数组里 [0,k) 是原样搬过去的同一批对象，
+            // 差分从 k 开始比，代价是一次指针拷贝，远小于重解析整份 HTML。
+            "window.__smSplice=function(st,del,ins,after){" +
+            // 变更点后面还有大段内容（说明改写发生在很早的位置）：交给整份重解析
+            "if(after<0||after>400)return null;" +
+            "var u=st.units,len=u.length,k=len,seen=0;" +
+            // 先跳过末尾的闭合标签：插入点在「最后一个字」之后，而不是数组末尾
+            "while(k>0&&u[k-1].ch===undefined)k--;" +
+            "while(k>0&&seen<after){k--;if(u[k].ch!==undefined)seen++;}" +
+            "if(seen<after)return null;" +
+            // del 必须正好是 k 之前连续的那几个字，否则切点不可信
+            "var j=k-1,cnt=del.length;" +
+            "while(cnt>0){if(j<0||u[j].ch===undefined)return null;cnt--;j--;}" +
+            "var back='';" +
+            "for(var x=j+1;x<k;x++)back+=u[x].ch;" +
+            "if(back!==del)return null;" +
+            "var at=(k<len&&u[k].at!==undefined)?u[k].at:((k>0)?u[k-1].at:0);" +
+            "var nu=u.slice(0,k);" +
+            "for(var q=0;q<ins.length;q++)nu.push({ch:ins.charAt(q),at:at+q});" +
+            "for(var y=k;y<len;y++)nu.push(u[y]);" +
+            "st.chars+=ins.length;" +
+            // 进度游标（字数 → 单位下标）跟着右移；锚点栈按旧的单位序列记的，作废
+            "if(st.advI!=null&&st.advI>=k)st.advI+=ins.length;" +
+            "st.stackChars=null;st.stackPending=null;" +
+            "st.common=k;" +
+            "return nu;};" +
             // 重画：只往已显示区追加新增单位，已画过的节点一律不动。
             "window.__smPaint=function(st,t){" +
             "var root=t.querySelector('.smooth-shown');" +
@@ -1218,7 +1290,11 @@ final class RendererAssets {
             "if(!old)return -2;" +
             "if(old===u)return st.cur<=u.length?-1:u.length;" +
             "var n=Math.min(st.cur,u.length);" +
-            "for(var i=0;i<n;i++){" +
+            // st.common 是「这一帧确定没变的单位个数」（续写时由 unitize 给出）。
+            // 从它开始比，而不是每帧从 0 比到切点——两万个单位的逐项比较
+            // 在 4.4 上本身就要几毫秒，也是要消掉的那类随长度增长的开销。
+            "var i=st.common||0;if(i>n)i=n;" +
+            "for(;i<n;i++){" +
             "var a=u[i],b=old[i];" +
             "if(a.ch!==b.ch||a.tok!==b.tok)return i;}" +
             "return -1;};" +
@@ -1363,7 +1439,6 @@ final class RendererAssets {
             // 这一帧里「第一个闭合标签之后」的元素栈：本帧新开又已闭合的段落，
             // 在帧尾不该继续留在栈上。留着的话，下一帧的新字会写进上一帧那个
             // 已经结束的段落里，段落结构越写越乱
-            "var closedStack=null,closedAny=0;" +
             "for(var i=from;i<to;i++){" +
             "var x=u[i];" +
             "var top=st.stack[st.stack.length-1].el;" +
@@ -1389,8 +1464,6 @@ final class RendererAssets {
             // 闭合前先合并这一段文字：一个标签里最后写的那几句话，
             // 往往是好几帧各写一段，不合并就一段一个文本节点
             "if(lcIdx>=0)window.__smJoin(top);" +
-            "if(closedAny===0)closedStack=st.stack.slice(0,st.stack.length);" +
-            "closedAny++;" +
             "for(var k=st.stack.length-1;k>0;k--){" +
             "if(st.stack[k].n===x.close){st.stack.length=k;break;}}" +
             "continue;}" +
@@ -1411,9 +1484,17 @@ final class RendererAssets {
             // 追加结束后把锚点指到「最后一个字所在的元素」：本帧新写的字如果
             // 落在新开的代码块/段落里，锚点还停在上一个段落的话，渐变窗口
             // 就找不到这一帧真正的尾巴，新字会一直停在正文色、看不出渐现。
-            "if(lastCh&&lastCh.parentNode){st.gi=lastCh;window.__smJoin(lastCh.parentNode);}" +
-            // 帧尾回退到「已闭合」的位置：下一帧的续写从那里开始接
-            "if(closedStack)st.stack=closedStack;};" +
+            "if(lastCh&&lastCh.parentNode){st.gi=lastCh;window.__smJoin(lastCh.parentNode);}};" +
+            // 帧尾不再把元素栈回退到「本帧第一个闭合标签之前」。
+            //
+            // 旧实现在帧尾把栈复位成那一刻的快照，注释说「新开又闭合的段落不该留在
+            // 栈上」。但自然进出栈本来就不会留下已闭合的元素，这个复位只在一帧跨过
+            // 多个块时才生效——比如本帧从思考块的折叠条一路画到块内正文：中途有
+            // 好几个闭合标签，快照停在第一个闭合标签之前（折叠条那层），下一帧的
+            // 新字就被追加进折叠条里，表现为「思考内容变蓝贴在展开按钮上」，再下一帧
+            // 结构重算又把它挪回块内（看起来像「字闪一下消失、又钻回思考内容」）。
+            // 同一处复位也让表格单元格、行内加粗的字序颠倒（td/strong 之后的新字
+            // 被写回父级）。栈只由本帧真正处理过的标签决定，才是它的正确语义。
             // 渐变窗口：从「最新显示的那个字」往前数 GRAD 个字保留浅色，
             // 再往前的一律落成正文色。
             // 窗口是按节点位置倒着数的，不是按创建顺序：这样窗口里永远是「末尾那一串」，
@@ -1432,9 +1513,11 @@ final class RendererAssets {
             // 必须从前往后收。从后往前收时，每颗 span 的前一个兄弟都是 span，
             // 走 replaceChild 分支各建一颗文本节点，收完就是「一字一节点」，
             // 相邻文本节点越攒越多——排版成本随回答长度线性上涨。
-            "var old=st.root.getElementsByTagName('span'),list=[];" +
+            // 只取渐变用的 span。旧实现遍历整棵显示层的 span 再按类名筛：代码高亮
+            // 一多就是几千个节点，每帧全扫一遍，成本随正文长度线性增长。
+            // 按类名取活动集合，长度就是真正要处理的个数。
+            "var old=st.root.getElementsByClassName('stream-new'),list=[];" +
             "for(var i=0;i<old.length;i++){" +
-            "if((''+old[i].className).indexOf('stream-new')<0)continue;" +
             "list.push(old[i]);}" +
             // 每一颗都落回裸文本：相邻的前一个文本节点直接 appendData，
             // 否则新建一个文本节点。留一颗 span 当锚点会让下一帧的窗口
@@ -1519,12 +1602,10 @@ final class RendererAssets {
             // 它们会停在「刚出现时那一档浅色」，一直不变深
             "window.__smRestyle(el,GRAD);};" +
             "window.__smRestyle=function(el,GRAD){" +
-            "var ns=el.getElementsByTagName('span'),cnt=0,len=0,j;" +
-            "for(j=0;j<ns.length;j++)if((''+ns[j].className).indexOf('stream-new')>=0)cnt++;" +
+            // 同上：按类名取，不扫整棵子树再筛
+            "var ns=el.getElementsByClassName('stream-new'),len=0,j;" +
             "for(j=ns.length-1;j>=0;j--){" +
-            "var sp=ns[j];" +
-            "if((''+sp.className).indexOf('stream-new')<0)continue;" +
-            "len++;sp.style.opacity=(Math.round((len/GRAD)*10)/10);}};" +
+            "len++;ns[j].style.opacity=(Math.round((len/GRAD)*10)/10);}};" +
             // 纯文本进度独立成一状态，不和 HTML 的单位序列混用：
             // 两套口径（偏移 / 字数）混在一起时，一个「<」就能让显示量跳掉几十字
             //
@@ -1699,7 +1780,7 @@ final class RendererAssets {
             "st.root=null;st.cur=0;st.paintUnits=null;st.fi=null;st.gi=null;" +
             "st.advA=null;st.advI=null;st.run=null;st.natLast=0;" +
             "st.stackChars=null;st.stackPending=null;" +
-            "st.stack=[];st.grad=[];" +
+            "st.stack=[];st.grad=[];st.src='';st.common=0;" +
             "window.__smPlain.on=false;" +
             "window.__smPlainReset();};" +
             // 已到达的完整片段 + 已经放出的字数：两者一起下发，进度落后时也不会漏内容
@@ -1740,7 +1821,10 @@ final class RendererAssets {
             "var src=base+delta;" +
             "var a=adv|0;if(a<0)a=0;" +
             "st.arrived=src;st.show=a;" +
-            "st.units=window.__smUnitize(src,st);" +
+            // replaceFrom 就是「这一帧从该下标起才可能不同」的精确位置：
+            // 交给 __smUnitize，它只重解析这一小截，前面的单位原样复用。
+            // 流式的常态帧（末尾又多了几个字）从这里走，单帧成本与正文长度无关。
+            "st.units=window.__smUnitize(src,st,replaceFrom>0?replaceFrom:0);" +
             "if(a>st.chars)a=st.chars;st.show=a;" +
             "window.__smAdvance(st,t,a);return true;};" +
             // 纯文本帧：保持当前进度，只把到达的全文记下来

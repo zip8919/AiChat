@@ -14,7 +14,7 @@ import ru.noties.jlatexmath.JLatexMathDrawable;
 
 /**
  * 数学公式渲染：{@code $...$} / {@code $$...$$} / {@code \ce{...}} / 裸 {@code \command}
- * 统一转成 jlatexmath 位图，再包成 SVG data-URI 内联进 HTML。
+ * 统一转成 jlatexmath 位图，再包成 {@code <img src="data:image/png;base64,…">} 内联进 HTML。
  *
  * <p>从 {@link MessageHtmlRenderer} 抽出（约 700 行）。这里全部是无状态静态方法，
  * 唯一的共享状态是公式位图缓存——同一公式在长对话里会被反复渲染，缓存按字符数
@@ -538,33 +538,36 @@ final class MathRenderer {
                 }
 
                 String alt = Html.escAttr(formula);
-                // Block: explicit display dimensions (w/scale) so API 18
-                // doesn't fall back to 300×150 default. viewBox maps the
-                // high-res bitmap to display size.
-                // Inline: no width/height attrs — CSS height:1.6em;width:auto
-                String svgNs = "http://www.w3.org/2000/svg";
-                String xlinkNs = "http://www.w3.org/1999/xlink";
+                // 一律用 <img> 输出，不再套 <svg><image>。
+                //
+                // 为什么改：API 19 的 WebView 是 Chromium 30，内联 <svg> 里的
+                // <image xlink:href="data:..."> 不保证出图——页面里公式位置只剩一个
+                // 空 svg（用户看到的「公式变成 svg 标签、不渲染」）。而流式增量绘制
+                // 会把标签逐个 insertAdjacentHTML 进 DOM，SVG 元素走的是外来内容解析
+                // 分支，属性（xlink:href 带上几十 KB 的 base64）还要被重新序列化一次，
+                // 这条路径在老 WebView 上更容易出问题。
+                //
+                // 位图本来就有像素尺寸：块级用 width/height 属性把它缩到显示尺寸
+                // （CSS 像素，与 density 无关），行内交给 CSS height:1.6em;width:auto。
+                // <img> 是空元素，两种路径（整段 innerHTML、逐标签追加）行为一致。
                 if (block) {
                     int dispW = Math.round((float) w / scale);
                     int dispH = Math.round((float) h / scale);
                     if (dispW < 1) dispW = 1;
                     if (dispH < 1) dispH = 1;
                     imgTag = "<div class=\"math-block\">" +
-                        "<svg xmlns=\"" + svgNs + "\" xmlns:xlink=\"" + xlinkNs + "\"" +
+                        "<img src=\"data:image/png;base64," + b64 + "\"" +
                         " width=\"" + dispW + "\" height=\"" + dispH + "\"" +
-                        " viewBox=\"0 0 " + w + " " + h + "\"" +
-                        " style=\"max-width:100%;\">" +
-                        "<image width=\"" + w + "\" height=\"" + h + "\"" +
-                        " xlink:href=\"data:image/png;base64," + b64 + "\"/>" +
-                        "</svg></div>";
+                        " style=\"max-width:100%;height:auto;\"" +
+                        " alt=\"" + alt + "\">" +
+                        "</div>";
                 } else {
-                    imgTag = "<svg xmlns=\"" + svgNs + "\" xmlns:xlink=\"" + xlinkNs + "\"" +
-                        " class=\"math-inline\"" +
-                        " viewBox=\"0 0 " + w + " " + h + "\"" +
-                        " style=\"height:1.6em;width:auto;vertical-align:middle;\">" +
-                        "<image width=\"" + w + "\" height=\"" + h + "\"" +
-                        " xlink:href=\"data:image/png;base64," + b64 + "\"/>" +
-                        "</svg>";
+                    imgTag = "<img class=\"math-inline\"" +
+                        " src=\"data:image/png;base64," + b64 + "\"" +
+                        " width=\"" + Math.max(1, Math.round((float) w / scale)) + "\"" +
+                        " height=\"" + Math.max(1, Math.round((float) h / scale)) + "\"" +
+                        " style=\"height:1.6em;width:auto;vertical-align:middle;\"" +
+                        " alt=\"" + alt + "\">";
                 }
             }
         } catch (Exception e) {

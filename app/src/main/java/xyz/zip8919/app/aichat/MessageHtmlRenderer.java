@@ -695,22 +695,23 @@ public class MessageHtmlRenderer {
      *
      * <p>不能增量情况一律退回整段渲染，正确性优先：
      * <ul>
-     *   <li>正文带 {@code [thinking]} / {@code [tool]} 结构化块——这些块由
-     *       {@link #contentWithBlocks} 整体解析，切点语义与纯 markdown 不同；</li>
-     *   <li>{@link MarkdownChunker#splitPoint} 找不到安全切点（长代码块、
-     *       超长段落、正在思考中）；</li>
+     *   <li>{@link MarkdownChunker#splitPoint} 找不到安全切点（正文还短、长代码块、
+     *       超长段落、一整段还在增长的思考块里）；</li>
      *   <li>尾段比上一帧还长一截且前缀没命中（换了一段回答、用户编辑了正文）。</li>
      * </ul>
+     *
+     * <p><b>结构化块（{@code [thinking]} / {@code [tool]}）不再整段重建。</b>
+     * 切点由 {@link MarkdownChunker} 选，它明确拒绝落在这些块的内部；因此前缀里
+     * 的结构化块一定是<b>已闭合</b>的（未闭合的块只能整体落在尾段里）。已闭合块与
+     * 普通段落一样是顶层块，按同一条分派（{@link #contentWithBlocks} 还是
+     * {@link MarkdownPipeline#render}）渲染前缀，与整段渲染的前半部分逐字节相同。
+     *
+     * <p>这条曾经是「开着实时渲染 + 思考模型 = 越写越慢」的唯一原因：只要正文里
+     * 出现一个 {@code [thinking]}，每一帧就把整条回答（含此前的全部轮次）重新解析一遍，
+     * 单帧成本随正文线性增长。
      */
     static String contentToHtmlIncremental(String text, Context ctx) {
         if (text == null || text.isEmpty()) return "";
-        if (text.indexOf("[thinking]") >= 0 || text.indexOf(WebSearchTool.TRACE_START) >= 0) {
-            // 结构化块逐帧整体重建：块本身很短，重建代价远小于切点判断出错的风险
-            incSrc = "";
-            incHtml = "";
-            incCut = -1;
-            return contentToHtml(text, ctx, false);
-        }
         int cut = MarkdownChunker.splitPoint(text, incCut);
         if (cut < 0) {
             // 没有安全切点（正文还短、或在长代码块/长段落里）：整段渲染。
@@ -728,7 +729,7 @@ public class MessageHtmlRenderer {
             // 前缀命中：只渲染尾段，前缀直接用上一帧的结果。
             // 这是流式的常态路径——切点稳定，一次渲染的前缀会被后面几十帧复用。
             incCut = cut;
-            return incHtml + MarkdownPipeline.render(text.substring(cut), ctx);
+            return incHtml + renderFragment(text.substring(cut), ctx);
         }
         // 前缀是新的（第一帧、切点前移、换了一段回答）：渲染前缀并记下来。
         //
@@ -736,10 +737,25 @@ public class MessageHtmlRenderer {
         // 由 MarkdownChunker 的切点条件保证（顶层块边界 + 空行之后、不与上一个块
         // 同类可合并、不在围栏代码 / 未闭合的结构化块里）——已用整篇一致性用例验证。
         // 注意不要「整段渲染一遍再切前缀」：那等于白渲染一次，增量就没意义了。
-        String prefixHtml = MarkdownPipeline.render(prefix, ctx);
+        String prefixHtml = renderFragment(prefix, ctx);
         rememberPrefix(prefix, prefixHtml, sig);
         incCut = cut;
-        return prefixHtml + MarkdownPipeline.render(text.substring(cut), ctx);
+        return prefixHtml + renderFragment(text.substring(cut), ctx);
+    }
+
+    /**
+     * 一段正文 → HTML，分派方式与整段渲染（{@link #contentToHtml}）完全一致。
+     *
+     * <p>不能一律走 {@link MarkdownPipeline#render}：带 {@code [thinking]} /
+     * {@code [tool]} 的片段必须由 {@link #contentWithBlocks} 解析，否则折叠块与卡片
+     * 会被当成普通文字。前缀与尾段都按这一段自己的内容分派——切点不会落在结构化块
+     * 内部，所以前缀里的块都是已闭合的，尾段里的块（若有）也是从块首开始的完整结构。
+     */
+    private static String renderFragment(String part, Context ctx) {
+        if (part == null || part.isEmpty()) return "";
+        boolean structured = part.indexOf("[thinking]") >= 0
+                || part.indexOf(WebSearchTool.TRACE_START) >= 0;
+        return structured ? contentWithBlocks(part, ctx) : MarkdownPipeline.render(part, ctx);
     }
 
     /**
