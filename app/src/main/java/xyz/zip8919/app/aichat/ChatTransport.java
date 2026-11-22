@@ -4,6 +4,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.util.List;
 import javax.net.ssl.HttpsURLConnection;
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -45,6 +46,18 @@ final class ChatTransport {
     static JSONObject buildRequestBody(String model, ProviderInfo provider, String thinkingLevel,
             JSONArray messages, boolean stream, JSONArray tools, boolean includeUsage,
             boolean sendThinking) throws Exception {
+        return buildRequestBody(model, provider, thinkingLevel, messages, stream, tools,
+                includeUsage, sendThinking, 0);
+    }
+
+    /**
+     * @param offAttempt 关闭思考的第几次尝试（见 {@link ThinkingOff#plans}）。
+     *                   端点 400/422 时由调用方递增，换下一种关闭字段重发；
+     *                   只有「思考等级=关」时才起作用。
+     */
+    static JSONObject buildRequestBody(String model, ProviderInfo provider, String thinkingLevel,
+            JSONArray messages, boolean stream, JSONArray tools, boolean includeUsage,
+            boolean sendThinking, int offAttempt) throws Exception {
         JSONObject body = new JSONObject();
         body.put("model", model);
         body.put("stream", stream);
@@ -67,46 +80,29 @@ final class ChatTransport {
         }
 
         if (sendThinking) {
-            if ("boolean".equals(provider.thinkingType)) {
-                if ("off".equals(level)) {
-                    // 关思考必须显式下发 false。原来 off 时一个字段都不发，端点保持默认
-                    // （多数是「开」），用户以为开关坏了，实际还在思考、白烧 token。
-                    // 少数端点不认这个字段会 400，由 ChatStreamRunner 的 thinking 降级兜底。
-                    body.put(provider.thinkingParamName, false);
-                } else {
-                    body.put(provider.thinkingParamName, true);
-                    body.put("thinking_budget", ThinkingLevels.budget(level));
-                }
+            // 字段名兜底：老配置里 thinkingParamName 可能为空，put(null) 会抛异常
+            String pName = provider.thinkingParamName;
+            if (pName == null || pName.trim().length() == 0) pName = "thinking";
+            if ("off".equals(level)) {
+                // 关闭思考交给 ThinkingOff 按「家族 → 提供商声明 → 通用 → 不下发」
+                // 逐个方案尝试。旧版把四类关闭字段一次全发，严格端点（OpenAI 官方、
+                // 部分网关）对多出来的 thinking / chat_template_kwargs 直接 400，
+                // 降级时又把整个关闭意图丢掉，于是「选了关，模型照样思考」。
+                ThinkingOff.apply(body, provider, model, offAttempt);
+            } else if ("boolean".equals(provider.thinkingType)) {
+                body.put(pName, true);
+                body.put("thinking_budget", ThinkingLevels.budget(level));
             } else {
                 JSONObject tObj = new JSONObject();
-                tObj.put("type", "off".equals(level) ? "disabled" : "enabled");
-                body.put(provider.thinkingParamName, tObj);
+                tObj.put("type", "enabled");
+                body.put(pName, tObj);
+                // Anthropic 要求开启思考时必须给预算，漏了直接 400
+                if (ReasoningProfiles.needsBudget(model)) {
+                    body.put("thinking_budget", ThinkingLevels.budget(level));
+                }
                 String effort = ThinkingLevels.reasoningEffort(level);
                 if (effort != null) {
                     body.put("reasoning_effort", effort);
-                }
-            }
-            if ("off".equals(level)) {
-                // 只发一个开关远远不够：同一批「思考等级=关」的端点在实测里分成三类，
-                // 各自认不同的字段——
-                //   1. 认 thinking.type=disabled（DeepSeek 系、默认的自建 provider）
-                //   2. 认 reasoning_effort=none（OpenAI 系、vLLM 新版）
-                //   3. 认 chat_template_kwargs.enable_thinking=false（Qwen / GLM 的
-                //      模板参数开关，SCNet GLM-5 这类端点会直接忽略 thinking.type）
-                // 以前这里只发了第 1 类，第 2、3 类端点上的表现就是「明明选了关，
-                // 模型还在思考」。三个字段一起发：不认识的端点按 JSON 扩展字段处理，
-                // 一般直接忽略；真被严格校验拦下会 400，走 ChatStreamRunner 的
-                // thinking 降级（sendThinking=false）重发。
-                // 非流式的 ApiClient 早已这样发，两条路径行为保持一致。
-                body.put("reasoning_effort", "none");
-                JSONObject ctk = new JSONObject();
-                ctk.put("enable_thinking", false);
-                body.put("chat_template_kwargs", ctk);
-                // Qwen / 混元 / 豆包这一系只认顶层 enable_thinking，
-                // thinking.type 与 chat_template_kwargs 都会被静默忽略。
-                // 只对已知家族发：严格的 OpenAI 端点对多余顶层字段会 400。
-                if (ReasoningProfiles.of(model).topLevelEnableThinking) {
-                    body.put("enable_thinking", false);
                 }
             }
         }
@@ -116,9 +112,9 @@ final class ChatTransport {
     /**
      * 端点连思考关闭字段都不认时的最后一道保险：在 system 提示词末尾追加一段硬约束。
      *
-     * <p>走到这里说明前面发过 thinking/thinking_budget/reasoning_effort/
-     * chat_template_kwargs 中的关闭组合，端点仍然 400，降级后一个思考字段都不发，
-     * 端点回到默认（多数开思考）。协议层面已经没有可用开关，只能靠指令压制。
+     * <p>走到这里说明 {@link ThinkingOff} 的所有关闭方案都没被端点接受，或已走到
+     * 「不下发任何字段」的那一步，端点回到默认（多数开思考）。协议层面已经没有
+     * 可用开关，只能靠指令压制。
      *
      * <p>只改第一条 system 消息；没有 system 就在最前面补一条。历史内容一个字不动，
      * 这样多轮上下文里前几轮的格式与解析结果不受影响。
@@ -160,11 +156,25 @@ final class ChatTransport {
      */
     static String resolveThinkingLevel(String model, ProviderInfo provider, String globalLevel) {
         if (globalLevel == null || globalLevel.length() == 0) return globalLevel;
-        if ("off".equals(globalLevel)) return globalLevel;
         try {
             ConfigManager cfg = ConfigManager.getInstance();
             String providerName = provider == null ? null : provider.name;
             ModelInfo m = cfg.findModel(providerName, model);
+            if ("off".equals(globalLevel)) {
+                // 探测/实测确认这个模型关不掉思考（o 系列、Gemini Pro、推理专用模型等）：
+                // 界面里不会提供「关闭」，全局配置可能还留着旧的 off。
+                // 这里落到最低档，既避免明知无效还发关闭字段，也让界面与实际一致。
+                if (m != null && m.thinkingOffBlocked) {
+                    List<String> levels = m.levelList();
+                    if (levels.isEmpty()) {
+                        // 没探过档位但已确认关不掉：用家族先验的最低档兜底
+                        levels = ReasoningProfiles.of(model).levels;
+                    }
+                    if (!levels.isEmpty()) return ThinkingLevels.lowest(levels);
+                    return "low";
+                }
+                return globalLevel;
+            }
             if (m == null || !m.levelsProbed()) {
                 // 没探测过：按模型家族先验落档（xhigh → high、minimal → 家族最低档）。
                 // 旧版原样下发，端点不认识的词会被静默忽略，界面上选的和实际生效的

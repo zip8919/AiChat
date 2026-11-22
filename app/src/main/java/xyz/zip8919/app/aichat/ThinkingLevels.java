@@ -78,9 +78,20 @@ final class ThinkingLevels {
      * @param available 模型可用档位；空集合表示未探测
      */
     static List<String> choices(List<String> available) {
+        return choices(available, true);
+    }
+
+    /**
+     * @param offSupported 模型是否真的能关掉思考。探测或实测确认关不掉时传 false，
+     *                     列表里就不出现「关闭」——留着它只会让用户选到一个
+     *                     「看起来关了、实际还在想」的选项。
+     */
+    static List<String> choices(List<String> available, boolean offSupported) {
         List<String> out = new ArrayList<String>();
-        out.add(OFF);
+        if (offSupported) out.add(OFF);
         if (available == null || available.isEmpty()) {
+            // 没探测过：列全集。即使已知关不掉思考，也要给出可选的强度档，
+            // 不能返回空列表让下拉变成空白。
             out.addAll(ORDER);
             return out;
         }
@@ -88,7 +99,9 @@ final class ThinkingLevels {
             if (available.contains(l)) out.add(l);
         }
         // 可用集合里只有无法识别的自定义值：原样列出，不做猜译
-        if (out.size() == 1) out.addAll(available);
+        if (out.isEmpty() || (out.size() == 1 && offSupported && OFF.equals(out.get(0)))) {
+            out.addAll(available);
+        }
         return out;
     }
 
@@ -182,8 +195,19 @@ final class ThinkingLevels {
      * @return 实际要下发的档位
      */
     static String resolve(String global, List<String> available) {
+        return resolve(global, available, true);
+    }
+
+    /**
+     * @param offSupported 模型能否真正关掉思考。false 且全局是 off 时落到最低档，
+     *                     避免「界面已经没有关闭项、请求却还在试图关闭」。
+     */
+    static String resolve(String global, List<String> available, boolean offSupported) {
         if (global == null || global.length() == 0) return global;
-        if (OFF.equalsIgnoreCase(global)) return global;
+        if (OFF.equalsIgnoreCase(global)) {
+            if (offSupported || available == null || available.isEmpty()) return global;
+            return lowest(available);
+        }
         if (available == null || available.isEmpty()) return global;
         String g = global.trim().toLowerCase(Locale.US);
         if (available.contains(g)) return g;
@@ -206,6 +230,18 @@ final class ThinkingLevels {
         if (above == null) return below;
         // 距离相等时取低档
         return (gi - indexOf(below)) <= (indexOf(above) - gi) ? below : above;
+    }
+
+    /** 集合里强度最低的档位；没有可识别档位时返回集合第一项。 */
+    static String lowest(List<String> available) {
+        if (available == null || available.isEmpty()) return "";
+        String best = null;
+        for (String l : available) {
+            int li = indexOf(l);
+            if (li < 0) continue;
+            if (best == null || li < indexOf(best)) best = l;
+        }
+        return best == null ? available.get(0) : best;
     }
 
     /** 集合里强度最高的档位；没有可识别档位时返回集合第一项。 */

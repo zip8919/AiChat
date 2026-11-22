@@ -1800,7 +1800,10 @@ public class MainActivity extends ThemedActivity {
         ModelInfo model = currentModelInfo();
         List<String> available = (model != null && model.levelsProbed())
                 ? model.levelList() : new ArrayList<String>();
-        thinkingChoices.addAll(ThinkingLevels.choices(available));
+        // 探测或实测确认关不掉思考的模型（o 系列、Gemini Pro 等），不列出「关闭」：
+        // 留着它等于给用户一个无效选项，选了也还在思考。
+        boolean offSupported = model == null || !model.thinkingOffBlocked;
+        thinkingChoices.addAll(ThinkingLevels.choices(available, offSupported));
         for (String c : thinkingChoices) labels.add(ThinkingLevels.pickLabel(c));
 
         ArrayAdapter<String> thinkingAdapter = new ArrayAdapter<String>(this,
@@ -1810,6 +1813,13 @@ public class MainActivity extends ThemedActivity {
         thinkingSpinner.setAdapter(thinkingAdapter);
 
         String level = configManager.getThinkingLevel();
+        if (!offSupported && ThinkingLevels.OFF.equals(level)) {
+            // 该模型关不掉思考，旧的「关闭」已经没有意义：落到最低档并写回配置，
+            // 避免界面上显示一档、实际请求又是另一档。
+            level = ThinkingLevels.resolve(level, available, false);
+            configManager.setThinkingLevel(level);
+            configManager.save();
+        }
         int levelPos = ThinkingLevels.indexIn(thinkingChoices, level);
         // 先复位再去 setSelection：setSelection 会同步触发一次 onItemSelected，
         // 此时的 pos 还是旧的，不能当作用户操作写盘（见 refreshModelSpinner 的复位）

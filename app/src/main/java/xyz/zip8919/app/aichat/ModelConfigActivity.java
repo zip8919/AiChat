@@ -1039,6 +1039,10 @@ public class ModelConfigActivity extends ThemedActivity {
                         m.supportsThinking = false;
                         m.probedAt = System.currentTimeMillis();
                     }
+                    // 关闭能力：探测明确给出结论时才改，测不出来就保留原值
+                    if (rep.offSupported != null) {
+                        m.thinkingOffBlocked = !rep.offSupported.booleanValue();
+                    }
                     cfg.bumpProbeRevision();
                     cfg.save();
                     String badge = probeBadge(rep);
@@ -1119,6 +1123,9 @@ public class ModelConfigActivity extends ThemedActivity {
             sb.append(Strings.get(R.string.modelconfigactivity_159));
         } else {
             sb.append(Strings.get(R.string.modelconfigactivity_160));
+        }
+        if (m.thinkingOffBlocked) {
+            sb.append("\n").append(Strings.get(R.string.capabilityprobe_024));
         }
         sb.append("\n").append(m.supportsVision
                 ? Strings.get(R.string.modelconfigactivity_161)

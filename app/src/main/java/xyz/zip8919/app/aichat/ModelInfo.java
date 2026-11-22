@@ -40,6 +40,14 @@ public class ModelInfo {
     /** 探测时端点对档位取值不做校验（传什么都 200），档位结论只能算「全部接受」。 */
     public boolean levelsUnverifiable;
 
+    /**
+     * 该模型无法关闭思考（探测或实际请求里确认「关」之后仍有推理痕迹）。
+     *
+     * <p>为真时思考档位下拉不再列出「关闭」项：留着它，用户选了也关不掉，
+     * 只会以为开关失灵。o 系列、Gemini Pro、部分推理专用模型属于这一类。
+     */
+    public boolean thinkingOffBlocked;
+
     /** 界面上一律用它，读不到显示名就回退模型 ID。 */
     public String label() {
         if (displayName != null && displayName.trim().length() > 0) return displayName.trim();
@@ -92,6 +100,7 @@ public class ModelInfo {
         m.thinkingLevels = thinkingLevels;
         m.probedAt = probedAt;
         m.levelsUnverifiable = levelsUnverifiable;
+        m.thinkingOffBlocked = thinkingOffBlocked;
         return m;
     }
 }

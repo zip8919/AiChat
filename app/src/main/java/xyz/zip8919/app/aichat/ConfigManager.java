@@ -233,6 +233,7 @@ public class ConfigManager {
             mj.put("thinking_levels", m.thinkingLevels == null ? "" : m.thinkingLevels);
             mj.put("probed_at", m.probedAt);
             mj.put("levels_unverifiable", m.levelsUnverifiable);
+            mj.put("thinking_off_blocked", m.thinkingOffBlocked);
             modelArr.put(mj);
         }
         json.put("models", modelArr);
@@ -285,6 +286,8 @@ public class ConfigManager {
             m.thinkingLevels = mj.optString("thinking_levels", "");
             m.probedAt = mj.optLong("probed_at", 0L);
             m.levelsUnverifiable = mj.optBoolean("levels_unverifiable", false);
+            // 老配置没有这一项：默认 false，思考档位仍提供「关闭」，行为与升级前一致
+            m.thinkingOffBlocked = mj.optBoolean("thinking_off_blocked", false);
             models.add(m);
         }
 

@@ -111,6 +111,17 @@ final class ReasoningProfiles {
     }
 
     /**
+     * 开启思考时是否必须一起给 {@code thinking_budget}。
+     *
+     * <p>Anthropic 的 thinking 是「预算驱动」：只写 {@code type:enabled} 不给预算会
+     * 直接 400，探测和聊天都必须带上。其余家族没有这个硬要求，多发反而可能被
+     * 严格端点拒绝，所以只对 claude 返回 true。
+     */
+    static boolean needsBudget(String modelId) {
+        return "claude".equals(of(modelId).family);
+    }
+
+    /**
      * 把用户选的档位落到家族支持的档位。家族未知时原样返回，
      * 让探测结果（如果有）成为唯一依据。
      */

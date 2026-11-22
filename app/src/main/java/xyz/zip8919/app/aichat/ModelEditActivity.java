@@ -276,7 +276,8 @@ public class ModelEditActivity extends ThemedActivity {
         if (rep.vision != null) visionCb.setChecked(rep.vision.booleanValue());
 
         boolean levelsOk = rep.ok() && !rep.levels.isEmpty();
-        if (!levelsOk && !rep.levelsRejected && rep.vision == null) {
+        if (!levelsOk && !rep.levelsRejected && rep.vision == null
+                && rep.offSupported == null) {
             // 一档都没得出，也没探到图片：认证、网络或端点不可用，配置不动
             probeResult.setTextColor(0xFFC62828);
             probeResult.setText(Strings.get(R.string.modeleditactivity_021, rep.error));
@@ -310,6 +311,11 @@ public class ModelEditActivity extends ThemedActivity {
             // 下一轮请求按它落档，模型真正接受的档位反而被丢掉。
             probedLevels = null;
             sb.append(Strings.get(R.string.modeleditactivity_028)).append(rep.error);
+        }
+
+        if (Boolean.FALSE.equals(rep.offSupported)) {
+            // 关不掉就明确说出来：否则用户会以为是开关失灵，反复重选
+            sb.append("\n").append(Strings.get(R.string.capabilityprobe_024));
         }
 
         if (rep.vision != null) {
@@ -355,7 +361,8 @@ public class ModelEditActivity extends ThemedActivity {
             LogUtil.d(TAG, "probe persisted on save only: name/provider changed");
             return;
         }
-        if (rep == null || (!rep.ok() && !rep.levelsRejected && rep.vision == null)) return;
+        if (rep == null || (!rep.ok() && !rep.levelsRejected && rep.vision == null
+                && rep.offSupported == null)) return;
         ModelInfo target = cfg.findModel(editing.provider, editing.name);
         if (target == null) return;
         // 视觉与档位是两项独立结论，各写各的
@@ -373,6 +380,10 @@ public class ModelEditActivity extends ThemedActivity {
             target.supportsThinking = false;
             target.levelsUnverifiable = false;
             target.probedAt = System.currentTimeMillis();
+        }
+        // 关闭能力：探测明确给出结论时才改，测不出来就保留原值
+        if (rep.offSupported != null) {
+            target.thinkingOffBlocked = !rep.offSupported.booleanValue();
         }
         cfg.bumpProbeRevision();
         cfg.save();

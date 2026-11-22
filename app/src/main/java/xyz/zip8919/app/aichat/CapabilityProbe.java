@@ -37,8 +37,41 @@ final class CapabilityProbe {
     private static final String TAG = "CapabilityProbe";
 
     private static final int TIMEOUT_MS = 20000;
-    /** 思考档位探测的回复长度上限：只要端点能起来，回答多短都算通过。 */
-    private static final int THINKING_MAX_TOKENS = 64;
+    /**
+     * 思考档位探测的回复长度上限基数。
+     *
+     * <p>旧版固定 64：思考模型的全部额度会被推理吃掉，正文恒为空；更糟的是
+     * Anthropic 要求 {@code max_tokens > thinking.budget_tokens}，预算 1024 配
+     * 上限 64 必然 400，于是每个 Claude 模型都被探成「不支持思考」。现在按档位
+     * 预算动态给上限（见 {@link #probeMaxTokens}），保证预算与上限不打架。
+     */
+    private static final int THINKING_MIN_TOKENS = 1024;
+    /** 关闭探测的回复上限：只要模型肯作答，一道算术题这些额度够用。 */
+    private static final int OFF_MAX_TOKENS = 1024;
+
+    /**
+     * 各档探测用的思考预算。
+     *
+     * <p>与真实聊天用的 {@link ThinkingLevels#budget} 分开：真实预算到 32K，
+     * 探测照搬会让单次请求的输出上限达到三万 token，一轮探测既慢又贵。
+     * 探测只需要「档位之间拉得开」，用 1K～6K 六档就足够看出差别。
+     */
+    private static int probeBudget(String level) {
+        switch (ThinkingLevels.indexOf(level)) {
+            case 0: return 1024;
+            case 1: return 1536;
+            case 2: return 2048;
+            case 3: return 3072;
+            case 4: return 4096;
+            case 5: return 6144;
+            default: return 2048;
+        }
+    }
+
+    /** 输出上限必须严格大于思考预算，否则 Anthropic 一类端点直接 400。 */
+    private static int probeMaxTokens(String level) {
+        return probeBudget(level) + 256;
+    }
     /**
      * 图片探测的等待时间比档位探测长。
      *
@@ -133,6 +166,8 @@ final class CapabilityProbe {
         /** 视觉：true 支持 / false 不支持 / null 未能判定 */
         Boolean vision;
         String visionNote = "";
+        /** 能否关闭思考：true 能 / false 不能 / null 未能判定 */
+        Boolean offSupported;
         /** 服务端对所有档位都回 200，档位结论不可区分 */
         boolean unverifiable;
         /** 六档逐个明确被拒：可以据此认定该模型不吃思考参数 */
@@ -192,6 +227,9 @@ final class CapabilityProbe {
         // 只有「有痕迹」且「强弱之间拉开差距」才认定这些档位真的生效。
         List<String> accepted = new ArrayList<String>();
         List<Integer> signals = new ArrayList<Integer>();
+        // 有档位的回复被输出上限截断：此时各档的推理 token 都被削到同一个天花板，
+        // 比值全一样，不能再据此判「端点没按档位调强度」。
+        boolean anyTruncated = false;
         for (int i = 0; i < candidates.size(); i++) {
             if (stop != null && stop.stopped()) {
                 rep.error = Strings.get(R.string.capabilityprobe_006);
@@ -209,6 +247,7 @@ final class CapabilityProbe {
                 int sig = reasoningSignal(r.body);
                 signals.add(Integer.valueOf(sig));
                 if (sig > 0) evidence = true;
+                if (truncated(r.body, probeMaxTokens(level))) anyTruncated = true;
                 continue;
             }
             if (!isRejection(r.httpCode)) {
@@ -228,8 +267,10 @@ final class CapabilityProbe {
                 rep.levels.addAll(prof.levels.isEmpty()
                         ? new ArrayList<String>() : prof.levels);
                 if (prof.levels.isEmpty()) rep.levels.clear();
-            } else if (spread(signals)) {
-                // 有痕迹、且强弱之间明显拉开差距：这些档位确实在起作用
+            } else if (spread(signals) || anyTruncated) {
+                // 有痕迹、且强弱之间明显拉开差距：这些档位确实在起作用。
+                // 被输出上限截断的样本比不出相对强弱，但每一档都确实产生了推理，
+                // 不能因为「数值一样」把档位砍到只剩一个。
                 rep.levels.addAll(accepted);
             } else {
                 // 有痕迹但各档一模一样：端点吃了参数却没按档位调强度。
@@ -246,6 +287,13 @@ final class CapabilityProbe {
                 rep.levels.add(top);
                 rep.unverifiable = true;
             }
+        }
+
+        // ---- 关闭思考 ----
+        // 档位只回答「能开多强」，回答不了「能不能关」。用户选了关却还在思考，
+        // 根因就在这里没有数据。结论为 false 时，思考档位下拉不再列出「关闭」。
+        if (stop == null || !stop.stopped()) {
+            rep.offSupported = probeOff(url, snap, model, stop);
         }
 
         // ---- 图片输入 ----
@@ -266,6 +314,41 @@ final class CapabilityProbe {
             }
         }
         return finish(rep, rep.levels, rep.vision, rep.unverifiable);
+    }
+
+    /**
+     * 关闭思考探测：按真实聊天的关闭方案逐个试，看关掉之后还有没有推理痕迹。
+     *
+     * <p>判据只有一条：回复里还有没有 {@code reasoning_content} 或推理 token。
+     * 端点对不认识的字段一律回 200，只看状态码会把「静默忽略」当成「关掉了」，
+     * 这正是旧版「选了关、模型还在想」的原因之一。
+     *
+     * <p>关闭方案与聊天路径共用 {@link ThinkingOff}：探测认为可行的方案，真实请求
+     * 也正是按同一顺序下发的，两边不会得出互相矛盾的结论。
+     *
+     * @return true 能关 / false 关不掉 / null 没能判定（网络、限流、中途停止）
+     */
+    private static Boolean probeOff(String url, ProviderInfo snap, String model, Stop stop) {
+        int plans = ThinkingOff.planCount(snap, model);
+        for (int i = 0; i < plans; i++) {
+            if (stop != null && stop.stopped()) return null;
+            Raw r = post(url, snap.apiKey, offBody(snap, model, i), TIMEOUT_MS);
+            if (r.error != null) return null;
+            if (r.httpCode >= 200 && r.httpCode < 300) {
+                // 8 token 以下当作字段残留（个别端点会回一个空对象的痕迹），
+                // 真正的推理远不止这点量；宁可判「能关」，实测发现关不掉时还有
+                // 聊天路径的运行时校准兜底。
+                return reasoningSignal(r.body) >= 8 ? Boolean.FALSE : Boolean.TRUE;
+            }
+            if (!isRejection(r.httpCode)) {
+                // 认证、限流、服务端错误与关闭能力无关，不下结论
+                return null;
+            }
+            // 400/422：这一种关闭字段不被接受，换下一种
+            LogUtil.d(TAG, "off plan #%d rejected: HTTP %d", i, r.httpCode);
+        }
+        // 所有关闭方案都被拒：端点没有可用的关闭入口
+        return Boolean.FALSE;
     }
 
     /**
@@ -389,6 +472,10 @@ final class CapabilityProbe {
             if (sb.length() > 0) sb.append("；");
             sb.append(rep.visionNote);
         }
+        if (rep.offSupported != null && !rep.offSupported.booleanValue()) {
+            if (sb.length() > 0) sb.append("；");
+            sb.append(Strings.get(R.string.capabilityprobe_024));
+        }
         if (rep.note.length() > 0) {
             if (sb.length() > 0) sb.append("；");
             sb.append(rep.note);
@@ -415,6 +502,12 @@ final class CapabilityProbe {
         if (text == null) return 0;
         // 没有 token 计数时按推理正文的长度估：中文约 1.5 字/token
         return Math.max(1, text.trim().length() * 2 / 3);
+    }
+
+    /** 回复是否被输出上限截断（completion_tokens 顶到 max_tokens）。 */
+    private static boolean truncated(String body, int maxTokens) {
+        int ct = firstInt(body, "completion_tokens");
+        return ct > 0 && ct >= maxTokens - 1;
     }
 
     /** 各档位的痕迹量是否拉开差距：最大与最小的差达到最大值的 20%（至少 8）。 */
@@ -548,15 +641,21 @@ final class CapabilityProbe {
      */
     static String thinkingBody(ProviderInfo p, String model, String level, boolean includeThinking) {
         try {
-            JSONObject body = baseBody(model, THINKING_MAX_TOKENS);
+            JSONObject body = baseBody(model, probeMaxTokens(level));
             if (includeThinking) {
+                String pName = p.thinkingParamName;
+                if (pName == null || pName.trim().length() == 0) pName = "thinking";
                 if ("boolean".equals(p.thinkingType)) {
-                    body.put(p.thinkingParamName, true);
-                    body.put("thinking_budget", ThinkingLevels.budget(level));
+                    body.put(pName, true);
+                    body.put("thinking_budget", probeBudget(level));
                 } else {
                     JSONObject t = new JSONObject();
                     t.put("type", "enabled");
-                    body.put(p.thinkingParamName, t);
+                    body.put(pName, t);
+                    // Anthropic 开启思考必须给预算，漏了会被 400 记成「档位不支持」
+                    if (ReasoningProfiles.needsBudget(model)) {
+                        body.put("thinking_budget", probeBudget(level));
+                    }
                     String effort = ThinkingLevels.reasoningEffort(level);
                     if (effort != null) body.put("reasoning_effort", effort);
                 }
@@ -569,8 +668,34 @@ final class CapabilityProbe {
             body.put("messages", msgs);
             return body.toString();
         } catch (Exception e) {
-            return "{\"model\":\"" + model + "\",\"max_tokens\":" + THINKING_MAX_TOKENS
+            return "{\"model\":\"" + model + "\",\"max_tokens\":" + THINKING_MIN_TOKENS
                     + ",\"stream\":false,\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}";
+        }
+    }
+
+    /**
+     * 关闭方案的请求体：与真实聊天同一套字段，只是换成探测问题、非流式。
+     *
+     * @param plan 关闭方案序号，见 {@link ThinkingOff#plans}
+     */
+    static String offBody(ProviderInfo p, String model, int plan) {
+        try {
+            JSONObject body = baseBody(model, OFF_MAX_TOKENS);
+            JSONArray msgs = new JSONArray();
+            JSONObject m = new JSONObject();
+            m.put("role", "user");
+            m.put("content", THINK_ASK);
+            msgs.put(m);
+            body.put("messages", msgs);
+            // 与聊天一致：最后一个方案不下发任何思考字段，交给提示词压制。
+            // 提示词要写在 messages 之后，否则会被下面这次赋值覆盖掉。
+            if (!ThinkingOff.apply(body, p, model, plan)) {
+                ChatTransport.forceNoThinking(body);
+            }
+            return body.toString();
+        } catch (Exception e) {
+            LogUtil.w(TAG, "build off body failed: %s", e.getMessage());
+            return null;
         }
     }
 
@@ -578,7 +703,7 @@ final class CapabilityProbe {
     static String visionBody(ProviderInfo p, String model, String imageBase64) {
         try {
             JSONObject body = baseBody(model, VISION_MAX_TOKENS);
-            disableThinking(p, body);
+            disableThinking(p, body, model);
             JSONArray content = new JSONArray();
             JSONObject text = new JSONObject();
             text.put("type", "text");
@@ -609,21 +734,11 @@ final class CapabilityProbe {
      * <p>看图任务不需要推理，关掉能让模型直接作答，既快也避开「想完没给正文」的
      * 空回复。关不掉的端点（不认识这个参数）多半会忽略，不影响判定。
      */
-    private static void disableThinking(ProviderInfo p, JSONObject body) {
-        if (p.thinkingType == null || p.thinkingParamName == null
-                || p.thinkingParamName.length() == 0) {
-            return;
-        }
-        try {
-            if ("boolean".equals(p.thinkingType)) {
-                body.put(p.thinkingParamName, false);
-            } else {
-                JSONObject off = new JSONObject();
-                off.put("type", "disabled");
-                body.put(p.thinkingParamName, off);
-            }
-        } catch (Exception e) {
-            LogUtil.w(TAG, "disable thinking failed: %s", e.getMessage());
+    private static void disableThinking(ProviderInfo p, JSONObject body, String model) {
+        // 与聊天共用首选关闭方案：字段形态对了才关得掉，否则看图请求会先被
+        // 推理吃掉额度，返回空正文，模型被误判成「没有视觉能力」。
+        if (!ThinkingOff.apply(body, p, model, 0)) {
+            LogUtil.d(TAG, "no thinking-off plan for %s, vision probe runs with defaults", model);
         }
     }
 

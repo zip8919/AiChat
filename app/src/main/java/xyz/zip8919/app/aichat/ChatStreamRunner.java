@@ -258,11 +258,17 @@ final class ChatStreamRunner {
             // 直接不下发，省掉一次必然的 400 降级请求。
             boolean sendThinking = !(job.isContinue() && job.cont.officialPrefix);
             boolean thinkingDowngraded = false;
-            // 思考等级=关 时，关闭参数不允许被「端点拒绝思考参数」的降级整包丢掉：
-            // 丢掉等于回到端点默认值（多数是开），用户选了关却还在思考。
-            // 这类端点（不认任何思考字段）只能靠提示词硬压，见下面的强约束段。
-            boolean thinkingOff = "off".equals(job.thinkingLevel);
-            st.dropReasoning = thinkingOff;
+            // 用户是否选了「关闭」。与 thinkingOff 分开：探测/实测确认关不掉时，
+            // thinkingOff 为 false（不发关闭字段，按最低档走），但用户不想看思考内容
+            // 的意愿仍然成立，思考块照样不展示。
+            boolean userWantsNoThinking = "off".equals(job.thinkingLevel);
+            boolean thinkingOff = userWantsNoThinking
+                    && "off".equals(ChatTransport.resolveThinkingLevel(
+                            job.modelName, job.provider, job.thinkingLevel));
+            // 关闭方案的尝试序号：端点 400/422 时递增，换下一种关闭字段重发。
+            // 旧版一次把四类关闭字段全发，被拒后整套丢掉，等于放弃关闭。
+            int thinkingOffAttempt = 0;
+            st.dropReasoning = userWantsNoThinking;
             // 最近一次 429 的响应体。重试耗尽那一轮可能已读不到 body，用它兜底进错误卡片。
             String last429Body = "";
             /**
@@ -319,10 +325,15 @@ final class ChatStreamRunner {
 
                 JSONObject body = ChatTransport.buildRequestBody(job.modelName, job.provider,
                         job.thinkingLevel, conversation, job.streamEnabled,
-                        toolsEnabled ? toolDefs : null, includeUsage, sendThinking);
-                // 端点连关闭字段都不认（上面降级过）：只能退到提示词层面硬压。
-                // 只加在 system 上，不动历史消息，避免影响多轮上下文的一致性。
-                if (thinkingOff && !sendThinking) {
+                        toolsEnabled ? toolDefs : null, includeUsage, sendThinking,
+                        thinkingOffAttempt);
+                // 协议层没有可用的关闭字段（已被端点全部拒绝，或走到了最后一个方案）：
+                // 退到提示词层面硬压。只加在 system 上，不动历史消息，避免影响多轮
+                // 上下文的一致性。
+                boolean noThinkingFields = !sendThinking
+                        || (thinkingOff && ThinkingOff.isSilent(
+                                job.provider, job.modelName, thinkingOffAttempt));
+                if (thinkingOff && noThinkingFields) {
                     ChatTransport.forceNoThinking(body);
                 }
                 // 统计口径：一次 open 就是一次 HTTP 请求（含工具轮、含重试）。
@@ -398,7 +409,32 @@ final class ChatStreamRunner {
 
                     // 二级降级：端点不认思考参数（自建 provider 会被写成
                     // thinkingType=object + 参数名 thinking，官方 OpenAI 这类严格端点
-                    // 直接 400）。去掉 thinking 整套字段再发一次，别让用户卡死在这里。
+                    // 直接 400）。
+                    // 「关闭」不整包丢弃：换下一种关闭字段重发，直到方案用尽，
+                    // 最后才退到「不下发任何思考字段 + 提示词压制」。
+                    // 整包丢弃等于回到端点默认（多数开思考），用户选了关却还在思考。
+                    if ((code == 400 || code == 422) && sendThinking && thinkingOff) {
+                        if (thinkingOffAttempt + 1 < ThinkingOff.planCount(
+                                job.provider, job.modelName)) {
+                            thinkingOffAttempt++;
+                            LogUtil.w(TAG, "thinking-off params rejected, try plan #%d (%s)",
+                                    thinkingOffAttempt,
+                                    ThinkingOff.planAt(job.provider, job.modelName,
+                                            thinkingOffAttempt));
+                            ChatTransport.close(conn);
+                            conn = null;
+                            session.setConnection(null);
+                            continue;
+                        }
+                        sendThinking = false;
+                        LogUtil.w(TAG, "all thinking-off plans rejected, fall back to prompt");
+                        ChatTransport.close(conn);
+                        conn = null;
+                        session.setConnection(null);
+                        continue;
+                    }
+
+                    // 开着思考时端点不认参数：整套去掉再发一次，别让用户卡死在这里。
                     if ((code == 400 || code == 422) && sendThinking && !thinkingDowngraded) {
                         thinkingDowngraded = true;
                         sendThinking = false;
@@ -448,6 +484,11 @@ final class ChatStreamRunner {
                 // 真正的新回答由宿主按请求代数重新起步。
                 SseRound.Result rr = readRound(conn, st, renderer);
                 st.chunks = rr.chunks;
+                // 选了关、也发了关闭字段，端点却仍然吐推理内容：这个模型关不掉思考。
+                // 当场记进配置，思考档位里不再提供「关闭」，免得下次继续白等。
+                if (userWantsNoThinking && rr.thinkingChunks > 0) {
+                    onThinkingOffIgnored(rr.thinkingChunks);
+                }
                 // 统计要的是「本轮这一发」的用量，而 st 里是跨轮累计值。
                 // 不做差直接记，一条带 3 次工具轮的回复会把总量算成 1+2+3=6 倍。
                 final int ptBefore = st.promptTokens;
@@ -623,6 +664,33 @@ final class ChatStreamRunner {
                 session.setConnection(null);
                 session.onSettled(st.toSettled(job));
             }
+        }
+    }
+
+    /**
+     * 端点没有接受关闭思考：把这个事实写进模型配置。
+     *
+     * <p>探测能提前发现大部分关不掉的模型，但探测用的是短请求，个别端点在中转、
+     * 特定参数组合下表现不同。真正跑一次对话时看到推理内容，是最硬的证据。
+     * 记下来之后，思考档位下拉不再列出「关闭」，用户不会反复选到一个无效选项。
+     *
+     * <p>只在第一次发现时提示一次：配置里已标记过的直接返回，不打扰每轮对话。
+     */
+    private void onThinkingOffIgnored(int chunks) {
+        try {
+            ConfigManager cfg = ConfigManager.getInstance();
+            ModelInfo m = cfg.findModel(job.providerName, job.modelName);
+            if (m == null || m.thinkingOffBlocked) return;
+            m.thinkingOffBlocked = true;
+            cfg.bumpProbeRevision();
+            cfg.save();
+            LogUtil.w(TAG, "model %s still reasons with thinking off (%d chunks): "
+                    + "marked as not closable", job.modelName, chunks);
+            if (session.isCurrent(job.generation)) {
+                ui.toast(Strings.get(R.string.chatstreamrunner_019));
+            }
+        } catch (Throwable t) {
+            LogUtil.w(TAG, "record thinking-off failure failed: %s", t);
         }
     }
 

@@ -40,8 +40,7 @@ public class ApiClient {
             // 与主流程同一口径落档：模型探测过档位、且不含全局档时换成最近可用档，
             // 否则标题生成会在只认 max 的模型上被 400，标题静默失败。
             String level = ChatTransport.resolveThinkingLevel(model, provider, thinkingLevel);
-            JSONObject body = buildRequestBody(model, messages, systemPrompt, level,
-                    provider.thinkingType, provider.thinkingParamName, false);
+            JSONObject body = buildRequestBody(model, provider, messages, systemPrompt, level, false);
             // 512: models that ignore all thinking-off switches burn tokens on
             // reasoning first; 50 left no room for the actual title (empty content)
             body.put("max_tokens", 512);
@@ -371,10 +370,9 @@ public class ApiClient {
         return result;
     }
 
-    private static JSONObject buildRequestBody(String model,
+    private static JSONObject buildRequestBody(String model, ProviderInfo provider,
             List<Message> messages, String systemPrompt,
-            String thinkingLevel, String thinkingType, String thinkingParamName,
-            boolean stream) throws Exception {
+            String thinkingLevel, boolean stream) throws Exception {
 
         JSONObject json = new JSONObject();
         json.put("model", model);
@@ -405,36 +403,29 @@ public class ApiClient {
         json.put("messages", msgs);
         LogUtil.d(TAG, "buildRequestBody: model=%s stream=%s msgs=%d(+system=%s) thinking=%s type=%s param=%s",
                 model, stream, messages == null ? 0 : messages.size(),
-                (systemPrompt != null && !systemPrompt.isEmpty()), thinkingLevel, thinkingType, thinkingParamName);
+                (systemPrompt != null && !systemPrompt.isEmpty()), thinkingLevel,
+                provider.thinkingType, provider.thinkingParamName);
 
         // Thinking parameters (null = skip entirely, for title gen etc.)
+        String pName = provider.thinkingParamName;
+        if (pName == null || pName.trim().length() == 0) pName = "thinking";
         if (thinkingLevel != null && !"off".equals(thinkingLevel)) {
-            if ("boolean".equals(thinkingType)) {
+            if ("boolean".equals(provider.thinkingType)) {
                 // SiliconFlow style
-                json.put(thinkingParamName, true);
+                json.put(pName, true);
                 json.put("thinking_budget", ThinkingLevels.budget(thinkingLevel));
             } else {
                 // DeepSeek style (object type)
                 JSONObject thinkingObj = new JSONObject();
                 thinkingObj.put("type", "enabled");
-                json.put(thinkingParamName, thinkingObj);
+                json.put(pName, thinkingObj);
                 String effort = ThinkingLevels.reasoningEffort(thinkingLevel);
                 if (effort != null) json.put("reasoning_effort", effort);
             }
         } else if (thinkingLevel != null && "off".equals(thinkingLevel)) {
-            if ("boolean".equals(thinkingType)) {
-                json.put(thinkingParamName, false);
-            } else {
-                // DeepSeek style: send disabled
-                JSONObject thinkingObj = new JSONObject();
-                thinkingObj.put("type", "disabled");
-                json.put(thinkingParamName, thinkingObj);
-            }
-            // Fallback params for providers that ignore the primary switch
-            // (e.g. SCNet GLM-5 ignores thinking.type=disabled but honors
-            // reasoning_effort=none / chat_template_kwargs.enable_thinking)
-            json.put("reasoning_effort", "none");
-            json.put("chat_template_kwargs", new JSONObject().put("enable_thinking", false));
+            // 与流式聊天共用同一套关闭方案：按家族/提供商挑唯一一个字段，
+            // 不再四类字段一起发（严格端点会因此 400）。
+            ThinkingOff.apply(json, provider, model, 0);
         }
         // thinkingLevel == null: skip all thinking params
 

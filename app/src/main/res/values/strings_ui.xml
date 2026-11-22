@@ -148,6 +148,7 @@
     <string name="capabilityprobe_015">（该服务对思考参数一律返回成功，档位强度无法逐档验证）</string>
     <string name="capabilityprobe_016">支持图片输入（两张图均读出数字）</string>
     <string name="capabilityprobe_017">不支持图片输入</string>
+    <string name="capabilityprobe_024">该模型无法关闭思考，思考档位不提供「关闭」</string>
     <string name="capabilityprobe_018">请求内容为空，请重试</string>
     <string name="capabilityprobe_019">响应里读不到回复正文</string>
     <string name="capabilityprobe_020">回复正文为空</string>
@@ -2210,6 +2211,7 @@
     <string name="mainactivity_180">执行结果</string>
     <string name="chatstreamrunner_017">联网搜索已关闭，未执行这次搜索。需要联网时，在设置里打开联网搜索再让我查。</string>
     <string name="chatstreamrunner_018">联网搜索已关闭，联网搜索不可用</string>
+    <string name="chatstreamrunner_019">该模型无法关闭思考，思考档位已移除「关闭」</string>
     <string name="modelconfigactivity_152">可用</string>
     <string name="modelconfigactivity_158">可用思考档位：%1$s</string>
     <string name="modelconfigactivity_159">思考档位：未探测，按全局档位下发</string>
