@@ -58,6 +58,16 @@ final class ChatStreamRunner {
      */
     private static final int MAX_EMPTY_RETRY = 1;
 
+    /** 关闭状态：还没见到推理内容。 */
+    private static final int OFF_UNKNOWN = 0;
+    /** 关闭状态：见到推理，正在看它是否继续增长。 */
+    private static final int OFF_OPEN = 1;
+    /** 关闭状态：确认关不掉，下一次尝试换方案。 */
+    private static final int OFF_CLOSED = 2;
+    /** 关闭状态：确认关得掉。 */
+    private static final int OFF_NONE = 3;
+
+
     /** 空回复重发前的等待：给端点一点缓存/调度上的余量，立刻重发往往同样为空。 */
     private static final long EMPTY_RETRY_DELAY_MS = 800;
 
@@ -190,6 +200,11 @@ final class ChatStreamRunner {
     /** 未配置搜索密钥的提示只弹一次。 */
     private boolean warnedNoSearchKey;
 
+    /** 当前这次关闭尝试观察到的推理字符数，见 {@link #confirmThinkingOff}。 */
+    private int offProbeChars;
+    /** 上一次构建的请求体里是否真的下发了关闭字段。 */
+    private boolean lastOffApplied;
+
     ChatStreamRunner(StreamJob job, Ui ui, Session session) {
         this.job = job;
         this.ui = ui;
@@ -259,8 +274,8 @@ final class ChatStreamRunner {
             boolean sendThinking = !(job.isContinue() && job.cont.officialPrefix);
             boolean thinkingDowngraded = false;
             // 用户是否选了「关闭」。与 thinkingOff 分开：探测/实测确认关不掉时，
-            // thinkingOff 为 false（不发关闭字段，按最低档走），但用户不想看思考内容
-            // 的意愿仍然成立，思考块照样不展示。
+            // thinkingOff 为 false（不发关闭字段，按最低档走）。此时思考内容照常
+            // 展示——关不掉就如实呈现，不靠隐藏内容假装关掉了。
             boolean userWantsNoThinking = "off".equals(job.thinkingLevel);
             boolean thinkingOff = userWantsNoThinking
                     && "off".equals(ChatTransport.resolveThinkingLevel(
@@ -268,7 +283,13 @@ final class ChatStreamRunner {
             // 关闭方案的尝试序号：端点 400/422 时递增，换下一种关闭字段重发。
             // 旧版一次把四类关闭字段全发，被拒后整套丢掉，等于放弃关闭。
             int thinkingOffAttempt = 0;
-            st.dropReasoning = userWantsNoThinking;
+            // 已确认可用的关闭方案指纹：同一条回答里验证成功了就沿用，不再从头试。
+            String provenOffSig = "";
+            // 关闭状态：unknown 表示还没收到推理内容；open 表示已收到、本轮继续观察；
+            // closed 表示已判定关不掉（下一次尝试换方案）；none 表示已确认关住了。
+            int offMode = OFF_UNKNOWN;
+            // 本轮开始时用的模型 ID：探测通过的方案要记在这个模型名下
+            final String modelOriginal = job.modelName;
             // 最近一次 429 的响应体。重试耗尽那一轮可能已读不到 body，用它兜底进错误卡片。
             String last429Body = "";
             /**
@@ -322,20 +343,29 @@ final class ChatStreamRunner {
                     renderer.commitTail(st.trace.toString());
                     ui.showStatus(Strings.get(R.string.chatstreamrunner_003), job.generation, st.trace.toString(), job.aiIndex);
                 }
+                // 上一轮用当前关闭方案仍然产生了推理：换下一种方案重发。
+                // 不换方案的话，同一条回答里后面每个工具轮都会白烧一遍推理。
+                // 阶梯走到头（只剩「不下发字段」）时不再换：那种方案等于什么都不做，
+                // 换过去只会让用户多等一次请求，直接按「关不掉」处理。
+                if (offMode == OFF_CLOSED && sendThinking && thinkingOff
+                        && !ThinkingOff.exhausted(job.provider, modelOriginal,
+                                thinkingOffAttempt)) {
+                    thinkingOffAttempt++;
+                    offMode = OFF_UNKNOWN;
+                    offProbeChars = 0;
+                    LogUtil.w(TAG, "thinking-off plan rejected at runtime, switch to #%d (%s)",
+                            thinkingOffAttempt, ThinkingOff.planAt(
+                                    job.provider, modelOriginal, thinkingOffAttempt));
+                }
 
                 JSONObject body = ChatTransport.buildRequestBody(job.modelName, job.provider,
                         job.thinkingLevel, conversation, job.streamEnabled,
                         toolsEnabled ? toolDefs : null, includeUsage, sendThinking,
                         thinkingOffAttempt);
-                // 协议层没有可用的关闭字段（已被端点全部拒绝，或走到了最后一个方案）：
-                // 退到提示词层面硬压。只加在 system 上，不动历史消息，避免影响多轮
-                // 上下文的一致性。
-                boolean noThinkingFields = !sendThinking
-                        || (thinkingOff && ThinkingOff.isSilent(
-                                job.provider, job.modelName, thinkingOffAttempt));
-                if (thinkingOff && noThinkingFields) {
-                    ChatTransport.forceNoThinking(body);
-                }
+                // 关闭思考只靠协议字段：不再追加「不要思考」之类的提示词约束。
+                // 提示词管不住模型内部推理，只会污染上下文、让模型输出变形。
+                lastOffApplied = thinkingOff && sendThinking
+                        && ThinkingOff.applied(job.provider, modelOriginal, thinkingOffAttempt);
                 // 统计口径：一次 open 就是一次 HTTP 请求（含工具轮、含重试）。
                 // 重试另有 retries 计数，方便区分「请求多」是工具轮还是 429。
                 // 统计按「界面上的名字」记：用户看报表时要能对上模型下拉里的那一项
@@ -410,12 +440,13 @@ final class ChatStreamRunner {
                     // 二级降级：端点不认思考参数（自建 provider 会被写成
                     // thinkingType=object + 参数名 thinking，官方 OpenAI 这类严格端点
                     // 直接 400）。
-                    // 「关闭」不整包丢弃：换下一种关闭字段重发，直到方案用尽，
-                    // 最后才退到「不下发任何思考字段 + 提示词压制」。
+                    // 「关闭」不整包丢弃：换下一种关闭字段重发，直到方案用尽。
                     // 整包丢弃等于回到端点默认（多数开思考），用户选了关却还在思考。
+                    // 方案用尽后这一轮按端点默认下发（不再追加提示词约束）：关不掉
+                    // 就是关不掉，界面上已经不给这个模型「关闭」选项。
                     if ((code == 400 || code == 422) && sendThinking && thinkingOff) {
-                        if (thinkingOffAttempt + 1 < ThinkingOff.planCount(
-                                job.provider, job.modelName)) {
+                        if (!ThinkingOff.exhausted(job.provider, job.modelName,
+                                thinkingOffAttempt)) {
                             thinkingOffAttempt++;
                             LogUtil.w(TAG, "thinking-off params rejected, try plan #%d (%s)",
                                     thinkingOffAttempt,
@@ -426,8 +457,11 @@ final class ChatStreamRunner {
                             session.setConnection(null);
                             continue;
                         }
+                        // 所有能发的关闭字段都被端点拒了：这个模型关不掉。
+                        // 记下来，界面不再给「关闭」选项，下一轮不再白试。
+                        ThinkingOff.rememberCannotOff(modelOriginal);
                         sendThinking = false;
-                        LogUtil.w(TAG, "all thinking-off plans rejected, fall back to prompt");
+                        LogUtil.w(TAG, "all thinking-off plans rejected, send defaults");
                         ChatTransport.close(conn);
                         conn = null;
                         session.setConnection(null);
@@ -484,10 +518,33 @@ final class ChatStreamRunner {
                 // 真正的新回答由宿主按请求代数重新起步。
                 SseRound.Result rr = readRound(conn, st, renderer);
                 st.chunks = rr.chunks;
-                // 选了关、也发了关闭字段，端点却仍然吐推理内容：这个模型关不掉思考。
-                // 当场记进配置，思考档位里不再提供「关闭」，免得下次继续白等。
-                if (userWantsNoThinking && rr.thinkingChunks > 0) {
-                    onThinkingOffIgnored(rr.thinkingChunks);
+                if (thinkingOff && provenOffSig.length() == 0) {
+                    int prev = offMode;
+                    offMode = confirmThinkingOff(modelOriginal, offMode,
+                            rr.thinkingChunks, rr.reasoning.length(), round);
+                    if (offMode == OFF_NONE && prev != OFF_NONE) {
+                        String sig = ThinkingOff.signatureOf(
+                                job.provider, modelOriginal, thinkingOffAttempt);
+                        provenOffSig = sig;
+                        // 记下真实对话里验证过的方案：下次打开这个模型直接从它开始，
+                        // 不再从第一种方案一个个试
+                        try {
+                            ModelInfo mm = ConfigManager.getInstance()
+                                    .findModel(job.providerName, modelOriginal);
+                            String low = mm == null ? "" : ThinkingLevels.lowest(mm.levelList());
+                            ThinkingOff.remember(modelOriginal, sig, low);
+                        } catch (Throwable ignored) {
+                            // 记忆只是优化，失败不影响本次回答
+                        }
+                    } else if (offMode == OFF_CLOSED && prev != OFF_CLOSED
+                            && ThinkingOff.exhausted(job.provider, modelOriginal,
+                                    thinkingOffAttempt)) {
+                        // 所有可选字段都试过、推理照样在流：这个模型确实关不掉。
+                        // 立刻落进运行期记忆，思考档位马上不再列「关闭」，
+                        // 免得用户反复选一个根本做不到的档位。
+                        ThinkingOff.rememberCannotOff(modelOriginal);
+                        ui.toast(Strings.get(R.string.chatstreamrunner_019));
+                    }
                 }
                 // 统计要的是「本轮这一发」的用量，而 st 里是跨轮累计值。
                 // 不做差直接记，一条带 3 次工具轮的回复会把总量算成 1+2+3=6 倍。
@@ -668,30 +725,42 @@ final class ChatStreamRunner {
     }
 
     /**
-     * 端点没有接受关闭思考：把这个事实写进模型配置。
+     * 关闭是否真的生效：逐次分片判断，避免把「更早的方案其实也关掉了」误记成关不掉。
      *
-     * <p>探测能提前发现大部分关不掉的模型，但探测用的是短请求，个别端点在中转、
-     * 特定参数组合下表现不同。真正跑一次对话时看到推理内容，是最硬的证据。
-     * 记下来之后，思考档位下拉不再列出「关闭」，用户不会反复选到一个无效选项。
+     * <p>state 走法：
+     * <ul>
+     *   <li>unknown + 出现推理 → open：记下这一片的长度，继续观察，等这一轮结束再定；
+     *       立刻判定会把前几种方案（被端点忽略）的首片也记成「这一种不行」。</li>
+     *   <li>open + 推理仍在增长 → closed：推理在展开，说明关闭无效。</li>
+     *   <li>open + 推理停止、且本轮是工具轮 → 下一次换方案重试；
+     *       最后一轮则整段回看：只要尾巴没有继续增长，按「已关」处理。</li>
+     * </ul>
      *
-     * <p>只在第一次发现时提示一次：配置里已标记过的直接返回，不打扰每轮对话。
+     * @param chunks 本轮收到的推理分片数
+     * @param chars  推理正文的字符数，用来区分「一片就不再增长」和「一直在涨」
+     * @param round  第几轮（工具轮会进下一轮）
+     * @return 新的状态
      */
-    private void onThinkingOffIgnored(int chunks) {
-        try {
-            ConfigManager cfg = ConfigManager.getInstance();
-            ModelInfo m = cfg.findModel(job.providerName, job.modelName);
-            if (m == null || m.thinkingOffBlocked) return;
-            m.thinkingOffBlocked = true;
-            cfg.bumpProbeRevision();
-            cfg.save();
-            LogUtil.w(TAG, "model %s still reasons with thinking off (%d chunks): "
-                    + "marked as not closable", job.modelName, chunks);
-            if (session.isCurrent(job.generation)) {
-                ui.toast(Strings.get(R.string.chatstreamrunner_019));
-            }
-        } catch (Throwable t) {
-            LogUtil.w(TAG, "record thinking-off failure failed: %s", t);
+    private int confirmThinkingOff(String model, int state, int chunks, int chars, int round) {
+        if (chunks <= 0) {
+            // 本轮没有推理，且关闭字段确实下发过：这一方案关得住
+            boolean sent = lastOffApplied;
+            offProbeChars = 0;
+            if (!sent) return state;
+            return OFF_NONE;
         }
+        if (state == OFF_UNKNOWN) {
+            offProbeChars = chars;
+            return OFF_OPEN;
+        }
+        // 已经在观察期内：推理继续变长才算真的在思考
+        boolean grew = chars > offProbeChars;
+        offProbeChars = chars;
+        if (!grew) return OFF_OPEN;
+        LogUtil.w(TAG, "model %s still reasons with thinking off (%d chars): "
+                + "next attempt uses another plan", model, chars);
+        offProbeChars = 0;
+        return OFF_CLOSED;
     }
 
     /**
@@ -745,7 +814,7 @@ final class ChatStreamRunner {
                         public boolean isAborted() {
                             return !session.isAlive(job.generation);
                         }
-                    }, partial, st.dropReasoning);
+                    }, partial);
         } catch (Exception e) {
             // 断流（读超时、连接重置、TLS 中断）不是「什么都没发生」：调用方会走失败
             // 链路，用 st.trace 重写气泡并落盘。这里不把半截 display 补进 trace，
@@ -877,9 +946,6 @@ final class ChatStreamRunner {
          * 必须能从续跑基准里截掉，否则新旧两份回答会连在一起。
          */
         int partialStart = -1;
-
-        /** 用户关掉了思考：reasoning 照收但不上屏，见 SseRound.Result#dropReasoning。 */
-        boolean dropReasoning;
 
         /**
          * 累加一轮的 usage。工具轮次会发多次请求，逐轮相加才是这条消息的真实消耗；

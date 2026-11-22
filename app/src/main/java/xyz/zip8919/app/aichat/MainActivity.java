@@ -1802,7 +1802,10 @@ public class MainActivity extends ThemedActivity {
                 ? model.levelList() : new ArrayList<String>();
         // 探测或实测确认关不掉思考的模型（o 系列、Gemini Pro 等），不列出「关闭」：
         // 留着它等于给用户一个无效选项，选了也还在思考。
-        boolean offSupported = model == null || !model.thinkingOffBlocked;
+        // 配置里的 thinkingOffBlocked 管跨重启，运行期记忆管「刚刚聊天里试出来的」——
+        // 两条都要看，否则刚被实测否掉的模型，下拉里还挂着「关闭」。
+        boolean offSupported = (model == null || !model.thinkingOffBlocked)
+                && (model == null || !ThinkingOff.cannotOff(model.name));
         thinkingChoices.addAll(ThinkingLevels.choices(available, offSupported));
         for (String c : thinkingChoices) labels.add(ThinkingLevels.pickLabel(c));
 

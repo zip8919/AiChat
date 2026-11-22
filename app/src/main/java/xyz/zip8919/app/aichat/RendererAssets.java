@@ -450,35 +450,50 @@ final class RendererAssets {
             "if(cn.indexOf('stream-tail')>=0)return true;" +
             "if(cn.indexOf('stream-base')>=0)return false;" +
             "p=p.parentElement||p.parentNode;}return false;};" +
-            // 同一个容器上、连续多少帧内不重复扫：流式每帧都会调到这里，而思考块与
-            // 工具卡片只在「块数变化」或「用户点了折叠」时才需要重新套状态。
-            // 旧实现每帧 querySelectorAll 一遍整棵 tail 子树 —— 长回答里 tail 有
-            // 几千个节点，这个扫描本身就随正文线性增长，是「越写越卡」的第二个来源。
-            // 用内容指纹（子节点数 + 末节点）判断有没有新块进来：没有就整趟跳过。
-            "window.__smScanMem=window.__smScanMem||{};" +
-            "window.__smScanKey=function(root,cls){" +
-            "var n=root.querySelectorAll?root.querySelectorAll(cls):null;" +
-            "return n?(n.length+'/'+(n.length?n[n.length-1].textContent.length:0)):'';};" +
+            // 思考块后面是否已经出现别的内容（空白节点不算）。
+            // 流式期间思考块是最后一个节点，闭合并接上正文后才有后继节点，
+            // 用它判定「还在思考」比依赖渲染时写死的 data-think-live 更准：
+            // 增量绘制不会重写已有节点的属性，写死的值会一直停在 1。
+            "window.__nextReal=function(n){" +
+            "var s=n.nextSibling;" +
+            "while(s&&((s.nodeType===3&&!/\\S/.test(s.nodeValue||''))||s.nodeType===8))s=s.nextSibling;" +
+            "return s;};" +
+            // 思考块的展开状态逐「块」记在 DOM 节点上（__thOpen），而不是全局一个指纹。
+            //
+            // 旧实现每次落地都做两件很贵、且会闪的事：
+            //   1) 对整棵 root 做 querySelectorAll('.thinking-wrap') —— 长回答里
+            //      渐显层有几千个节点，这个扫描随正文线性增长；
+            //   2) 用「块数 / 末块文本长度」当指纹，思考内容每长几个字指纹就变，
+            //      于是每帧都把全部块重扫一遍、重新写 style.display 与按钮文案。
+            //      而 tail 的节点本来就在随渐显增删，写 display 会触发布局，
+            //      几块一起抖动 —— 用户看到的就是「思考块时不时折叠、下一步又展开」。
+            //
+            // 现在：块的状态记在节点上（__thOpen / __thLive），只有「首次出现」和
+            // 「思考结束（live 1→0）」这两个时刻各定一次态，之后只有用户手动点击
+            // 才会改。中间每帧一律跳过，不重写 display，也就不再有抖动。
             "window.applyThinkingStates=function(root){" +
-            "if(!root||!root.querySelectorAll)return;" +
-            "var w=root.querySelectorAll('.thinking-wrap');" +
-            // 没有思考块就没什么可恢复的：绝大多数流式帧都走这里直接返回
+            "if(!root||!root.getElementsByClassName)return;" +
+            // getElementsByClassName 返回活动集合，取 length/索引都是 O(1) 级；
+            // querySelectorAll 每帧都要遍历整棵子树做选择器匹配，正文越长越慢。
+            "var w=root.getElementsByClassName('thinking-wrap');" +
             "if(w.length===0)return;" +
-            // 块数与末块文本长度都没变，说明这一帧没有新增/改写思考块；
-            // 只有用户点了折叠才需要重扫，那个路径走 toggleThinking 自己处理
-            "var sig=w.length+'/'+(''+w[w.length-1].textContent).length;" +
-            "if(window.__thinkSig===sig&&window.__thinkSigRoot===root)return;" +
-            "window.__thinkSig=sig;window.__thinkSigRoot=root;" +
             "for(var i=0;i<w.length;i++){" +
-            "var k=w[i].getAttribute('data-think-key');" +
-            "var b=w[i].querySelector('.thinking-block');" +
-            "var t=w[i].querySelector('.thinking-toggle');" +
+            "var it=w[i];" +
+            "var lv=(it.getAttribute('data-think-live')==='1'&&!window.__nextReal(it))?1:0;" +
+            // 状态没变就整趟跳过：这是「不闪、不卡」的关键，重复写
+            // display / textContent 会让浏览器重排，安静的时候一个字都不用改
+            "if(it.__thOpen!==undefined&&it.__thLive===lv)continue;" +
+            "var b=it.querySelector('.thinking-block');" +
+            "var t=it.querySelector('.thinking-toggle');" +
             "if(!b||!t)continue;" +
+            "var k=it.getAttribute('data-think-key');" +
             // 用户点过 → 尊重手动；否则：进行中(live=1 且在 tail) 自动展开，结束自动折叠
             "var m=(k&&Object.prototype.hasOwnProperty.call(window.__thinkOpen,k))" +
             "?!!window.__thinkOpen[k]:null;" +
-            "var live=w[i].getAttribute('data-think-live')==='1'&&window.__inTail(w[i]);" +
+            "var live=lv===1&&window.__inTail(it);" +
             "var open=(m===null)?live:m;" +
+            "it.__thOpen=open?1:0;" +
+            "it.__thLive=lv;" +
             "b.style.display=open?'block':'none';" +
             "if(open){t.textContent='@@L_FOLD@@';}" +
             "else{var n=parseInt(t.getAttribute('data-tok'),10);if(!(n>0))n=1;" +
@@ -499,29 +514,39 @@ final class RendererAssets {
             "if(!(t>0))t=Math.max(1,Math.round(b.textContent.length*2/3));" +
             "btn.textContent='@@L_EXPAND@@'+window.fmtTok(t)+' tokens）──';}" +
             "if(k)window.__thinkOpen[k]=open;" +
-            // 手动改过状态，指纹缓存作废：下一帧必须重新套一遍
-            "window.__thinkSig=null;};" +
+            // 节点上的定态标记同步改掉：否则下一次重建时这个节点还是「已定态」，
+            // 会被 applyThinkingStates 直接跳过，于是折叠/展开状态看起来没生效
+            "if(w)w.__thOpen=open?1:0;};" +
             "window.__toolOpen=window.__toolOpen||{};" +
+            // 工具卡片同样逐「张」记状态（__tcSet），不再用内容指纹：
+            // 指纹里带最后一张卡片的 textContent.length，一次搜索/抓取在返回结果时
+            // 会反复长，指纹每帧都变 → 每次都把所有卡片重扫一遍并重写 display。
+            // 卡片越多，这段开销越大，而且 style 抖动会让整块区域跟着重排。
+            //
+            // __tcSet 取卡片集合：用按类名的活动集合读，length/索引都是常数级，
+            // 不必每帧在整棵 tail 子树里做选择器查询。
+            "window.__tcSet=function(root){" +
+            "if(!root||!root.getElementsByClassName)return null;" +
+            "return root.getElementsByClassName('tool-card');};" +
             "window.applyToolStates=function(root){" +
-            "if(!root||!root.querySelectorAll)return;" +
-            "var cards=root.querySelectorAll('.tool-card');" +
-            "if(cards.length===0)return;" +
-            // 与思考块同理：卡片集合没变就不必再扫一遍
-            "var tsig=cards.length+'/'+(''+cards[cards.length-1].textContent).length;" +
-            "if(window.__toolSig===tsig&&window.__toolSigRoot===root)return;" +
-            "window.__toolSig=tsig;window.__toolSigRoot=root;" +
+            "if(!root)return;" +
+            "var cards=window.__tcSet(root);" +
+            "if(!cards||cards.length===0)return;" +
             "for(var i=0;i<cards.length;i++){" +
+            "if(cards[i].__tcDone===1)continue;" +
             "var k=cards[i].getAttribute('data-tool-key');" +
             "var b=cards[i].querySelector('.tool-body');" +
             "var h=cards[i].querySelector('.tool-head-click');" +
             "if(!b)continue;" +
             "var a=h?h.querySelector('.tool-arrow'):null;" +
             "var hint=h?h.querySelector('.tool-hint'):null;" +
-            "if(k&&window.__toolOpen[k]){b.style.display='block';" +
+            "var open=!!(k&&window.__toolOpen[k]);" +
+            "if(open){b.style.display='block';" +
             "if(a)a.textContent='▼';if(hint)hint.textContent='';}" +
             "else{b.style.display='none';" +
             "if(a)a.textContent='▶';" +
-            "if(hint)hint.textContent='@@L_TAP@@';}};" +
+            "if(hint)hint.textContent='@@L_TAP@@';}" +
+            "cards[i].__tcDone=1;}" +
             // 每次重绘落地后按 key 恢复思考块展开状态（跨重建不丢）。
             "window.applyThinkingStates(root);" +
             "window.applyToolFold(root);};" +
@@ -543,7 +568,8 @@ final class RendererAssets {
             "if(msgs.length===0)msgs=root.querySelectorAll('.msg');}" +
             "for(var i=0;i<msgs.length;i++)foldMsgTools(msgs[i]);};" +
             "function foldMsgTools(msg){" +
-            "var cards=msg.querySelectorAll('.tool-card');" +
+            // 活动集合：length 常数级，不必每帧在整条消息里做选择器查询
+            "var cards=msg.getElementsByClassName('tool-card');" +
             "var n=cards.length;var bar=msg.querySelector('.tool-fold');" +
             "if(n<=window.__toolFoldLimit){" +
             "if(bar&&bar.parentNode)bar.parentNode.removeChild(bar);" +
@@ -582,7 +608,7 @@ final class RendererAssets {
             "if(a)a.textContent=open?'▼':'▶';" +
             "if(hint)hint.textContent=open?'':'@@L_TAP@@';" +
             "if(k)window.__toolOpen[k]=open;" +
-            "window.__toolSig=null;};" +
+            "if(card)card.__tcDone=1;};" +
             "window.toggleSources=function(h){" +
             "var b=h.nextElementSibling;if(!b)return;" +
             "var open=b.style.display==='none';" +
@@ -859,11 +885,13 @@ final class RendererAssets {
             "window.__absorbLive=function(t,b){" +
             "var live=t.querySelector?t.querySelector('.tool-live'):null;" +
             "if(!live)return;" +
+            // 每次都重新取：上面每搬一张卡片，b 的子树都在变
+            "var have=b.getElementsByClassName('tool-card');" +
             "while(live.firstChild){" +
             "var card=live.firstChild;" +
             "var key=card.getAttribute?card.getAttribute('data-tool-key'):null;" +
             "if(key){" +
-            "var dup=false,have=b.querySelectorAll('.tool-card');" +
+            "var dup=false;" +
             "for(var hi=0;hi<have.length;hi++){" +
             "if(have[hi].getAttribute('data-tool-key')===key){dup=true;break;}}" +
             "if(dup){live.removeChild(card);continue;}}" +
@@ -1038,7 +1066,8 @@ final class RendererAssets {
             // 现在重新起步由 Java 侧用一个稳定键压制（__smoothStart 的 key），
             // 这里只负责「同一份内容永远往同一个方向长」。
             "window.__sm={on:false,arrived:'',show:0,units:[],chars:0,cut:0," +
-            "stack:[],root:null,cur:0,paintUnits:null,fi:null,gi:null};" +
+            "stack:[],root:null,cur:0,paintUnits:null,fi:null,gi:null," +
+            "advA:null,advI:null,run:null,natLast:0,stackChars:null,stackPending:null};" +
             "window.__smEsc=function(c){" +
             "return c==='&'?'&amp;':(c==='<'?'&lt;':(c==='>'?'&gt;':c));};" +
             // 正文 → 最小单位：每个字符一个单位、每段标签一个单位。
@@ -1051,23 +1080,38 @@ final class RendererAssets {
             // 只在单位序列上移动切点。
             "window.__smUnitize=function(html,st){" +
             "var s=html||'';" +
-            // 末段一旦不是文本（HTML 已闭合、或尾部是卡片），就不再复用：
-            // 前缀必须停在标签边界上，截半截标签再解析会把后面的结构全带歪。
-            "var reuse=st&&st.fi!=null&&st.fi>=0&&st.fi<=s.length&&s.indexOf('<',st.fi)<0" +
-            "&&st.paintUnits&&st.cur<=st.units.length;" +
-            "if(!reuse){" +
-            // 全量重建也必须把 fi 记下来：它是「末尾那段裸文本」的起点，
-            // 清成 null 的话下一帧又只能全量解析，长回答每帧重解析一遍 HTML。
+            // 末尾纯文本续写：这是流式输出最典型的帧——段落还在写，只有最后一段
+            // 文字后面又多出几个字，前面的标签、闭合结构一个字都没变。
+            //
+            // 判定用「三段式」：开头（到末段文字起点）、末段文字本身、结尾闭合标签。
+            // 开头与结尾都一样、只有末段文字在后面接长，就说明结构完全没变：
+            // 只要把新增的字补进单位序列，下一帧绘图时直接写进原来那个文本节点，
+            // 完全不用把几万字的 HTML 重新解析一遍（这正是长回答越写越卡的主因）。
+            "if(st&&st.run&&st.stackChars){" +
+            "var r=window.__smRun(s);" +
+            "if(r&&r.rs===st.run.rs&&r.head===st.run.head&&r.tail===st.run.tail" +
+            "&&r.raw.length>=st.run.raw.length&&r.raw.indexOf(st.run.raw)===0){" +
+            "var d=r.raw.substring(st.run.raw.length);" +
+            "if(d.indexOf('<')<0&&d.indexOf('&')<0){" +
+            "var u0=st.units,nat0=st.natLast;" +
+            "for(var q0=0;q0<d.length;q0++){" +
+            "u0.push({ch:d.charAt(q0),at:nat0});nat0++;}" +
+            "st.natLast=nat0;st.chars+=d.length;st.run=r;" +
+            // 追加要从「上一帧最后那个字所在的元素」里接，不能从根节点接：
+            // 结构没变，所以那串元素引用仍然有效
+            "st.stackPending=st.stackChars;" +
+            "return u0;}}}" +
+            // 全量解析后记下三段式，供下一帧判定用
             "var all=window.__smParse(s,0);" +
-            "if(st){st.chars=all.cnt;st.fi=all.fi;}" +
-            "return all.units;}" +
-            // 续写：只解析新增的那一小段，单位接到已有序列后面
-            "var add=window.__smParse(s.substring(st.fi),st.fi);" +
-            "var units=st.units;" +
-            "if(units.length>st.cur)units.length=st.cur;" +
-            "for(var k=0;k<add.units.length;k++)units.push(add.units[k]);" +
-            "st.fi=add.fi;st.chars=add.cnt;" +
-            "return units;};" +
+            "if(st){st.chars=all.cnt;st.natLast=all.fi;st.run=window.__smRun(s);" +
+            "st.advA=null;st.advI=null;st.stackChars=null;st.stackPending=null;}" +
+            "return all.units;};" +
+            // 把一份 HTML 切成「开头 / 末段文字 / 结尾闭合标签」三段。
+            // 结尾必须是闭合标签，否则没有稳定的追加锚点。
+            "window.__smRun=function(s){" +
+            "var ci=s.lastIndexOf('</');if(ci<0)return null;" +
+            "var rs=s.lastIndexOf('>',ci-1)+1;" +
+            "return {rs:rs,head:s.substring(0,rs),raw:s.substring(rs,ci),tail:s.substring(ci)};};" +
             // 把一段 HTML 解析成单位序列；nat 是这段源码在整个正文里的起点。
             // 每个单位记下位置（at）：续写时只解析尾部，不必每帧重解析整份 HTML——
             // 长回答每帧都重新解析才是「越写越慢」的主因。
@@ -1109,15 +1153,17 @@ final class RendererAssets {
             // 不重置的话，下一次追加会写进一个已经脱离文档的节点，
             // 屏幕上就一直停在旧内容，看起来像「卡住了」。
             "if(st.root&&st.root!==root){st.root=null;st.cur=0;st.gi=null;st.fi=null;" +
-            "st.paintUnits=null;st.stack=[];}" +
+            "st.paintUnits=null;st.stack=[];st.advA=null;st.advI=null;}" +
             "var u=st.units,cut=st.cut;" +
             "var same=(st.root===root)&&cut>=st.cur&&window.__smSamePrefix(st,u);" +
             "var prevCur=st.cur;" +
             "if(!same){" +
             // 结构变了（markdown 补全、代码高亮落地）才整段重画
             "root.innerHTML='';st.root=root;st.stack=[{el:root,n:''}];st.cur=0;" +
-            "st.gi=null;prevCur=0;" +
+            "st.gi=null;prevCur=0;st.stackChars=null;st.stackPending=null;" +
             "}" +
+            // 末段文字续写的那一帧：从上一帧最后那个字所在的元素接着写
+            "if(st.stackPending){st.stack=st.stackPending;st.stackPending=null;}" +
             // 从「已经画到哪」接着画；重画后从 0 开始整段补一次
             "window.__smAppend(st,u,prevCur,cut);" +
             "st.cur=cut;st.paintUnits=u;" +
@@ -1135,10 +1181,14 @@ final class RendererAssets {
             // 前缀是否与上一帧绘制时一致：一致才能接着往后追加
             "window.__smSamePrefix=function(st,u){" +
             "var old=st.paintUnits;" +
-            // 没有上一帧、或单位序列被增量接长（旧数组后面多了新单位）都不能
-            // 当成「前缀一致」：此时 u 与 old 是同一个对象，逐项比较必然相等，
-            // 但屏幕上画出来的只有 st.cur 之前的内容——后面那截永远不会被补上。
-            "if(!old||old===u)return false;" +
+            "if(!old)return false;" +
+            // 同一个数组对象 = 这一帧是增量续写的（只在尾部 push，前面元素原样保留，
+            // 中途还会被截到 st.cur 再往后接）。元素引用没变，前缀必然一致。
+            //
+            // 旧实现在这里 return false，于是每一帧都走「清空 + 全量重画」：
+            // 3 万字的回答每帧重建几万个节点，实时渲染越写越卡、思考块与公式
+            // 跟着重建闪一下，根因就在这一行。
+            "if(old===u)return st.cur<=u.length;" +
             "if(st.cur>u.length||st.cur>old.length)return false;" +
             "for(var i=0;i<st.cur;i++){" +
             "var a=u[i],b=old[i];" +
@@ -1156,6 +1206,10 @@ final class RendererAssets {
             // 降级成裸文本、却从不收掉旧 span 的 .stream-new，于是正文越长、
             // 带半透明样的字越多——「工具上方最后几个字一直是灰色」就是这么来的。
             "window.__smAppend=function(st,u,from,to){" +
+            // 记下「最后一个字」在处理到它时的元素栈：下一帧若只是这段文字续写，
+            // 就从同一串元素继续往里写，不必重解析、也不必从根节点重新定位
+            "var lcIdx=-1;" +
+            "for(var q=to-1;q>=from;q--){if(u[q].ch!==undefined){lcIdx=q;break;}}" +
             "for(var i=from;i<to;i++){" +
             "var x=u[i];" +
             "var top=st.stack[st.stack.length-1].el;" +
@@ -1172,6 +1226,7 @@ final class RendererAssets {
             // 不再「一字一 span」：一屏几百个 span 在 4.4 的 WebView 上排版很贵，
             // 而且每个都要单独设 opacity，滚动跟随时会明显掉帧。
             "st.gi=tn;lastCh=tn;" +
+            "if(i===lcIdx)st.stackChars=st.stack.slice();" +
             "continue;}" +
             "if(x.close!==undefined){" +
             "for(var k=st.stack.length-1;k>0;k--){" +
@@ -1245,8 +1300,13 @@ final class RendererAssets {
             // 每帧推进：把切点按「已到达字符数」移到该到的位置
             "window.__smAdvance=function(st,t,adv){" +
             "var a=adv|0,cnt=0,i=0,u=st.units;" +
+            // 从上一帧数到的位置继续：正文到几万字时，每帧从 0 数一遍
+            // 就是几十万次循环，纯白烧 CPU（每拍都要来一次）。
+            // 前提是序列前缀没变——advA/advI 在序列被重建时由 __smUnitize 清空。
+            "if(st.advI!=null&&st.advA!=null&&a>=st.advA&&st.advI<=u.length){" +
+            "i=st.advI;cnt=st.advA;}" +
             "for(;i<u.length;i++){if(cnt>=a)break;if(u[i].ch!==undefined)cnt++;}" +
-            "st.cut=i;" +
+            "st.cut=i;st.advA=cnt;st.advI=i;" +
             "window.__smPaint(st,t);return true;};" +
             // 纯文本渐显：只在正文节点上挪内容，不重建任何结构。
             //
@@ -1457,6 +1517,8 @@ final class RendererAssets {
             "st.key=key||'';" +
             "st.on=true;st.arrived='';st.show=0;st.units=[];st.chars=0;st.cut=0;st.plain=false;" +
             "st.root=null;st.cur=0;st.paintUnits=null;st.fi=null;st.gi=null;" +
+            "st.advA=null;st.advI=null;st.run=null;st.natLast=0;" +
+            "st.stackChars=null;st.stackPending=null;" +
             "st.stack=[];st.grad=[];" +
             "window.__smPlain.on=false;" +
             "window.__smPlainReset();};" +
@@ -1531,13 +1593,27 @@ final class RendererAssets {
             "n=n.parentNode;}},true);" +
             "document.addEventListener('touchend',function(){window.__sm.hold=false;},true);" +
             "document.addEventListener('touchcancel',function(){window.__sm.hold=false;},true);" +
-            "window.__applyTailHtml=function(t,html){var s=window.__snapScroll(t);" +
+            "window.__applyTailHtml=function(t,html){" +
+            // 渐显通道自己维护 DOM：这里再写一次 innerHTML，等于每帧把已经画好的
+            // 节点全部销毁重建（思考块、公式、代码高亮、展开状态跟着重来），
+            // 屏幕上闪、手机上卡，而且紧接着 __smoothPush 还要再增量画一遍。
+            // 只把「已到达的片段」交给渐显层，它按单位序列追加，已画的节点一律不动。
+            "if(window.__sm.on){" +
+            // 第一次进入渐显（或显示层被换掉）：tail 里可能还留着上一帧的纯文本节点，
+            // 不清一次会和追加出来的正文叠在一起。之后各帧一律不清。
+            "if(!window.__sm.root||!t.contains(window.__sm.root)){t.innerHTML='';" +
+            "window.__sm.root=null;window.__sm.cur=0;window.__sm.stack=[];}" +
+            "t.className='stream-tail';" +
+            "window.__smoothPush(html||'',window.__sm.show,t);" +
+            // 卡片折叠状态仍要套一次：渐显层只恢复思考块，卡片走另一条状态表。
+            // applyToolStates 逐张带完成标记，重复调用不会重写已定态的卡片。
+            "applyToolStates(t);" +
+            "window.__clearStatusIn(t);" +
+            "smartScrollToBottom();return;}" +
+            "var s=window.__snapScroll(t);" +
             // 重建前不需要手动捕获：展开状态存在 __thinkOpen 里，重建后按 key 恢复
             "t.className='stream-tail';t.innerHTML=html;window.__restoreScroll(t,s);" +
             "clearStatus();addCopyBtns(t);applyToolStates(t);" +
-            // 渐显正在进行：新到达的片段同样只显示到当前进度，别整段甩出来
-            "if(window.__sm.on)window.__smoothPush(html||'',window.__sm.show," +
-            "t);" +
             "smartScrollToBottom();};" +
             "window.__applyTailText=function(t,text){var s=window.__snapScroll(t);" +
             // tail 里已经有实时写入的工具卡片时，纯文本帧会把它们整段抹掉——

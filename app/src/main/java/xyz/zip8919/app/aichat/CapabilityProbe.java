@@ -168,6 +168,13 @@ final class CapabilityProbe {
         String visionNote = "";
         /** 能否关闭思考：true 能 / false 不能 / null 未能判定 */
         Boolean offSupported;
+        /**
+         * 关闭字段一律被忽略、且开着思考时才出推理：模型固定思考。
+         *
+         * <p>这种情况不写档位（写出来就是让用户选一档永远不生效的强度），
+         * 思考档位里也不该出现「关闭」。
+         */
+        boolean offBlocked;
         /** 服务端对所有档位都回 200，档位结论不可区分 */
         boolean unverifiable;
         /** 六档逐个明确被拒：可以据此认定该模型不吃思考参数 */
@@ -221,10 +228,7 @@ final class CapabilityProbe {
         ReasoningProfiles.Profile prof = ReasoningProfiles.of(model);
         List<String> candidates = prof.levels.isEmpty()
                 ? new ArrayList<String>(ThinkingLevels.ORDER) : prof.levels;
-        int accepts = 0;
-        boolean evidence = false;
-        // 各档位对应的推理痕迹量：level → 推理 token 数（缺失时按推理字数估）。
-        // 只有「有痕迹」且「强弱之间拉开差距」才认定这些档位真的生效。
+        // 各档位对应的推理痕迹量：level → 推理 token 数（缺失时按推理字数估）
         List<String> accepted = new ArrayList<String>();
         List<Integer> signals = new ArrayList<Integer>();
         // 有档位的回复被输出上限截断：此时各档的推理 token 都被削到同一个天花板，
@@ -242,11 +246,9 @@ final class CapabilityProbe {
                 break;
             }
             if (r.httpCode >= 200 && r.httpCode < 300) {
-                accepts++;
                 accepted.add(level);
                 int sig = reasoningSignal(r.body);
                 signals.add(Integer.valueOf(sig));
-                if (sig > 0) evidence = true;
                 if (truncated(r.body, probeMaxTokens(level))) anyTruncated = true;
                 continue;
             }
@@ -258,42 +260,48 @@ final class CapabilityProbe {
             }
         }
 
-        if (accepted.size() > 0) {
-            if (!evidence) {
-                // 全 200、回复里没有任何推理痕迹：端点只是没报错，结论不可验证。
-                // 家族已知时保留家族档位（用户仍能选到「端点认的那几个词」，
-                // 只是强度未必真生效）；家族未知时不把 200 当成支持。
-                rep.unverifiable = true;
-                rep.levels.addAll(prof.levels.isEmpty()
-                        ? new ArrayList<String>() : prof.levels);
-                if (prof.levels.isEmpty()) rep.levels.clear();
-            } else if (spread(signals) || anyTruncated) {
-                // 有痕迹、且强弱之间明显拉开差距：这些档位确实在起作用。
-                // 被输出上限截断的样本比不出相对强弱，但每一档都确实产生了推理，
-                // 不能因为「数值一样」把档位砍到只剩一个。
-                rep.levels.addAll(accepted);
-            } else {
-                // 有痕迹但各档一模一样：端点吃了参数却没按档位调强度。
-                // 只保留最高的那一档（至少能证明「思考是开着的」），其余不写，
-                // 免得用户以为切档有用。
-                String top = accepted.get(accepted.size() - 1);
-                int best = -1;
-                for (int i = 0; i < accepted.size(); i++) {
-                    if (signals.get(i).intValue() > best) {
-                        best = signals.get(i).intValue();
-                        top = accepted.get(i);
-                    }
-                }
-                rep.levels.add(top);
-                rep.unverifiable = true;
+        // 基线：同一道题、不带任何思考参数各发一次。
+        // 端点对不认识的字段一律回 200，只看「这一档回了 200」证明不了思考被打开。
+        // 与无参数基线对照才能确定：带开启字段时推理更多 → 开启确实生效；
+        // 带关闭字段时推理回到基线以下 → 关闭确实生效。未探测（家族未知）的模型
+        // 也靠这条基线区分「本来就会推理」和「参数把它打开了」。
+        int baseline = -1;
+        if ((stop == null || !stop.stopped())
+                && url != null && snap.apiKey != null && snap.apiKey.trim().length() > 0) {
+            Raw b = post(url, snap.apiKey, thinkingBody(snap, model, null, false));
+            if (b.error == null && b.httpCode >= 200 && b.httpCode < 300) {
+                baseline = reasoningSignal(b.body);
+                LogUtil.d(TAG, "thinking baseline signal=%d", baseline);
             }
         }
 
+        // 判据：这一档的推理量明显高于基线。缺基线时退回「有推理痕迹」。
+        // 全部档位都与基线一样时，说明端点默认就开着思考，参数并不能让推理更强，
+        // 档位结论写成「不可验证」，而不是把 200 当成支持。
+        boolean anyAbove = false;
+        for (int i = 0; i < accepted.size(); i++) {
+            if (aboveBaseline(signals.get(i).intValue(), baseline)) anyAbove = true;
+        }
+        if (anyTruncated) anyAbove = true;
+        if (!accepted.isEmpty()) {
+            if (!anyAbove && baseline >= 0) {
+                rep.unverifiable = true;
+            }
+            rep.levels.addAll(accepted);
+        }
+
         // ---- 关闭思考 ----
-        // 档位只回答「能开多强」，回答不了「能不能关」。用户选了关却还在思考，
-        // 根因就在这里没有数据。结论为 false 时，思考档位下拉不再列出「关闭」。
+        // 判据与开启同一套：关闭后推理量降回基线以下才算关得掉。
+        // 只回 200 不算数：端点对不认识的字段一律回 200 并照常思考。
         if (stop == null || !stop.stopped()) {
-            rep.offSupported = probeOff(url, snap, model, stop);
+            rep.offSupported = probeOff(url, snap, model, baseline, stop);
+            if (Boolean.FALSE.equals(rep.offSupported)) {
+                // 关不掉思考 ≠ 没有强度档位：o 系列、Gemini Pro 这类模型本来就
+                // 没有「关闭」，但 low / medium / high 是实打实支持的。
+                // 旧版在这里连档位一起清空，用户看到的是「这个模型什么都不能调」，
+                // 与文档完全对不上。只标记「档位里别给关闭」，档位结论原样保留。
+                rep.offBlocked = true;
+            }
         }
 
         // ---- 图片输入 ----
@@ -328,17 +336,32 @@ final class CapabilityProbe {
      *
      * @return true 能关 / false 关不掉 / null 没能判定（网络、限流、中途停止）
      */
-    private static Boolean probeOff(String url, ProviderInfo snap, String model, Stop stop) {
-        int plans = ThinkingOff.planCount(snap, model);
+    private static Boolean probeOff(String url, ProviderInfo snap, String model,
+            int baseline, Stop stop) {
+        // 只试真的会下发关闭字段的方案。末尾那个「什么都不发」的兜底不能算：
+        // 它等于没做任何事，模型若本来就默认不思考，会被误判成「关得掉」，
+        // 之后真实聊天里却什么都不发，用户选关也没生效。
+        int plans = ThinkingOff.realPlanCount(snap, model);
+        if (plans == 0) {
+            // 没有可用字段（家族未知、提供商也没声明）：测不出来，不下结论
+            return null;
+        }
         for (int i = 0; i < plans; i++) {
             if (stop != null && stop.stopped()) return null;
             Raw r = post(url, snap.apiKey, offBody(snap, model, i), TIMEOUT_MS);
             if (r.error != null) return null;
             if (r.httpCode >= 200 && r.httpCode < 300) {
-                // 8 token 以下当作字段残留（个别端点会回一个空对象的痕迹），
-                // 真正的推理远不止这点量；宁可判「能关」，实测发现关不掉时还有
-                // 聊天路径的运行时校准兜底。
-                return reasoningSignal(r.body) >= 8 ? Boolean.FALSE : Boolean.TRUE;
+                int sig = reasoningSignal(r.body);
+                // 关闭生效 = 推理量降回基线以下（等于基线也说明字段被忽略，仍在默认思考）
+                boolean ok = belowBaseline(sig, baseline);
+                LogUtil.d(TAG, "off plan #%d -> signal=%d baseline=%d ok=%s",
+                        i, sig, baseline, ok);
+                if (ok) {
+                    ThinkingOff.remember(model, ThinkingOff.signatureOf(snap, model, i), "");
+                    return Boolean.TRUE;
+                }
+                // 没降下来：换下一种关闭字段
+                continue;
             }
             if (!isRejection(r.httpCode)) {
                 // 认证、限流、服务端错误与关闭能力无关，不下结论
@@ -347,8 +370,32 @@ final class CapabilityProbe {
             // 400/422：这一种关闭字段不被接受，换下一种
             LogUtil.d(TAG, "off plan #%d rejected: HTTP %d", i, r.httpCode);
         }
-        // 所有关闭方案都被拒：端点没有可用的关闭入口
+        ThinkingOff.rememberCannotOff(model);
         return Boolean.FALSE;
+    }
+
+    /**
+     * 推理量是否明显高于基线。
+     *
+     * <p>没有基线时只看有没有痕迹；有基线时要求高出 50% 且至少 16 token，
+     * 避免端点抖动一两个字就被判成「这一档生效了」。
+     */
+    static boolean aboveBaseline(int signal, int baseline) {
+        if (signal <= 0) return false;
+        if (baseline < 0) return true;
+        return signal >= baseline + Math.max(16, baseline / 2);
+    }
+
+    /**
+     * 推理量是否降到基线以下（关闭生效）。
+     *
+     * <p>没有基线时按「看不到任何推理痕迹」判断。有基线时允许端点仍吐一小段
+     * 余留推理（不超过基线的一半且不超过 32 token），超过就算没关掉。
+     */
+    static boolean belowBaseline(int signal, int baseline) {
+        if (baseline < 0) return signal <= 0;
+        int cap = Math.min(32, Math.max(0, baseline / 2));
+        return signal <= cap;
     }
 
     /**
@@ -472,7 +519,7 @@ final class CapabilityProbe {
             if (sb.length() > 0) sb.append("；");
             sb.append(rep.visionNote);
         }
-        if (rep.offSupported != null && !rep.offSupported.booleanValue()) {
+        if (rep.offBlocked) {
             if (sb.length() > 0) sb.append("；");
             sb.append(Strings.get(R.string.capabilityprobe_024));
         }
@@ -687,11 +734,9 @@ final class CapabilityProbe {
             m.put("content", THINK_ASK);
             msgs.put(m);
             body.put("messages", msgs);
-            // 与聊天一致：最后一个方案不下发任何思考字段，交给提示词压制。
-            // 提示词要写在 messages 之后，否则会被下面这次赋值覆盖掉。
-            if (!ThinkingOff.apply(body, p, model, plan)) {
-                ChatTransport.forceNoThinking(body);
-            }
+            // 与聊天一致：最后一种方案是「不下发任何思考字段」，此时是否真的关掉
+            // 由响应里有没有推理痕迹来判定，不靠提示词压制。
+            ThinkingOff.apply(body, p, model, plan);
             return body.toString();
         } catch (Exception e) {
             LogUtil.w(TAG, "build off body failed: %s", e.getMessage());

@@ -110,45 +110,6 @@ final class ChatTransport {
     }
 
     /**
-     * 端点连思考关闭字段都不认时的最后一道保险：在 system 提示词末尾追加一段硬约束。
-     *
-     * <p>走到这里说明 {@link ThinkingOff} 的所有关闭方案都没被端点接受，或已走到
-     * 「不下发任何字段」的那一步，端点回到默认（多数开思考）。协议层面已经没有
-     * 可用开关，只能靠指令压制。
-     *
-     * <p>只改第一条 system 消息；没有 system 就在最前面补一条。历史内容一个字不动，
-     * 这样多轮上下文里前几轮的格式与解析结果不受影响。
-     */
-    static void forceNoThinking(JSONObject body) {
-        if (body == null) return;
-        try {
-            JSONArray msgs = body.optJSONArray("messages");
-            if (msgs == null) return;
-            String hint = "\n\n[系统指令，优先于以上任何要求] 本次对话已由用户关闭“思考”功能："
-                    + "不要输出任何思考过程、推理步骤或 分析/thinking 段落，"
-                    + "直接给出最终回答。";
-            for (int i = 0; i < msgs.length(); i++) {
-                JSONObject m = msgs.optJSONObject(i);
-                if (m == null) continue;
-                if (!"system".equals(m.optString("role"))) continue;
-                String c = m.optString("content", "");
-                if (c.indexOf("[系统指令，优先于以上任何要求]") >= 0) return;
-                m.put("content", c + hint);
-                return;
-            }
-            JSONObject sys = new JSONObject();
-            sys.put("role", "system");
-            sys.put("content", hint.trim());
-            JSONArray out = new JSONArray();
-            out.put(sys);
-            for (int i = 0; i < msgs.length(); i++) out.put(msgs.opt(i));
-            body.put("messages", out);
-        } catch (Throwable t) {
-            LogUtil.w(TAG, "forceNoThinking failed: %s", t);
-        }
-    }
-
-    /**
      * 把全局思考档位换成这个模型真正接受的档位。
      *
      * <p>没有探测过档位的模型原样返回，行为与旧版完全一致。
@@ -164,13 +125,18 @@ final class ChatTransport {
                 // 探测/实测确认这个模型关不掉思考（o 系列、Gemini Pro、推理专用模型等）：
                 // 界面里不会提供「关闭」，全局配置可能还留着旧的 off。
                 // 这里落到最低档，既避免明知无效还发关闭字段，也让界面与实际一致。
-                if (m != null && m.thinkingOffBlocked) {
-                    List<String> levels = m.levelList();
-                    if (levels.isEmpty()) {
+                //
+                // 两条判据都要看：配置负责跨重启，运行期记忆负责「刚才聊天里试出来的」。
+                // 只看配置的话，同一次运行里刚被否掉的模型，后面每条消息都还要再白试一轮。
+                boolean blocked = (m != null && m.thinkingOffBlocked)
+                        || ThinkingOff.cannotOff(model);
+                if (blocked) {
+                    List<String> levels = m == null ? null : m.levelList();
+                    if (levels == null || levels.isEmpty()) {
                         // 没探过档位但已确认关不掉：用家族先验的最低档兜底
                         levels = ReasoningProfiles.of(model).levels;
                     }
-                    if (!levels.isEmpty()) return ThinkingLevels.lowest(levels);
+                    if (levels != null && !levels.isEmpty()) return ThinkingLevels.lowest(levels);
                     return "low";
                 }
                 return globalLevel;

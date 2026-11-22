@@ -53,8 +53,11 @@ final class ReasoningProfiles {
         String m = modelId == null ? "" : modelId.trim().toLowerCase(Locale.US);
         if (m.length() == 0) return UNKNOWN;
 
-        // OpenAI 推理系列：o1/o3/o4 只认 reasoning_effort，gpt-5 起多了 minimal
-        if (starts(m, "o1") || starts(m, "o3") || starts(m, "o4")) {
+        // OpenAI 推理系列：o1/o3/o4 只认 reasoning_effort；o3-mini 起才有 minimal
+        if (starts(m, "o1")) {
+            return profile("openai-o", "low,medium,high", false);
+        }
+        if (starts(m, "o3") || starts(m, "o4")) {
             return profile("openai-o", "minimal,low,medium,high", false);
         }
         if (starts(m, "gpt-5")) {
@@ -72,15 +75,19 @@ final class ReasoningProfiles {
             // 通义系用 thinking_budget 控强度：词汇到「高」，最高预算另用 max 表示
             return profile("qwen", "minimal,low,medium,high,max", true);
         }
-        if (m.indexOf("glm") >= 0) {
-            return profile("glm", "low,medium,high,max", true);
-        }
-        if (m.indexOf("hunyuan") >= 0 || starts(m, "hy") || m.indexOf("混元") >= 0) {
-            return profile("hunyuan", "minimal,low,medium,high,max", true);
+        // 混元：官方 OpenAI 兼容接口用 thinking 对象开关，推理强度是
+        // reasoning_effort=low|medium|high（hy4 系列文档），不认顶层 enable_thinking。
+        // 豆包（方舟）同属「thinking 对象 + reasoning_effort」这一组。
+        if (m.indexOf("hunyuan") >= 0 || m.indexOf("混元") >= 0 || starts(m, "hy-")
+                || m.matches("hy[0-9].*")) {
+            return profile("hunyuan", "low,medium,high", false);
         }
         if (m.indexOf("doubao") >= 0 || m.indexOf("seed-") >= 0
                 || m.indexOf("seed1") >= 0 || m.indexOf("seed-oss") >= 0) {
-            return profile("doubao", "minimal,low,medium,high,max", true);
+            return profile("doubao", "minimal,low,medium,high,max", false);
+        }
+        if (m.indexOf("glm") >= 0) {
+            return profile("glm", "low,medium,high,max", true);
         }
         if (m.indexOf("claude") >= 0 || m.indexOf("sonnet") >= 0
                 || m.indexOf("opus") >= 0 || m.indexOf("haiku") >= 0) {

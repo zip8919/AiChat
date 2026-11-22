@@ -294,10 +294,9 @@ public class ModelEditActivity extends ThemedActivity {
         }
 
         StringBuilder sb = new StringBuilder();
-        // 关闭能力与档位、视觉同为独立结论：探测给出明确答案时随保存一起落盘
-        if (rep.offSupported != null) {
-            probedOffBlocked = Boolean.valueOf(!rep.offSupported.booleanValue());
-        }
+        // 关闭能力与档位、视觉同为独立结论：确认关不掉时随保存一起落盘
+        if (rep.offBlocked) probedOffBlocked = Boolean.TRUE;
+        else if (Boolean.TRUE.equals(rep.offSupported)) probedOffBlocked = Boolean.FALSE;
         if (levelsOk) {
             probedLevels = new ArrayList<String>(rep.levels);
             thinkingCb.setChecked(true);
@@ -327,8 +326,8 @@ public class ModelEditActivity extends ThemedActivity {
             sb.append(Strings.get(R.string.modeleditactivity_028)).append(rep.error);
         }
 
-        if (Boolean.FALSE.equals(rep.offSupported)) {
-            // 关不掉就明确说出来：否则用户会以为是开关失灵，反复重选
+        if (rep.offBlocked) {
+            // 模型固定思考：说清楚关不掉，否则用户会以为是开关失灵，反复重选
             sb.append("\n").append(Strings.get(R.string.capabilityprobe_024));
         }
 
@@ -395,9 +394,11 @@ public class ModelEditActivity extends ThemedActivity {
             target.levelsUnverifiable = false;
             target.probedAt = System.currentTimeMillis();
         }
-        // 关闭能力：探测明确给出结论时才改，测不出来就保留原值
-        if (rep.offSupported != null) {
-            target.thinkingOffBlocked = !rep.offSupported.booleanValue();
+        // 关闭能力：只有确认「关不掉」才改写；能关或测不出来时保持原值
+        if (rep.offBlocked) {
+            target.thinkingOffBlocked = true;
+        } else if (Boolean.TRUE.equals(rep.offSupported)) {
+            target.thinkingOffBlocked = false;
         }
         cfg.bumpProbeRevision();
         cfg.save();

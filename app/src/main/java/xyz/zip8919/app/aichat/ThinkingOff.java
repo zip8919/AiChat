@@ -31,7 +31,7 @@ final class ThinkingOff {
     static final int PLAN_NATIVE = 1;
     /** 通用组合：effort 取家族最低档 + 模板参数。 */
     static final int PLAN_GENERIC = 2;
-    /** 不下发任何思考字段，交给提示词压制。 */
+    /** 不下发任何思考字段：最后的兜底，等于交给端点默认；仍推理就判定关不掉。 */
     static final int PLAN_NONE = 3;
 
     private ThinkingOff() {
@@ -42,10 +42,23 @@ final class ThinkingOff {
      *
      * <p>去重在这里完成：家族方案与提供商方案常常写出同一个字段，重复尝试只会
      * 白吃一次 400。
+     *
+     * <p>真实对话里验证过、且确实关掉了推理的字段排在第一位；没验证过的按
+     * 家族 → 提供商 → 通用 → 不下发 的顺序。验证结果只影响顺序，不改变覆盖面：
+     * 记忆里的方案被端点改了行为，后面的方案照样能接住。
      */
     static List<Integer> plans(ProviderInfo p, String model) {
         List<Integer> out = new ArrayList<Integer>();
         List<String> seen = new ArrayList<String>();
+        String remembered = rememberedSig(model);
+        if (remembered.length() > 0) {
+            for (int plan = PLAN_FAMILY; plan <= PLAN_GENERIC; plan++) {
+                if (!remembered.equals(signature(p, model, plan))) continue;
+                if (signature(p, model, plan).length() == 0) continue;
+                add(out, seen, p, model, plan);
+                break;
+            }
+        }
         add(out, seen, p, model, PLAN_FAMILY);
         add(out, seen, p, model, PLAN_NATIVE);
         add(out, seen, p, model, PLAN_GENERIC);
@@ -53,8 +66,91 @@ final class ThinkingOff {
         return out;
     }
 
+    // ---- 实测记忆 ----
+
+    /** 模型 ID → 已验证的关闭方案指纹。进程内即可，重启后重新验证一次不算慢。 */
+    private static final java.util.HashMap<String, String> REMEMBERED =
+            new java.util.HashMap<String, String>();
+    /** 模型 ID → 实测确认无法关闭（所有方案都试过、推理照旧）。 */
+    private static final java.util.HashMap<String, Boolean> CANNOT_OFF =
+            new java.util.HashMap<String, Boolean>();
+
+    /**
+     * 记下一次真实对话里成功的关闭方案。
+     *
+     * @param sig 方案指纹（见 {@link #signatureOf}）
+     * @param lowestLevel 当时用的最低档，仅用于日志
+     */
+    static void remember(String model, String sig, String lowestLevel) {
+        if (model == null || sig == null || sig.length() == 0) return;
+        synchronized (REMEMBERED) {
+            REMEMBERED.put(model, sig);
+            // 能关掉就不再是「关不掉」
+            CANNOT_OFF.remove(model);
+        }
+        LogUtil.d("ThinkingOff", "remembered off plan for %s: %s (%s)", model, sig, lowestLevel);
+    }
+
+    /**
+     * 记下「这个模型关不掉」：所有方案都被拒，或实测里推理照旧。
+     *
+     * <p>与配置里的 {@code thinkingOffBlocked} 两条路：配置负责跨重启、跨设备一致；
+     * 这里负责当次运行的即时判断，命中后思考档位立刻不再列出「关闭」。
+     */
+    static void rememberCannotOff(String model) {
+        if (model == null) return;
+        synchronized (REMEMBERED) {
+            CANNOT_OFF.put(model, Boolean.TRUE);
+            REMEMBERED.remove(model);
+        }
+        LogUtil.w("ThinkingOff", "model %s cannot disable thinking", model);
+    }
+
+    /** 实测确认关不掉（本次运行内）。 */
+    static boolean cannotOff(String model) {
+        if (model == null) return false;
+        synchronized (CANNOT_OFF) {
+            return CANNOT_OFF.containsKey(model);
+        }
+    }
+
+    private static String rememberedSig(String model) {
+        if (model == null) return "";
+        synchronized (REMEMBERED) {
+            String s = REMEMBERED.get(model);
+            return s == null ? "" : s;
+        }
+    }
+
+    /** 第 {@code attempt} 次尝试对应的方案指纹；越界返回空串。 */
+    static String signatureOf(ProviderInfo p, String model, int attempt) {
+        List<Integer> list = plans(p, model);
+        if (attempt < 0 || attempt >= list.size()) return "";
+        return signature(p, model, list.get(attempt).intValue());
+    }
+
+    /** 第 {@code attempt} 次尝试是否真的会下发关闭字段。 */
+    static boolean applied(ProviderInfo p, String model, int attempt) {
+        return planAt(p, model, attempt) != PLAN_NONE;
+    }
+
     static int planCount(ProviderInfo p, String model) {
         return plans(p, model).size();
+    }
+
+    /**
+     * 真正会下发关闭字段的方案数（不含末尾那个「什么都不发」的兜底）。
+     *
+     * <p>调用方判断「还有没有别的字段可试」时要用这个：兜底方案等于什么都没做，
+     * 把它算进可尝试范围，会让「换方案」变成一次注定无效的重发。
+     */
+    static int realPlanCount(ProviderInfo p, String model) {
+        List<Integer> list = plans(p, model);
+        int n = 0;
+        for (int i = 0; i < list.size(); i++) {
+            if (list.get(i).intValue() != PLAN_NONE) n++;
+        }
+        return n;
     }
 
     /** 第 {@code attempt} 次尝试用哪个方案；越界时取最后一种（不下发）。 */
@@ -70,7 +166,6 @@ final class ThinkingOff {
      * 把方案写进请求体。
      *
      * @return true 表示确实下发了一个关闭字段；false 表示这一方案不下发任何字段
-     *         （调用方需要改用提示词压制）
      */
     static boolean apply(JSONObject body, ProviderInfo p, String model, int attempt) {
         if (body == null) return false;
@@ -86,9 +181,19 @@ final class ThinkingOff {
         }
     }
 
-    /** 关闭后是否完全没下发思考字段（提示词兜底的唯一判据）。 */
+    /** 这一方案是否不下发任何思考字段。 */
     static boolean isSilent(ProviderInfo p, String model, int attempt) {
         return planAt(p, model, attempt) == PLAN_NONE;
+    }
+
+    /**
+     * 方案阶梯是否已经走到头（真实字段都试过了）。
+     *
+     * <p>运行期靠它判断「还有没有别的字段可试」：都试完了就只能承认关不掉，
+     * 而不是继续换方案、让用户看着请求一次次重发。
+     */
+    static boolean exhausted(ProviderInfo p, String model, int attempt) {
+        return attempt + 1 >= realPlanCount(p, model);
     }
 
     // ---- 各方案 ----
@@ -126,7 +231,14 @@ final class ThinkingOff {
                 body.put("reasoning_effort", "low");
                 return true;
             }
-            // Qwen / 混元 / 豆包 / Kimi / MiniMax / 文心：顶层 enable_thinking
+            if ("hunyuan".equals(f)) {
+                // 混元协议是 thinking 对象：type=disabled 关掉，reasoning_effort=high
+                // 才是官方文档里的高强度档。旧映射把混元归到「只认顶层 enable_thinking」
+                // 一组，发的字段端点不认，于是「文档说能关、探测说关不掉」。
+                thinkingDisabled(body);
+                return true;
+            }
+            // Qwen / 豆包 / Kimi / MiniMax / 文心：顶层 enable_thinking
             body.put("enable_thinking", false);
             return true;
         } catch (Exception e) {
@@ -230,7 +342,8 @@ final class ThinkingOff {
             if ("openai-gpt5".equals(f)) {
                 return "effort:" + (supportsNone(model) ? "none" : "minimal");
             }
-            if ("deepseek".equals(f) || "claude".equals(f) || "glm".equals(f)) {
+            if ("deepseek".equals(f) || "claude".equals(f) || "glm".equals(f)
+                    || "hunyuan".equals(f)) {
                 return "thinking:disabled";
             }
             if ("gemini".equals(f)) return "effort:minimal";

@@ -145,7 +145,7 @@
     <string name="capabilityprobe_013">端点拒绝：%1$s</string>
     <string name="capabilityprobe_023">端点对任何思考参数都返回成功，但回复里没有推理内容，测不出档位；请在模型设置里手动选择可用档位</string>
     <string name="capabilityprobe_014">思考可用：%1$s</string>
-    <string name="capabilityprobe_015">（该服务对思考参数一律返回成功，档位强度无法逐档验证）</string>
+    <string name="capabilityprobe_015">（各档推理量与不设参数时一样，强度无法逐档验证）</string>
     <string name="capabilityprobe_016">支持图片输入（两张图均读出数字）</string>
     <string name="capabilityprobe_017">不支持图片输入</string>
     <string name="capabilityprobe_024">该模型无法关闭思考，思考档位不提供「关闭」</string>

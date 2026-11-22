@@ -1039,9 +1039,11 @@ public class ModelConfigActivity extends ThemedActivity {
                         m.supportsThinking = false;
                         m.probedAt = System.currentTimeMillis();
                     }
-                    // 关闭能力：探测明确给出结论时才改，测不出来就保留原值
-                    if (rep.offSupported != null) {
-                        m.thinkingOffBlocked = !rep.offSupported.booleanValue();
+                    // 关闭能力：只有确认「关不掉」才改写；能关或测不出来时保持原值
+                    if (rep.offBlocked) {
+                        m.thinkingOffBlocked = true;
+                    } else if (Boolean.TRUE.equals(rep.offSupported)) {
+                        m.thinkingOffBlocked = false;
                     }
                     cfg.bumpProbeRevision();
                     cfg.save();
