@@ -45,6 +45,15 @@ final class SseRound {
         int chunks;
         int thinkingChunks;
         int contentChunks;
+        /**
+         * 推理 token 数（来自 {@code usage.completion_tokens_details.reasoning_tokens}
+         * 或 {@code thinking_tokens}）。
+         *
+         * <p>为什么要单独记：有的端点在关掉思考后仍然返回一个空的 reasoning 分片，
+         * 有的网关干脆把 {@code reasoning_content} 丢掉、只在用量里留下推理计数。
+         * 只看「有没有正文之外的文字」会把两种情况都判错。
+         */
+        int reasoningTokens;
 
         /** 协议层失败（无 choices/无 message/既无正文也无工具调用），非 null 即失败。 */
         String error;
@@ -192,6 +201,7 @@ final class SseRound {
             return;
         }
         r.usage = json.optJSONObject("usage");
+        r.reasoningTokens = reasoningTokensOf(r.usage);
         JSONArray choices = json.optJSONArray("choices");
         JSONObject message = choices != null && choices.length() > 0
                 ? choices.getJSONObject(0).optJSONObject("message") : null;
@@ -212,7 +222,9 @@ final class SseRound {
         }
 
         String reasoning = message.has("reasoning_content") && !message.isNull("reasoning_content")
-                ? message.optString("reasoning_content", "") : "";
+                ? message.optString("reasoning_content", "")
+                : (message.has("reasoning") && !message.isNull("reasoning")
+                        ? message.optString("reasoning", "") : "");
         if (reasoning.length() > 0) {
             r.display.append("[thinking]").append(reasoning).append("[/thinking]");
             r.thinkingChunks++;
@@ -278,7 +290,12 @@ final class SseRound {
                 // usage 必须在 choices 判空之前取：OpenAI 的最后一帧是
                 // {"choices":[],"usage":{...}}，先 continue 掉就永远读不到。
                 JSONObject usageObj = json.optJSONObject("usage");
-                if (usageObj != null) r.usage = usageObj;
+                if (usageObj != null) {
+                    r.usage = usageObj;
+                    // 用量里带推理计数时以此为准：它统计的是整轮，比逐帧累加准
+                    int rt = reasoningTokensOf(usageObj);
+                    if (rt > 0) r.reasoningTokens = rt;
+                }
 
                 JSONArray choices = json.optJSONArray("choices");
                 if (choices == null || choices.length() == 0) {
@@ -312,27 +329,30 @@ final class SseRound {
                 // 从这里往下不再用 catch 兜住：解析异常应当让本轮失败并保留已输出的
                 // 内容，而不是被当成「坏分片」跳过——那样工具调用会静默丢失，
                 // 界面上只看到模型「想了半天没动静」。
-                if (delta.has("reasoning_content") && !delta.isNull("reasoning_content")) {
-                    String rc = delta.optString("reasoning_content", "");
-                    if (rc.length() > 0) {
-                        r.thinkingChunks++;
-                        // 思考块一旦闭合就不再往里追加：有的端点在正文开始之后
-                        // 还会补一小段 reasoning（或干脆把正文混进 reasoning 流），
-                        // 继续追加会把正文推到思考块里、跑到已经显示的回答下面，
-                        // 屏幕上表现为「文字忽隐忽现、顺序乱掉」。
-                        if (!thinkingFinished) {
-                            if (!thinkingActive) {
-                                thinkingActive = true;
-                                r.display.append("[thinking]");
-                                LogUtil.d(TAG, "thinking phase START at chunk#%d", r.chunks);
-                            }
-                            r.display.append(rc);
+                // 推理 token 计数：有的网关不返回 reasoning_content，只在用量里留计数
+                if (r.reasoningTokens == 0) r.reasoningTokens = reasoningTokensOf(delta);
+                // 有的网关只发 reasoning，不发 reasoning_content。只认前者时
+                // 「关掉之后还有没有推理」就永远判成没有，关闭结论全靠猜。
+                String rc = delta.optString("reasoning_content", "");
+                if (rc.length() == 0) rc = delta.optString("reasoning", "");
+                if (rc.length() > 0) {
+                    r.thinkingChunks++;
+                    // 思考块一旦闭合就不再往里追加：有的端点在正文开始之后
+                    // 还会补一小段 reasoning（或干脆把正文混进 reasoning 流），
+                    // 继续追加会把正文推到思考块里、跑到已经显示的回答下面，
+                    // 屏幕上表现为「文字忽隐忽现、顺序乱掉」。
+                    if (!thinkingFinished) {
+                        if (!thinkingActive) {
+                            thinkingActive = true;
+                            r.display.append("[thinking]");
+                            LogUtil.d(TAG, "thinking phase START at chunk#%d", r.chunks);
                         }
-                        r.reasoning.append(rc);
-                        if (LogUtil.ENABLED) {
-                            LogUtil.v(TAG, "reasoning chunk#%d: %s",
-                                    r.thinkingChunks, LogUtil.preview(rc, 150));
-                        }
+                        r.display.append(rc);
+                    }
+                    r.reasoning.append(rc);
+                    if (LogUtil.ENABLED) {
+                        LogUtil.v(TAG, "reasoning chunk#%d: %s",
+                                r.thinkingChunks, LogUtil.preview(rc, 150));
                     }
                 }
 
@@ -409,5 +429,22 @@ final class SseRound {
         }
         LogUtil.i(TAG, "stream finished: chunks=%d tools=%d contentLen=%d displayLen=%d",
                 r.chunks, r.toolCalls.length(), r.content.length(), r.display.length());
+    }
+
+    /**
+     * 从一帧里取推理 token 数。
+     *
+     * <p>三种写法都见过：顶层 {@code reasoning_tokens}、{@code thinking_tokens}、
+     * 以及 OpenAI 官方的 {@code completion_tokens_details.reasoning_tokens}。
+     */
+    static int reasoningTokensOf(JSONObject frame) {
+        if (frame == null) return 0;
+        int n = frame.optInt("reasoning_tokens", 0);
+        if (n <= 0) n = frame.optInt("thinking_tokens", 0);
+        if (n <= 0) {
+            JSONObject d = frame.optJSONObject("completion_tokens_details");
+            if (d != null) n = d.optInt("reasoning_tokens", 0);
+        }
+        return n > 0 ? n : 0;
     }
 }

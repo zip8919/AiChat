@@ -221,19 +221,48 @@ final class CapabilityProbe {
         String url = Endpoint.chatUrl(snap);
 
         // ---- 思考档位 ----
-        // 候选档位优先取「模型家族知识」：端点对不认识的字段一律回 200，
-        // 逐档打请求只能证明「没报错」，证明不了「这一档真的生效」。
-        // 家族已知时只探它自家的几档；家族未知时才退回六档全集，且全部 200
-        // 只记「不可验证」，不再声称六档都支持（旧版就是把 200 当成支持）。
+        // 顺序很关键：先探「关闭」，再拿它的推理量当基线。理由：
+        //   · 端点默认就开着思考时，「不设参数」的基线里也有推理，拿它比只会得出
+        //     「各档都比基线少」，判不出任何结论；
+        //   · 真正能关掉的模型，关闭之后的推理量才是「没有思考」的干净基线，
+        //     各档与它比，多出来多少就是这一档真实加上去的推理。
+        // 关闭探不出来（关不掉 / 网络问题）时，退回用「不设参数」作基线。
+        int offSignal = -1;
+        if (stop == null || !stop.stopped()) {
+            Intent off = probeOff(url, snap, model, stop);
+            rep.offSupported = off.supported;
+            offSignal = off.signal;
+            if (Boolean.FALSE.equals(off.supported)) {
+                // 关不掉思考 ≠ 没有强度档位：o 系列、Gemini Pro 这类模型本来就
+                // 没有「关闭」，但 low / medium / high 是实打实支持的。
+                // 只标记「档位里别给关闭」，档位结论原样保留。
+                rep.offBlocked = true;
+            }
+        }
+
+        // 对照组：优先用「关闭生效」那一次的推理量，其次用不设参数的那一次
+        int baseline = offSignal;
+        if (baseline < 0 && (stop == null || !stop.stopped())
+                && url != null && snap.apiKey != null && snap.apiKey.trim().length() > 0) {
+            Raw b = post(url, snap.apiKey, thinkingBody(snap, model, null, false));
+            if (b.error == null && b.httpCode >= 200 && b.httpCode < 300) {
+                baseline = reasoningSignal(b.body);
+                LogUtil.d(TAG, "thinking baseline (no params) signal=%d", baseline);
+            }
+        }
+        LogUtil.d(TAG, "thinking baseline for levels=%d (off signal=%d)", baseline, offSignal);
+
         ReasoningProfiles.Profile prof = ReasoningProfiles.of(model);
         List<String> candidates = prof.levels.isEmpty()
                 ? new ArrayList<String>(ThinkingLevels.ORDER) : prof.levels;
-        // 各档位对应的推理痕迹量：level → 推理 token 数（缺失时按推理字数估）
+        // 各档位对应的推理量：level → 推理 token 数（缺失时按推理字数估）
         List<String> accepted = new ArrayList<String>();
         List<Integer> signals = new ArrayList<Integer>();
-        // 有档位的回复被输出上限截断：此时各档的推理 token 都被削到同一个天花板，
-        // 比值全一样，不能再据此判「端点没按档位调强度」。
+        // 有档位的回复被输出上限截断：此时各档的推理都被削到同一个天花板，
+        // 比值全一样，不能再据此判「这一档没比基线多」。
         boolean anyTruncated = false;
+        int anyAbove = 0;
+        int tested = 0;
         for (int i = 0; i < candidates.size(); i++) {
             if (stop != null && stop.stopped()) {
                 rep.error = Strings.get(R.string.capabilityprobe_006);
@@ -246,10 +275,26 @@ final class CapabilityProbe {
                 break;
             }
             if (r.httpCode >= 200 && r.httpCode < 300) {
-                accepted.add(level);
                 int sig = reasoningSignal(r.body);
-                signals.add(Integer.valueOf(sig));
-                if (truncated(r.body, probeMaxTokens(level))) anyTruncated = true;
+                boolean trunc = truncated(r.body, probeMaxTokens(level));
+                if (trunc) anyTruncated = true;
+                // 这一档要么推理量跟基线明显不同（真的按档位变了），要么被输出
+                // 上限截断（也是「思考确实打开了」的旁证）。两者都不满足的档位不
+                // 列入：端点对不认识的档位一律回 200，光看状态码会把它们全算成支持。
+                //
+                // 判据必须双向。只能关掉思考时才是单向的：那时基线是 0，比 0 大
+                // 就说明在推理。关不掉思考的模型（o 系列、Gemini Pro）基线是端点
+                // 默认档——默认多半落在中间，比它低的档位推理更少，只判「更高」
+                // 会把 minimal / low 全丢掉，最后只剩高档被报成支持。
+                if (trunc || differsFrom(sig, baseline)) {
+                    accepted.add(level);
+                    signals.add(Integer.valueOf(sig));
+                    anyAbove++;
+                } else {
+                    LogUtil.d(TAG, "level %s not above baseline (%d vs %d), drop",
+                            level, sig, baseline);
+                }
+                tested++;
                 continue;
             }
             if (!isRejection(r.httpCode)) {
@@ -260,47 +305,12 @@ final class CapabilityProbe {
             }
         }
 
-        // 基线：同一道题、不带任何思考参数各发一次。
-        // 端点对不认识的字段一律回 200，只看「这一档回了 200」证明不了思考被打开。
-        // 与无参数基线对照才能确定：带开启字段时推理更多 → 开启确实生效；
-        // 带关闭字段时推理回到基线以下 → 关闭确实生效。未探测（家族未知）的模型
-        // 也靠这条基线区分「本来就会推理」和「参数把它打开了」。
-        int baseline = -1;
-        if ((stop == null || !stop.stopped())
-                && url != null && snap.apiKey != null && snap.apiKey.trim().length() > 0) {
-            Raw b = post(url, snap.apiKey, thinkingBody(snap, model, null, false));
-            if (b.error == null && b.httpCode >= 200 && b.httpCode < 300) {
-                baseline = reasoningSignal(b.body);
-                LogUtil.d(TAG, "thinking baseline signal=%d", baseline);
-            }
-        }
-
-        // 判据：这一档的推理量明显高于基线。缺基线时退回「有推理痕迹」。
-        // 全部档位都与基线一样时，说明端点默认就开着思考，参数并不能让推理更强，
-        // 档位结论写成「不可验证」，而不是把 200 当成支持。
-        boolean anyAbove = false;
-        for (int i = 0; i < accepted.size(); i++) {
-            if (aboveBaseline(signals.get(i).intValue(), baseline)) anyAbove = true;
-        }
-        if (anyTruncated) anyAbove = true;
         if (!accepted.isEmpty()) {
-            if (!anyAbove && baseline >= 0) {
-                rep.unverifiable = true;
-            }
             rep.levels.addAll(accepted);
-        }
-
-        // ---- 关闭思考 ----
-        // 判据与开启同一套：关闭后推理量降回基线以下才算关得掉。
-        // 只回 200 不算数：端点对不认识的字段一律回 200 并照常思考。
-        if (stop == null || !stop.stopped()) {
-            rep.offSupported = probeOff(url, snap, model, baseline, stop);
-            if (Boolean.FALSE.equals(rep.offSupported)) {
-                // 关不掉思考 ≠ 没有强度档位：o 系列、Gemini Pro 这类模型本来就
-                // 没有「关闭」，但 low / medium / high 是实打实支持的。
-                // 旧版在这里连档位一起清空，用户看到的是「这个模型什么都不能调」，
-                // 与文档完全对不上。只标记「档位里别给关闭」，档位结论原样保留。
-                rep.offBlocked = true;
+            // 探过、但没有任何一档比基线高：端点收参数却完全无视它。
+            // 这时「各档强度」没法证实，结论写成「不可验证」，而不是硬报支持。
+            if (anyAbove == 0 && tested > 0 && baseline >= 0) {
+                rep.unverifiable = true;
             }
         }
 
@@ -336,42 +346,69 @@ final class CapabilityProbe {
      *
      * @return true 能关 / false 关不掉 / null 没能判定（网络、限流、中途停止）
      */
-    private static Boolean probeOff(String url, ProviderInfo snap, String model,
-            int baseline, Stop stop) {
+    private static Intent probeOff(String url, ProviderInfo snap, String model, Stop stop) {
         // 只试真的会下发关闭字段的方案。末尾那个「什么都不发」的兜底不能算：
         // 它等于没做任何事，模型若本来就默认不思考，会被误判成「关得掉」，
         // 之后真实聊天里却什么都不发，用户选关也没生效。
         int plans = ThinkingOff.realPlanCount(snap, model);
         if (plans == 0) {
             // 没有可用字段（家族未知、提供商也没声明）：测不出来，不下结论
-            return null;
+            return Intent.unknown();
         }
         for (int i = 0; i < plans; i++) {
-            if (stop != null && stop.stopped()) return null;
+            if (stop != null && stop.stopped()) return Intent.unknown();
             Raw r = post(url, snap.apiKey, offBody(snap, model, i), TIMEOUT_MS);
-            if (r.error != null) return null;
+            if (r.error != null) return Intent.unknown();
             if (r.httpCode >= 200 && r.httpCode < 300) {
                 int sig = reasoningSignal(r.body);
-                // 关闭生效 = 推理量降回基线以下（等于基线也说明字段被忽略，仍在默认思考）
-                boolean ok = belowBaseline(sig, baseline);
-                LogUtil.d(TAG, "off plan #%d -> signal=%d baseline=%d ok=%s",
-                        i, sig, baseline, ok);
-                if (ok) {
+                LogUtil.d(TAG, "off plan #%d -> signal=%d", i, sig);
+                // 关掉的判据是「完全没有推理痕迹」：关闭字段生效时，端点不该再
+                // 产出任何 reasoning。只要还有，不管多少，都算没关住。
+                //
+                // 旧版在这里跟「不设参数」比大小。端点默认开着思考时这条还能用，
+                // 端点默认关着思考时，任何方案都不比基线低，于是能关的模型也被
+                // 判成关不掉——混元 4 Flash 那类「文档说能关、探测说不能」就是这么来的。
+                if (sig <= 0) {
                     ThinkingOff.remember(model, ThinkingOff.signatureOf(snap, model, i), "");
-                    return Boolean.TRUE;
+                    return Intent.yes(0);
                 }
-                // 没降下来：换下一种关闭字段
+                // 没关住：换下一种关闭字段
                 continue;
             }
             if (!isRejection(r.httpCode)) {
                 // 认证、限流、服务端错误与关闭能力无关，不下结论
-                return null;
+                return Intent.unknown();
             }
             // 400/422：这一种关闭字段不被接受，换下一种
             LogUtil.d(TAG, "off plan #%d rejected: HTTP %d", i, r.httpCode);
         }
         ThinkingOff.rememberCannotOff(model);
-        return Boolean.FALSE;
+        return Intent.no();
+    }
+
+    /** 关闭探测的结论：能否关掉 + 关掉时的推理量（用作档位对照的干净基线）。 */
+    static final class Intent {
+        /** true 能关 / false 关不掉 / null 没能判定。 */
+        final Boolean supported;
+        /** 关掉时的推理量；未能判定或关不掉时 -1。 */
+        final int signal;
+
+        private Intent(Boolean supported, int signal) {
+            this.supported = supported;
+            this.signal = signal;
+        }
+
+        static Intent yes(int signal) {
+            return new Intent(Boolean.TRUE, signal);
+        }
+
+        static Intent no() {
+            return new Intent(Boolean.FALSE, -1);
+        }
+
+        static Intent unknown() {
+            return new Intent(null, -1);
+        }
     }
 
     /**
@@ -387,15 +424,19 @@ final class CapabilityProbe {
     }
 
     /**
-     * 推理量是否降到基线以下（关闭生效）。
+     * 这一档是否真的按档位改变了推理量：比基线高或者低都算。
      *
-     * <p>没有基线时按「看不到任何推理痕迹」判断。有基线时允许端点仍吐一小段
-     * 余留推理（不超过基线的一半且不超过 32 token），超过就算没关掉。
+     * <p>基线是「关掉思考」时测出来的（近似 0）就退化成 {@link #aboveBaseline}——
+     * 那时只能往上看；基线是端点默认档时两边都要看，否则默认档以下的档位会被
+     * 一律判成不支持。容差和单向判据一致，避免端点抖动一两个字就被算成生效。
      */
-    static boolean belowBaseline(int signal, int baseline) {
-        if (baseline < 0) return signal <= 0;
-        int cap = Math.min(32, Math.max(0, baseline / 2));
-        return signal <= cap;
+    static boolean differsFrom(int signal, int baseline) {
+        if (baseline <= 0) return aboveBaseline(signal, baseline);
+        if (signal < 0) return false;
+        int tol = Math.max(16, baseline / 2);
+        int d = signal - baseline;
+        if (d < 0) d = -d;
+        return d >= tol;
     }
 
     /**

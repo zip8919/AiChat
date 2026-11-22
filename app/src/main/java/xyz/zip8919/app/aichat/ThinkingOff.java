@@ -19,15 +19,29 @@ import org.json.JSONObject;
  * 接受的字段先发；被 400/422 拒绝时换下一种方案，而不是一次退回「什么都不发」。
  * 每种方案只写一个顶层字段，端点不认就只浪费一次请求，不会把请求体搅成一锅。
  *
- * <p>方案按可信度排序：家族知识 → 提供商声明 → 通用组合 → 不下发。
- * 家族知识排最前，是因为自建 provider 的 {@code thinkingType} 默认都是
- * {@code object}+{@code thinking}，对 OpenAI、Qwen 这些端点本身就是错的。
+ * <p>方案按可信度排序：认得家族时家族知识在前、认不得时提供商声明在前，
+ * 之后才是通用组合与「不下发」。家族字段是协议规定死的，端点配错也照样有效；
+ * 自建 provider 的 {@code thinkingType} 默认都是 {@code object}+{@code thinking}，
+ * 对 OpenAI、Qwen 这些端点本身就是错的，所以只用来兜底不认识的模型。
  */
 final class ThinkingOff {
 
-    /** 按模型家族挑字段。 */
+    /**
+     * 按模型家族挑字段。
+     *
+     * <p>排在提供商声明之后：模型挂在哪个端点上，端点自己配的开关才是真的。
+     */
     static final int PLAN_FAMILY = 0;
-    /** 按提供商声明的字段名与形态。 */
+    /**
+     * 按提供商声明的字段名与形态。
+     *
+     * <p><b>为什么排第一</b>：这是用户为这个端点亲手填的字段名。同一份
+     * OpenAI 兼容接口，Qwen 挂上去关思考要发 {@code enable_thinking}，
+     * DeepSeek 挂上去要发 {@code thinking}，第三方网关又可能两者都认。
+     * 只按模型名猜字段，会把「用 Qwen 自己的开关关得好好的」那些模型
+     * 判成 400 被拒，再降级成「什么都不发」，思考就回到默认的开启。
+     * 旧版在这一点上是对的，后来的「按家族重排」反而把它弄坏了。
+     */
     static final int PLAN_NATIVE = 1;
     /** 通用组合：effort 取家族最低档 + 模板参数。 */
     static final int PLAN_GENERIC = 2;
@@ -44,7 +58,7 @@ final class ThinkingOff {
      * 白吃一次 400。
      *
      * <p>真实对话里验证过、且确实关掉了推理的字段排在第一位；没验证过的按
-     * 家族 → 提供商 → 通用 → 不下发 的顺序。验证结果只影响顺序，不改变覆盖面：
+     * 提供商声明 → 家族 → 通用 → 不下发 的顺序。验证结果只影响顺序，不改变覆盖面：
      * 记忆里的方案被端点改了行为，后面的方案照样能接住。
      */
     static List<Integer> plans(ProviderInfo p, String model) {
@@ -52,15 +66,25 @@ final class ThinkingOff {
         List<String> seen = new ArrayList<String>();
         String remembered = rememberedSig(model);
         if (remembered.length() > 0) {
-            for (int plan = PLAN_FAMILY; plan <= PLAN_GENERIC; plan++) {
+            for (int plan = PLAN_NATIVE; plan <= PLAN_GENERIC; plan++) {
                 if (!remembered.equals(signature(p, model, plan))) continue;
                 if (signature(p, model, plan).length() == 0) continue;
                 add(out, seen, p, model, plan);
                 break;
             }
         }
-        add(out, seen, p, model, PLAN_FAMILY);
-        add(out, seen, p, model, PLAN_NATIVE);
+        // 认得家族就先用家族字段：这些字段是协议规定死的（o 系列只认
+        // reasoning_effort、Claude 只认 thinking），端点配错也不影响；
+        // 认不得家族时用提供商声明的字段名——那是用户为这个端点亲手填的。
+        String fam = ReasoningProfiles.of(model).family;
+        boolean known = fam != null && fam.length() > 0 && !"unknown".equals(fam);
+        if (known) {
+            add(out, seen, p, model, PLAN_FAMILY);
+            add(out, seen, p, model, PLAN_NATIVE);
+        } else {
+            add(out, seen, p, model, PLAN_NATIVE);
+            add(out, seen, p, model, PLAN_FAMILY);
+        }
         add(out, seen, p, model, PLAN_GENERIC);
         add(out, seen, p, model, PLAN_NONE);
         return out;

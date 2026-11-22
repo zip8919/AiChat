@@ -521,7 +521,8 @@ final class ChatStreamRunner {
                 if (thinkingOff && provenOffSig.length() == 0) {
                     int prev = offMode;
                     offMode = confirmThinkingOff(modelOriginal, offMode,
-                            rr.thinkingChunks, rr.reasoning.length(), round);
+                            rr.thinkingChunks, rr.reasoning.length(), round,
+                            rr.reasoningTokens);
                     if (offMode == OFF_NONE && prev != OFF_NONE) {
                         String sig = ThinkingOff.signatureOf(
                                 job.provider, modelOriginal, thinkingOffAttempt);
@@ -742,12 +743,32 @@ final class ChatStreamRunner {
      * @return 新的状态
      */
     private int confirmThinkingOff(String model, int state, int chunks, int chars, int round) {
-        if (chunks <= 0) {
+        return confirmThinkingOff(model, state, chunks, chars, round, 0);
+    }
+
+    /**
+     * 判据：本轮有没有推理痕迹——推理正文或推理 token 计数，二者任一都算。
+     *
+     * <p>旧实现只看推理正文。网关把 {@code reasoning_content} 丢掉、只留用量里的
+     * 推理计数时，关掉的字段其实被忽略了，这里却判成「关住了」，于是档位里的
+     * 「关闭」被保留下来，用户选了关仍看到思考。少了推理 token 这一路，关闭
+     * 结论就只能靠猜。
+     */
+    private int confirmThinkingOff(String model, int state, int chunks, int chars, int round,
+            int reasoningTokens) {
+        if (chunks <= 0 && reasoningTokens <= 0) {
             // 本轮没有推理，且关闭字段确实下发过：这一方案关得住
             boolean sent = lastOffApplied;
             offProbeChars = 0;
             if (!sent) return state;
             return OFF_NONE;
+        }
+        if (chunks <= 0) {
+            // 只有计数、没有正文：说明确实在推理，直接换方案
+            LogUtil.w(TAG, "model %s still reasons with thinking off (%d tokens, no text)",
+                    model, reasoningTokens);
+            offProbeChars = 0;
+            return OFF_CLOSED;
         }
         if (state == OFF_UNKNOWN) {
             offProbeChars = chars;

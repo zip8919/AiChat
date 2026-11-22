@@ -1094,8 +1094,18 @@ final class RendererAssets {
             "var d=r.raw.substring(st.run.raw.length);" +
             "if(d.indexOf('<')<0&&d.indexOf('&')<0){" +
             "var u0=st.units,nat0=st.natLast;" +
+            // 新字必须插在「上一帧遗留在末尾的闭合标签」之前。
+            //
+            // 切点停在最后一个字后面：末尾那段 </p> 还没画出去，仍留在序列尾部。
+            // 直接 push 会让序列变成「<p>文字</p>新字」——下一帧先把段落闭合、
+            // 再把新字写进父级，段落就此断开，正文一节一节落到根节点上，
+            // 每节一个文本节点（相邻文本成百上千、排版越来越慢就是这么来的）。
+            "var li=u0.length-1;while(li>=0&&u0[li].ch===undefined)li--;" +
+            "var tl=li+1<u0.length?u0.slice(li+1):null;" +
+            "if(tl)u0.length=li+1;" +
             "for(var q0=0;q0<d.length;q0++){" +
             "u0.push({ch:d.charAt(q0),at:nat0});nat0++;}" +
+            "if(tl)for(var t0=0;t0<tl.length;t0++)u0.push(tl[t0]);" +
             "st.natLast=nat0;st.chars+=d.length;st.run=r;" +
             // 追加要从「上一帧最后那个字所在的元素」里接，不能从根节点接：
             // 结构没变，所以那串元素引用仍然有效
@@ -1155,19 +1165,38 @@ final class RendererAssets {
             "if(st.root&&st.root!==root){st.root=null;st.cur=0;st.gi=null;st.fi=null;" +
             "st.paintUnits=null;st.stack=[];st.advA=null;st.advI=null;}" +
             "var u=st.units,cut=st.cut;" +
-            "var same=(st.root===root)&&cut>=st.cur&&window.__smSamePrefix(st,u);" +
+            "var dp=(st.root===root)?window.__smDiff(st,u):-2;" +
+            "var same=(dp===-1)&&cut>=st.cur;" +
+            // 帧首的纯文本续写：结构与上一帧完全一致，只是末尾文字接着长。
+            // 这种情况下不必动已有的渐变 span，也不要逐字重新建节点——
+            // 每帧都重建一遍，不仅慢，还会让整段文字在「半透明 → 实色 → 半透明」
+            // 之间来回跳，看起来就是屏幕在闪。
+            "var pureTail=window.__smTailGrow(st,u);" +
             "var prevCur=st.cur;" +
             "if(!same){" +
-            // 结构变了（markdown 补全、代码高亮落地）才整段重画
+            // 结构变了（markdown 补全、代码高亮落地、思考块又长了一段）：从第一处
+            // 分叉所在的位置往后重画，前面已经定稿的节点一个都不动。
+            //
+            // 整段清空重画最省事，但三万字的回答要重建三万个节点，低端机上是
+            // 几百毫秒的停顿；重建期间思考块的展开状态、公式位图、代码高亮全跟着
+            // 重来，屏幕一闪一闪——「开着实时渲染就卡顿」的真正来源。
+            // 只拆最后一块也不行：思考块的正文在长、末尾那段正文很短时，分叉落在
+            // 前面的思考块里，思考内容就会停在最初那几段。
+            "var rp=window.__smRewind(st,root,dp);" +
+            "if(rp>=0){prevCur=rp;" +
+            "}else{" +
             "root.innerHTML='';st.root=root;st.stack=[{el:root,n:''}];st.cur=0;" +
             "st.gi=null;prevCur=0;st.stackChars=null;st.stackPending=null;" +
+            "}" +
             "}" +
             // 末段文字续写的那一帧：从上一帧最后那个字所在的元素接着写
             "if(st.stackPending){st.stack=st.stackPending;st.stackPending=null;}" +
             // 从「已经画到哪」接着画；重画后从 0 开始整段补一次
             "window.__smAppend(st,u,prevCur,cut);" +
             "st.cur=cut;st.paintUnits=u;" +
-            "window.__smFade(st);" +
+            // 纯文本续写时保留已有的渐变窗口：窗口里那几十个字本来就是
+            // 刚写下的，重新切一遍等于把同一段字重建两次
+            "if(!pureTail)window.__smFade(st);" +
             "applyThinkingStates(t);" +
             // 正文已经出来，进度提示（正在整理搜索结果…）就该收掉：
             // 它挂在 .content 之后，不收的话正文会一直显示在提示上方
@@ -1178,22 +1207,143 @@ final class RendererAssets {
             "var now=Date.now();" +
             "if(!window.__smScrollAt||now-window.__smScrollAt>100){" +
             "window.__smScrollAt=now;if(!window.__userUp)smartScrollToBottom();}};" +
-            // 前缀是否与上一帧绘制时一致：一致才能接着往后追加
-            "window.__smSamePrefix=function(st,u){" +
-            "var old=st.paintUnits;" +
-            "if(!old)return false;" +
-            // 同一个数组对象 = 这一帧是增量续写的（只在尾部 push，前面元素原样保留，
-            // 中途还会被截到 st.cur 再往后接）。元素引用没变，前缀必然一致。
+            // 上一帧画过的单位序列与本帧的第一处分叉下标：-1 表示已画前缀完全没变。
             //
-            // 旧实现在这里 return false，于是每一帧都走「清空 + 全量重画」：
-            // 3 万字的回答每帧重建几万个节点，实时渲染越写越卡、思考块与公式
-            // 跟着重建闪一下，根因就在这一行。
-            "if(old===u)return st.cur<=u.length;" +
-            "if(st.cur>u.length||st.cur>old.length)return false;" +
-            "for(var i=0;i<st.cur;i++){" +
+            // 同一个数组对象 = 这一帧是增量续写的（只在尾部 push，元素引用没变），
+            // 前缀必然一致，直接返回 -1。旧实现在这里 return false，于是每一帧都走
+            // 「清空 + 全量重画」：3 万字的回答每帧重建几万个节点，实时渲染越写越卡、
+            // 思考块与公式跟着重建闪一下，根因就在这一行。
+            "window.__smDiff=function(st,u){" +
+            "var old=st.paintUnits;" +
+            "if(!old)return -2;" +
+            "if(old===u)return st.cur<=u.length?-1:u.length;" +
+            "var n=Math.min(st.cur,u.length);" +
+            "for(var i=0;i<n;i++){" +
             "var a=u[i],b=old[i];" +
-            "if(a.ch!==b.ch||a.tok!==b.tok)return false;}" +
+            "if(a.ch!==b.ch||a.tok!==b.tok)return i;}" +
+            "return -1;};" +
+            // 一颗节点占多少个单位：文本按字数，元素按「开标签 + 子节点 + 闭标签」。
+            // 只有「整颗跳过」时才用得到，所以递归一次是可以接受的。
+            "window.__smVoidEl=/^(br|img|hr|input|meta|link|source|wbr|area|base|col|embed|param|track)$/;" +
+            "window.__smUnits=function(n){" +
+            "if(!n)return 0;" +
+            "if(n.nodeType===3)return (n.nodeValue||'').length;" +
+            "if(n.nodeType!==1)return 0;" +
+            // 渐显窗口切出来的 span 不对应任何单位，只代表里面的字
+            "if(n.__at==null)return (n.textContent||'').length;" +
+            "var t=1,c=n.childNodes;" +
+            "for(var i=0;i<c.length;i++)t+=window.__smUnits(c[i]);" +
+            "return window.__smVacant(n)?t:t+1;};" +
+            "window.__smVacant=function(n){" +
+            "return window.__smVoidEl.test((''+n.tagName).toLowerCase());};" +
+            // 把显示层回退到分叉处：拆掉 dp 之后的节点，返回真正能接着画的下标。
+            //
+            // 每个由 __smAppend 建出来的元素都记着自己的开标签下标（__at），
+            // 所以可以顺着 dp 一路下潜到最深一层包住它的元素，只在那一层截断
+            // 文本——代价是「深度 + 兄弟数」，与已经写了多少字无关。
+            // 返回 -1 表示这一帧的结构对不上（少见），调用方退回整段重画。
+            "window.__smRewind=function(st,root,dp){" +
+            "if(dp<0||!root)return -1;" +
+            "var path=[],el=root,i,j;" +
+            "for(;;){" +
+            "var kids=el.childNodes,best=null;" +
+            // 子节点按文档顺序，最后一个「起点不晚于 dp」的元素就是 dp 所在的容器
+            "for(i=0;i<kids.length;i++){" +
+            "var n=kids[i];" +
+            "if(n.nodeType!==1||n.__at==null)continue;" +
+            "if(n.__at<=dp)best=n;}" +
+            "if(!best)break;" +
+            // 它的结束边界：下一个元素兄弟的起点；没有下一个兄弟时按自身单位数算。
+            // dp 越过了边界就说明分叉不在它里面，停在这一层。
+            "var nx=Infinity;" +
+            "for(j=0;j<kids.length;j++){" +
+            "var m=kids[j];" +
+            "if(m.nodeType===1&&m.__at!=null&&m.__at>best.__at){nx=m.__at;break;}}" +
+            "if(nx===Infinity)nx=best.__at+window.__smUnits(best);" +
+            "if(dp>=nx)break;" +
+            "path.push(best);el=best;}" +
+            // 在这一层按 dp 截断：文本节点可以精确切，整颗元素只能退到它的起点
+            "var ci=(el===root)?0:(el.__at+1);" +
+            "var ks=el.childNodes,cut=-1,rp=dp;" +
+            "for(i=0;i<ks.length;i++){" +
+            "var n2=ks[i];" +
+            "if(n2.nodeType===3){" +
+            "var L=(n2.nodeValue||'').length;" +
+            "if(ci+L>dp){" +
+            "var kp=dp-ci;if(kp<0)kp=0;" +
+            "if(kp<n2.nodeValue.length)n2.nodeValue=n2.nodeValue.substring(0,kp);" +
+            "cut=i+1;rp=dp;break;}" +
+            "ci+=L;" +
+            "}else if(n2.nodeType!==1){" +
+            "cut=i;rp=ci;break;" +
+            "}else if(n2.__at==null){" +
+            // 没有起点下标的是渐显窗口切出来的 span：整颗算长度，切不进去就退到它的起点
+            "var L2=window.__smUnits(n2);" +
+            "if(ci+L2>dp){cut=i;rp=ci;break;}" +
+            "ci+=L2;" +
+            "}else{" +
+            "if(n2.__at>=dp){cut=i;rp=ci;break;}" +
+            "ci=n2.__at+window.__smUnits(n2);}" +
+            "}" +
+            // 所有子节点都整体落在分叉之前：不用拆任何节点，直接从这里往后接
+            "if(cut<0){cut=ks.length;rp=ci;}" +
+            "if(rp<0||rp>dp)return -1;" +
+            "while(el.childNodes.length>cut)el.removeChild(el.lastChild);" +
+            // 分叉之后的节点不只在最深处：祖先的后续兄弟同样对应 dp 之后的单位，
+            // 不拆掉的话旧段落的尾巴会留在屏幕上（新的一段接在它后面长出来）
+            "for(i=path.length-1;i>=0;i--){" +
+            "var nd=path[i];" +
+            "while(nd.nextSibling)nd.parentNode.removeChild(nd.nextSibling);}" +
+            // 元素栈按路径重建：下一帧从这里继续往里写
+            "var sk=[{el:root,n:''}];" +
+            "for(i=0;i<path.length;i++){" +
+            "sk.push({el:path[i],n:(''+path[i].tagName).toLowerCase()});}" +
+            "st.stack=sk;st.cur=rp;st.gi=null;st.stackChars=null;st.stackPending=null;" +
+            "return rp;};" +
+            // 这一帧是不是「末段文字接着长」：从 st.cur 往后，上一帧画过的单位
+            // 与新序列逐项相同，且剩下的都是纯字符（没有标签开合）。
+            // 满足时说明结构没变，渐变窗口可以原样留着，只把新字补进去。
+            "window.__smTailGrow=function(st,u){" +
+            "var old=st.paintUnits;" +
+            "if(!old||old===u||st.cur<=0)return false;" +
+            "var n=Math.min(u.length,old.length);" +
+            "if(n<=st.cur)return false;" +
+            "for(var i=st.cur;i<n;i++){" +
+            "var a=u[i],b=old[i];" +
+            "if(a.ch!==b.ch||a.tok!==b.tok)return false;" +
+            "if(a.ch===undefined)return false;}" +
+            "for(var j=n;j<u.length;j++){if(u[j].ch===undefined)return false;}" +
             "return true;};" +
+            // 收掉元素尾部连续的文本节点，压到只剩一个。
+            //
+            // 为什么必须有这一步：markdown 渲染器每帧都可能改写末段（行内格式、
+            // 实体、高亮），「上一帧写入的文本节点」和「这一帧新写入的文本节点」
+            // 就会在同一位置首尾相接。不合并的话，一条长回答会积累上万个相邻文本
+            // 节点，每个都要单独参与换行与对齐计算——这是「越写越卡」在下层真正
+            // 的原因，光把 innerHTML 换成 appendData 只能缓解，不能消除。
+            //
+            // 每次只压两层，所以循环到不再成对为止；上限 8 次足够，避免异常时死循环。
+            "window.__smJoin=function(nd){" +
+            "if(!nd)return;" +
+            "for(var t=0;t<8;t++){" +
+            "var c=nd.lastChild;" +
+            "if(!c||c.nodeType!==3)return;" +
+            "var pv=c.previousSibling;" +
+            "if(!pv||pv.nodeType!==3)return;" +
+            "pv.appendData(c.nodeValue||'');nd.removeChild(c);}};" +
+            // 把一颗文本节点与左右相邻的文本节点并成一颗，返回合并后的那颗。
+            //
+            // 渐显每帧要做两件事：把上一帧切出来的 span 落回裸文本、再从尾部切出
+            // 新的窗口。落回时新字所在的那颗文本节点停在窗口的后面，就地变成一个
+            // 与前者首尾相接的独立节点——一帧一颗，几十帧下来就是几十个相邻文本
+            // 节点挂在同一个父级上，每个都单独参与换行计算。
+            "window.__smBare=function(tn){" +
+            "if(!tn||tn.nodeType!==3||!tn.parentNode)return tn;" +
+            "var p=tn.parentNode,pv=tn.previousSibling;" +
+            "if(pv&&pv.nodeType===3){pv.appendData(tn.nodeValue||'');p.removeChild(tn);tn=pv;}" +
+            "var nx=tn.nextSibling;" +
+            "if(nx&&nx.nodeType===3){tn.appendData(nx.nodeValue||'');p.removeChild(nx);}" +
+            "return tn;};" +
             // 重画后找回上一个仍在文档里的渐变节点，接着往后挂
             "window.__smLastNew=function(root){" +
             "var ns=root.querySelectorAll('.stream-new');" +
@@ -1210,6 +1360,10 @@ final class RendererAssets {
             // 就从同一串元素继续往里写，不必重解析、也不必从根节点重新定位
             "var lcIdx=-1;" +
             "for(var q=to-1;q>=from;q--){if(u[q].ch!==undefined){lcIdx=q;break;}}" +
+            // 这一帧里「第一个闭合标签之后」的元素栈：本帧新开又已闭合的段落，
+            // 在帧尾不该继续留在栈上。留着的话，下一帧的新字会写进上一帧那个
+            // 已经结束的段落里，段落结构越写越乱
+            "var closedStack=null,closedAny=0;" +
             "for(var i=from;i<to;i++){" +
             "var x=u[i];" +
             "var top=st.stack[st.stack.length-1].el;" +
@@ -1219,6 +1373,9 @@ final class RendererAssets {
             //「按节点定位渐变窗口」就失效了
             // appendData 而不是 appendChild：同一段连续文字写进一个文本节点，
             // 否则 WebView 会把几百个相邻文本节点一个个当排版单元，长回答明显变卡
+            // 上一帧在这里断过（标签边界、换段），尾部可能已经有个文本节点停在
+            // 边上——新字直接接进去，不要再开一个新节点
+            "window.__smJoin(top);" +
             "var lc=top.lastChild;" +
             "var tn=(lc&&lc.nodeType===3)?(lc.appendData(x.ch),lc):null;" +
             "if(!tn){tn=document.createTextNode(x.ch);top.appendChild(tn);}" +
@@ -1229,12 +1386,23 @@ final class RendererAssets {
             "if(i===lcIdx)st.stackChars=st.stack.slice();" +
             "continue;}" +
             "if(x.close!==undefined){" +
+            // 闭合前先合并这一段文字：一个标签里最后写的那几句话，
+            // 往往是好几帧各写一段，不合并就一段一个文本节点
+            "if(lcIdx>=0)window.__smJoin(top);" +
+            "if(closedAny===0)closedStack=st.stack.slice(0,st.stack.length);" +
+            "closedAny++;" +
             "for(var k=st.stack.length-1;k>0;k--){" +
             "if(st.stack[k].n===x.close){st.stack.length=k;break;}}" +
             "continue;}" +
             "if(x.open!==undefined){" +
+            // 开新标签前先合并：上一段文字写入时留下的相邻文本节点，
+            // 会在标签边界处各成一段，长回答里越积越多
+            "if(lcIdx>=0)window.__smJoin(top);" +
             "top.insertAdjacentHTML('beforeend','<'+x.open+'>');" +
             "var el=top.lastElementChild;" +
+            // 记下最后一个「直接挂在显示层下」的块：块内结构变了只拆它重画
+            // 顶层块记下自己的起始单位下标：结构变化时从这里往后重画
+            "if(el)el.__at=i;" +
             "if(el&&!x.void)st.stack.push({el:el,n:x.tag});" +
             "continue;}" +
             // 注释 / 无法归类的原样片段
@@ -1243,7 +1411,9 @@ final class RendererAssets {
             // 追加结束后把锚点指到「最后一个字所在的元素」：本帧新写的字如果
             // 落在新开的代码块/段落里，锚点还停在上一个段落的话，渐变窗口
             // 就找不到这一帧真正的尾巴，新字会一直停在正文色、看不出渐现。
-            "if(lastCh&&lastCh.parentNode)st.gi=lastCh;};" +
+            "if(lastCh&&lastCh.parentNode){st.gi=lastCh;window.__smJoin(lastCh.parentNode);}" +
+            // 帧尾回退到「已闭合」的位置：下一帧的续写从那里开始接
+            "if(closedStack)st.stack=closedStack;};" +
             // 渐变窗口：从「最新显示的那个字」往前数 GRAD 个字保留浅色，
             // 再往前的一律落成正文色。
             // 窗口是按节点位置倒着数的，不是按创建顺序：这样窗口里永远是「末尾那一串」，
@@ -1257,21 +1427,31 @@ final class RendererAssets {
             "while(g&&g.nodeType===1&&(''+g.className).indexOf('stream-new')>=0){" +
             "g=g.lastChild;}" +
             "var anchor=(g&&g.nodeType===3&&g.parentNode)?g:null;" +
-            // 先收掉旧的渐变字：留最后一颗当「认领」标记，用来认出同一个括号里
-            // 已经切好的窗口；更早的全部落回裸文本，节点数不随回答长度增长
-            "var old=st.root.getElementsByTagName('span'),lastSp=null,list=[];" +
-            "for(var i=old.length-1;i>=0;i--){" +
+            // 先收掉旧的渐变字：全部落回裸文本，节点数不随回答长度增长
+            //
+            // 必须从前往后收。从后往前收时，每颗 span 的前一个兄弟都是 span，
+            // 走 replaceChild 分支各建一颗文本节点，收完就是「一字一节点」，
+            // 相邻文本节点越攒越多——排版成本随回答长度线性上涨。
+            "var old=st.root.getElementsByTagName('span'),list=[];" +
+            "for(var i=0;i<old.length;i++){" +
             "if((''+old[i].className).indexOf('stream-new')<0)continue;" +
             "list.push(old[i]);}" +
-            // 保留「最后一个」当锚点：新写的字就接在它后面
+            // 每一颗都落回裸文本：相邻的前一个文本节点直接 appendData，
+            // 否则新建一个文本节点。留一颗 span 当锚点会让下一帧的窗口
+            // 从它旁边重新切，span 一段段累积，节点数随帧数增长。
             "for(var i=0;i<list.length;i++){" +
             "var sp=list[i];" +
-            "if(i===0){lastSp=sp;continue;}" +
             "var tn=sp.textContent,prev=sp.previousSibling;" +
             "if(prev&&prev.nodeType===3){prev.appendData(tn);sp.parentNode.removeChild(sp);}" +
             "else sp.parentNode.replaceChild(document.createTextNode(tn),sp);}" +
-            // 收完之后把锚点交给「最后一个字」：新写的字总是接在它后面
-            "if(!anchor||!anchor.parentNode)anchor=lastSp;" +
+            // 收完之后锚点若已脱离文档，退回「最后一个字所在的元素」重新定位
+            "if(!anchor||!anchor.parentNode){" +
+            "var pe=st.gi;while(pe&&pe.nodeType!==1)pe=pe.parentNode;" +
+            "var c=pe?pe.lastChild:null;" +
+            "anchor=(c&&c.nodeType===3)?c:null;}" +
+            // 锚点先与左右相邻文本合并：旧窗口落回裸文本后，新字那颗节点就停在
+            // 它们后面，不合并的话每帧都多留一颗相邻文本节点
+            "if(anchor)anchor=window.__smBare(anchor);" +
             // 从锚点取最后 GRAD 个字切开：同一段文本一旦切开，切出来的字就在
             // 锚点后面，下一次锚点自然移到新写的字上，窗口随之前移
             "if(anchor){" +
