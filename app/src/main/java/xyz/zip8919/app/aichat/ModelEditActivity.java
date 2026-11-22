@@ -42,6 +42,14 @@ public class ModelEditActivity extends ThemedActivity {
     /** 探测得到的档位集合（本次编辑内的临时值）；null 表示没探过。 */
     private List<String> probedLevels;
 
+    /**
+     * 探测得到的「能否关闭思考」结论；null 表示没得出。
+     *
+     * <p>新建模型时 {@link #persistProbe} 还写不了库（记录尚不存在），结论只能
+     * 随保存一起落盘。少了这一步，新建后探测的模型还会保留「关闭」选项。
+     */
+    private Boolean probedOffBlocked;
+
     /** 下拉里每一项对应的提供商唯一标识；空串表示「（未指定）」。 */
     private final List<String> providerKeys = new ArrayList<String>();
     private String presetProvider;
@@ -286,6 +294,10 @@ public class ModelEditActivity extends ThemedActivity {
         }
 
         StringBuilder sb = new StringBuilder();
+        // 关闭能力与档位、视觉同为独立结论：探测给出明确答案时随保存一起落盘
+        if (rep.offSupported != null) {
+            probedOffBlocked = Boolean.valueOf(!rep.offSupported.booleanValue());
+        }
         if (levelsOk) {
             probedLevels = new ArrayList<String>(rep.levels);
             thinkingCb.setChecked(true);
@@ -294,7 +306,9 @@ public class ModelEditActivity extends ThemedActivity {
                 sb.append(Strings.get(R.string.modeleditactivity_023));
             }
             String global = cfg.getThinkingLevel();
-            String actual = ThinkingLevels.resolve(global, probedLevels);
+            // 已知关不掉思考时，提示里也直接给出会落到的最低档，和实际下发一致
+            boolean offSupported = !Boolean.TRUE.equals(probedOffBlocked);
+            String actual = ThinkingLevels.resolve(global, probedLevels, offSupported);
             if (!actual.equals(global)) {
                 sb.append(Strings.get(R.string.modeleditactivity_024)).append(ThinkingLevels.label(global))
                         .append(Strings.get(R.string.modeleditactivity_025)).append(ThinkingLevels.label(actual))
@@ -443,6 +457,9 @@ public class ModelEditActivity extends ThemedActivity {
             target.setLevelList(probedLevels);
             target.supportsThinking = thinkingCb.isChecked();
             target.probedAt = System.currentTimeMillis();
+        }
+        if (probedOffBlocked != null) {
+            target.thinkingOffBlocked = probedOffBlocked.booleanValue();
         }
         if (creating) {
             cfg.getModels().add(target);
