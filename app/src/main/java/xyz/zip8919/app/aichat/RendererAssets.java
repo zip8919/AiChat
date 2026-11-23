@@ -548,9 +548,9 @@ final class RendererAssets {
             //      而 tail 的节点本来就在随渐显增删，写 display 会触发布局，
             //      几块一起抖动 —— 用户看到的就是「思考块时不时折叠、下一步又展开」。
             //
-            // 现在：块的状态记在节点上（__thOpen / __thLive），只有「首次出现」和
-            // 「思考结束（live 1→0）」这两个时刻各定一次态，之后只有用户手动点击
-            // 才会改。中间每帧一律跳过，不重写 display，也就不再有抖动。
+            // 现在：块的状态记在节点上（__thOpen / __thSig），只在「节点首次出现」
+            // 和「块离开 / 进入 tail」这两个时刻定一次态，之后只有用户点击才改。
+            // 中间每帧一律跳过，不重写 display，也就不再有抖动。
             "window.applyThinkingStates=function(root){" +
             "if(!root||!root.getElementsByClassName)return;" +
             // getElementsByClassName 返回活动集合，取 length/索引都是 O(1) 级；
@@ -559,38 +559,30 @@ final class RendererAssets {
             "if(w.length===0)return;" +
             "for(var i=0;i<w.length;i++){" +
             "var it=w[i];" +
-            "var lv=(window.__nextReal(it)?0:1);" +
+            // 唯一的自动依据：这块还在不在 .stream-tail 里（= 本轮还在生成）。
+            //
+            // 不再看「思考块后面有多少正文」：那句话本意是「等模型开始写回答
+            // 再收起」，但只要模型边想边写、或者流式把正文早一帧推进 DOM，
+            // 块就会在思考没写完时被折起来，用户点开又在下一次重绘时被折回去。
+            // 生成期间一律展开，读完时间线由用户自己控制；本轮结束、节点被
+            // commit 进 base 后才默认折叠（那时它也离开 tail 了）。
             "var inTail=window.__inTail(it);" +
-            "var running=inTail&&it.getAttribute('data-think-live')==='1';" +
             // 状态没变就整趟跳过：这是「不闪、不卡」的关键，重复写
             // display / textContent 会让浏览器重排，安静的时候一个字都不用改。
-            // 跳过条件里必须带 running：thinking 结束时属性从 1 变 0、而节点
-            // 可能被渐显就地复用（不是重建），只比 lv 会漏掉这次转换。
-            "if(it.__thOpen!==undefined&&it.__thLive===lv&&it.__thRun===running)continue;" +
+            "if(it.__thOpen!==undefined&&it.__thSig===inTail)continue;" +
             "var b=it.querySelector('.thinking-block');" +
             "var t=it.querySelector('.thinking-toggle');" +
             "if(!b||!t)continue;" +
             "var k=window.__thinkKey(it);" +
-            // 用户点过 → 尊重手动；否则：进行中 自动展开，结束自动折叠
+            // 用户点过 → 尊重手动，优先级最高
             "var m=(k&&Object.prototype.hasOwnProperty.call(window.__thinkOpen,k))" +
             "?!!window.__thinkOpen[k]:null;" +
-            // 用户在看这一块（手动展开过）：绝不自动折回去。
-            // 「展开后马上自动折叠」就是这一句缺失时的表现——下一帧判成「思考结束」，
-            // 又把 display 写回 none。
             "if(m===true){if(it.__thOpen===1)continue;" +
             "if(b.style.display!=='block'){b.style.display='block';t.textContent='@@L_FOLD@@';}" +
-            "it.__thOpen=1;it.__thLive=lv;it.__thRun=running;continue;}" +
-            "var live=lv===1&&inTail;" +
-            // 还在输出、也还没关闭的思考块（data-think-live="1"）一律展开，
-            // 不再要求「思考块处在末尾」：流式每一帧整段重建，正文往往比
-            // [/thinking] 早一帧到 DOM，此时 lv 已经是 0；若把 running 挂在
-            // live 上，它就会跟着失效，块在思考没写完时被折起来 —— 这正是
-            // 「生成时思考自动折叠」残留的那条路径。
-            // 思考真正结束（data-think-live="0"）后才按正文进度自动收起。
-            "var open=(m===null)?(live||running):m;" +
+            "it.__thOpen=1;it.__thSig=inTail;continue;}" +
+            "var open=(m===null)?inTail:m;" +
             "it.__thOpen=open?1:0;" +
-            "it.__thLive=lv;" +
-            "it.__thRun=running;" +
+            "it.__thSig=inTail;" +
             "b.style.display=open?'block':'none';" +
             "if(open){t.textContent='@@L_FOLD@@';}" +
             "else{var n=parseInt(t.getAttribute('data-tok'),10);if(!(n>0))n=1;" +
