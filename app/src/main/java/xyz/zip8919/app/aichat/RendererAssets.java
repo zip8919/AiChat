@@ -469,14 +469,20 @@ final class RendererAssets {
             // 折起来」，想读还得再展开一次。
             //
             // 现在按「末尾」判：只有在思考块之后已经出现了实打实的正文（超过
-            // {@link #THINK_SETTLE_CHARS} 个可见字符），或者用户已经离开这一屏
-            // （底部出现其它内容）、或者生成本轮已经收尾，才算思考结束。
+            // {@link #THINK_SETTLE_CHARS} 个可见字符）才算思考结束。
             // 工具卡片不算正文——思考与工具调用经常交替出现，卡片落地时折叠会让
             // 后面的思考被藏起来。
+            //
+            // 判断范围是从思考块到「末尾」，而不是它的下一个兄弟，因为两者之间
+            // 可能隔着渐显的显示层：逐字渐显时正文装在 .smooth-shown 里，与新字
+            // 一起被追加成思考块的下一个兄弟，于是「已到末尾」永远比实际晚一段。
+            // 不能再把「本轮已收尾」（__sm.settled）算作结束信号：它是整页共享的
+            // 一个值，收尾之后任何一次重绘都会让仍在 tail 里的思考块被当成已结束
+            // 自动折叠，这正是「生成过程中思考自己折起来」的直接原因。
             "window.__nextReal=function(n){" +
             "var root=document.querySelector('.stream-tail');" +
             "if(!root||!root.contains(n))return n.nextSibling;" +
-            "var txt='',s=n.nextSibling;" +
+            "var txt='',s=window.__smNextEl(n);" +
             "while(s){" +
             "if(s.nodeType===3){if(/\\S/.test(s.nodeValue||''))txt+=s.nodeValue;}" +
             "else if(s.nodeType===1){" +
@@ -486,8 +492,29 @@ final class RendererAssets {
             "s=s.nextSibling;continue;}" +
             "txt+=(s.textContent||'');}" +
             "s=s.nextSibling;}" +
-            "if(txt.replace(/\\s+/g,'').length>window.__smSettleChars)return true;" +
-            "return !!window.__sm.settled;};" +
+            "return txt.replace(/\\s+/g,'').length>window.__smSettleChars;};" +
+            // 计数起点：思考块之后、渐显显示层里「已经画到」的范围之内。
+            //
+            // 渐显时正文装在 .smooth-shown 里，与新字一起被追加成思考块的下一个
+            // 兄弟；思考块本身是上一个兄弟，它的已显示内容不计入。再往后的兄弟
+            // 还一个都没画，计进来只会提前判成「正文已出现」。所以扫到显示层
+            // 最后一个已画元素为止。
+            // 不在渐显通道里（没有 .smooth-shown）时退回读全部后续兄弟。
+            "window.__smNextEl=function(n){" +
+            "var st=window.__sm;" +
+            "if(!st||!st.on||!st.root||!st.stack||!st.stack[0])return n.nextSibling;" +
+            // 已画出内容的终点：显示层里最后那一层元素
+            "var last=st.root.lastElementChild;" +
+            "if(!last)return n.nextSibling;" +
+            "var inside=(function(x){while(x&&x!==document.body){if(x===last)return true;" +
+            "x=x.parentNode;}return false;})(n);" +
+            "if(!inside)return n.nextSibling;" +
+            // 块内已画到末尾：再往后的兄弟都还没画，没有正文可计
+            "if(n===last)return null;" +
+            "var s=n.nextSibling,p=n.parentNode;" +
+            "while(!s&&p&&p!==last){s=p.nextSibling;p=p.parentNode;}" +
+            "if(!s||s===last)return null;" +
+            "return s;};" +
             // 思考块的展开状态逐「块」记在 DOM 节点上（__thOpen），而不是全局一个指纹。
             //
             // 旧实现每次落地都做两件很贵、且会闪的事：
@@ -527,7 +554,11 @@ final class RendererAssets {
             "if(b.style.display!=='block'){b.style.display='block';t.textContent='@@L_FOLD@@';}" +
             "it.__thOpen=1;it.__thLive=lv;continue;}" +
             "var live=lv===1&&window.__inTail(it);" +
-            "var open=(m===null)?live:m;" +
+            // 还在输出、也还没关闭的思考块（data-think-live="1"）一律展开：
+            // 生成过程中用户要读的就是它，自动折起来既打断阅读，也要多一次点击。
+            // 思考结束（模型开始写回答）时上面的 lv 已经是 0，照常自动收起。
+            "var running=live&&it.getAttribute('data-think-live')==='1';" +
+            "var open=(m===null)?(live||running):m;" +
             "it.__thOpen=open?1:0;" +
             "it.__thLive=lv;" +
             "b.style.display=open?'block':'none';" +
