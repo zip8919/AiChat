@@ -450,6 +450,27 @@ final class RendererAssets {
             "n=n|0;if(n<1000)return ''+n;" +
             "if(n<1000000)return (n/1000).toFixed(1)+'k';" +
             "return (n/1000000).toFixed(1)+'M';};" +
+            // 思考内容的 token 估算（与 MessageHtmlRenderer.estimateTokens 同一口径：
+            // 中日韩/全角 0.6，其余 0.3，按 0.1 向上取整）。
+            //
+            // 只在「块已经不再输出、但渲染时没来得及写数字」时用：流式期间的那个
+            // 折叠条是 data-tok="0" 的常量版（为了逐帧字节不变），它被
+            // streamCommitTail 整棵搬进 base 之后就再也不会重渲染，属性一直是 0，
+            // 折叠条也就一直显示「思考中…」，永远看不到 token 数。
+            "window.__thTok=function(b){" +
+            "if(!b)return 0;" +
+            "var s=b.textContent||'',wide=0,narrow=0,n=s.length;" +
+            "for(var i=0;i<n;i++){" +
+            "var c=s.charCodeAt(i);" +
+            "if(c>=0xD800&&c<=0xDBFF&&i+1<n){var d=s.charCodeAt(i+1);" +
+            "if(d>=0xDC00&&d<=0xDFFF){i++;wide++;continue;}}" +
+            "if((c>=0x1100&&c<=0x115F)||(c>=0x2E80&&c<=0x303E)||(c>=0x3041&&c<=0x33FF)||" +
+            "(c>=0x3400&&c<=0x4DBF)||(c>=0x4E00&&c<=0x9FFF)||(c>=0xA000&&c<=0xA4CF)||" +
+            "(c>=0xAC00&&c<=0xD7A3)||(c>=0xF900&&c<=0xFAFF)||(c>=0xFE30&&c<=0xFE4F)||" +
+            "(c>=0xFF00&&c<=0xFF60)||(c>=0xFFE0&&c<=0xFFE6)){wide++;}else{narrow++;}}" +
+            "var tenths=wide*6+narrow*3;" +
+            "if(tenths<=0)return 0;" +
+            "return Math.max(1,Math.ceil(tenths/10));};" +
             // 思考块的展开状态必须存在 JS 变量里：流式每 200ms 会整段重建
             // .stream-tail 的 innerHTML，只改 DOM style 的话下一次重绘就回到
             // HTML 里写死的 display:none，表现为「展开闪一下又折叠回去」。
@@ -682,6 +703,15 @@ final class RendererAssets {
             "var inTail=window.__inTail(it);" +
             "var lvA=it.getAttribute('data-think-live');" +
             "var live=(lvA==null||lvA==='')?inTail:(lvA==='1');" +
+            // 已经归档（不在 .stream-tail 里）的块不可能还在输出。
+            //
+            // 这种节点是流式途中按「未闭合」渲染出来的：data-tok="0"，折叠条写着
+            // 「思考中…」。轮次切换时 streamCommitTail 把它们整棵搬进 base，属性
+            // 原样跟着走，之后再没有任何路径会重渲染这一块 —— 于是一直被当成
+            // 「正在写」：自动展开、折叠条永远停在「思考中…」，用户永远看不到
+            // 这段思考到底花了多少 token。
+            // 归档即收尾：就地纠正 live 标记，下面按「已结束」走，把数字补上。
+            "if(live&&!inTail){live=false;it.setAttribute('data-think-live','0');}" +
             "var sig=(live?'L':'')+(inTail?'T':'');" +
             "var b=it.querySelector('.thinking-block');" +
             "var t=it.querySelector('.thinking-toggle');" +
@@ -727,6 +757,12 @@ final class RendererAssets {
             // 文案按 data-tok 算；data-tok 为 0 的是「还在输出」的块，
             // 这时候根本还没有可信的数字，显示占位文案而不是「1 tokens」。
             "var tokN=parseInt(t.getAttribute('data-tok'),10);if(!(tokN>0))tokN=0;" +
+            // 已结束的块还没有可信数字（常见于上面那种被搬进 base 的 live 节点）：
+            // 按正文估算一个写回 data-tok，之后的文案/折叠/重建都用这个数。
+            // 只写一次：属性一旦大于 0 就走不到这里，不会每帧重算。
+            "if(!live&&tokN<=0){" +
+            "var est=window.__thTok(b);" +
+            "if(est>0){tokN=est;t.setAttribute('data-tok',''+est);}}" +
             "var wantTxt=open?'@@L_FOLD@@':(tokN>0" +
             "?('@@L_EXPAND@@'+window.fmtTok(tokN)+' tokens）──')" +
             ":'@@L_EXPAND@@@@L_THINKING@@');" +
