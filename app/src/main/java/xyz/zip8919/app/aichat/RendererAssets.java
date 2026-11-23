@@ -11,6 +11,7 @@ final class RendererAssets {
     private RendererAssets() {
     }
 
+
     /** 把脚本里的文案占位符换成资源里的文字。页面每次重灌都要调用。 */
     static String localize(String js) {
         return js
@@ -35,6 +36,16 @@ final class RendererAssets {
                 .replace("@@L_RETRYING@@", Strings.get(R.string.renderer_019))
                 .replace("@@L_SHOW_ALL@@", Strings.get(R.string.renderer_020));
     }
+
+    /**
+     * 页面脚本：思考块之后出现多少个正文字符才算「思考结束」（80）。
+     *
+     * <p>取 80 的原因：一段回答的开场白一般一两行就到这个量，读到它用户已经在
+     * 看正文了；再小会退化成「刚闭包就折叠」，再大则思考块一直撑开着挤占屏幕。
+     * 必须作为数字拼进脚本——Chromium 30 的字符串拼接不支持把 Java 常量塞进
+     * 跨字符串表达式的中间。
+     */
+    private static final int THINK_SETTLE_CHARS = 80;
 
     /** 气泡、工具卡片、代码块、表格、错误卡片等全部样式。 */
     static final String CSS =
@@ -451,14 +462,32 @@ final class RendererAssets {
             "if(cn.indexOf('stream-tail')>=0)return true;" +
             "if(cn.indexOf('stream-base')>=0)return false;" +
             "p=p.parentElement||p.parentNode;}return false;};" +
-            // 思考块后面是否已经出现别的内容（空白节点不算）。
-            // 流式期间思考块是最后一个节点，闭合并接上正文后才有后继节点，
-            // 用它判定「还在思考」比依赖渲染时写死的 data-think-live 更准：
-            // 增量绘制不会重写已有节点的属性，写死的值会一直停在 1。
+            // 思考块后面是否已经出现「回答正文」。
+            //
+            // 旧实现只看紧邻的下一个非空兄弟：思考一闭合，紧跟的就是第一段正文，
+            // 于是块被当成「思考结束」立刻自动折叠。用户体感是「生成时思考会自己
+            // 折起来」，想读还得再展开一次。
+            //
+            // 现在按「末尾」判：只有在思考块之后已经出现了实打实的正文（超过
+            // {@link #THINK_SETTLE_CHARS} 个可见字符），或者用户已经离开这一屏
+            // （底部出现其它内容）、或者生成本轮已经收尾，才算思考结束。
+            // 工具卡片不算正文——思考与工具调用经常交替出现，卡片落地时折叠会让
+            // 后面的思考被藏起来。
             "window.__nextReal=function(n){" +
-            "var s=n.nextSibling;" +
-            "while(s&&((s.nodeType===3&&!/\\S/.test(s.nodeValue||''))||s.nodeType===8))s=s.nextSibling;" +
-            "return s;};" +
+            "var root=document.querySelector('.stream-tail');" +
+            "if(!root||!root.contains(n))return n.nextSibling;" +
+            "var txt='',s=n.nextSibling;" +
+            "while(s){" +
+            "if(s.nodeType===3){if(/\\S/.test(s.nodeValue||''))txt+=s.nodeValue;}" +
+            "else if(s.nodeType===1){" +
+            "var cn=''+(s.className||'');" +
+            "if(cn.indexOf('tool-card')>=0||cn.indexOf('tool-live')>=0||cn.indexOf('thinking-wrap')>=0||" +
+            "cn.indexOf('copy-btn')>=0||cn.indexOf('code-head')>=0||cn.indexOf('lang-tag')>=0){" +
+            "s=s.nextSibling;continue;}" +
+            "txt+=(s.textContent||'');}" +
+            "s=s.nextSibling;}" +
+            "if(txt.replace(/\\s+/g,'').length>window.__smSettleChars)return true;" +
+            "return !!window.__sm.settled;};" +
             // 思考块的展开状态逐「块」记在 DOM 节点上（__thOpen），而不是全局一个指纹。
             //
             // 旧实现每次落地都做两件很贵、且会闪的事：
@@ -480,7 +509,7 @@ final class RendererAssets {
             "if(w.length===0)return;" +
             "for(var i=0;i<w.length;i++){" +
             "var it=w[i];" +
-            "var lv=(it.getAttribute('data-think-live')==='1'&&!window.__nextReal(it))?1:0;" +
+            "var lv=(window.__nextReal(it)?0:1);" +
             // 状态没变就整趟跳过：这是「不闪、不卡」的关键，重复写
             // display / textContent 会让浏览器重排，安静的时候一个字都不用改
             "if(it.__thOpen!==undefined&&it.__thLive===lv)continue;" +
@@ -491,6 +520,12 @@ final class RendererAssets {
             // 用户点过 → 尊重手动；否则：进行中(live=1 且在 tail) 自动展开，结束自动折叠
             "var m=(k&&Object.prototype.hasOwnProperty.call(window.__thinkOpen,k))" +
             "?!!window.__thinkOpen[k]:null;" +
+            // 用户在看这一块（手动展开过）：绝不自动折回去。
+            // 「展开后马上自动折叠」就是这一句缺失时的表现——下一帧判成「思考结束」，
+            // 又把 display 写回 none。
+            "if(m===true){if(it.__thOpen===1)continue;" +
+            "if(b.style.display!=='block'){b.style.display='block';t.textContent='@@L_FOLD@@';}" +
+            "it.__thOpen=1;it.__thLive=lv;continue;}" +
             "var live=lv===1&&window.__inTail(it);" +
             "var open=(m===null)?live:m;" +
             "it.__thOpen=open?1:0;" +
@@ -1066,6 +1101,7 @@ final class RendererAssets {
             // 而在调用方：新一轮开始、甚至只是补一帧 base，都会把渐显缓冲清空重画。
             // 现在重新起步由 Java 侧用一个稳定键压制（__smoothStart 的 key），
             // 这里只负责「同一份内容永远往同一个方向长」。
+            "window.__smSettleChars=80;" +
             "window.__sm={on:false,arrived:'',show:0,units:[],chars:0,cut:0," +
             "stack:[],root:null,cur:0,paintUnits:null,fi:null,gi:null," +
             "advA:null,advI:null,run:null,natLast:0,stackChars:null,stackPending:null," +
@@ -1841,9 +1877,11 @@ final class RendererAssets {
             "var t=c.querySelector('.stream-tail');if(!t)return false;" +
             "window.__smAdvance(st,t,a);return true;};" +
             "window.__smoothStop=function(){" +
+            "window.__sm.settled=1;" +
             "window.__sm.on=false;window.__smPlain.on=false;};" +
             // 收尾：按最终片段一次放完，然后退出渐显
             "window.__smoothFinish=function(html,idx){" +
+            "window.__sm.settled=1;" +
             // 纯文本模式下以缓冲里的全文为准：调用方传进来的 html 参数在这里是空的
             "if(window.__smPlain.on)return window.__smoothPlainFinish(idx);" +
             "var changed=false;" +
