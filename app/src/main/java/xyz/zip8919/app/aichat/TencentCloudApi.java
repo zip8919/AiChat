@@ -497,15 +497,18 @@ final class TencentCloudApi {
                     "DescribeTokenPlanPersonalPackage", p, true);
             merged.raw("Token Plan " + types[i], r.body);
             if (r.ok) {
-                // 没买过这个系列时接口回「未购买」，属于正常结果，不当失败
                 merged.fields.addAll(r.fields);
                 merged.probe("Token Plan " + types[i], "DescribeTokenPlanPersonalPackage",
                         "可用", r.fields.isEmpty() ? "未购买" : ("返回 " + r.fields.size() + " 项"));
             } else {
                 String why = r.error == null ? "未知原因" : r.error;
+                // 套餐接口在没买过时用「资源不存在」报错，不是真失败：诊断里要说成「未购买」，
+                // 否则一屏「不可用」看着像密钥或网络出了问题
+                boolean notBought = isNotFound(why) || why.indexOf("未购买") >= 0
+                        || why.indexOf("没有可展示的额度字段") >= 0;
                 merged.probe("Token Plan " + types[i], "DescribeTokenPlanPersonalPackage",
-                        "无套餐", why);
-                if (firstErr == null) firstErr = why;
+                        notBought ? "未购买" : "不可用", notBought ? null : why);
+                if (!notBought && firstErr == null) firstErr = why;
             }
         }
         merged.ok = !merged.fields.isEmpty();
@@ -713,9 +716,12 @@ final class TencentCloudApi {
             }
             out.json = resp;
             if ("billing".equals(service)) {
-                // 金额接口的字段由调用方按扣费顺序拼装，这里只摊平兜底
+                // 金额接口的字段由调用方按扣费顺序拼装（数据常在 Data 数组里，
+                // 摊平只能得到下标名），这里只把 Response 交出去，不判断成功与否
                 out.ok = true;
-            } else if ("DescribeTokenPlanPersonalPackage".equals(action)) {
+                return out;
+            }
+            if ("DescribeTokenPlanPersonalPackage".equals(action)) {
                 parsePackage(resp, action, out);
             } else {
                 // 用量 / 计费类接口：字段按版本变动，统一摊平，不写死字段名
@@ -776,6 +782,13 @@ final class TencentCloudApi {
     /** {@code DescribeTokenPlanPersonalPackage}：额度字段按接口原值显示，积分常带小数。 */
     private static void parsePackage(JSONObject resp, String action, Result out) {
         String status = resp.optString("PackageStatus", "");
+        // 未购买时接口只回 PackageStatus=UNPURCHASED，没有额度字段：
+        // 这是正常结果而不是解析失败，直接在这里定论，别让上层猜
+        if ("UNPURCHASED".equalsIgnoreCase(status)) {
+            out.ok = false;
+            out.error = "未购买该套餐";
+            return;
+        }
         if (status.length() == 0 && !resp.has("TotalCredits")) {
             // 这个产品类型没返回有效套餐：不写一行空标题，交给上层判定为「未购买」
             return;
