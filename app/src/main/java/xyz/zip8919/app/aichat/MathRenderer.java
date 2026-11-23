@@ -14,7 +14,7 @@ import ru.noties.jlatexmath.JLatexMathDrawable;
 
 /**
  * 数学公式渲染：{@code $...$} / {@code $$...$$} / {@code \ce{...}} / 裸 {@code \command}
- * 统一转成 jlatexmath 位图，再包成 SVG data-URI 内联进 HTML。
+ * 统一转成 jlatexmath 位图，再包成 {@code <img src="data:image/png;base64,…">} 内联进 HTML。
  *
  * <p>从 {@link MessageHtmlRenderer} 抽出（约 700 行）。这里全部是无状态静态方法，
  * 唯一的共享状态是公式位图缓存——同一公式在长对话里会被反复渲染，缓存按字符数
@@ -470,7 +470,112 @@ final class MathRenderer {
         }
         return out.toString();
     }
+    /**
+     * 把模型常写、但 jlatexmath 不认的写法换成等价写法。
+     *
+     * <p>jlatexmath 的解析器比 KaTeX 严格得多：{@code \tag}、{@code \label}、
+     * {@code \newline}、{@code \color}、{@code align*} 环境等
+     * 一律直接抛 ParseException。抛了就整条公式降级成源码文本，这正是用户说的
+     * 「只有一部分公式能显示，其余显示原始代码」——同一段回答里，写法简单的
+     * 公式出图，带这些命令的公式变成 {@code \tag{1}…} 原样文本。
+     *
+     * <p>只做字符级的等价替换，不改公式语义；换完如果外层还有未配对的 $，交给
+     * 原来的解析失败路径，不做猜测。
+     */
+    private static final java.util.regex.Pattern UNICODE_CP =
+            java.util.regex.Pattern.compile("\\\\unicode\\{([0-9A-Fa-f]{1,6})\\}");
+
+    static String normalizeForJLatexMath(String formula) {
+        return normalizeForJLatexMath(formula, true);
+    }
+
+    /**
+     * @param colorAllowed jlatexmath 认的颜色只有基础色名（红/绿/蓝/…），
+     *                     {@code #1f6feb}、{@code rgb(...)}、{@code orange} 之类的
+     *                     写法会让整条公式解析失败。这类颜色只在「猜」：先按原样
+     *                     试一次，失败了才剥掉颜色重试，所以默认 {@code false}。
+     */
+    static String normalizeForJLatexMath(String formula, boolean colorAllowed) {
+        if (formula == null || formula.length() == 0) return formula;
+        String s = formula;
+        // 编号与标签不出现在位图里（编号由模型正文自己写），直接去掉
+        s = s.replaceAll("\\\\tag\\*?\\{[^{}]*\\}", "")
+             .replaceAll("\\\\label\\{[^{}]*\\}", "")
+             .replaceAll("\\\\nonumber|\\\\notag", "");
+        // 换行命令：模型在 $$ 块里写的 \newline 也是换行意图
+        s = s.replace("\\newline", "\\\\");
+        // 颜色：位图字色跟随主题，公式内自定义颜色不参与出图
+        if (!colorAllowed) {
+            s = s.replaceAll("\\\\color\\{[^{}]*\\}", "")
+                 .replaceAll("\\\\textcolor\\{[^{}]*\\}", "");
+        }
+        // 带星号的对齐环境：jlatexmath 只认无星版本
+        s = s.replace("\\begin{align*}", "\\begin{array}{rl}")
+             .replace("\\end{align*}", "\\end{array}")
+             .replace("\\begin{gather*}", "\\begin{array}{c}")
+             .replace("\\end{gather*}", "\\end{array}")
+             .replace("\\begin{eqnarray*}", "\\begin{array}{rcl}")
+             .replace("\\end{eqnarray*}", "\\end{array}");
+        // 字体命令别名
+        s = s.replace("\\mbox{", "\\text{")
+             .replace("\\hbox{", "\\text{");
+        // 分组与「不要断行」类命令：只是排版建议，去掉不影响公式本身
+        s = s.replaceAll("\\\\(begingroup|endgroup|ensuremath|nobreak)(?![A-Za-z])", "");
+        // KaTeX 的 unicode 命令写法，jlatexmath 直接用字符本身
+        java.util.regex.Matcher um = UNICODE_CP.matcher(s);
+        if (um.find()) {
+            StringBuffer sb = new StringBuffer();
+            do {
+                int cp = Integer.parseInt(um.group(1), 16);
+                String rep = new String(Character.toChars(Math.min(cp, 0x10FFFF)));
+                um.appendReplacement(sb, java.util.regex.Matcher.quoteReplacement(rep));
+            } while (um.find());
+            um.appendTail(sb);
+            s = sb.toString();
+        }
+        // 环境名 → jlatexmath 的对应环境（它没有 center / flushleft / flushright）
+        s = s.replace("\\begin{center}", "\\begin{array}{c}")
+             .replace("\\end{center}", "\\end{array}")
+             .replace("\\begin{flushleft}", "\\begin{array}{l}")
+             .replace("\\end{flushleft}", "\\end{array}")
+             .replace("\\begin{flushright}", "\\begin{array}{r}")
+             .replace("\\end{flushright}", "\\end{array}");
+        s = s.trim();
+        return s.length() == 0 ? formula : s;
+    }
+
     private static String renderLatexImg(String formula, boolean block, float density) {
+        String tag = renderLatexImg(formula, block, density, NORM_EQUIV);
+        // 等价替换后仍解析失败（多半是没洗掉的颜色写法：#1f6feb、rgb(...)、orange）
+        // → 只剥颜色再试一次。这正是「同一段回答里有的公式出图、有的显示原始代码」
+        // 最常见的一类：公式本身没问题，只是颜色名不认识。
+        if (isFallbackTag(tag) && formula != null && formula.indexOf('\\') >= 0) {
+            String retry = renderLatexImg(formula, block, density, NORM_NO_COLOR);
+            if (!isFallbackTag(retry)) return retry;
+        }
+        // 最后再按原始写法试一次：替换规则万一动到了模型写对了的东西（例如
+        // \mbox 里包着自定义命令），原样反而能解析。
+        if (isFallbackTag(tag) && formula != null && formula.indexOf('\\') >= 0) {
+            String raw = renderLatexImg(formula, block, density, NORM_RAW);
+            if (!isFallbackTag(raw)) return raw;
+        }
+        return tag;
+    }
+
+    /** 清洗级别：原样 / 等价替换 / 等价替换 + 去颜色。 */
+    private static final int NORM_RAW = 0;
+    private static final int NORM_EQUIV = 1;
+    private static final int NORM_NO_COLOR = 2;
+
+    /**
+     * @param normLevel {@link #NORM_RAW} / {@link #NORM_EQUIV} / {@link #NORM_NO_COLOR}。
+     *
+     * <p>先按 1 试、失败再按 2 试：jlatexmath 认识基础色名（红/绿/蓝），
+     * 一律剥掉颜色会白白丢掉模型想强调的东西；只有 {@code #1f6feb}、
+     * {@code rgb(...)}、{@code orange} 这类写法才会让整条公式解析失败。
+     */
+    private static String renderLatexImg(String formula, boolean block, float density, int normLevel) {
+        if (normLevel != NORM_RAW) formula = normalizeForJLatexMath(formula, normLevel < NORM_NO_COLOR);
         // 公式字色跟随主题：早期固定白底黑字，深色模式下就是一块刺眼的白色方块。
         // 现在背景透明、字色取 ac_text。key 必须带上字色 —— 否则浅色下渲染的缓存
         // 会在切深色后被复用，公式永远不换色。
@@ -490,7 +595,7 @@ final class MathRenderer {
             }
         } catch (Throwable ignored) {
         }
-        String key = formula + (block ? "b" : "i") + ":" + Integer.toHexString(fgColor)
+        String key = formula + (block ? "b" : "i") + normLevel + ":" + Integer.toHexString(fgColor)
                 + ":" + Integer.toHexString(fallbackBg) + ":" + Integer.toHexString(fallbackFg);
         boolean transientFrame = Boolean.TRUE.equals(TRANSIENT.get());
         String cached = transientFrame ? frameCache.get(key) : null;
@@ -512,7 +617,10 @@ final class MathRenderer {
             int h = d.getIntrinsicHeight();
 
             if (w > 0 && h > 0) {
-                int maxW = (int)(400 * density);
+                // 注意：w/h 是位图像素，display 尺寸是 w/scale。上限必须按位图像素算
+                // （400dp × density × scale），否则 2 倍屏以上的机器上，超过 400 位图像素
+                // 的公式会被缩到 400 像素、再按 w/scale 显示成 160dp，字比正文小一半。
+                int maxW = (int)(400 * density * scale);
                 if (w > maxW) { float s = (float) maxW / w;
                     d = JLatexMathDrawable.builder(formula).textSize(textSize * s)
                             .background(0x00000000).color(fgColor).build();
@@ -538,53 +646,46 @@ final class MathRenderer {
                 }
 
                 String alt = Html.escAttr(formula);
-                // Block: explicit display dimensions (w/scale) so API 18
-                // doesn't fall back to 300×150 default. viewBox maps the
-                // high-res bitmap to display size.
-                // Inline: no width/height attrs — CSS height:1.6em;width:auto
-                String svgNs = "http://www.w3.org/2000/svg";
-                String xlinkNs = "http://www.w3.org/1999/xlink";
+                // 一律用 <img> 输出，不再套 <svg><image>。
+                //
+                // 为什么改：API 19 的 WebView 是 Chromium 30，内联 <svg> 里的
+                // <image xlink:href="data:..."> 不保证出图——页面里公式位置只剩一个
+                // 空 svg（用户看到的「公式变成 svg 标签、不渲染」）。而流式增量绘制
+                // 会把标签逐个 insertAdjacentHTML 进 DOM，SVG 元素走的是外来内容解析
+                // 分支，属性（xlink:href 带上几十 KB 的 base64）还要被重新序列化一次，
+                // 这条路径在老 WebView 上更容易出问题。
+                //
+                // 位图本来就有像素尺寸：块级用 width/height 属性把它缩到显示尺寸
+                // （CSS 像素，与 density 无关），行内交给 CSS height:1.6em;width:auto。
+                // <img> 是空元素，两种路径（整段 innerHTML、逐标签追加）行为一致。
                 if (block) {
                     int dispW = Math.round((float) w / scale);
                     int dispH = Math.round((float) h / scale);
                     if (dispW < 1) dispW = 1;
                     if (dispH < 1) dispH = 1;
                     imgTag = "<div class=\"math-block\">" +
-                        "<svg xmlns=\"" + svgNs + "\" xmlns:xlink=\"" + xlinkNs + "\"" +
+                        "<img src=\"data:image/png;base64," + b64 + "\"" +
                         " width=\"" + dispW + "\" height=\"" + dispH + "\"" +
-                        " viewBox=\"0 0 " + w + " " + h + "\"" +
-                        " style=\"max-width:100%;\">" +
-                        "<image width=\"" + w + "\" height=\"" + h + "\"" +
-                        " xlink:href=\"data:image/png;base64," + b64 + "\"/>" +
-                        "</svg></div>";
+                        " style=\"max-width:100%;height:auto;\"" +
+                        " alt=\"" + alt + "\">" +
+                        "</div>";
                 } else {
-                    imgTag = "<svg xmlns=\"" + svgNs + "\" xmlns:xlink=\"" + xlinkNs + "\"" +
-                        " class=\"math-inline\"" +
-                        " viewBox=\"0 0 " + w + " " + h + "\"" +
-                        " style=\"height:1.6em;width:auto;vertical-align:middle;\">" +
-                        "<image width=\"" + w + "\" height=\"" + h + "\"" +
-                        " xlink:href=\"data:image/png;base64," + b64 + "\"/>" +
-                        "</svg>";
+                    imgTag = "<img class=\"math-inline\"" +
+                        " src=\"data:image/png;base64," + b64 + "\"" +
+                        " width=\"" + Math.max(1, Math.round((float) w / scale)) + "\"" +
+                        " height=\"" + Math.max(1, Math.round((float) h / scale)) + "\"" +
+                        " style=\"height:1.6em;width:auto;vertical-align:middle;\"" +
+                        " alt=\"" + alt + "\">";
                 }
             }
         } catch (Exception e) {
             LogUtil.w(TAG, "latex render FAILED for '%s': %s -> fallback", LogUtil.preview(formula, 80), e.getMessage());
+            // 具体哪种写法不认由分层重试决定（见 renderLatexImg 入口）。
         }
 
         // Clean fallback — monospace code-style, not debug-yellow
         if (imgTag == null) {
-            String bgHex = String.format("#%06X", 0xFFFFFF & fallbackBg);
-            String fgHex = String.format("#%06X", 0xFFFFFF & fallbackFg);
-            if (block) {
-                imgTag = "<div class=\"math-block\" style=\"background:" + bgHex
-                    + ";padding:10px;border-radius:4px;\">"
-                    + "<code style=\"font-size:14px;color:" + fgHex + ";\">"
-                    + Html.esc(formula) + "</code></div>";
-            } else {
-                imgTag = "<code style=\"font-size:0.9em;background:" + bgHex
-                    + ";padding:1px 5px;border-radius:3px;color:" + fgHex + ";\">"
-                    + Html.esc(formula) + "</code>";
-            }
+            imgTag = fallbackTag(formula, block, fallbackBg, fallbackFg, normLevel);
         }
 
         if (transientFrame) {
@@ -614,6 +715,32 @@ final class MathRenderer {
         LogUtil.v(TAG, "latex cached (size=%d): %d chars html", latexCache.size(), imgTag.length());
         return imgTag;
     }
+    /**
+     * 解析失败时的降级块：按原样展示公式源码。
+     *
+     * <p>只包一层 {@code <code>}（块级再套 {@code math-block} 容器），
+     * 与正文里的行内代码同款样式；{@link #isFallbackTag} 据此判断是否值得
+     * 换一种写法重试。
+     */
+    private static String fallbackTag(String formula, boolean block, int bg, int fg, int normLevel) {
+        String bgHex = String.format("#%06X", 0xFFFFFF & bg);
+        String fgHex = String.format("#%06X", 0xFFFFFF & fg);
+        if (block) {
+            return "<div class=\"math-block\" style=\"background:" + bgHex
+                + ";padding:10px;border-radius:4px;\">"
+                + "<code style=\"font-size:14px;color:" + fgHex + ";\">"
+                + Html.esc(formula) + "</code></div>";
+        }
+        return "<code style=\"font-size:0.9em;background:" + bgHex
+            + ";padding:1px 5px;border-radius:3px;color:" + fgHex + ";\">"
+            + Html.esc(formula) + "</code>";
+    }
+
+    /** 这个输出是不是降级块（没有出图，只有源码文本）。 */
+    private static boolean isFallbackTag(String tag) {
+        return tag == null || tag.indexOf("data:image/png;base64,") < 0;
+    }
+
     // Strip leading $$, \[, or $ from output buffer and return prefix length (0/1/2).
     // Only strips if the math wrapper contains only this command and the matching
     // closer immediately follows in text at cmdEnd.
