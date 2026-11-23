@@ -455,19 +455,28 @@ final class RendererAssets {
             // __thinkOpen 只记录「用户手动点过 toggle」的块（hasOwnProperty 区分
             // 显式折叠 false 与「从未操作过」），手动状态优先级最高，不被自动流程覆盖。
             "window.__thinkOpen=window.__thinkOpen||{};" +
-            // 展开状态的实际 key：消息 data-idx + 块序号。
+            // 展开状态的实际 key：消息位置 + 块序号。
             //
             // 服务端写进 data-think-key 的是「这块在本段文本里的序号」，同一条
             // 消息的 base / tail 各自从 0 数，光用序号会让不同消息、不同段落
-            // 的块重名——用户展开一条消息的思考，别的消息也跟着展开。拼上
-            // 最近的 .msg[data-idx] 就唯一了。节点重建后重算，结果不带内容，
-            // 所以流式增长期间恒定，手动展开不会被下一帧冲掉。
+            // 的块重名——用户展开一条消息的思考，别的消息也跟着展开。
+            //
+            // 消息这一维不能用 data-idx：流式期间气泡是 data-idx="-1" 的占位，
+            // 收尾 finalizeLast 才改成真实下标。拿它拼 key，生成结束那一刻 key
+            // 会整段变一次，用户展开的块正好被折回去。改用「这条消息在 .msg
+            // 列表里的位置」：整轮生成、finalize、整页重建都不会变，位置算一次
+            // 就缓存在消息节点上（流式只重建 tail 内容，消息节点本身不重建）。
             "window.__thinkKey=function(it){" +
             "if(it.__thKey!==undefined)return it.__thKey;" +
             "var raw=it.getAttribute('data-think-key')||'';var p=it,mi='',n=0;" +
-            "while(p&&p.nodeType===1&&n++<12){" +
-            "var di=p.getAttribute('data-idx');" +
-            "if(di!==null&&di!==''){mi=di;break;}p=p.parentNode;}" +
+            "while(p&&p.nodeType===1&&n++<14){" +
+            "if((' '+((p.className&&p.className.baseVal)||p.className||'')+' ').indexOf(' msg ')>=0)break;" +
+            "p=p.parentNode;}" +
+            "if(p&&p.nodeType===1){" +
+            "if(p.__mi===undefined){var all=document.getElementsByClassName('msg'),pos=-1;" +
+            "for(var j=0;j<all.length;j++){if(all[j]===p){pos=j;break;}}" +
+            "p.__mi='p'+pos;}" +
+            "mi=p.__mi;}" +
             "var k=mi+'#'+raw;it.__thKey=k;return k;};" +
             // 只有仍在 .stream-tail 里的块才算「正在输出」：commit 进 base、或整页
             // 重建后落在 .content 里的历史消息，一律视为已结束，不自动展开。
