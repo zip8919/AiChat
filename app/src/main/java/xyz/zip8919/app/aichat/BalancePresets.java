@@ -58,9 +58,9 @@ final class BalancePresets {
                     "返回总余额、赠金余额与充值余额"),
             // 旧配置里存的是推理地址的余额路径，那条路恒为 404；
             // 现在改为用 SecretId/SecretKey 调云 API 取真实余额。
-            new Preset(ID_TENCENT, "腾讯云（余额 / 用量 / Token Plan）", "",
-                    "用 SecretId 与 SecretKey 查询账户可用余额、TokenHub 用量与计费方式、"
-                            + "Token Plan 套餐额度；长按「查询余额」可查看各接口的诊断信息"),
+            new Preset(ID_TENCENT, "腾讯云 TokenHub（可用额度 / 用量 / Token Plan）", "",
+                    "用 SecretId 与 SecretKey 查询 TokenHub 后付费还能用的钱（代金券、赠送金、现金、授信）、"
+                            + "TokenHub 用量与计费方式、Token Plan 套餐额度；长按提供商可查看各接口的诊断信息"),
             new Preset("openai_compat", "通用 OpenAI 兼容平台", "/dashboard/billing/credit_grants",
                     "适用于大多数中转站的额度接口"),
             new Preset("siliconflow", "硅基流动 SiliconFlow", "/v1/user/info",

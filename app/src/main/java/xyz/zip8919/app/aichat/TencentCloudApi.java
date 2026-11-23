@@ -23,17 +23,25 @@ import org.json.JSONObject;
  *
  * <p>本类只跑只读接口，分两组：
  *
- * <p><b>金额</b>（费用中心口径，按量付费看这里）：
+ * <p><b>金额</b>（费用中心口径，TokenHub 后付费扣的就是这里的钱）：
  * <ul>
- *   <li>{@code billing / DescribeAccountBalance}：账户可用余额、冻结、欠费。</li>
+ *   <li>{@code billing / DescribeAccountBalance}：现金 / 赠送 / 可用 / 欠费 / 冻结，授信额度；</li>
+ *   <li>{@code billing / DescribeVoucherInfo}：待使用的代金券余额（扣费时最先扣它）；</li>
+ *   <li>{@code billing / DescribeCostSummaryByProduct}：本月 TokenHub 实际扣了多少钱。</li>
  * </ul>
+ * TokenHub 没有单独的钱包：按量付费的扣费顺序是「代金券 → 赠送金 → 现金，
+ * 信用客户最后用授信额度」，所以这几段合起来才是「还能用多少」。
+ * 只显示现金余额会在有代金券或赠送金时把余额显示得偏低。
  *
  * <p><b>TokenHub 用量与套餐</b>：
  * <ul>
- *   <li>{@code tokenhub / DescribePaymentSummary}：计费方式汇总（后付费是否开通、限额）；</li>
- *   <li>{@code tokenhub / DescribeInferPageOverview}：推理服务页 KPI 汇总（近期用量）；</li>
+ *   <li>{@code tokenhub / DescribePaymentSummary}：计费方式汇总；</li>
+ *   <li>{@code tokenhub / DescribeEndpointList}：每个模型的免费额度用量、是否已转后付费；</li>
+ *   <li>{@code tokenhub / DescribeUsageRankList}：近 7 天 token 用量；</li>
  *   <li>{@code tokenhub / DescribeTokenPlanPersonalPackage}：Token Plan 个人版套餐额度。</li>
  * </ul>
+ * 免费额度用完就意味着每一笔调用都从余额扣钱，所以它和余额必须一起看，
+ * 只有余额数字看不出「还能撑多久」。
  * 不要在这里加任何会改动账户的接口。
  *
  * <p><b>为什么是「探测式」而不是写死解析</b>：腾讯云的用量/计费类接口字段经常
@@ -57,6 +65,8 @@ final class TencentCloudApi {
         String note;
         /** 原始响应体（含错误码），供「原始返回」查看。 */
         String body;
+        /** 解析后的 Response 对象；接口失败时为 null。 */
+        JSONObject json;
         int code;
         String url;
         java.util.List<String[]> fields = new java.util.ArrayList<String[]>();
@@ -79,63 +89,395 @@ final class TencentCloudApi {
             if (v.length() == 0) return;
             fields.add(new String[] { name, v });
         }
+
+        /** 取字段的数值，缺失或不是数字时返回 0。 */
+        double num(String key) {
+            if (json == null) return 0;
+            Object v = json.opt(key);
+            if (v == null || JSONObject.NULL.equals(v)) return 0;
+            try {
+                return Double.parseDouble(String.valueOf(v));
+            } catch (Throwable t) {
+                return 0;
+            }
+        }
+
+        /**
+         * 置顶字段：可用额度与待使用代金券，这两项决定「现在还能不能继续调用」。
+         *
+         * <p>按名称挑而不是按位置挑：代金券为 0 时那行不会出现，按位置会把
+         * 「账户可用余额」顶到最前，和它下面那行重复。
+         */
+        java.util.List<String[]> leadFields() {
+            java.util.List<String[]> out = new java.util.ArrayList<String[]>();
+            for (int i = 0; i < fields.size(); i++) {
+                if (isLead(fields.get(i)[0])) out.add(fields.get(i));
+            }
+            return out;
+        }
+
+        /** 其余账户明细：排在其他组的数字之后。 */
+        java.util.List<String[]> restFields() {
+            java.util.List<String[]> out = new java.util.ArrayList<String[]>();
+            for (int i = 0; i < fields.size(); i++) {
+                if (!isLead(fields.get(i)[0])) out.add(fields.get(i));
+            }
+            return out;
+        }
+
+        private static boolean isLead(String name) {
+            return name.startsWith("TokenHub 可用额度") || name.startsWith("待使用代金券");
+        }
     }
 
     private TencentCloudApi() {
     }
 
     /**
-     * 查账户余额。
+     * 查 TokenHub 后付费还能用的钱。
      *
-     * @param secretId  SecretId（AK 开头）
+     * <p>TokenHub 按量付费从腾讯云账户实时扣费，扣费顺序为
+     * 「代金券 → 赠送金（+收益转入）→ 现金充值，信用客户最后用授信额度」，
+     * 所以这里把三段都取出来，按顺序排在正文最前面；只报现金余额会低估可用额度。
+     *
+     * <p>两个接口都是只读，任一不可用（无权限、未开通）只记一条原因，不影响另一个。
+     *
+     * @param secretId  SecretId（AKID 开头）
      * @param secretKey SecretKey
-     * @param region    地域，billing 接口用空串（全局接口），传空即可
+     * @param region    billing 接口用空串（全局接口）
      */
     static Result accountBalance(String secretId, String secretKey, String region) {
-        Result r = call(secretId, secretKey, region,
-                "billing.tencentcloudapi.com", "billing", "2023-07-01",
+        Result bal = call(secretId, secretKey, region,
+                "billing.tencentcloudapi.com", "billing", "2018-07-09",
                 "DescribeAccountBalance", new JSONObject(), false);
-        r.raw("账户余额 DescribeAccountBalance", r.body);
-        return r;
+        Result voucher = call(secretId, secretKey, "ap-guangzhou",
+                "billing.tencentcloudapi.com", "billing", "2018-07-09",
+                "DescribeVoucherInfo", voucherParams(), true);
+
+        Result merged = new Result();
+        merged.code = bal.code > 0 ? bal.code : voucher.code;
+        merged.url = bal.url;
+        merged.body = bal.body;
+        merged.raw("账户余额 DescribeAccountBalance", bal.body);
+        merged.raw("代金券 DescribeVoucherInfo", voucher.body);
+
+        // 余额接口是主口径：它失败才整体算失败
+        merged.ok = bal.ok;
+        if (!bal.ok) {
+            merged.error = bal.error;
+            merged.note = "账户余额取不到，TokenHub 后付费可用额度也查不到。";
+            return merged;
+        }
+        long cash = (long) bal.num("CashAccountBalance");
+        long income = (long) bal.num("IncomeIntoAccountBalance");
+        long present = (long) bal.num("PresentAccountBalance");
+        long freeze = (long) bal.num("FreezeAmount");
+        long owe = (long) bal.num("OweAmount");
+        long creditLimit = (long) bal.num("CreditAmount");
+        boolean hasCredit = bal.ok && creditLimit > 0;
+
+        // 1) 代金券：只说「待使用」的余额，已用/过期的钱已经花不出去
+        long voucherLeft = -1;
+        if (voucher.ok) {
+            JSONObject vo = voucher.json;
+            long units = voucherUnitDivisor(vo.optString("Unit", ""));
+            JSONObject sum = vo.optJSONObject("BalanceSum");
+            long total = 0;
+            if (sum != null) total = (long) (sum.optDouble("TotalBalance", 0) / units);
+            else total = (long) (vo.optDouble("TotalBalance", 0) / units);
+            long expired = sum != null ? (long) (sum.optDouble("Overdue", 0) / units) : 0;
+            long used = sum != null ? (long) (sum.optDouble("Used", 0) / units) : 0;
+            // 总余额含已用与已过期；两者都为 0 时直接用总余额（部分账号不返回明细）
+            voucherLeft = (expired > 0 || used > 0) ? Math.max(0, total - used - expired) : total;
+            merged.add("待使用代金券", moneyFen(voucherLeft) + " 元");
+        }
+
+        long cashUntilCredit = cash + income + present + (voucherLeft > 0 ? voucherLeft : 0);
+        if (hasCredit) {
+            merged.add("TokenHub 可用额度（含授信）",
+                    moneyFen(cashUntilCredit + creditLimit) + " 元");
+        } else {
+            merged.add("TokenHub 可用额度（不含代金券）", moneyFen(cash + income + present) + " 元");
+        }
+        // 腾讯云口径的可用余额，与控制台费用中心显示一致，便于核对
+        long avail = (long) bal.num("RealBalance");
+        merged.add("账户可用余额", moneyFen(avail) + " 元");
+        merged.add("现金充值余额", moneyFen(cash) + " 元");
+        if (present > 0) merged.add("赠送金余额", moneyFen(present) + " 元");
+        if (income > 0) merged.add("收益转入余额", moneyFen(income) + " 元");
+        if (hasCredit) merged.add("授信额度", moneyFen(creditLimit) + " 元");
+        if (freeze > 0) merged.add("冻结金额", moneyFen(freeze) + " 元");
+        if (owe > 0) merged.add("欠费金额", moneyFen(owe) + " 元");
+
+        StringBuilder note = new StringBuilder();
+        note.append("TokenHub 按量付费没有单独的钱包，每次调用从腾讯云账户扣费；"
+                + "扣费顺序为代金券 → 赠送金 → 现金，信用客户最后用授信额度。");
+        if (!voucher.ok && voucher.error != null) {
+            append(note, "代金券：" + voucher.error);
+        }
+        if (hasCredit) {
+            append(note, "「含授信」即账户余额彻底用完后还能靠授信额度继续调用的部分。");
+        }
+        if (owe > 0) {
+            append(note, "账户已欠费，充值为正后 TokenHub 推理服务自动恢复；"
+                    + "暂停超过 15 天，在线推理服务会被删除。");
+        }
+        if (freeze > 0) {
+            append(note, "冻结金额是开通后付费或领取免费包时预冻结的，"
+                    + "删除对应模型的推理服务后回到账户。");
+        }
+        merged.note = note.toString();
+        return merged;
     }
 
     /**
-     * 查 TokenHub 的用量与计费概览（按量付费主要看这一块）。
+     * {@code DescribeVoucherInfo} 的入参：只取待使用、且能抵后付费的券。
      *
-     * <p>两个接口都是只读汇总，不传业务参数（按当前主账号聚合）：
+     * <p>不传 PayMode 时会把预付费专用券也算进来，那些券用不到 TokenHub 的后付费账单上。
+     */
+    private static JSONObject voucherParams() {
+        JSONObject p = new JSONObject();
+        try {
+            p.put("Limit", 100);
+            p.put("Offset", 1);
+            p.put("Status", "unUsed");
+            p.put("PayMode", "postPay");
+        } catch (Exception ignored) {
+            // put 只在 key 为 null 时抛，这里是常量
+        }
+        return p;
+    }
+
+    /** 代金券金额单位换算：micro 即 1e-8 元换算成分要再乘 1e6。 */
+    private static long voucherUnitDivisor(String unit) {
+        if (unit == null || unit.length() == 0 || "cent".equalsIgnoreCase(unit)) return 1;
+        if ("micro".equalsIgnoreCase(unit)) return 1000000L;
+        return 1;
+    }
+
+    /**
+     * 查 TokenHub 的用量与免费额度（「还能用多久」主要看这一块）。
+     *
+     * <p>三块只读数据，缺一块都会让人误判：
      * <ul>
-     *   <li>{@code DescribePaymentSummary}：计费方式汇总；</li>
-     *   <li>{@code DescribeInferPageOverview}：推理服务页 KPI 汇总。</li>
+     *   <li>{@code DescribePaymentSummary}：后付费开通了几项、免费包领了几项；</li>
+     *   <li>{@code DescribeEndpointList}：每个模型的免费额度用了多少、是否已转后付费；</li>
+     *   <li>{@code DescribeUsageRankList}：近 7 天实际吃了多少 token。</li>
      * </ul>
      * 任一接口不被账号支持（未开通、无权限、入参不匹配）时只记一条原因，
-     * 不影响另一个接口的结果。
+     * 不影响其余接口的结果。
+     *
+     * <p>不再调用 {@code DescribeInferPageOverview}：它在只开了后付费的账号上恒返回
+     * {@code InternalError}，每次查余额都白耗一次往返。
      */
     static Result tokenHubUsage(String secretId, String secretKey, String region) {
         Result merged = new Result();
-        String[][] jobs = {
-                { "计费方式汇总", "DescribePaymentSummary" },
-                { "推理用量汇总", "DescribeInferPageOverview" },
-        };
-        String firstErr = null;
-        for (int i = 0; i < jobs.length; i++) {
-            Result r = call(secretId, secretKey, region,
-                    "tokenhub.tencentcloudapi.com", "tokenhub", "2026-03-22",
-                    jobs[i][1], new JSONObject(), true);
-            merged.raw(jobs[i][0] + " " + jobs[i][1], r.body);
-            if (r.ok) {
-                merged.fields.addAll(r.fields);
-                merged.probe(jobs[i][0], jobs[i][1], "可用",
-                        r.fields.isEmpty() ? "返回里没有可展示的字段" : ("返回 " + r.fields.size() + " 项"));
+        Result pay = call(secretId, secretKey, region,
+                "tokenhub.tencentcloudapi.com", "tokenhub", "2026-03-22",
+                "DescribePaymentSummary", new JSONObject(), true);
+        merged.raw("计费方式汇总 DescribePaymentSummary", pay.body);
+        merged.probe("计费方式汇总", "DescribePaymentSummary",
+                pay.ok ? "可用" : "不可用", pay.ok ? null : pay.error);
+
+        // 1) 免费额度：按模型给余量，用尽的要标出来——用尽即开始扣现金
+        Result ep = call(secretId, secretKey, region,
+                "tokenhub.tencentcloudapi.com", "tokenhub", "2026-03-22",
+                "DescribeEndpointList", new JSONObject(), true);
+        merged.raw("推理服务列表 DescribeEndpointList", ep.body);
+        merged.probe("推理服务列表", "DescribeEndpointList",
+                ep.ok ? "可用" : "不可用", ep.ok ? null : ep.error);
+        String freeSummary = parseFreeQuota(ep, merged);
+
+        // 2) 近 7 天用量
+        Result used = call(secretId, secretKey, region,
+                "tokenhub.tencentcloudapi.com", "tokenhub", "2026-03-22",
+                "DescribeUsageRankList", usageParams(7), true);
+        merged.raw("近 7 天用量 DescribeUsageRankList", used.body);
+        merged.probe("近 7 天用量", "DescribeUsageRankList",
+                used.ok ? "可用" : "不可用", used.ok ? null : used.error);
+        parseWeekUsage(used, merged);
+
+        merged.ok = !merged.fields.isEmpty();
+        StringBuilder note = new StringBuilder();
+        if (freeSummary != null) append(note, freeSummary);
+        if (!merged.ok) {
+            merged.error = pay.error != null ? pay.error
+                    : (ep.error != null ? ep.error : used.error);
+        }
+        merged.note = note.length() > 0 ? note.toString() : null;
+        return merged;
+    }
+
+    /**
+     * {@code DescribeEndpointList}：把每个模型的免费额度摊成一行摘要。
+     *
+     * <p>{@code ChargeDetail} 是一段 JSON 字符串，里面才有 {@code FreeQuota}；
+     * 字段名按实际返回取值，不按文档猜。
+     *
+     * @return 给说明区的一句话；没有免费额度信息时返回 null
+     */
+    private static String parseFreeQuota(Result ep, Result out) {
+        if (!ep.ok || ep.json == null) return null;
+        org.json.JSONArray list = ep.json.optJSONArray("EndpointSet");
+        if (list == null) return null;
+        StringBuilder exhausted = new StringBuilder();
+        StringBuilder left = new StringBuilder();
+        int totalTokens = 0;
+        int usedTokens = 0;
+        boolean any = false;
+        for (int i = 0; i < list.length(); i++) {
+            JSONObject e = list.optJSONObject(i);
+            if (e == null) continue;
+            String name = e.optString("EndpointName", e.optString("ModelName", ""));
+            JSONObject quota = chargeDetail(e.optString("ChargeDetail", ""));
+            if (quota == null) continue;
+            any = true;
+            long total = (long) quota.optDouble("TotalQuota", 0);
+            long usedQ = (long) quota.optDouble("UsedQuota", 0);
+            totalTokens += total;
+            usedTokens += usedQ;
+            boolean done = total > 0 && usedQ >= total;
+            boolean postpaid = e.optBoolean("PaymentEnabled", false);
+            if (done) {
+                if (exhausted.length() > 0) exhausted.append("、");
+                exhausted.append(name);
+                if (postpaid) exhausted.append("（已转后付费）");
             } else {
-                String why = r.error == null ? "未知原因" : r.error;
-                merged.probe(jobs[i][0], jobs[i][1], "不可用", why);
-                if (firstErr == null) firstErr = jobs[i][0] + "：" + why;
+                if (left.length() > 0) left.append("、");
+                left.append(name).append(" 剩 ").append(wan(total - usedQ));
             }
         }
-        merged.ok = !merged.fields.isEmpty();
-        if (!merged.ok && firstErr != null) merged.error = firstErr;
-        merged.note = "用量按当前计费周期汇总，与腾讯云控制台的统计口径一致。";
-        return merged;
+        if (!any) return null;
+        StringBuilder sb = new StringBuilder();
+        if (exhausted.length() > 0) {
+            sb.append("免费额度已用完：").append(exhausted)
+              .append("，这部分调用开始从账户余额扣费。");
+        }
+        if (left.length() > 0) {
+            if (sb.length() > 0) sb.append('\n');
+            sb.append("免费额度仍有剩余：").append(left).append(" tokens。");
+        }
+        // 正文只放一句总量，明细在说明里，不挤占金额
+        if (totalTokens > 0) {
+            out.add("免费额度已用", wan(usedTokens) + " / " + wan(totalTokens) + " tokens");
+        }
+        return sb.length() > 0 ? sb.toString() : null;
+    }
+
+    /** {@code ChargeDetail} 是 JSON 字符串，取出里面的 {@code FreeQuota}。 */
+    private static JSONObject chargeDetail(String raw) {
+        if (raw == null || raw.length() == 0) return null;
+        try {
+            return new JSONObject(ApiClient.sanitizeJson(raw)).optJSONObject("FreeQuota");
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /**
+     * {@code DescribeUsageRankList} 的入参。
+     *
+     * <p>参数约束按实际接口试出来的，与文档不一致：{@code Dimension} 只认小写
+     * {@code model/apikey/endpoint}，{@code Period} 是 int64 且只能取
+     * 60 / 300 / 3600 / 86400，时间必须是 RFC3339（带 T 与 Z）。
+     */
+    private static JSONObject usageParams(int days) {
+        JSONObject p = new JSONObject();
+        try {
+            p.put("Dimension", "endpoint");
+            p.put("Period", 86400);
+            p.put("StartTime", isoDay(-(days - 1), "T00:00:00Z"));
+            p.put("EndTime", isoDay(0, "T23:59:59Z"));
+        } catch (Exception ignored) {
+            // put 只在 key 为 null 时抛，这里是常量
+        }
+        return p;
+    }
+
+    /** 相对今天偏移若干天，返回 {@code yyyy-MM-dd} 拼上给定的时分秒（接口要求 RFC3339）。 */
+    private static String isoDay(int offsetDays, String time) {
+        long t = System.currentTimeMillis() + offsetDays * 24L * 3600L * 1000L;
+        SimpleDateFormat f = new SimpleDateFormat("yyyy-MM-dd", Locale.US);
+        f.setTimeZone(TimeZone.getTimeZone("UTC"));
+        return f.format(new Date(t)) + time;
+    }
+
+    /** 近 N 天用量：末尾的 {@code TotalStats} 是区间合计。 */
+    private static void parseWeekUsage(Result used, Result out) {
+        if (!used.ok || used.json == null) return;
+        JSONObject stats = used.json.optJSONObject("TotalStats");
+        if (stats == null) return;
+        double total = stats.optDouble("TotalToken", 0);
+        if (total <= 0) return;
+        out.add("近 7 天用量", wan((long) total) + " tokens");
+        out.add("近 7 天输入", wan((long) stats.optDouble("InputTotalToken", 0)) + " tokens");
+        out.add("近 7 天输出", wan((long) stats.optDouble("OutputTotalToken", 0)) + " tokens");
+    }
+
+    /** token 数按万缩写：一屏里靠前的数字要能一眼看出量级。 */
+    private static String wan(long n) {
+        if (n < 10000) return String.valueOf(n);
+        return trimZero(Math.round(n / 1000.0) / 10.0) + " 万";
+    }
+
+    /**
+     * 查本月 TokenHub 实际扣了多少钱。
+     *
+     * <p>{@code DescribeCostSummaryByProduct} 按产品汇总，TokenHub 的产品码是 {@code p_lmp}；
+     * 同一份返回里还会有一条「月度计费精度差异」，那是账面冲销，不属于 TokenHub 消耗。
+     */
+    static Result tokenHubCost(String secretId, String secretKey) {
+        Result r = call(secretId, secretKey, "",
+                "billing.tencentcloudapi.com", "billing", "2018-07-09",
+                "DescribeCostSummaryByProduct", monthParams(), true);
+        Result out = new Result();
+        out.code = r.code;
+        out.url = r.url;
+        out.body = r.body;
+        out.raw("本月扣费 DescribeCostSummaryByProduct", r.body);
+        if (!r.ok || r.json == null) {
+            out.error = r.error;
+            out.probe("本月扣费", "DescribeCostSummaryByProduct", "不可用", r.error);
+            return out;
+        }
+        org.json.JSONArray data = r.json.optJSONArray("Data");
+        String cost = null;
+        if (data != null) {
+            for (int i = 0; i < data.length(); i++) {
+                JSONObject item = data.optJSONObject(i);
+                if (item == null) continue;
+                if ("p_lmp".equalsIgnoreCase(item.optString("BusinessCode", ""))) {
+                    cost = item.optString("RealTotalCost", "0.00");
+                    break;
+                }
+            }
+        }
+        out.ok = true;
+        out.probe("本月扣费", "DescribeCostSummaryByProduct", "可用", null);
+        if (cost != null) {
+            out.add("本月 TokenHub 扣费", cost + " 元");
+        } else {
+            out.note = "本月还没有产生 TokenHub 费用。";
+        }
+        return out;
+    }
+
+    /** {@code DescribeCostSummaryByProduct} 需要 BeginTime/EndTime（不是 StartTime）。 */
+    private static JSONObject monthParams() {
+        SimpleDateFormat f = new SimpleDateFormat("yyyy-MM-dd", Locale.US);
+        f.setTimeZone(TimeZone.getTimeZone("Asia/Shanghai"));
+        long now = System.currentTimeMillis();
+        JSONObject p = new JSONObject();
+        try {
+            String month = f.format(new Date(now)).substring(0, 7);
+            p.put("BeginTime", month + "-01");
+            p.put("EndTime", f.format(new Date(now)));
+            p.put("Offset", 0);
+            p.put("Limit", 50);
+        } catch (Exception ignored) {
+            // put 只在 key 为 null 时抛，这里是常量
+        }
+        return p;
     }
 
     /** 查 Token Plan 个人版套餐额度（含通用与混元两个产品类型）。 */
@@ -173,51 +515,64 @@ final class TencentCloudApi {
     }
 
     /**
-     * 合并三组查询的结果：有字段的进正文，没字段的进「说明」，全部进诊断。
+     * 合并各组的查询结果：有字段的进正文，没字段的进「说明」，全部进诊断。
      *
-     * <p>合并顺序固定为「账户余额 → TokenHub 用量 → Token Plan」：用户最关心
-     * 的「还有多少钱」必须第一眼看到，套餐额度是补充。
+     * <p>正文按「能不能继续用」排序，不按接口来源排：
+     * 可用额度 → 本月已扣费 → 近 7 天用量 → 免费额度 → 账户明细 → Token Plan。
+     * 余额数字单独看没有意义——本月扣了 0.56 元、余额 2.32 元，才知道还够用多久。
      */
     static Result collect(String secretId, String secretKey, boolean diagnostic) {
         Result all = new Result();
         Result bal = accountBalance(secretId, secretKey, "");
+        Result cost = tokenHubCost(secretId, secretKey);
         Result usage = tokenHubUsage(secretId, secretKey, "ap-guangzhou");
         Result plan = tokenPlanPackage(secretId, secretKey, "ap-guangzhou");
 
-        all.fields.addAll(bal.fields);
+        // 顺序即展示顺序：额度、扣费、用量、免费额度，最后才是账户明细与套餐
+        all.fields.addAll(bal.leadFields());
+        all.fields.addAll(cost.fields);
         all.fields.addAll(usage.fields);
+        all.fields.addAll(bal.restFields());
         all.fields.addAll(plan.fields);
         all.probes.addAll(bal.probes);
+        all.probes.addAll(cost.probes);
         all.probes.addAll(usage.probes);
         all.probes.addAll(plan.probes);
         all.raws.addAll(bal.raws);
+        all.raws.addAll(cost.raws);
         all.raws.addAll(usage.raws);
         all.raws.addAll(plan.raws);
 
-        all.code = bal.code > 0 ? bal.code : (usage.code > 0 ? usage.code : plan.code);
+        all.code = bal.code > 0 ? bal.code : (cost.code > 0 ? cost.code : usage.code);
         all.url = bal.url;
-        all.body = bal.body != null ? bal.body : (usage.body != null ? usage.body : plan.body);
+        all.body = bal.body != null ? bal.body : cost.body;
 
         all.ok = !all.fields.isEmpty();
         if (!all.ok) {
             all.error = bal.error != null ? bal.error
-                    : (usage.error != null ? usage.error : plan.error);
+                    : (usage.error != null ? usage.error : cost.error);
         }
         StringBuilder note = new StringBuilder();
-        if (bal.note != null) note.append(bal.note);
+        if (bal.note != null) append(note, bal.note);
         // 没开通用量统计或没买套餐都是常态：说清「没查到什么」比留白有用
         if (usage.fields.isEmpty() && usage.error != null) {
             append(note, "TokenHub 用量：" + usage.error);
         }
         if (plan.fields.isEmpty() && plan.error != null) {
-            append(note, "Token Plan：" + plan.error);
+            // 用 TokenHub 按量付费、不买 Token Plan 才是常态，这句不能像报错
+            append(note, "Token Plan：当前账户未持有套餐，按量付费直接从账户余额扣费，不影响使用。");
         }
-        if (usage.fields.size() > 0 && usage.note != null) append(note, usage.note);
+        if (usage.note != null) append(note, usage.note);
+        if (cost.note != null) append(note, cost.note);
         if (plan.fields.size() > 0 && plan.note != null) append(note, plan.note);
+        // 金额没查到但用量查到了：正文有内容也会被认为成功，失败原因必须落在说明里
+        if (bal.fields.isEmpty() && bal.error != null) {
+            append(note, "账户余额：" + bal.error);
+        }
         if (diagnostic) {
             append(note, "诊断模式：逐个接口的调用结果与原始返回见下方，可复制反馈。");
         } else {
-            append(note, "长按「查询余额」可查看各接口的诊断信息。");
+            append(note, "长按提供商可查看各接口的诊断信息。");
         }
         all.note = note.toString();
         return all;
@@ -356,8 +711,10 @@ final class TencentCloudApi {
                 out.error = describe(errCode, msg);
                 return out;
             }
+            out.json = resp;
             if ("billing".equals(service)) {
-                parseBalance(resp, out);
+                // 金额接口的字段由调用方按扣费顺序拼装，这里只摊平兜底
+                out.ok = true;
             } else if ("DescribeTokenPlanPersonalPackage".equals(action)) {
                 parsePackage(resp, action, out);
             } else {
@@ -415,22 +772,6 @@ final class TencentCloudApi {
     }
 
     // ---- 各接口返回解析 ----
-
-    /** {@code DescribeAccountBalance}：Balance 为分单位整数。 */
-    private static void parseBalance(JSONObject resp, Result out) {
-        if (resp.has("Balance")) {
-            out.add("可用余额", money(resp.opt("Balance")) + " 元");
-        }
-        out.add("账户状态", resp.has("RealName") ? (resp.optInt("RealName", 0) == 1 ? "已实名" : "未实名") : null);
-        if (resp.has("FreezeAmount")) {
-            String f = money(resp.opt("FreezeAmount"));
-            if (!"0.00".equals(f)) out.add("冻结金额", f + " 元");
-        }
-        if (resp.has("OweAmount")) {
-            String o = money(resp.opt("OweAmount"));
-            if (!"0.00".equals(o)) out.add("欠费金额", o + " 元");
-        }
-    }
 
     /** {@code DescribeTokenPlanPersonalPackage}：额度字段按接口原值显示，积分常带小数。 */
     private static void parsePackage(JSONObject resp, String action, Result out) {
@@ -542,14 +883,9 @@ final class TencentCloudApi {
         return s;
     }
 
-    /** 分单位整数 → 元，两位小数。 */
-    private static String money(Object v) {
-        try {
-            long fen = (long) Double.parseDouble(String.valueOf(v));
-            return String.format(Locale.US, "%d.%02d", fen / 100, Math.abs(fen % 100));
-        } catch (Throwable t) {
-            return String.valueOf(v);
-        }
+    /** 分单位整数 → 元，两位小数；负值也能正确输出。 */
+    private static String moneyFen(long fen) {
+        return String.format(Locale.US, "%d.%02d", fen / 100, Math.abs(fen % 100));
     }
 
     /** 数字去掉无意义的 .0，保留接口给的精度。 */

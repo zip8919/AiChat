@@ -2183,7 +2183,7 @@
     <string name="providereditactivity_062">该提供商的 %1$d 个模型都已添加。</string>
     <string name="settingsactivity_080">这个提供商还没有填写腾讯云 SecretId 与 SecretKey，填好后再查询</string>
     <string name="settingsactivity_081">这个平台还没配置余额接口路径，请在提供商设置里选择平台或填写路径</string>
-    <string name="providereditactivity_065">在腾讯云访问管理中创建的子账号密钥，需具备只读访问权限（如 QcloudBillingReadOnlyAccess）。查询只读取余额与套餐额度，不改动账户</string>
+    <string name="providereditactivity_065">用腾讯云访问管理中创建的子账号密钥。查询余额需要费用中心的只读权限（如 QcloudBillingReadOnlyAccess），查看 TokenHub 用量与套餐另需 QcloudTokenHubReadOnlyAccess。只读取余额和用量，不改动账户</string>
     <string name="updatemanager_019">检查更新失败（HTTP %1$d），请稍后再试</string>
     <string name="mainactivity_171">查看详情</string>
     <string name="mainactivity_172">公告</string>
