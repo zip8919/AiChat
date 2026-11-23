@@ -455,6 +455,20 @@ final class RendererAssets {
             // __thinkOpen 只记录「用户手动点过 toggle」的块（hasOwnProperty 区分
             // 显式折叠 false 与「从未操作过」），手动状态优先级最高，不被自动流程覆盖。
             "window.__thinkOpen=window.__thinkOpen||{};" +
+            // 展开状态的实际 key：消息 data-idx + 块序号。
+            //
+            // 服务端写进 data-think-key 的是「这块在本段文本里的序号」，同一条
+            // 消息的 base / tail 各自从 0 数，光用序号会让不同消息、不同段落
+            // 的块重名——用户展开一条消息的思考，别的消息也跟着展开。拼上
+            // 最近的 .msg[data-idx] 就唯一了。节点重建后重算，结果不带内容，
+            // 所以流式增长期间恒定，手动展开不会被下一帧冲掉。
+            "window.__thinkKey=function(it){" +
+            "if(it.__thKey!==undefined)return it.__thKey;" +
+            "var raw=it.getAttribute('data-think-key')||'';var p=it,mi='',n=0;" +
+            "while(p&&p.nodeType===1&&n++<12){" +
+            "var di=p.getAttribute('data-idx');" +
+            "if(di!==null&&di!==''){mi=di;break;}p=p.parentNode;}" +
+            "var k=mi+'#'+raw;it.__thKey=k;return k;};" +
             // 只有仍在 .stream-tail 里的块才算「正在输出」：commit 进 base、或整页
             // 重建后落在 .content 里的历史消息，一律视为已结束，不自动展开。
             "window.__inTail=function(n){var p=n,i=0;" +
@@ -537,14 +551,18 @@ final class RendererAssets {
             "for(var i=0;i<w.length;i++){" +
             "var it=w[i];" +
             "var lv=(window.__nextReal(it)?0:1);" +
+            "var inTail=window.__inTail(it);" +
+            "var running=inTail&&it.getAttribute('data-think-live')==='1';" +
             // 状态没变就整趟跳过：这是「不闪、不卡」的关键，重复写
-            // display / textContent 会让浏览器重排，安静的时候一个字都不用改
-            "if(it.__thOpen!==undefined&&it.__thLive===lv)continue;" +
+            // display / textContent 会让浏览器重排，安静的时候一个字都不用改。
+            // 跳过条件里必须带 running：thinking 结束时属性从 1 变 0、而节点
+            // 可能被渐显就地复用（不是重建），只比 lv 会漏掉这次转换。
+            "if(it.__thOpen!==undefined&&it.__thLive===lv&&it.__thRun===running)continue;" +
             "var b=it.querySelector('.thinking-block');" +
             "var t=it.querySelector('.thinking-toggle');" +
             "if(!b||!t)continue;" +
-            "var k=it.getAttribute('data-think-key');" +
-            // 用户点过 → 尊重手动；否则：进行中(live=1 且在 tail) 自动展开，结束自动折叠
+            "var k=window.__thinkKey(it);" +
+            // 用户点过 → 尊重手动；否则：进行中 自动展开，结束自动折叠
             "var m=(k&&Object.prototype.hasOwnProperty.call(window.__thinkOpen,k))" +
             "?!!window.__thinkOpen[k]:null;" +
             // 用户在看这一块（手动展开过）：绝不自动折回去。
@@ -552,15 +570,18 @@ final class RendererAssets {
             // 又把 display 写回 none。
             "if(m===true){if(it.__thOpen===1)continue;" +
             "if(b.style.display!=='block'){b.style.display='block';t.textContent='@@L_FOLD@@';}" +
-            "it.__thOpen=1;it.__thLive=lv;continue;}" +
-            "var live=lv===1&&window.__inTail(it);" +
-            // 还在输出、也还没关闭的思考块（data-think-live="1"）一律展开：
-            // 生成过程中用户要读的就是它，自动折起来既打断阅读，也要多一次点击。
-            // 思考结束（模型开始写回答）时上面的 lv 已经是 0，照常自动收起。
-            "var running=live&&it.getAttribute('data-think-live')==='1';" +
+            "it.__thOpen=1;it.__thLive=lv;it.__thRun=running;continue;}" +
+            "var live=lv===1&&inTail;" +
+            // 还在输出、也还没关闭的思考块（data-think-live="1"）一律展开，
+            // 不再要求「思考块处在末尾」：流式每一帧整段重建，正文往往比
+            // [/thinking] 早一帧到 DOM，此时 lv 已经是 0；若把 running 挂在
+            // live 上，它就会跟着失效，块在思考没写完时被折起来 —— 这正是
+            // 「生成时思考自动折叠」残留的那条路径。
+            // 思考真正结束（data-think-live="0"）后才按正文进度自动收起。
             "var open=(m===null)?(live||running):m;" +
             "it.__thOpen=open?1:0;" +
             "it.__thLive=lv;" +
+            "it.__thRun=running;" +
             "b.style.display=open?'block':'none';" +
             "if(open){t.textContent='@@L_FOLD@@';}" +
             "else{var n=parseInt(t.getAttribute('data-tok'),10);if(!(n>0))n=1;" +
@@ -571,7 +592,7 @@ final class RendererAssets {
             // 展开状态，硬去重反而可能误删不同轮次、前缀相同的思考块。
             "window.toggleThinking=function(btn){" +
             "var b=btn.nextElementSibling;if(!b)return;" +
-            "var w=btn.parentNode;var k=w?w.getAttribute('data-think-key'):null;" +
+            "var w=btn.parentNode;var k=w?window.__thinkKey(w):null;" +
             "var open=b.style.display==='none';" +
             "b.style.display=open?'block':'none';" +
             "if(open){btn.textContent='@@L_FOLD@@';}" +

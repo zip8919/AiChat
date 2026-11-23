@@ -862,15 +862,20 @@ public class MessageHtmlRenderer {
                     // 尾部可能还有半句被截断的 markdown，按原样渲染即可。
                     int thinkTok = estimateTokens(thinking.replace("[thinking]", ""));
                     // 流式每个分片都会整段重建 HTML，思考块的展开状态必须靠一个
-                    // 稳定 key 跨重建恢复。取「开头 64 字」做指纹：流式内容只在
-                    // 末尾增长，前缀不变；同一段思考在「未闭合 → 闭合」两种形态
-                    // 下也拿到同一个 key，展开状态不会跳变。
+                    // 稳定 key 跨重建恢复。
+                    //
+                    // key 只能取「这块在全文里的序号」，绝不能掺内容：
+                    // 早先用「开头 64 字」的 hash，思考短于 64 字时内容每长一个字
+                    // hash 就变一次，用户点开的块下一帧按新 key 找不到记录，立刻被
+                    // 自动规则折回去 —— 表现就是「手动展开后马上又折叠」。
+                    // 序号在同一条消息里只随块的出现顺序变化，流式增长、未闭合 →
+                    // 闭合都不会变；跨消息的串扰由 JS 侧拼上消息 data-idx 解决。
                     // data-think-live=1 表示这段思考还在输出（未收到 [/thinking]）。
                     // JS 侧只对「仍在 tail 里」的 live 块自动展开；等闭合标记到达、
                     // 或本轮被 commit 进 base 后，同一块自动折叠。历史消息整页重建
                     // 时块直接落在 .content 里、不在 tail 内，一律折叠，不会误展开。
                     html.append("<div class=\"thinking-wrap\" data-think-key=\"")
-                        .append(thinkingKey(thinking)).append("\" data-think-live=\"1\">")
+                        .append(thinkingKey(blocks)).append("\" data-think-live=\"1\">")
                         .append("<div class=\"thinking-toggle\" data-tok=\"").append(thinkTok)
                         .append(Strings.get(R.string.messagehtmlrenderer_025))
                         .append(formatTokens(thinkTok)).append(" tokens）──</div>")
@@ -888,7 +893,7 @@ public class MessageHtmlRenderer {
                 int thinkTok = estimateTokens(thinking);
                 // 已闭合（思考结束）：live=0，JS 会自动折叠，除非用户手动展开过。
                 html.append("<div class=\"thinking-wrap\" data-think-key=\"")
-                    .append(thinkingKey(thinking)).append("\" data-think-live=\"0\">")
+                    .append(thinkingKey(blocks - 1)).append("\" data-think-live=\"0\">")
                     .append("<div class=\"thinking-toggle\" data-tok=\"").append(thinkTok)
                     .append(Strings.get(R.string.messagehtmlrenderer_026))
                     .append(formatTokens(thinkTok)).append(" tokens）──</div>")
@@ -925,19 +930,20 @@ public class MessageHtmlRenderer {
     }
 
     /**
-     * 思考块的稳定标识：取「前 64 个字符」的哈希。
+     * 思考块的稳定标识：这块在本段文本里的出现序号。
      *
-     * <p>为什么不用序号：base 与 tail 是两段独立文本、各自从 0 开始渲染，
-     * 序号必然重叠——base 里的历史思考块和 tail 里正在输出的新块会同名，
-     * 展开状态互相串。内容指纹天然区分：两段文本里的思考内容不同，
-     * 哈希就不同。
+     * <p>为什么不能用内容指纹：早先取「前 64 个字符」的哈希，思考短于 64 字时
+     * 内容每长一个字哈希就变一次；流式每 200ms 整段重建 HTML，用户点开的块
+     * 在下一帧按新 key 找不到记录，立刻被自动规则折回去 —— 这就是「生成时
+     * 手动展开马上又折叠」的直接原因。序号只随块的出现顺序变化，输出过程中
+     * 恒定，未闭合 → 闭合也不变。
      *
-     * <p>为什么取前缀而不是全文：流式时内容只在末尾增长，全文哈希每片都变，
-     * 展开状态就永远对不上；前缀在整个输出过程中不变，闭合后也一致。
+     * <p>序号会在 base / tail 两段文本里各自从 0 开始，可能重名；JS 侧按
+     * 「消息 data-idx + 序号」组合使用，跨消息、跨段落都不会串。commit 之后
+     * 块本来就走默认折叠，不需要延续 tail 期间的序号。
      */
-    private static String thinkingKey(String thinking) {
-        String head = thinking.length() > 64 ? thinking.substring(0, 64) : thinking;
-        return Integer.toHexString(head.hashCode());
+    private static String thinkingKey(int idx) {
+        return "t" + idx;
     }
 
     /**
