@@ -433,7 +433,10 @@ final class MarkdownPipeline {
                // 这一版页面「只属于」哪个消息列表：宿主下发追加/流式脚本时会带上它，
                // 页面一比对就知道脚本是不是发给自己的。不带的话，切会话/重建时两版
                // 页面交错，迟到的帧会写进别人的气泡，或者写到页面外
-               "<script>\nwindow.__acMsgList=" + msgListId + ";\n</script>\n" +
+               "<script>\nwindow.__acMsgList=" + msgListId + ";\n" +
+               // 思考块诊断开关：只在 debug 包打开。JS 侧据此决定是否挂
+               // MutationObserver、是否把每条记录经 Android.thinkTrace 落到文件。
+               "window.__TH_DIAG=" + BuildConfig.DEBUG + ";\n</script>\n" +
                "<div id=\"msgs\">\n" + bodyHtml + "\n</div>\n" +
                "<script>\n" + RendererAssets.localize(RendererAssets.JS) + "\n</script>\n" +
                "</body>\n</html>";

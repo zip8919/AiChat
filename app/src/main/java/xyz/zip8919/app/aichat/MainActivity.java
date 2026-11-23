@@ -4676,6 +4676,20 @@ public class MainActivity extends ThemedActivity {
     // ========== JavaScript bridge ==========
 
     class JsBridge {
+        /**
+         * 思考块诊断上报：页面每发生一次「定态 / 点击 / display 被改写」都调这里，
+         * 落到 {@link ThinkLog} 的文件里。debug 包才写，正式包直接返回。
+         */
+        @JavascriptInterface
+        public void thinkTrace(final String line) {
+            if (line == null || !ThinkLog.ENABLED) return;
+            new Thread(new Runnable() {
+                public void run() {
+                    ThinkLog.line(MainActivity.this, line);
+                }
+            }, "think-trace").start();
+        }
+
         @JavascriptInterface
         public void copyCode(final String code) {
             LogUtil.d(TAG, "JsBridge.copyCode: len=%s", code == null ? "null" : code.length());

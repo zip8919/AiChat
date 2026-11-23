@@ -34,7 +34,8 @@ final class RendererAssets {
                 .replace("@@L_429_PREFIX@@", Strings.get(R.string.renderer_017))
                 .replace("@@L_429_DEFAULT@@", Strings.get(R.string.renderer_018))
                 .replace("@@L_RETRYING@@", Strings.get(R.string.renderer_019))
-                .replace("@@L_SHOW_ALL@@", Strings.get(R.string.renderer_020));
+                .replace("@@L_SHOW_ALL@@", Strings.get(R.string.renderer_020))
+                .replace("@@L_THINKING@@", Strings.get(R.string.renderer_021));
     }
 
     /**
@@ -455,6 +456,18 @@ final class RendererAssets {
             // __thinkOpen 只记录「用户手动点过 toggle」的块（hasOwnProperty 区分
             // 显式折叠 false 与「从未操作过」），手动状态优先级最高，不被自动流程覆盖。
             "window.__thinkOpen=window.__thinkOpen||{};" +
+            // 每条折叠记录带上「第几轮生成」的戳。
+            //
+            // 流式期间 tail 的结构每帧都可能变（markdown 补全、渐显层重画），
+            // 变一次思考块的 DOM 节点就是全新的一个：节点上的 __thWasLive
+            // 自然是空的。旧代码把「节点是新的 + 正在输出」当成「上一轮的
+            // 残留记录」，直接 delete 掉用户刚写进去的折叠状态 —— 用户点一下
+            // 收起，下一帧就被删记录、下一帧 applyThinkingStates 又按 live 自动
+            // 展开，屏幕上就是「怎么点都折不起来」。
+            // 改用轮次戳判定：只有记录来自「另一轮生成」才作废，同一轮内的
+            // 重建一律保留用户的选择。
+            "window.__thinkRnd=window.__thinkRnd||{};" +
+            "window.__thRound=window.__thRound||1;" +
             // 展开状态的实际 key：消息位置 + 块序号。
             //
             // 服务端写进 data-think-key 的是「这块在本段文本里的序号」，同一条
@@ -468,15 +481,29 @@ final class RendererAssets {
             // 就缓存在消息节点上（流式只重建 tail 内容，消息节点本身不重建）。
             "window.__thinkKey=function(it){" +
             "if(it.__thKey!==undefined)return it.__thKey;" +
-            "var raw=it.getAttribute('data-think-key')||'';var p=it,mi='',n=0;" +
+            // 先定位所属消息：消息这一维不看属性，只看 DOM 位置，
+            // 这样即使某份节点缺属性，也不会退化成全局共用一个 key。
+            "var p=it,mi='',n=0;" +
             "while(p&&p.nodeType===1&&n++<14){" +
             "if((' '+((p.className&&p.className.baseVal)||p.className||'')+' ').indexOf(' msg ')>=0)break;" +
             "p=p.parentNode;}" +
-            "if(p&&p.nodeType===1){" +
+            "var host=null;" +
+            "if(p&&p.nodeType===1){host=p;" +
             "if(p.__mi===undefined){var all=document.getElementsByClassName('msg'),pos=-1;" +
             "for(var j=0;j<all.length;j++){if(all[j]===p){pos=j;break;}}" +
             "p.__mi='p'+pos;}" +
             "mi=p.__mi;}" +
+            "var raw=it.getAttribute('data-think-key')||'';" +
+            // 属性缺失时按「块在所属消息里的序号」兜底。
+            // 实测日志里出现过 key 尾巴为空（p5#）：同一时刻页面上并存着
+            // 分属两份容器的思考块，其中一份没有 data-think-key。点击记在
+            // p5#、apply 读 p5#t0，两个 key 对不上，用户点展开就永远不生效。
+            // 用位置兜底后，两份节点各自拿到互不相同的稳定 key。
+            "if(!raw){" +
+            "var host2=host||document;" +
+            "var ws=host2.getElementsByClassName('thinking-wrap'),idx=-1;" +
+            "for(var q=0;q<ws.length;q++){if(ws[q]===it){idx=q;break;}}" +
+            "raw='w'+idx;}" +
             "var k=mi+'#'+raw;it.__thKey=k;return k;};" +
             // 只有仍在 .stream-tail 里的块才算「正在输出」：commit 进 base、或整页
             // 重建后落在 .content 里的历史消息，一律视为已结束，不自动展开。
@@ -551,58 +578,311 @@ final class RendererAssets {
             // 现在：块的状态记在节点上（__thOpen / __thSig），只在「节点首次出现」
             // 和「块离开 / 进入 tail」这两个时刻定一次态，之后只有用户点击才改。
             // 中间每帧一律跳过，不重写 display，也就不再有抖动。
+            // 结构归一化：把流式途中套坏的思考块重排回 wrap > toggle + block。
+            //
+            // 逐字渐显是按「单位」往已显示区追加的，一旦某帧的锚点栈指到了
+            // 上一层的 .thinking-toggle，后面所有标签就都往它里面长，形成
+            // wrap > toggle > toggle > … > block（实测日志里连出 5 层）。
+            // 这种树有两个后果：
+            //   1) 每个 toggle 都带 onclick，一次点击冒泡触发多次，展开/折叠
+            //      互相抵消——日志里同一毫秒两条 click（open=1 后紧接 open=0）
+            //      就是它，用户感受是「偶尔能、偶尔不能」；
+            //   2) block 的父节点不再是 wrap，按父节点算 key 会算错。
+            //
+            // 只把内层 toggle 解包还不够：block 会落在上一层 toggle 里，
+            // 父节点仍然不对。这里直接把 wrap 的内部重排成标准结构：
+            // 取最外层 toggle（带 onclick 的那个）和最后一个 block（内容最全），
+            // 摘下来重新挂到 wrap 下，中间那些壳全部丢掉。
+            // 不动 style.display，用户当前的展开状态原样保留。
+            // 结构归一化：只摘掉多余 toggle 的点击与显示，绝不搬动任何节点。
+            //
+            // 逐字渐显是按「单位」往已显示区追加的，某一帧锚点栈指到上一层的
+            // .thinking-toggle 后，后面所有标签就都往它里面长，形成
+            // wrap > toggle > toggle > … > block（日志里连出 5 层）。
+            // 每个 toggle 都带 onclick，点一次事件冒泡把几个全触发一遍，
+            // 奇数层展开、偶数层折回——用户感受是「偶尔能、偶尔不能」。
+            //
+            // 上一版在这里把 block 摘下来重挂、把 wrap 清空重建，结果渐显
+            // 下一帧又套回去，__thFix 每帧都返回 1（日志里几十条 flatten
+            // fixed=1），DOM 被反复替换：用户点中的那个节点在下一帧就没了，
+            // 于是「点展开没反应 / 按钮写着展开但内容已经展着」。
+            //
+            // 现在只做两件不动树的事：
+            //   1) 第一个 toggle 之外的 toggle 全部去掉 onclick（冒泡不再重复触发）
+            //   2) 这些多余的 toggle 设 display:none（不占版面、不显示重复文案）
+            // block 留在原处，逐字渐显的锚点栈全部有效，DOM 完全稳定。
+            "window.__thFix=function(w){" +
+            "if(!w||!w.getElementsByClassName)return 0;" +
+            "var ts=w.getElementsByClassName('thinking-toggle');" +
+            "if(ts.length<=1)return 0;" +
+            // 顺序不能反：先把内容块提到 wrap 的直接子层，再去隐藏多余的折叠条。
+            //
+            // 上一版直接给多余的 toggle 设 display:none，而块恰好套在它里面——
+            // 于是「把思考内容一起藏掉了」，用户看到的就是「完全不显示思考内容、
+            // 点折叠按钮也没反应」（点了只改了块的 display，祖先还是 none）。
+            // 这里只移动节点、不重建：块里的文字、渐显锚点、展开状态全部保持有效。
+            "var bl=w.getElementsByClassName('thinking-block');" +
+            "var b=bl.length?bl[0]:null;" +
+            "if(b&&b.parentNode!==w){try{w.appendChild(b);}catch(x){}}" +
+            "var n=0;" +
+            // 文档序 = 外层在前，ts[0] 就是最外层那个（带正确 onclick 的）
+            "for(var i=1;i<ts.length;i++){" +
+            "var e=ts[i];if(!e)continue;" +
+            "if(e.__thMute===1)continue;" +
+            "e.__thMute=1;e.onclick=null;" +
+            // 兜底：万一这层里还包着内容块（上面没提干净），绝不隐藏它
+            "var eb=e.getElementsByClassName('thinking-block');" +
+            "if(eb.length===0){try{e.style.display='none';}catch(x){}}" +
+            "n++;" +
+            "}" +
+            "return n;};" +
+            "window.__thFlatten=function(root){" +
+            "if(!root||!root.getElementsByClassName)return 0;" +
+            "var wraps=root.getElementsByClassName('thinking-wrap');" +
+            "var fixed=0;" +
+            // 倒序 + 复查 length：修好一个 wrap 会改变集合，从尾部往前不会漏
+            "for(var i=wraps.length-1;i>=0;i--){" +
+            "if(i<wraps.length&&window.__thFix(wraps[i]))fixed++;" +
+            "}" +
+            "if(fixed)window.__thRec('flatten fixed='+fixed);" +
+            "return fixed;};" +
             "window.applyThinkingStates=function(root){" +
             "if(!root||!root.getElementsByClassName)return;" +
             // getElementsByClassName 返回活动集合，取 length/索引都是 O(1) 级；
             // querySelectorAll 每帧都要遍历整棵子树做选择器匹配，正文越长越慢。
             "var w=root.getElementsByClassName('thinking-wrap');" +
             "if(w.length===0)return;" +
+            // 健康的树里每块正好一个 wrap、一个 toggle、一个 block。数量对不上
+            // 说明逐字渐显在某一帧把 toggle 套进了 toggle（见 __thFlatten 注释）。
+            // 判等是活动集合的 length，常数级，不会拖慢每一帧。
+            "var togs=root.getElementsByClassName('thinking-toggle');" +
+            "var blks=root.getElementsByClassName('thinking-block');" +
+            // 数量对不上就修：toggle 多了（套娃）或 block 少了（被吃掉/藏起来）都要修。
+            // 两个 length 都是活动集合的常数级读取，不会拖慢每一帧。
+            "if(togs.length!==w.length||blks.length!==w.length){window.__thFlatten(root);" +
+            "w=root.getElementsByClassName('thinking-wrap');" +
+            "if(w.length===0)return;}" +
             "for(var i=0;i<w.length;i++){" +
             "var it=w[i];" +
-            // 唯一的自动依据：这块还在不在 .stream-tail 里（= 本轮还在生成）。
+            // 判断依据排优先级，越靠前越可靠：
+            //   1. 用户点过 → 按用户的（唯一有绝对权限的来源）；
+            //   2. data-think-live="1" → 服务端明确说「这段思考还没闭合」（正在写）；
+            //   3. 块在 .stream-tail 里 → 本轮正在生成；
+            //   4. 以上都不是 → 已归档，默认折叠。
             //
-            // 不再看「思考块后面有多少正文」：那句话本意是「等模型开始写回答
-            // 再收起」，但只要模型边想边写、或者流式把正文早一帧推进 DOM，
-            // 块就会在思考没写完时被折起来，用户点开又在下一次重绘时被折回去。
-            // 生成期间一律展开，读完时间线由用户自己控制；本轮结束、节点被
-            // commit 进 base 后才默认折叠（那时它也离开 tail 了）。
+            // 反复出问题的根源是只认第 3 条：流式重建时块可能被写进 base、
+            // 也可能因 JSON/HTML 转义差异落到 tail 之外，此时「不在 tail」
+            // 会被误判成「已结束」，块在思考中途就被折起来，用户点开下一帧
+            // 又折回。把服务端自己的 live 标记提到前面，就不依赖节点位置。
+            // 属性缺失时（标签在流式途中被截断，重建出来的 wrap 没有
+            // data-think-live，日志里表现为 live=null），用「是否还在
+            // .stream-tail 里」推断是否正在输出：tail 里的一定是本轮内容。
+            // 不这样兜底，残缺节点会走「已结束」分支被折起来，而用户点它
+            // 又因为 key 缺尾巴写不进记录，于是永远展不开。
             "var inTail=window.__inTail(it);" +
-            // 状态没变就整趟跳过：这是「不闪、不卡」的关键，重复写
-            // display / textContent 会让浏览器重排，安静的时候一个字都不用改。
-            "if(it.__thOpen!==undefined&&it.__thSig===inTail)continue;" +
+            "var lvA=it.getAttribute('data-think-live');" +
+            "var live=(lvA==null||lvA==='')?inTail:(lvA==='1');" +
+            "var sig=(live?'L':'')+(inTail?'T':'');" +
             "var b=it.querySelector('.thinking-block');" +
             "var t=it.querySelector('.thinking-toggle');" +
             "if(!b||!t)continue;" +
             "var k=window.__thinkKey(it);" +
-            // 用户点过 → 尊重手动，优先级最高
+            // 「上一轮已结束」→「这一轮又开始输出」时，把上一轮留下的折叠记录作废。
+            //
+            // 用户对一段已闭合的思考点过收起，那条 false 会一直挂在
+            // __thinkOpen 上；下一轮思考复用了同一个块（服务端续写、或重新生成
+            // 落在同一条消息），live 又变成 1，这段旧记录就会把自动展开压掉，
+            // 表现正是「重新测试一次，又是上次那样折着」。
+            //
+            // 判「上一轮」只能靠轮次戳，不能靠节点新旧：流式期间 tail 每帧
+            // 都可能重画，节点一直是新的，按节点判会把同一轮里用户刚点的
+            // 收起也一并作废（v1.21.36 的「生成过程折叠不了」）。
+            "if(live&&it.__thWasLive!==1&&k&&window.__thinkRnd[k]!==window.__thRound){" +
+            "delete window.__thinkOpen[k];delete window.__thinkRnd[k];}" +
+            "it.__thWasLive=live?1:0;" +
             "var m=(k&&Object.prototype.hasOwnProperty.call(window.__thinkOpen,k))" +
             "?!!window.__thinkOpen[k]:null;" +
-            "if(m===true){if(it.__thOpen===1)continue;" +
-            "if(b.style.display!=='block'){b.style.display='block';t.textContent='@@L_FOLD@@';}" +
-            "it.__thOpen=1;it.__thSig=inTail;continue;}" +
-            "var open=(m===null)?inTail:m;" +
+            // 正在输出的思考块（live=1）无论如何都要展开：
+            // 只有用户亲手折叠过（m===false）才允许收起。这一段必须是「硬」的——
+            // 用户报的「生成中自动折叠、点了又折回」就是这里被软判定放过了。
+            "var open;" +
+            "if(live){open=(m===false)?false:true;}" +
+            "else if(m!==null){open=m;}" +
+            "else{open=inTail;}" +
+            "var same=(it.__thOpen===(open?1:0))&&it.__thSig===sig;" +
             "it.__thOpen=open?1:0;" +
-            "it.__thSig=inTail;" +
-            "b.style.display=open?'block':'none';" +
-            "if(open){t.textContent='@@L_FOLD@@';}" +
-            "else{var n=parseInt(t.getAttribute('data-tok'),10);if(!(n>0))n=1;" +
-            "t.textContent='@@L_EXPAND@@'+window.fmtTok(n)+' tokens）──';}}};" +
-            // 重复内容不在这里靠 DOM 去重治理：根因在 Java 侧插入工具卡片前
-            // 漏了 commitTail，导致同一轮 display 同时留在 tail 又被当增量
-            // 追加进 base。已在 ChatStreamRunner 修源头；DOM 侧只负责恢复
-            // 展开状态，硬去重反而可能误删不同轮次、前缀相同的思考块。
-            "window.toggleThinking=function(btn){" +
-            "var b=btn.nextElementSibling;if(!b)return;" +
-            "var w=btn.parentNode;var k=w?window.__thinkKey(w):null;" +
+            "it.__thSig=sig;" +
+            // display 与按钮文案必须各自对齐实际状态，两者都要幂等。
+            //
+            // 旧写法只在「定态标记没变」(same) 时写文案，而 display 是
+            // 「实际值不符才写」。一旦 display 被外部改动、定态标记却还是旧值，
+            // 就只改了 display 不改文案——用户看到按钮写着「点击展开」，
+            // 内容却已经摆在那儿展开着，点一下反而收紧，观感就是「按钮反了」。
+            // 改成各自比对实际值：一致时不产生任何写入（安静时零重排），
+            // 不一致时立刻纠正，文案与 display 永远同步。
+            "var want=open?'block':'none';" +
+            "var cur=b.style.display||'';" +
+            "var dispChanged=(cur!==want);" +
+            "if(dispChanged)b.style.display=want;" +
+            // 文案按 data-tok 算；data-tok 为 0 的是「还在输出」的块，
+            // 这时候根本还没有可信的数字，显示占位文案而不是「1 tokens」。
+            "var tokN=parseInt(t.getAttribute('data-tok'),10);if(!(tokN>0))tokN=0;" +
+            "var wantTxt=open?'@@L_FOLD@@':(tokN>0" +
+            "?('@@L_EXPAND@@'+window.fmtTok(tokN)+' tokens）──')" +
+            ":'@@L_EXPAND@@@@L_THINKING@@');" +
+            "var txtChanged=(t.textContent!==wantTxt);" +
+            "if(txtChanged)t.textContent=wantTxt;" +
+            "if(dispChanged||txtChanged){" +
+            "window.__thMark(it,b,(dispChanged?'fix:':'txt:')+sig,open);" +
+            "}else if(!same){" +
+            "window.__thMark(it,b,'apply:'+sig,open);" +
+            "}" +
+            "}" +
+            "};" +
+            // ---- 思考块诊断（仅在 debug 包启用）----
+            //
+            // 现象是「生成中自动折叠、点开又折回」，但脚本逻辑在所有模拟场景下
+            // 都正确。剩下的可能是别的路径在写 display，或者是别的层遮住了它。
+            // 这里只记账、不修复，记录三类事实：
+            //   1) 每次定态：块标识、判定依据、结果、当时的实际 display；
+            //   2) 每次点击：点击前/后的 display 与 __thOpen；
+            //   3) 每次 display 被外部改写：observer 抓到 style 变更就记一条。
+            // 读法：Java 侧落在 ThinkLog 的文件里（debug 包）。
+            "window.__thBuf=[];window.__thT0=0;" +
+            "window.__thStamp=function(){if(!window.__thT0)window.__thT0=Date.now();" +
+            "return ((Date.now()-window.__thT0)/1000).toFixed(2)+'s';};" +
+            "window.__thRec=function(s){s=window.__thStamp()+' '+s;" +
+            "if(window.__thBuf.length>400)window.__thBuf.shift();" +
+            "try{if(window.Android&&Android.thinkTrace)Android.thinkTrace(s);}catch(e){}};" +
+            "window.__thLog=function(){return window.__thBuf.join('\\n');};" +
+            "window.__thMark=function(it,b,why,open){" +
+            "var k='';try{k=window.__thinkKey(it);}catch(e){}" +
+            "window.__thRec('mark key='+k+' why='+why+' open='+(open?1:0)+" +
+            "' disp='+(b?(b.style.display||'(empty)'):'(no-block)')+" +
+            "' live='+(it&&it.getAttribute?it.getAttribute('data-think-live'):'-')+" +
+            "' open0='+it.__thOpen+' sig='+it.__thSig);};" +
+            "window.__thOnMut=function(tg){" +
+            "if(!tg||tg.nodeType!==1)return;" +
+            "var cn=''+(tg.className||'');" +
+            "if(cn.indexOf('thinking-block')<0&&cn.indexOf('thinking-wrap')<0)return;" +
+            "var wr=cn.indexOf('thinking-wrap')>=0?tg:tg.parentNode;" +
+            "window.__thRec('mut cn='+cn.slice(0,18)+' disp='+(tg.style.display||'(empty)')+" +
+            "' open0='+(wr?wr.__thOpen:'-')+' sig='+(wr?wr.__thSig:'-'));};" +
+            "window.__thWatch=function(){" +
+            "if(!window.__TH_DIAG||!window.MutationObserver||window.__thObs)return;" +
+            "window.__thObs=new MutationObserver(function(muts){" +
+            "for(var i=0;i<muts.length;i++){window.__thOnMut(muts[i].target);}});" +
+            "var rt=document.getElementById('msgs')||document.body;" +
+            "window.__thObs.observe(rt,{subtree:true,attributes:true,attributeFilter:['style']});" +
+            // 节流的布局采样：display 说「展开」但块其实看不见时，
+            // 必须知道是尺寸为 0、被裁掉、还是被挡住。每 3 秒最多量一次。
+            "window.__thGeomTimer=setInterval(function(){" +
+            "try{window.__thGeom('poll');}catch(e){}},3000);};" +
+            // 布局探针：既然日志证明 display 一直是 block，那「看不见」只可能是
+            // 尺寸为 0、被裁掉、或被别的元素盖住。这里把这三件事都量出来。
+            "window.__thGeom=function(tag){" +
+            // 取「最后一个」思考块：第一个往往是历史消息里的，采样到的是
+            // 屏幕外很远的旧节点（日志里 wrapTop=-15923 就是这么来的），
+            // 对定位「当前正在生成的块」没有帮助。
+            "var _bl=document.getElementsByClassName('thinking-block');" +
+            "var b=_bl.length?_bl[_bl.length-1]:null;if(!b)return;" +
+            "var wr=b.parentNode;" +
+            "var r=b.getBoundingClientRect(),rw=wr?wr.getBoundingClientRect():{top:0,left:0,width:0,height:0};" +
+            "var cs=getComputedStyle(b),ws=wr?getComputedStyle(wr):cs;" +
+            "var st=b.scrollHeight,ch=b.clientHeight;" +
+            "var vh=window.innerHeight||0,med=document.documentElement?document.documentElement.clientHeight:vh;" +
+            "var out='geom '+tag+' w='+Math.round(r.width)+' h='+Math.round(r.height)+" +
+            "' top='+Math.round(r.top)+' bot='+Math.round(r.bottom)+" +
+            "' scrollH='+st+' clientH='+ch+" +
+            "' vh='+vh+' docH='+med+" +
+            // 页面上并存几份思考块：>1 说明有容器没清干净，用户点到的
+            // 那份和脚本操作的那份不是同一个节点，展开状态必然对不上。
+            "' wrapN='+(document.getElementsByClassName('thinking-wrap')||[]).length+" +
+            "' blkN='+(document.getElementsByClassName('thinking-block')||[]).length+" +
+            // 把每一份 wrap 的 key 都列出来：重复节点时能直接看出是哪几份子，
+            // 比只有一个总数有用得多。
+            "' wrapKeys='+(function(){var ws=document.getElementsByClassName('thinking-wrap');var a=[];" +
+            "for(var i=0;i<ws.length&&i<6;i++){try{a.push(window.__thinkKey(ws[i]));}catch(e){a.push('?');}}" +
+            "return a.join(',');})()+" +
+            "' key='+(function(){try{return window.__thinkKey(b.parentNode);}catch(e){return '?';}})()+" +
+            "' open0='+(b.parentNode?b.parentNode.__thOpen:'-')+" +
+            "' live='+(b.parentNode?b.parentNode.getAttribute('data-think-live'):'-')+" +
+            "' blkDisp='+(cs.display||'-')+' blkVis='+(cs.visibility||'-')+' blkOp='+(cs.opacity||'-')+" +
+            "' blkPos='+(cs.position||'-')+' blkCls='+(''+(b.className||'')).slice(0,24)+" +
+            "' wrapTop='+Math.round(rw.top)+' wrapH='+Math.round(rw.height)+" +
+            "' wrapDisp='+(ws.display||'-')+' wrapOverflow='+(ws.overflow||'-')+" +
+            "' parentCls='+(''+((wr&&wr.parentNode&&wr.parentNode.className)||'')).slice(0,24);" +
+            "if(r.width>0&&r.height>0){" +
+            "var px=r.left+Math.min(r.width/2,40),py=r.top+Math.min(r.height/2,20);" +
+            "var el=document.elementFromPoint(px,py);" +
+            "out+=' hitAtCenter='+(el?((el.tagName||'')+'.'+(''+(el.className||'')).slice(0,20)):'null')+" +
+            "' hitInBlock='+(el&&b.contains(el)?1:0);}" +
+            "var p=b,chain='';" +
+            "for(var i=0;i<6&&p&&p.nodeType===1;i++){" +
+            "var pc=getComputedStyle(p);" +
+            "chain+='<'+(p.tagName||'')+'.'+(''+(p.className||'')).slice(0,12)+" +
+            "':h'+Math.round(p.getBoundingClientRect().height)+',ov='+(pc.overflow||'-')+'>';" +
+            "p=p.parentNode;}" +
+            "window.__thRec(out+' chain='+chain);};" +
+            "try{window.__thWatch();}catch(e){};" +
+            // 点击去重：一次物理点击只能翻转一次。
+            //
+            // 实测日志（v1.21.33）里出现同一毫秒的两条 click：
+            //   key=p5#w-1 click open=1 disp=block
+            //   key=p5#t0  click open=0 disp=none
+            // 两次操作的是同一个 .thinking-block，5ms 内互相抵消，于是
+            // 「点了没反应 / 偶尔能偶尔不能」。原因是思考块在流式途中被
+            // 套成了 wrap>toggle>toggle>…>block 的多层结构（日志 chain 里
+            // 连出 5 层 thinking-tog），每个 toggle 都带 onclick，点一次
+            // 事件冒泡就把它们全触发一遍，奇数层展开、偶数层折回。
+            //
+            // 两道保险：
+            //   1) 新页面传 event 进来，同一个事件对象只处理一次（根治）；
+            //   2) 旧页面（已写进 DOM 的 onclick 只传 this）没有 event 可比，
+            //      就按「同一个 block 元素在 12ms 内只响应一次」兜住。
+            //      冒泡实测间隔 0~5ms，12ms 有 2 倍余量；用户连点最快 80ms 以上，不会误吞。
+            "window.toggleThinking=function(a,b2){" +
+            "var btn=null,ev=null;" +
+            "if(a&&a.nodeType===1){btn=a;}else{ev=a;btn=b2;}" +
+            "if(!btn)return;" +
+            "if(ev&&ev.__thDone){return;}if(ev){ev.__thDone=1;}" +
+            "var b=btn.nextElementSibling;" +
+            // 不能只认 btn.parentNode：实测日志里点击时取到的父节点并不是
+            // .thinking-wrap（同一时刻页面上并存两份思考块，其中一份的
+            // toggle 被包在别的容器里）。那样算出来的 key 少了块序号，
+            // 写进去的折叠/展开记录和 applyThinkingStates 读的 key 对不上，
+            // 用户点展开就永远不生效——这就是「点了折不动 / 点不开」。
+            // 这里向上找最近的 .thinking-wrap，找不到再退回父节点。
+            "var w=btn.parentNode,q=btn,g=0;" +
+            "while(q&&q.nodeType===1&&g++<8){" +
+            "if((''+(q.className||'')).indexOf('thinking-wrap')>=0){w=q;break;}" +
+            "q=q.parentNode;}" +
+            "if(b&&b.parentNode&&(''+(b.parentNode.className||'')).indexOf('thinking-wrap')>=0){w=b.parentNode;}" +
+            // 结构错位时 nextElementSibling 未必是正文块（toggle 被中间层包住），
+            // 那时按容器再找一次，避免「点了没反应」。
+            "if(!b||(''+(b.className||'')).indexOf('thinking-block')<0){" +
+            "b=w?w.querySelector('.thinking-block'):null;}" +
+            "if(!b)return;" +
+            // 旧 DOM 的 onclick 只传了 this，没有 event 可比；多层 toggle
+            // 嵌套时仍会被触发多次。这里按 block 元素做 70ms 窗口去重。
+            "var now=Date.now(),cs=window.__thClick;" +
+            "if(cs&&cs.el===b&&now-cs.t<12)return;" +
+            "window.__thClick={el:b,t:now};" +
+            "var k=w?window.__thinkKey(w):null;" +
             "var open=b.style.display==='none';" +
             "b.style.display=open?'block':'none';" +
             "if(open){btn.textContent='@@L_FOLD@@';}" +
             "else{" +
-            // 数值取渲染时写进 data-tok 的源码估算值；缺失时（老 DOM）退回按可见文本估算
+            // 数值取渲染时写进 data-tok 的源码估算值。data-tok=0 表示思考还在输出
+            // （还没有可信的最终数字），这时显示「思考中…」而不是拿正文长度瞎估一个数。
             "var t=parseInt(btn.getAttribute('data-tok'),10);" +
-            "if(!(t>0))t=Math.max(1,Math.round(b.textContent.length*2/3));" +
-            "btn.textContent='@@L_EXPAND@@'+window.fmtTok(t)+' tokens）──';}" +
+            "btn.textContent=(t>0)?('@@L_EXPAND@@'+window.fmtTok(t)+' tokens）──')" +
+            ":'@@L_EXPAND@@@@L_THINKING@@';}" +
             "if(k)window.__thinkOpen[k]=open;" +
+            // 记录戳上当前轮次：applyThinkingStates 靠它区分「本轮用户点的」
+            // 与「上一轮遗留的」，避免同一轮内的重建把这条记录当残留删掉。
+            "if(k)window.__thinkRnd[k]=window.__thRound;" +
+            "window.__thMark(w,b,'click',open);" +
             // 节点上的定态标记同步改掉：否则下一次重建时这个节点还是「已定态」，
             // 会被 applyThinkingStates 直接跳过，于是折叠/展开状态看起来没生效
             "if(w)w.__thOpen=open?1:0;};" +
@@ -1094,6 +1374,17 @@ final class RendererAssets {
             "t.removeChild(ck);continue;}" +
             "b.appendChild(ck);}" +
             "t.className='stream-tail';t.innerHTML='';" +
+            // 归档之后必须把渐显层的记账一起清掉：__sm.arrived 里还是「包含
+            // 刚搬进 base 的全部内容」的源码，st.root/stack 指着已经被搬走的
+            // 旧显示层。下一帧增量渲染会拿这份 arrived 在新建的 .smooth-shown
+            // 里重画一遍，于是 base 一份、tail 又一份——同一段思考在页面上
+            // 并存两个节点，用户点的是其中一份，脚本操作的是另一份，
+            // 展开状态永远对不上（日志里 key 尾巴为空、open0 反复 undefined
+            // 就是这么来的）。清成空串后，下一帧只会画真正的新内容。
+            "try{window.__sm.arrived='';window.__sm.root=null;window.__sm.stack=[];" +
+            "window.__sm.cur=0;window.__sm.paintUnits=null;window.__sm.gi=null;" +
+            "window.__sm.stackChars=null;window.__sm.stackPending=null;" +
+            "window.__sm.units=[];window.__sm.chars=0;window.__sm.show=0;}catch(e){}" +
             // 搬进来的 tail 节点按其 key 恢复展开状态（状态存在 __thinkOpen 里）
             "clearStatus();window.applyThinkingStates(b);};" +
             // ---- 横向滚动保护 ----
@@ -1311,7 +1602,14 @@ final class RendererAssets {
             "for(var y=k;y<len;y++)nu.push(u[y]);" +
             "st.chars+=ins.length;" +
             // 进度游标（字数 → 单位下标）跟着右移；锚点栈按旧的单位序列记的，作废
-            "if(st.advI!=null&&st.advI>=k)st.advI+=ins.length;" +
+            //
+            // 两个数必须一起挪：游标是「扫过前 advI 个单位正好得到 advA 个字」这一对。
+            // 只挪下标不挪字数（旧实现在这里只做了 advI+=ins.length），插入点又落在
+            // 游标之前时，这对数就对不上了——重新扫描会多算一截，游标一路冲到数组末尾，
+            // 把末尾那几个闭合标签也当成「待追加」画出去，元素栈被弹回根节点，
+            // 之后所有新字都写到块外面（思考块里的文字停在原地不再增长）。
+            "if(st.advI!=null&&st.advI>=k){st.advI+=ins.length;" +
+            "if(st.advA!=null)st.advA+=ins.length;}" +
             "st.stackChars=null;st.stackPending=null;" +
             "st.common=k;" +
             "return nu;};" +
@@ -1560,12 +1858,17 @@ final class RendererAssets {
             // 开新标签前先合并：上一段文字写入时留下的相邻文本节点，
             // 会在标签边界处各成一段，长回答里越积越多
             "if(lcIdx>=0)window.__smJoin(top);" +
-            "top.insertAdjacentHTML('beforeend','<'+x.open+'>');" +
+            // 插入「开始标签」时补成完整闭合的一对：只给 <div ...> 时解析器会
+            // 自动闭合，lastElementChild 未必是刚建的那个空元素（父节点是 <p>
+            // 时还会被 foster parenting 提到外面）。一旦取错，st.stack 就压进了
+            // 一个旧节点，后面所有子节点都往那儿长，思考块被套成
+            // wrap>toggle>toggle>…>block，一次点击冒泡触发多个 onclick，
+            // 展开与折叠互相抵消——这就是「偶尔能点开、偶尔点了没反应」。
+            "if(x.void){top.insertAdjacentHTML('beforeend','<'+x.open+'>');}" +
+            "else{top.insertAdjacentHTML('beforeend','<'+x.open+'></'+x.tag+'>');" +
             "var el=top.lastElementChild;" +
-            // 记下最后一个「直接挂在显示层下」的块：块内结构变了只拆它重画
-            // 顶层块记下自己的起始单位下标：结构变化时从这里往后重画
             "if(el)el.__at=i;" +
-            "if(el&&!x.void)st.stack.push({el:el,n:x.tag});" +
+            "if(el)st.stack.push({el:el,n:x.tag});}" +
             "continue;}" +
             // 注释 / 无法归类的原样片段
             "if(x.tok!==undefined){top.insertAdjacentHTML('beforeend',x.tok);}" +
@@ -2136,6 +2439,9 @@ final class RendererAssets {
             // 而 updateLastMsg 又会把 .content 整个 innerHTML 重设，把正在流出的
             // tail 一起抹掉 —— 用户看到的就是「回答闪一下然后凭空消失」。
             "window.appendAiDiv=function(idx){" +
+            // 新的一条回答 = 新一轮生成：折叠记录换一轮，上一轮留下的收起状态
+            // 不再压制这一轮的自动展开（见 applyThinkingStates 里的轮次判定）。
+            "window.__thRound=(window.__thRound||1)+1;" +
             // 新回答：记下「当前这一版页面里最后一条 AI 是它」。
             // 页面一旦换版，气泡跟着一起没了，onPageFinished 后按这个标记补建，
             // 不让内容落空（否则整段回答会写进旧文档，屏幕上空空如也）。

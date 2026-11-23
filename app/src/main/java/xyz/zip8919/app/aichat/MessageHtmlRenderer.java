@@ -858,9 +858,8 @@ public class MessageHtmlRenderer {
                     // 不带 toggle 的裸块，于是「多一份无法折叠的思考内容」。
                     // 这里复用闭合分支的同一套折叠结构，流式阶段也能展开/收起。
                     String thinking = text.substring(ts + 10);
-                    // 还在输出的思考没有 [/thinking] 收尾，直接估会把标记本身也算进去；
-                    // 尾部可能还有半句被截断的 markdown，按原样渲染即可。
-                    int thinkTok = estimateTokens(thinking.replace("[thinking]", ""));
+                    // 未闭合的思考块不再估算 token 数：这个数字每帧都变，会把
+                    // 折叠条那一格变成「每帧都不同」，进而带走整块思考内容的 DOM。
                     // 流式每个分片都会整段重建 HTML，思考块的展开状态必须靠一个
                     // 稳定 key 跨重建恢复。
                     //
@@ -876,10 +875,30 @@ public class MessageHtmlRenderer {
                     // 时块直接落在 .content 里、不在 tail 内，一律折叠，不会误展开。
                     html.append("<div class=\"thinking-wrap\" data-think-key=\"")
                         .append(thinkingKey(blocks)).append("\" data-think-live=\"1\">")
-                        .append("<div class=\"thinking-toggle\" data-tok=\"").append(thinkTok)
+                        // 流式期间折叠条的文字必须是「逐帧完全不变」的常量。
+                        //
+                        // 这里原来写的是估算 token 数（思考内容每长几个字就变一次），
+                        // 于是这两处每帧都不一样：折叠条的 data-tok 属性、以及紧随其后的
+                        // 那串数字文字。逐字渐显是按「单位序列」做差分的，差分一落到
+                        // 折叠条这一格，就要把从折叠条开始（含整个思考块）全部拆掉重画：
+                        // 块节点每帧换一个新的、inline 的 display:none 重新生效、
+                        // 用户手指按着的那个节点在下一帧已经不存在——表现就是
+                        // 「思考内容闪一下/整段不显示」「点折叠按钮没反应」。
+                        // 改成常量后，差分只会落在思考正文的末尾，块本身原地不动。
+                        // 注意：这里**不能**先把标签闭合再拼 onclick。
+                        // messagehtmlrenderer_025 自带结尾的引号 + onclick 属性：
+                        //   " onclick="toggleThinking(event,this)">── 展开思考（
+                        // 上一版在前面多写了一个 ">"，标签提前闭合，onclick 连同
+                        // 引号一起变成 div 的文本 —— 流式期间折叠条根本没有点击处理，
+                        // 用户点它毫无反应（日志里一条 click 都没有），
+                        // 思考一闭合、重建出带 onclick 的节点才又能点。
+                        .append("<div class=\"thinking-toggle\" data-tok=\"0\"")
                         .append(Strings.get(R.string.messagehtmlrenderer_025))
-                        .append(formatTokens(thinkTok)).append(" tokens）──</div>")
-                        .append("<div class=\"thinking-block\" style=\"display:none\">")
+                        .append(Strings.get(R.string.renderer_021))
+                        .append("</div>")
+                        // live 块不要内联 display:none：展开与否由页面按状态决定，
+                        // 内联隐藏会在每次重建后多出「先隐藏一帧、再被脚本翻开」的闪烁。
+                        .append("<div class=\"thinking-block\">")
                         .append(MarkdownPipeline.render(thinking, ctx))
                         .append("</div></div>");
                     break;

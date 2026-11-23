@@ -671,8 +671,8 @@
     <string name="messagehtmlrenderer_022">\');event.stopPropagation();return false;\"&gt;重新回复&lt;/button&gt;</string>
     <string name="messagehtmlrenderer_023">请求未完成</string>
     <string name="messagehtmlrenderer_024">请求未完成</string>
-    <string name="messagehtmlrenderer_025">\" onclick=\"toggleThinking(this)\"&gt;── 展开思考（</string>
-    <string name="messagehtmlrenderer_026">\" onclick=\"toggleThinking(this)\"&gt;── 展开思考（</string>
+    <string name="messagehtmlrenderer_025">\" onclick=\"toggleThinking(event,this)\"&gt;── 展开思考（</string>
+    <string name="messagehtmlrenderer_026">\" onclick=\"toggleThinking(event,this)\"&gt;── 展开思考（</string>
     <string name="messagehtmlrenderer_027">&lt;div class=\"tool-card\"&gt;&lt;div class=\"tool-card-head\"&gt;工具结果&lt;/div&gt;</string>
     <string name="messagehtmlrenderer_028">&lt;div class=\"tool-error\"&gt;结果格式异常，无法显示（</string>
     <string name="messagehtmlrenderer_029">" 字符）&lt;/div&gt;&lt;/div&gt;"</string>
@@ -2157,6 +2157,7 @@
     <string name="renderer_018">HTTP 429：请求过于频繁（服务端未返回具体原因）</string>
     <string name="renderer_019">正在重试…</string>
     <string name="renderer_020">直接显示</string>
+    <string name="renderer_021">思考中…）──</string>
     <string name="settingsactivity_071">货币：</string>
     <string name="settingsactivity_072">总余额：</string>
     <string name="settingsactivity_073">充值余额：</string>
