@@ -47,17 +47,17 @@ final class ChatTransport {
             JSONArray messages, boolean stream, JSONArray tools, boolean includeUsage,
             boolean sendThinking) throws Exception {
         return buildRequestBody(model, provider, thinkingLevel, messages, stream, tools,
-                includeUsage, sendThinking, 0);
+                includeUsage, sendThinking, true, false);
     }
 
     /**
-     * @param offAttempt 关闭思考的第几次尝试（见 {@link ThinkingOff#plans}）。
-     *                   端点 400/422 时由调用方递增，换下一种关闭字段重发；
-     *                   只有「思考等级=关」时才起作用。
+     * @param offIncludeNative 关闭思考时是否带上提供商自填的字段。端点 400/422
+     *                  拒收自填字段时由调用方传 false 重发：写全的家族字段继续保留，
+     *                  只去掉这一份，关闭意图不丢。
      */
     static JSONObject buildRequestBody(String model, ProviderInfo provider, String thinkingLevel,
             JSONArray messages, boolean stream, JSONArray tools, boolean includeUsage,
-            boolean sendThinking, int offAttempt) throws Exception {
+            boolean sendThinking, boolean offIncludeNative, boolean offBoolOnly) throws Exception {
         JSONObject body = new JSONObject();
         body.put("model", model);
         body.put("stream", stream);
@@ -84,11 +84,11 @@ final class ChatTransport {
             String pName = provider.thinkingParamName;
             if (pName == null || pName.trim().length() == 0) pName = "thinking";
             if ("off".equals(level)) {
-                // 关闭思考交给 ThinkingOff 按「家族 → 提供商声明 → 通用 → 不下发」
-                // 逐个方案尝试。旧版把四类关闭字段一次全发，严格端点（OpenAI 官方、
-                // 部分网关）对多出来的 thinking / chat_template_kwargs 直接 400，
-                // 降级时又把整个关闭意图丢掉，于是「选了关，模型照样思考」。
-                ThinkingOff.apply(body, provider, model, offAttempt);
+                // 关闭字段一次写全：同一份请求里带上各家认的那个键，谁认谁生效，
+                // 不认识的一律当未知字段忽略（见 ThinkingOff 的说明）。
+                // 旧版按家族只发一个、被静默忽略时不重试，是「选了关仍在思考」
+                // 的主要原因。
+                ThinkingOff.apply(body, provider, model, offIncludeNative, offBoolOnly);
             } else if ("boolean".equals(provider.thinkingType)) {
                 body.put(pName, true);
                 body.put("thinking_budget", ThinkingLevels.budget(level));
@@ -126,10 +126,11 @@ final class ChatTransport {
                 // 界面里不会提供「关闭」，全局配置可能还留着旧的 off。
                 // 这里落到最低档，既避免明知无效还发关闭字段，也让界面与实际一致。
                 //
-                // 两条判据都要看：配置负责跨重启，运行期记忆负责「刚才聊天里试出来的」。
-                // 只看配置的话，同一次运行里刚被否掉的模型，后面每条消息都还要再白试一轮。
-                boolean blocked = (m != null && m.thinkingOffBlocked)
-                        || ThinkingOff.cannotOff(model);
+                // 只看<b>探测或实测明确给出「关不掉」结论</b>的那一条（配置里的
+                // thinkingOffBlocked），不再看运行期记忆：记忆会被「某次回复恰好没有
+                // 推理痕迹」写成「能关」，也会被「一次 400」写成「关不掉」，
+                // 两种方向的误判都会让「关闭」忽明忽暗。
+                boolean blocked = m != null && m.thinkingOffBlocked;
                 if (blocked) {
                     List<String> levels = m == null ? null : m.levelList();
                     if (levels == null || levels.isEmpty()) {

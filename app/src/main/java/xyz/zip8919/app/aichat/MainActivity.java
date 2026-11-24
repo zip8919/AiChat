@@ -1800,12 +1800,13 @@ public class MainActivity extends ThemedActivity {
         ModelInfo model = currentModelInfo();
         List<String> available = (model != null && model.levelsProbed())
                 ? model.levelList() : new ArrayList<String>();
-        // 探测或实测确认关不掉思考的模型（o 系列、Gemini Pro 等），不列出「关闭」：
-        // 留着它等于给用户一个无效选项，选了也还在思考。
-        // 配置里的 thinkingOffBlocked 管跨重启，运行期记忆管「刚刚聊天里试出来的」——
-        // 两条都要看，否则刚被实测否掉的模型，下拉里还挂着「关闭」。
-        boolean offSupported = (model == null || !model.thinkingOffBlocked)
-                && (model == null || !ThinkingOff.cannotOff(model.name));
+        // 「关闭」一律保留。
+        //
+        // 旧版按探测结论（thinkingOffBlocked）把它从列表里删掉，于是同一个模型
+        // 的档位列表会随一次探测忽有忽无；探测又用固定题、短上限、非流式，
+        // 与实际聊天条件不同，结论本身并不可靠。只有真实聊天里端点明确拒收所有
+        // 关闭写法时（运行期记忆）才不列它——那一次是端点自己说的，可信。
+        boolean offSupported = model == null || !ThinkingOff.cannotOff(model.name);
         thinkingChoices.addAll(ThinkingLevels.choices(available, offSupported));
         for (String c : thinkingChoices) labels.add(ThinkingLevels.pickLabel(c));
 
@@ -1817,11 +1818,10 @@ public class MainActivity extends ThemedActivity {
 
         String level = configManager.getThinkingLevel();
         if (!offSupported && ThinkingLevels.OFF.equals(level)) {
-            // 该模型关不掉思考，旧的「关闭」已经没有意义：落到最低档并写回配置，
-            // 避免界面上显示一档、实际请求又是另一档。
+            // 端点上一轮明确拒收了所有关闭写法：这次落到最低档，但<b>不写回配置</b>。
+            // 旧版在这里 save()，把用户选的「关闭」永久改成最低档——换回一个能关的
+            // 模型时，用户会发现「关闭」虽然还在，却已经不在选中状态。
             level = ThinkingLevels.resolve(level, available, false);
-            configManager.setThinkingLevel(level);
-            configManager.save();
         }
         int levelPos = ThinkingLevels.indexIn(thinkingChoices, level);
         // 先复位再去 setSelection：setSelection 会同步触发一次 onItemSelected，

@@ -296,7 +296,10 @@ public class ModelEditActivity extends ThemedActivity {
         StringBuilder sb = new StringBuilder();
         // 关闭能力与档位、视觉同为独立结论：确认关不掉时随保存一起落盘
         if (rep.offBlocked) probedOffBlocked = Boolean.TRUE;
-        else if (Boolean.TRUE.equals(rep.offSupported)) probedOffBlocked = Boolean.FALSE;
+        else if (Boolean.TRUE.equals(rep.offSupported) || rep.offUnverifiable) {
+            // 实测能关、或这次没能判定：清掉旧结论，让「关闭」重新可用
+            probedOffBlocked = Boolean.FALSE;
+        }
         if (levelsOk) {
             probedLevels = new ArrayList<String>(rep.levels);
             thinkingCb.setChecked(true);
@@ -327,7 +330,7 @@ public class ModelEditActivity extends ThemedActivity {
         }
 
         if (rep.offBlocked) {
-            // 模型固定思考：说清楚关不掉，否则用户会以为是开关失灵，反复重选
+            // 模型没按关闭字段停下来：说明清楚，但档位里仍保留「关闭」
             sb.append("\n").append(Strings.get(R.string.capabilityprobe_024));
         }
 
@@ -397,7 +400,9 @@ public class ModelEditActivity extends ThemedActivity {
         // 关闭能力：只有确认「关不掉」才改写；能关或测不出来时保持原值
         if (rep.offBlocked) {
             target.thinkingOffBlocked = true;
-        } else if (Boolean.TRUE.equals(rep.offSupported)) {
+        } else if (Boolean.TRUE.equals(rep.offSupported) || rep.offUnverifiable) {
+            // 实测能关、或这次没能判定（换了写法、端点行为变了）：清掉旧结论，
+            // 让「关闭」重新可用。测不出来绝不能保存成「关不掉」。
             target.thinkingOffBlocked = false;
         }
         cfg.bumpProbeRevision();

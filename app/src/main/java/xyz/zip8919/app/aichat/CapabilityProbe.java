@@ -175,6 +175,8 @@ final class CapabilityProbe {
          * 思考档位里也不该出现「关闭」。
          */
         boolean offBlocked;
+        /** 关闭能力这次没测出来（默认就不思考、被拒、网络问题）：不据此改动已有结论。 */
+        boolean offUnverifiable;
         /** 服务端对所有档位都回 200，档位结论不可区分 */
         boolean unverifiable;
         /** 六档逐个明确被拒：可以据此认定该模型不吃思考参数 */
@@ -217,6 +219,10 @@ final class CapabilityProbe {
             rep.error = Strings.get(R.string.capabilityprobe_005);
             return rep;
         }
+        // 每次探测都从干净状态开始：上一次的结论不能顺着本次的判定继续生效。
+        // 「关不掉」只在真实聊天里由端点明确拒绝时落地（见 ChatStreamRunner），
+        // 探测本身只给建议，不改配置。
+        ThinkingOff.forget(model);
 
         String url = Endpoint.chatUrl(snap);
 
@@ -235,8 +241,10 @@ final class CapabilityProbe {
             if (Boolean.FALSE.equals(off.supported)) {
                 // 关不掉思考 ≠ 没有强度档位：o 系列、Gemini Pro 这类模型本来就
                 // 没有「关闭」，但 low / medium / high 是实打实支持的。
-                // 只标记「档位里别给关闭」，档位结论原样保留。
+                // 只标记「关不掉」，档位结论原样保留。
                 rep.offBlocked = true;
+            } else if (off.supported == null) {
+                rep.offUnverifiable = true;
             }
         }
 
@@ -335,54 +343,57 @@ final class CapabilityProbe {
     }
 
     /**
-     * 关闭思考探测：按真实聊天的关闭方案逐个试，看关掉之后还有没有推理痕迹。
+     * 关闭思考探测：同一道题发两次——一次不带任何思考参数，一次带上写全的关闭字段。
      *
-     * <p>判据只有一条：回复里还有没有 {@code reasoning_content} 或推理 token。
-     * 端点对不认识的字段一律回 200，只看状态码会把「静默忽略」当成「关掉了」，
-     * 这正是旧版「选了关、模型还在想」的原因之一。
+     * <p><b>为什么不再「逐个方案试」</b>：关闭字段一次写全之后，方案已经只有一种；
+     * 更重要的是旧判据本身不成立。旧版只看「关掉之后还有没有推理痕迹」，于是：
+     * <ul>
+     *   <li>端点默认就关着思考时，任何字段都不比基线低，能关的模型被报成关不掉；</li>
+     *   <li>网关把 {@code reasoning_content} 丢掉、只在用量里留推理计数时，</li>
+     *   <li>端点对未知字段一律回 200，只看状态码会把忽略当成生效。</li>
+     * </ul>
      *
-     * <p>关闭方案与聊天路径共用 {@link ThinkingOff}：探测认为可行的方案，真实请求
-     * 也正是按同一顺序下发的，两边不会得出互相矛盾的结论。
+     * <p>现在的判据是一组对照：默认那次有推理、关掉那次没有，才算「关得掉」；
+     * 两次都有推理，才算「关不掉」。任一次失败（网络、限流、非 400 的错误）都
+     * 不下结论——「测不出来」绝不能当成「关不掉」，否则界面会据此删掉「关闭」。
      *
-     * @return true 能关 / false 关不掉 / null 没能判定（网络、限流、中途停止）
+     * <p>请求体与聊天路径共用 {@link #offBody}，探测发出去的就是聊天会发的那份。
+     *
+     * @return true 能关 / false 关不掉 / null 没能判定（网络、限流、中途停止、被拒）
      */
     private static Intent probeOff(String url, ProviderInfo snap, String model, Stop stop) {
-        // 只试真的会下发关闭字段的方案。末尾那个「什么都不发」的兜底不能算：
-        // 它等于没做任何事，模型若本来就默认不思考，会被误判成「关得掉」，
-        // 之后真实聊天里却什么都不发，用户选关也没生效。
-        int plans = ThinkingOff.realPlanCount(snap, model);
-        if (plans == 0) {
-            // 没有可用字段（家族未知、提供商也没声明）：测不出来，不下结论
+        if (stop != null && stop.stopped()) return Intent.unknown();
+        Raw base = post(url, snap.apiKey, thinkingBody(snap, model, null, false), TIMEOUT_MS);
+        if (base.error != null || base.httpCode < 200 || base.httpCode >= 300) {
+            LogUtil.d(TAG, "off probe: baseline unusable (code=%d, err=%s)",
+                    base.httpCode, base.error);
             return Intent.unknown();
         }
-        for (int i = 0; i < plans; i++) {
-            if (stop != null && stop.stopped()) return Intent.unknown();
-            Raw r = post(url, snap.apiKey, offBody(snap, model, i), TIMEOUT_MS);
-            if (r.error != null) return Intent.unknown();
-            if (r.httpCode >= 200 && r.httpCode < 300) {
-                int sig = reasoningSignal(r.body);
-                LogUtil.d(TAG, "off plan #%d -> signal=%d", i, sig);
-                // 关掉的判据是「完全没有推理痕迹」：关闭字段生效时，端点不该再
-                // 产出任何 reasoning。只要还有，不管多少，都算没关住。
-                //
-                // 旧版在这里跟「不设参数」比大小。端点默认开着思考时这条还能用，
-                // 端点默认关着思考时，任何方案都不比基线低，于是能关的模型也被
-                // 判成关不掉——混元 4 Flash 那类「文档说能关、探测说不能」就是这么来的。
-                if (sig <= 0) {
-                    ThinkingOff.remember(model, ThinkingOff.signatureOf(snap, model, i), "");
-                    return Intent.yes(0);
-                }
-                // 没关住：换下一种关闭字段
-                continue;
-            }
-            if (!isRejection(r.httpCode)) {
-                // 认证、限流、服务端错误与关闭能力无关，不下结论
-                return Intent.unknown();
-            }
-            // 400/422：这一种关闭字段不被接受，换下一种
-            LogUtil.d(TAG, "off plan #%d rejected: HTTP %d", i, r.httpCode);
+        if (stop != null && stop.stopped()) return Intent.unknown();
+        Raw off = post(url, snap.apiKey, offBody(snap, model), TIMEOUT_MS);
+        if (off.error != null) return Intent.unknown();
+        if (off.httpCode == 400 || off.httpCode == 422) {
+            // 端点拒收关闭字段：这次请求根本不成立，不下结论。
+            // 旧版在这里直接判「关不掉」，随后界面就删掉了「关闭」——用户看到
+            // 的「选项忽然没了」就是这么来的。真实聊天里还有「去掉自填字段重发」
+            // 这一步，探测不该比聊天更早下结论。
+            LogUtil.d(TAG, "off probe: fields rejected (HTTP %d), no conclusion", off.httpCode);
+            return Intent.unknown();
         }
-        ThinkingOff.rememberCannotOff(model);
+        if (off.httpCode < 200 || off.httpCode >= 300) {
+            // 认证、限流、服务端错误与关闭能力无关
+            return Intent.unknown();
+        }
+        int baseSig = reasoningSignal(base.body);
+        int offSig = reasoningSignal(off.body);
+        LogUtil.d(TAG, "off probe: baseline=%d off=%d", baseSig, offSig);
+        if (baseSig > 0 && offSig == 0) return Intent.yes(0);
+        if (baseSig > 0 && offSig > 0) return Intent.no();
+        if (baseSig == 0 && offSig == 0) {
+            // 默认就不思考：这道题分不出关闭是否生效，不能拿它当结论。
+            return Intent.unknown();
+        }
+        // 关掉之后反而冒出推理：端点把关闭字段当成了别的意思，按关不掉处理
         return Intent.no();
     }
 
@@ -762,11 +773,9 @@ final class CapabilityProbe {
     }
 
     /**
-     * 关闭方案的请求体：与真实聊天同一套字段，只是换成探测问题、非流式。
-     *
-     * @param plan 关闭方案序号，见 {@link ThinkingOff#plans}
+     * 关闭请求体：与真实聊天同一套关闭字段，只是换成探测问题、非流式。
      */
-    static String offBody(ProviderInfo p, String model, int plan) {
+    static String offBody(ProviderInfo p, String model) {
         try {
             JSONObject body = baseBody(model, OFF_MAX_TOKENS);
             JSONArray msgs = new JSONArray();
@@ -775,9 +784,9 @@ final class CapabilityProbe {
             m.put("content", THINK_ASK);
             msgs.put(m);
             body.put("messages", msgs);
-            // 与聊天一致：最后一种方案是「不下发任何思考字段」，此时是否真的关掉
-            // 由响应里有没有推理痕迹来判定，不靠提示词压制。
-            ThinkingOff.apply(body, p, model, plan);
+            // 与聊天完全一致：关闭字段一次写全，是否真的关掉由响应里有没有推理
+            // 痕迹来判定，不靠提示词压制。
+            ThinkingOff.apply(body, p, model);
             return body.toString();
         } catch (Exception e) {
             LogUtil.w(TAG, "build off body failed: %s", e.getMessage());
@@ -823,7 +832,7 @@ final class CapabilityProbe {
     private static void disableThinking(ProviderInfo p, JSONObject body, String model) {
         // 与聊天共用首选关闭方案：字段形态对了才关得掉，否则看图请求会先被
         // 推理吃掉额度，返回空正文，模型被误判成「没有视觉能力」。
-        if (!ThinkingOff.apply(body, p, model, 0)) {
+        if (!ThinkingOff.apply(body, p, model)) {
             LogUtil.d(TAG, "no thinking-off plan for %s, vision probe runs with defaults", model);
         }
     }

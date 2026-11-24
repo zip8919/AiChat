@@ -425,7 +425,7 @@ public class ApiClient {
         } else if (thinkingLevel != null && "off".equals(thinkingLevel)) {
             // 与流式聊天共用同一套关闭方案：按家族/提供商挑唯一一个字段，
             // 不再四类字段一起发（严格端点会因此 400）。
-            ThinkingOff.apply(json, provider, model, 0);
+            ThinkingOff.apply(json, provider, model);
         }
         // thinkingLevel == null: skip all thinking params
 
