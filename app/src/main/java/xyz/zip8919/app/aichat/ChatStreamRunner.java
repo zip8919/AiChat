@@ -322,8 +322,18 @@ final class ChatStreamRunner {
                 OffDiag.log("==== 发送开始 ====");
                 OffDiag.log("模型=%s 提供商=%s 端点=%s", job.modelName, job.providerName,
                         OffDiag.endpoint(job.provider == null ? null : job.provider.apiUrl));
-                OffDiag.log("档位：界面=%s 实际=%s 关闭字段=%s", job.thinkingLevel, resolvedHead,
+                String cfgHead = "";
+                try {
+                    cfgHead = ConfigManager.getInstance().getThinkingLevel();
+                } catch (Throwable ignored) {
+                    // 读不到就留空，不影响日志其余部分
+                }
+                OffDiag.log("档位：请求=%s 配置=%s 实际=%s 关闭字段=%s", job.thinkingLevel,
+                        cfgHead, resolvedHead,
                         thinkingOff ? "下发" : (userWantsNoThinking ? "不下发" : "无需"));
+                if (!job.thinkingLevel.equals(cfgHead)) {
+                    OffDiag.log("注意：请求档位与配置不一致（按界面选中项发送）");
+                }
                 OffDiag.log("模型记录：关不掉=%s 已探测档位=%s", modelBlocked,
                         modelRecord());
                 OffDiag.log("提供商配置：thinkingType=%s paramName=%s",

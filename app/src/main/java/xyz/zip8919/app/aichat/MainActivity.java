@@ -175,6 +175,8 @@ public class MainActivity extends ThemedActivity {
     private boolean lastAppendCheckPending = false;
     private Spinner modelSpinner;
     private Spinner thinkingSpinner;
+    /** 档位下拉已完成至少一次绑定：此后「界面选中项」才可信。 */
+    private boolean thinkingBound = false;
     private View queueBar;
     private TextView queueBarText;
     private MessageQueue queue;
@@ -1832,26 +1834,72 @@ public class MainActivity extends ThemedActivity {
         // 换哪家、换哪个模型都一样。
         thinkingSpinner.setOnItemSelectedListener(null);
         thinkingSpinner.setSelection(levelPos);
+        OffDiag.log("档位列表重建：模型=%s 可用=%s 选项=%s 配置=%s 落在#%d",
+                model == null ? "-" : model.name, available, thinkingChoices, level, levelPos);
+        thinkingBound = true;
         LogUtil.d(TAG, "thinking levels for model=%s: %s (global=%s -> pos=%d)",
                 model == null ? "-" : model.name, thinkingChoices, level, levelPos);
 
-        // 本次绑定后下拉里显示的值。程序化设值、换模型后的落档回显都可能再触发一次
-        // onItemSelected，那一次不该写盘——否则切到一个不支持当前档位的模型，会把
-        // 全局档位悄悄改成该模型的最近档。
+        // 绑定值与配置值不一致，说明这次显示的是「落档」结果（模型不支持配置里的档位，
+        // 例如配置 off、模型只能列 low），程序化 setSelection 触发的回调要挡掉，
+        // 否则会把全局档位悄悄改成落档值。
+        //
+        // 注意只挡这一种：旧版无条件挡「等于绑定值」的回调，于是「先改别的档、再改回
+        // 原来的档」第二次一定被吞——界面显示关闭、配置停在上一次的档，请求照旧，
+        // 用户看到的就是「怎么选都不生效」。
+        final boolean landingMismatch = !level.equals(configManager.getThinkingLevel());
         final String boundLevel = level;
         thinkingSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             public void onItemSelected(AdapterView<?> parent, View view, int pos, long id) {
                 if (pos < 0 || pos >= thinkingChoices.size()) return;
                 String picked = thinkingChoices.get(pos);
-                if (picked.equals(boundLevel)) return;
-                if (picked.equals(configManager.getThinkingLevel())) return;
+                String before = configManager.getThinkingLevel();
+                if (landingMismatch && picked.equals(boundLevel)) {
+                    OffDiag.log("档位回调：#%d=%s（落档回显，不写盘；配置=%s）", pos, picked, before);
+                    return;
+                }
+                if (picked.equals(before)) {
+                    OffDiag.log("档位回调：#%d=%s（配置已是该值，不重复写盘）", pos, picked);
+                    return;
+                }
                 LogUtil.d(TAG, "thinking level selected: pos=%d -> %s", pos, picked);
                 configManager.setThinkingLevel(picked);
                 configManager.save();
+                OffDiag.log("档位已保存：#%d %s -> %s", pos, before, picked);
             }
 
             public void onNothingSelected(AdapterView<?> parent) { }
         });
+    }
+
+    /**
+     * 本次要下发的思考档位。
+     *
+     * <p><b>以界面上选中的那一项为准</b>，配置只当持久化记录。请求此前只读
+     * {@code configManager}，于是「用户选择 → 写配置」这条链路只要有一环没走通
+     * （回调没触发、换模型重建时被覆盖、写盘失败），界面显示「关闭」而请求仍按
+     * 旧档位发出，表现就是「选了关闭还在思考」。用户此刻看到的选项才是他的意图。
+     */
+    private String currentThinkingLevel() {
+        String level = configManager.getThinkingLevel();
+        try {
+            if (thinkingBound && thinkingSpinner != null
+                    && thinkingSpinner.getAdapter() != null
+                    && thinkingSpinner.getAdapter().getCount() == thinkingChoices.size()) {
+                int pos = thinkingSpinner.getSelectedItemPosition();
+                if (pos >= 0 && pos < thinkingChoices.size()) {
+                    String shown = thinkingChoices.get(pos);
+                    if (shown != null && shown.length() > 0 && !shown.equals(level)) {
+                        LogUtil.w(TAG, "thinking level: ui=%s config=%s -> use ui", shown, level);
+                        level = shown;
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            LogUtil.w(TAG, "currentThinkingLevel failed: %s", t.getMessage());
+        }
+        if (!configManager.isThinkingEnabled()) level = ThinkingLevels.OFF;
+        return level;
     }
 
     /** 当前选中的模型配置；找不到返回 null。 */
@@ -2294,8 +2342,7 @@ public class MainActivity extends ThemedActivity {
         am.interrupted = false;
         am.errorDetail = "";
         conversationManager.saveCurrentConversation();
-        String thinkingLevel = configManager.getThinkingLevel();
-        if (!configManager.isThinkingEnabled()) thinkingLevel = "off";
+        String thinkingLevel = currentThinkingLevel();
         int gen = requestGeneration.incrementAndGet();
         LogUtil.i(TAG, "continue generation: idx=%d prefix=%d display=%d official=%s url=%s",
                 pos, prefixText.length(), displayBase.length(), official, provider.apiUrl);
@@ -2941,8 +2988,7 @@ public class MainActivity extends ThemedActivity {
             }
         }
 
-        String thinkingLevel = configManager.getThinkingLevel();
-        if (!configManager.isThinkingEnabled()) thinkingLevel = "off";
+        String thinkingLevel = currentThinkingLevel();
         LogUtil.i(TAG, "request params: model=%s provider=%s url=%s thinking=%s",
                 currentModel, provider.name, provider.apiUrl, thinkingLevel);
 
@@ -5754,8 +5800,7 @@ public class MainActivity extends ThemedActivity {
             am.errorDetail = "";
             conversationManager.saveCurrentConversation();
 
-            String thinkingLevel = configManager.getThinkingLevel();
-            if (!configManager.isThinkingEnabled()) thinkingLevel = "off";
+            String thinkingLevel = currentThinkingLevel();
             int gen = requestGeneration.incrementAndGet();
             LogUtil.i(TAG, "resumeAssistantRequest: pos=%d rounds=%d traceLen=%d",
                     pos, rounds, am.content == null ? 0 : am.content.length());
@@ -5927,8 +5972,7 @@ public class MainActivity extends ThemedActivity {
             AcToast.show(this, Strings.get(R.string.mainactivity_153));
             return;
         }
-        String thinkingLevel = configManager.getThinkingLevel();
-        if (!configManager.isThinkingEnabled()) thinkingLevel = "off";
+        String thinkingLevel = currentThinkingLevel();
         int gen = requestGeneration.incrementAndGet();
         sendStreamingRequest(provider, thinkingLevel, gen);
     }
