@@ -372,6 +372,10 @@ final class RendererAssets {
             // 每 200ms 整段重建，700ms 后原节点早已脱离文档，parentElement 链断掉，
             // 再向上找 data-idx 只会走到 null —— 菜单永远不弹。
             "var lpTimer=null,lpStartX=0,lpStartY=0,lpIdx=null;" +
+            // 长按判定 900ms、位移容差 6px。
+            // 原来 700ms / 10px：词典笔屏幕小、手指落点抖动大，正常滑动阅读时
+            // 很容易在滚动开始前就攒满 700ms，菜单莫名其妙弹出来。900ms 仍短于
+            // 系统长按（约 500ms 起算但带按压反馈），对「有意识长按」没有负担。
             "document.addEventListener('touchstart',function(e){" +
             "if(!e.touches||e.touches.length!==1)return;" +
             "var t=e.touches[0];" +
@@ -386,11 +390,12 @@ final class RendererAssets {
             "lpTimer=setTimeout(function(){lpTimer=null;" +
             "if(lpIdx===null)return;" +
             "window.__suppressClickUntil=Date.now()+700;" +
-            "if(window.Android)Android.messageLongPress(lpIdx);},700);});" +
+            "if(window.Android)Android.messageLongPress(lpIdx);},900);});" +
             "document.addEventListener('touchmove',function(e){" +
             "if(!lpTimer||!e.touches||e.touches.length!==1)return;" +
             "var t=e.touches[0];" +
-            "if(Math.abs(t.clientX-lpStartX)>10||Math.abs(t.clientY-lpStartY)>10)" +
+            // 容差 6px：超过就说明是在滑动，不是在长按。
+            "if(Math.abs(t.clientX-lpStartX)>6||Math.abs(t.clientY-lpStartY)>6)" +
             "{clearTimeout(lpTimer);lpTimer=null;}" +
             "});" +
             "document.addEventListener('touchend',function(){" +
@@ -1144,8 +1149,11 @@ final class RendererAssets {
             "if(!e.touches||!e.touches.length)return;" +
             "var y=e.touches[0].clientY;" +
             "if(window.__touchY!=null){" +
-            "if(y>window.__touchY+8)window.__userUp=true;" +      // 手指下滑 = 往回看
-            "else if(y<window.__touchY-8)window.__userUp=false;}" + // 手指上滑 = 回到底部
+            // 只认「手指下滑 = 往回看」。反方向（上滑）一律不解除 __userUp：
+            // 生成过程中内容一直在长，用户常常只是往上推一点想看被输入栏挡住的行，
+            // 旧版 8px 就把它当成「我要回到底部」，于是刚滑开就被自动滚底吸回去。
+            // 想回底的人会一直滑到底，scroll 事件里「贴底即恢复跟随」那条足够。
+            "if(y>window.__touchY+8)window.__userUp=true;}" +
             "window.__touchY=y;},true);" +
             "window.smartScrollToBottom=function(force){" +
             // 手指按在可横滑容器上：不要拽视口，否则表格被滚出屏幕，看起来就是「滑不动」

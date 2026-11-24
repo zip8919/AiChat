@@ -483,6 +483,86 @@ public class MessageHtmlRenderer {
         return Math.max(1, (tenths + 9) / 10);
     }
 
+    /**
+     * 思考块的 token 估算：先剥掉 Markdown 语法，再按 {@link #estimateTokens} 的系数算。
+     *
+     * <p>页面上看到的是渲染后的文字，而 {@link #estimateTokens} 扫的是源码：
+     * {@code **}、{@code `}、代码围栏、链接地址这些标记都会当成普通字符计进 token，
+     * 一段带代码块的思考能虚高三成。用户拿这个数字和消息底部的 usage 对比，
+     * 自然会觉得「估算不准」。
+     *
+     * <p>这里按「最终会显示出来的文字」计数，口径与页面里的 {@code __thTok}
+     * （扫 {@code textContent}）一致，于是生成中与生成完之后数字不会跳变。
+     */
+    static int estimateThinkingTokens(CharSequence text) {
+        if (text == null || text.length() == 0) return 0;
+        int n = text.length();
+        StringBuilder sb = new StringBuilder(n);
+        boolean lineStart = true;
+        for (int i = 0; i < n; i++) {
+            char c = text.charAt(i);
+            if (c == '\n') {
+                sb.append(c);
+                lineStart = true;
+                continue;
+            }
+            if (lineStart) {
+                // 行首的标题 / 引用 / 列表记号不是文字
+                if (c == '#' || c == '>' || c == '|' || c == '-') {
+                    continue;
+                }
+                if (c != ' ' && c != '\t') lineStart = false;
+            }
+            switch (c) {
+                case '`':
+                case '*':
+                case '_':
+                case '~':
+                case '|':
+                    // 强调、行内代码、删除线、表格竖线：内容保留，符号不计数
+                    continue;
+                case '!':
+                    // ![alt](url) 只保留 alt
+                    if (i + 1 < n && text.charAt(i + 1) == '[') continue;
+                    break;
+                case '[': {
+                    // [text](url) -> text；纯方括号属于标点，也去掉
+                    int close = indexOfChar(text, ']', i + 1);
+                    if (close > 0 && close + 1 < n && text.charAt(close + 1) == '(') {
+                        int paren = indexOfChar(text, ')', close + 2);
+                        if (paren > 0) {
+                            sb.append(text, i + 1, close);
+                            i = paren;
+                            continue;
+                        }
+                    }
+                    continue;
+                }
+                case '<': {
+                    // HTML 标签整段跳过；「a < b」这类比较式保留
+                    int gt = indexOfChar(text, '>', i + 1);
+                    if (gt > 0 && gt - i <= 80) {
+                        i = gt;
+                        continue;
+                    }
+                    break;
+                }
+                default:
+                    break;
+            }
+            sb.append(c);
+        }
+        return estimateTokens(sb);
+    }
+
+    private static int indexOfChar(CharSequence text, char target, int from) {
+        int n = text.length();
+        for (int i = from; i < n; i++) {
+            if (text.charAt(i) == target) return i;
+        }
+        return -1;
+    }
+
     /** 中日韩字符与全角符号：这些按 0.6 token/字，其余按 0.3。 */
     private static boolean isWideChar(char c) {
         return (c >= 0x1100 && c <= 0x115F)      // 谚文字母
@@ -912,7 +992,7 @@ public class MessageHtmlRenderer {
                 // 消息底部的 token 用量，两处单位一致才能横向比较。
                 // 数值按源码估算（中文 0.6 / 英文 0.3 每字符），并写进 data-tok，
                 // 折叠时由 JS 直接读回，避免展开/收起后数字跳变。
-                int thinkTok = estimateTokens(thinking);
+                int thinkTok = estimateThinkingTokens(thinking);
                 // 已闭合（思考结束）：live=0，JS 会自动折叠，除非用户手动展开过。
                 html.append("<div class=\"thinking-wrap\" data-think-key=\"")
                     .append(thinkingKey(blocks - 1)).append("\" data-think-live=\"0\">")

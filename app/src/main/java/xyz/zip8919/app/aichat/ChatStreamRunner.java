@@ -368,7 +368,12 @@ final class ChatStreamRunner {
                 JSONObject body = ChatTransport.buildRequestBody(job.modelName, job.provider,
                         job.thinkingLevel, conversation, job.streamEnabled,
                         toolsEnabled ? toolDefs : null, includeUsage, sendThinking,
-                        !offNativeDropped, !offBoolOnly);
+                        // 注意这里不能取反：offBoolOnly 的语义是「只留布尔」，
+                        // 初始 false 表示要写全。写成 !offBoolOnly 会让第一发就落到
+                        // 只发 enable_thinking=false 的降级档——认 thinking 对象的
+                        // 端点（混元、DeepSeek、Kimi、GLM）于是完全收不到关闭意图，
+                        // 表现为「换了多少家、多少模型都关不掉」。
+                        !offNativeDropped, offBoolOnly);
                 if (OffDiag.ENABLED) {
                     OffDiag.log("请求 #%d 轮次=%d %s", reqSeq, round, OffDiag.shape(body));
                     OffDiag.log("  思考字段：%s",
