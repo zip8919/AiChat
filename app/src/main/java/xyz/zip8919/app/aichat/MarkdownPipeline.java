@@ -325,7 +325,7 @@ final class MarkdownPipeline {
             int d = q;
             while (d < len && result.charAt(d) >= '0' && result.charAt(d) <= '9') d++;
             int idx = -1;
-            if ((kind.equals("MATH") || kind.equals("SVG")) && d > q && d + 1 < len
+            if ((kind.equals("MATH") || kind.equals("MATHBLOCK") || kind.equals("SVG")) && d > q && d + 1 < len
                     && result.charAt(d) == '@' && result.charAt(d + 1) == '@'
                     && (d == q + 1 || result.charAt(q) != '0')) {
                 try {
@@ -337,6 +337,12 @@ final class MarkdownPipeline {
             if (idx >= 0 && idx < mathTags.size() && mathTags.get(idx) != null
                     && kind.equals("MATH")) {
                 out.append(mathTags.get(idx));
+                pos = d + 2;
+                continue;
+            }
+            if (idx >= 0 && idx < mathTags.size() && mathTags.get(idx) != null
+                    && kind.equals("MATHBLOCK")) {
+                appendBlockMath(out, mathTags.get(idx));
                 pos = d + 2;
                 continue;
             }
@@ -359,6 +365,77 @@ final class MarkdownPipeline {
         }
         return out.toString();
     }
+    /**
+     * 块级公式回填。
+     *
+     * <p>产物本身是 {@code <span class="math-block" style="display:block">}：独占一行居中，
+     * 又不会像 {@code <div>} 那样把所在的 {@code <p>} 强行闭合（{@code $$…$$} 前后没空行时
+     * 公式和图例常在同一段里）。
+     *
+     * <p>只有「整段就这一个公式」时才换成 {@code <div>}——那才是块元素的合法位置。
+     * 回填发生在 HTML 生成之后，只能按 commonmark 的固定输出形状认：单独成段的占位符
+     * 输出为 {@code <p>} + 占位符 + {@code </p>}，相邻两块公式之间的空行会折成
+     * {@code <br />}（新段落开头的 {@code <br />} 被跳过）。因此从末尾 {@code </p>}
+     * 往前剥 {@code <br />} 与空白，正好落在 {@code <p>} 上才算独占一段。
+     */
+    private static void appendBlockMath(StringBuilder out, String html) {
+        int end = out.length();
+        while (end > 0 && isSpace(out.charAt(end - 1))) end--;
+        int k = end;
+        int lt = end - 5;
+        if (lt >= 0 && out.charAt(lt) == '<' && out.charAt(lt + 1) == '/'
+                && (out.charAt(lt + 2) == 'p' || out.charAt(lt + 2) == 'P')
+                && out.charAt(lt + 3) == '>') {
+            k = lt;
+        }
+        while (k >= 3 && out.charAt(k - 1) == '>') {
+            int b = k - 2;
+            while (b >= 0 && isSpace(out.charAt(b))) b--;
+            if (b >= 4 && out.charAt(b) == '>' && out.charAt(b - 1) == '/'
+                    && (out.charAt(b - 2) == 'r' || out.charAt(b - 2) == 'R')
+                    && (out.charAt(b - 3) == 'b' || out.charAt(b - 3) == 'B')
+                    && out.charAt(b - 4) == '<') {
+                k = b - 4;
+            } else if (b >= 1 && isOpenP(out, b)) {
+                out.setLength(b - 1);
+                out.append(toBlockTag(html));
+                return;
+            } else {
+                break;
+            }
+        }
+        out.append(html);
+    }
+
+    /**
+     * 独占一段的块级公式：把行内元素的块级呈现换成真正的块元素。
+     *
+     * <p>按字符串下标手工替换而不是正则：{@code <span …>} 的属性里带 base64 图，
+     * 正则要在几十 KB 的串上回溯，回填一趟六条公式就是六次全文匹配。
+     */
+    private static String toBlockTag(String html) {
+        String r = html;
+        int i = r.indexOf("<span class=\"math-block\"");
+        if (i >= 0) {
+            r = r.substring(0, i) + "<div" + r.substring(i + 5, r.length());
+        }
+        if (r.endsWith("</span>")) {
+            r = r.substring(0, r.length() - 7) + "</div>";
+        }
+        return r;
+    }
+
+    /** {@code b} 处是否为 {@code <p>} 的最后一个字符（{@code '<'} 用码值比较，免去转义）。 */
+    private static boolean isOpenP(StringBuilder out, int b) {
+        char c = out.charAt(b);
+        return (c == 'p' || c == 'P') && out.charAt(b - 1) == 60;
+    }
+
+    /** 尾部空白：回填按尾部特征认段落时跳过。 */
+    private static boolean isSpace(char c) {
+        return c == ' ' || c == '\n' || c == '\t' || c == '\r';
+    }
+
     // Pre-compiled: preProcessExtensions runs on every markdown render (hot path)
     private static final Pattern P_FN_DEF =
             Pattern.compile("(?m)^\\[\\^([^\\]]+)\\]:\\s*(.+)$");

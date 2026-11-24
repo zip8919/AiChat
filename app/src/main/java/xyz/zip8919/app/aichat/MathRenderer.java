@@ -30,6 +30,10 @@ final class MathRenderer {
     // 公式位图缓存：key = formula + 块级/行内标记。按字符数而非条目数限制，
     // 因为单条 base64 HTML 可达数十 KB。
     private static final int LATEX_CACHE_MAX_BYTES = 2 * 1024 * 1024;
+
+    // 标签扫描长度上限：超过这个长度还没遇到 '>' 的 '<' 当普通字符处理，
+    // 避免正文里一个未闭合的尖括号把后面整段吃掉。
+    private static final int MAX_TAG_LEN = 2048;
     private static final Map<String, String> latexCache =
             Collections.synchronizedMap(new LinkedHashMap<String, String>());
 
@@ -109,6 +113,30 @@ final class MathRenderer {
             }
         }
     }
+    /**
+     * 行内公式占位符：解析后原位回填成 {@code <img class="math-inline">}。
+     *
+     * <p>块级与行内都用占位符，是因为已经生成的 HTML 不能再回到文本流里：
+     * 公式图带 {@code alt="原始公式"}，后续 {@link #renderBareLatexCommands}、
+     * {@code preProcessExtensions}、{@code HtmlSanitizer} 都按纯文本改写，
+     * 会把 alt 里的 {@code \frac} 再渲染一张图、把属性引号提前闭合，标签当场被撕碎
+     * （现象是公式位置只剩「图 + 半句源码 + ">」）。占位符里的内容全是字母数字，
+     * 上述规则怎么扫都碰不到。
+     */
+    private static String inlinePlaceholder(int index) {
+        return "@@MATH" + index + "@@";
+    }
+
+    /**
+     * 块级公式占位符。独占一行：{@code $$…$$} / {@code \[…\]} / 包住 {@code \ce} 的块级写法都用它。
+     *
+     * <p>前缀 {@code MATHBLOCK} 与行内的 {@code MATH} 不互为前缀：两套占位符共用
+     * 一个列表，回填时按前缀区分，块级还要额外处理外层段落。
+     */
+    private static String blockPlaceholder(int index) {
+        return "@@MATHBLOCK" + index + "@@";
+    }
+
     // Extract \ce{...} → convert to LaTeX → render with jlatexmath → @@MATHn@@ image.
     static String extractAndRenderCe(String text, float density, List<String> mathTags) {
         StringBuilder out = new StringBuilder();
@@ -145,11 +173,11 @@ final class MathRenderer {
                 String latex = ceToLatex(formula);
                 boolean isBlock = (pfx == 2); // $$ → block, $ or bare → inline
                 String imgHtml = renderLatexImg(latex, isBlock, density);
+                mathTags.add(imgHtml);
                 if (isBlock) {
-                    out.append('\n').append(imgHtml).append("\n\n");
+                    out.append('\n').append(blockPlaceholder(mathTags.size() - 1)).append('\n');
                 } else {
-                    mathTags.add(imgHtml);
-                    out.append("@@MATH").append(mathTags.size() - 1).append("@@");
+                    out.append(inlinePlaceholder(mathTags.size() - 1));
                 }
 
                 if (pfx > 0) i = skipMathSuffix(text, i, pfx);
@@ -374,6 +402,31 @@ final class MathRenderer {
         }
         return s.length();
     }
+    /**
+     * 返回 {@code start} 处 '<' 所在标签结束后的位置（含 '>'）；不是完整标签时返回 -1。
+     *
+     * <p>引号内的 '>' 不算结束（{@code alt="a > b"}），否则标签下半截会被当成正文。
+     * 超过 {@link #MAX_TAG_LEN} 字符仍未闭合就判定为「不是标签」：公式图是占位符、
+     * 不含超长标签，正文里一个孤零零的 '<' 不该让整段文字被吞掉。
+     */
+    private static int findTagEnd(String text, int start) {
+        char quote = 0;
+        int limit = Math.min(text.length(), start + MAX_TAG_LEN);
+        for (int k = start + 1; k < limit; k++) {
+            char c = text.charAt(k);
+            if (quote != 0) {
+                if (c == quote) quote = 0;
+            } else if (c == '"' || c == '\'') {
+                quote = c;
+            } else if (c == '>') {
+                return k + 1;
+            } else if (c == '<') {
+                return -1;
+            }
+        }
+        return -1;
+    }
+
     // Detect and render bare \command or \command{args} that aren't inside $...$ or backticks
     static String renderBareLatexCommands(String text, float density, List<String> mathTags) {
         StringBuilder out = new StringBuilder();
@@ -385,6 +438,19 @@ final class MathRenderer {
                 out.append('`');
                 i++;
                 continue;
+            }
+            // HTML 标签整段原样跳过。模型自己写的 <img alt="\alpha">、<span title="\beta">
+            // 里的源码不是正文，照正常规则扫会把属性值里的 \alpha 渲染成一张图插进引号里，
+            // 引号提前闭合、属性后半截变成可见文本。公式产物已改走占位符，这里守的是
+            // 模型与用户手写的标签。
+            if (!inBacktick && text.charAt(i) == '<' && i + 1 < text.length()
+                    && (Character.isLetter(text.charAt(i + 1)) || text.charAt(i + 1) == '/')) {
+                int end = findTagEnd(text, i);
+                if (end > i) {
+                    out.append(text, i, end);
+                    i = end;
+                    continue;
+                }
             }
             if (!inBacktick && text.charAt(i) == '\\' && i + 1 < text.length()
                     && Character.isLetter(text.charAt(i + 1))) {
@@ -402,7 +468,7 @@ final class MathRenderer {
                 }
                 String html = renderLatexImg(text.substring(start, i), false, density);
                 mathTags.add(html);
-                out.append("@@MATH").append(mathTags.size() - 1).append("@@");
+                out.append(inlinePlaceholder(mathTags.size() - 1));
             } else {
                 out.append(text.charAt(i));
                 i++;
@@ -426,7 +492,8 @@ final class MathRenderer {
                 int end = text.indexOf("$$", i + 2);
                 if (end > i) {
                     String html = renderLatexImg(text.substring(i + 2, end).trim(), true, density);
-                    out.append('\n').append(html).append("\n\n");
+                    mathTags.add(html);
+                    out.append('\n').append(blockPlaceholder(mathTags.size() - 1)).append('\n');
                     i = end + 2; continue;
                 }
             }
@@ -434,7 +501,8 @@ final class MathRenderer {
                 int end = text.indexOf("\\]", i + 2);
                 if (end > i) {
                     String html = renderLatexImg(text.substring(i + 2, end).trim(), true, density);
-                    out.append('\n').append(html).append("\n\n");
+                    mathTags.add(html);
+                    out.append('\n').append(blockPlaceholder(mathTags.size() - 1)).append('\n');
                     i = end + 2; continue;
                 }
             }
@@ -452,7 +520,7 @@ final class MathRenderer {
                         && !isWhitespaceChar(text.charAt(end - 1))) {
                     String html = renderLatexImg(text.substring(i + 1, end), false, density);
                     mathTags.add(html);
-                    out.append("@@MATH").append(mathTags.size() - 1).append("@@");
+                    out.append(inlinePlaceholder(mathTags.size() - 1));
                     i = end + 1; continue;
                 }
             }
@@ -461,7 +529,7 @@ final class MathRenderer {
                 if (end > i + 2) {
                     String html = renderLatexImg(text.substring(i + 2, end), false, density);
                     mathTags.add(html);
-                    out.append("@@MATH").append(mathTags.size() - 1).append("@@");
+                    out.append(inlinePlaceholder(mathTags.size() - 1));
                     i = end + 2; continue;
                 }
             }
@@ -555,12 +623,17 @@ final class MathRenderer {
                     int dispH = Math.round((float) h / scale);
                     if (dispW < 1) dispW = 1;
                     if (dispH < 1) dispH = 1;
-                    imgTag = "<div class=\"math-block\">" +
+                    // 用 display:block 的 <span> 而不是 <div>：这两个元素在 markdown 里
+                    // 常与正文挤在同一段（$$…$$ 前后没空行，or 列表项里），<div> 一旦落进
+                    // <p> 会被浏览器就地闭合，段落直接断成两截、多出一处段间距。
+                    // <span> 走行内元素规则，display:block 照样独占一行居中；
+                    // 整段只有公式时由 MarkdownPipeline 回填时换成 <div>。
+                    imgTag = "<span class=\"math-block\" style=\"display:block;\">" +
                         "<img src=\"data:image/png;base64," + b64 + "\"" +
                         " width=\"" + dispW + "\" height=\"" + dispH + "\"" +
                         " style=\"max-width:100%;height:auto;\"" +
                         " alt=\"" + alt + "\">" +
-                        "</div>";
+                        "</span>";
                 } else {
                     imgTag = "<img class=\"math-inline\"" +
                         " src=\"data:image/png;base64," + b64 + "\"" +
@@ -579,10 +652,10 @@ final class MathRenderer {
             String bgHex = String.format("#%06X", 0xFFFFFF & fallbackBg);
             String fgHex = String.format("#%06X", 0xFFFFFF & fallbackFg);
             if (block) {
-                imgTag = "<div class=\"math-block\" style=\"background:" + bgHex
+                imgTag = "<span class=\"math-block\" style=\"display:block;background:" + bgHex
                     + ";padding:10px;border-radius:4px;\">"
                     + "<code style=\"font-size:14px;color:" + fgHex + ";\">"
-                    + Html.esc(formula) + "</code></div>";
+                    + Html.esc(formula) + "</code></span>";
             } else {
                 imgTag = "<code style=\"font-size:0.9em;background:" + bgHex
                     + ";padding:1px 5px;border-radius:3px;color:" + fgHex + ";\">"
