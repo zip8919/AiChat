@@ -858,8 +858,11 @@ public class MessageHtmlRenderer {
                     // 不带 toggle 的裸块，于是「多一份无法折叠的思考内容」。
                     // 这里复用闭合分支的同一套折叠结构，流式阶段也能展开/收起。
                     String thinking = text.substring(ts + 10);
-                    // 未闭合的思考块不再估算 token 数：这个数字每帧都变，会把
+                    // 未闭合的思考块不在服务端估算 token 数：这个数字每帧都变，会把
                     // 折叠条那一格变成「每帧都不同」，进而带走整块思考内容的 DOM。
+                    // （数字改由页面补：applyThinkingStates 每帧按正文估算并写回
+                    //   data-tok，折叠条显示「思考中…」还是「N tokens」由它决定，
+                    //   这里只保证这格字节恒定。）
                     // 流式每个分片都会整段重建 HTML，思考块的展开状态必须靠一个
                     // 稳定 key 跨重建恢复。
                     //

@@ -35,7 +35,8 @@ final class RendererAssets {
                 .replace("@@L_429_DEFAULT@@", Strings.get(R.string.renderer_018))
                 .replace("@@L_RETRYING@@", Strings.get(R.string.renderer_019))
                 .replace("@@L_SHOW_ALL@@", Strings.get(R.string.renderer_020))
-                .replace("@@L_THINKING@@", Strings.get(R.string.renderer_021));
+                .replace("@@L_THINKING@@", Strings.get(R.string.renderer_021))
+                .replace("@@L_FOLD_N@@", Strings.get(R.string.renderer_022));
     }
 
     /**
@@ -757,13 +758,40 @@ final class RendererAssets {
             // 文案按 data-tok 算；data-tok 为 0 的是「还在输出」的块，
             // 这时候根本还没有可信的数字，显示占位文案而不是「1 tokens」。
             "var tokN=parseInt(t.getAttribute('data-tok'),10);if(!(tokN>0))tokN=0;" +
-            // 已结束的块还没有可信数字（常见于上面那种被搬进 base 的 live 节点）：
-            // 按正文估算一个写回 data-tok，之后的文案/折叠/重建都用这个数。
-            // 只写一次：属性一旦大于 0 就走不到这里，不会每帧重算。
-            "if(!live&&tokN<=0){" +
-            "var est=window.__thTok(b);" +
-            "if(est>0){tokN=est;t.setAttribute('data-tok',''+est);}}" +
-            "var wantTxt=open?'@@L_FOLD@@':(tokN>0" +
+            // 正在输出（live=1）的块也要显示数字。
+            //
+            // 流式那一段 HTML 里折叠条固定是 data-tok="0"（服务端不能写实时数，
+            // 每帧字节一变，逐字渐显的差分就会把整块思考拆掉重画，见
+            // MessageHtmlRenderer 的「未闭合」分支），于是生成期间折叠条一直
+            // 停在「思考中…」，要等这一轮结束、节点被搬进 base 之后才补上数字。
+            // 用户看到的正是「生成结束后才有数字，生成过程中只有思考中」。
+            //
+            // 这里由页面按当前正文估算并写回 data-tok：只改属性与折叠条文本，
+            // 不碰节点结构，差分照旧只落在思考正文末尾，不会引起重绘。
+            // 逐字渐显每帧都会调一次本函数，而一段思考可能几千字，全量扫描
+            // 每帧做一次会白白吃排版时间，所以按 280ms 节流：一个节流窗口内
+            // 最多扫一遍，肉眼看数字仍在跳，低端机上开销可忽略。
+            "if(live){" +
+            "var nowT=Date.now();" +
+            "if(!it.__thTokAt||nowT-it.__thTokAt>280){" +
+            "it.__thTokAt=nowT;" +
+            "var el=window.__thTok(b);" +
+            // 太短先不报数：刚开写时估出来是 1、2，数字每帧往上蹦比
+            // 「思考中…」更吵，也容易被当成错误。等攒够一行再切过去。
+            "if(el>=12&&el!==tokN){tokN=el;t.setAttribute('data-tok',''+el);}}}" +
+            // 已结束的块：按正文估算一个写回 data-tok，之后的文案/折叠/重建都用这个数。
+            // 只在第一次（__thTokFinal 未置位）算一次；live 期间可能停在节流窗口里，
+            // 归档这一下重算等于按最终正文校正，数字与消息底部的用量口径一致。
+            "else if(!it.__thTokFinal){" +
+            "it.__thTokFinal=1;" +
+            "var ef=window.__thTok(b);" +
+            "if(ef>0&&ef!==tokN){tokN=ef;t.setAttribute('data-tok',''+ef);}}" +
+            // 展开着的块也带上数字：只写「折叠思考」的话，用户在生成期间
+            // 展开看内容，反而看不到这段已经花了多少 token。
+            "var wantTxt=open?(tokN>0" +
+            "?('@@L_FOLD_N@@'+window.fmtTok(tokN)+' tokens）──')" +
+            ":'@@L_FOLD@@')" +
+            ":(tokN>0" +
             "?('@@L_EXPAND@@'+window.fmtTok(tokN)+' tokens）──')" +
             ":'@@L_EXPAND@@@@L_THINKING@@');" +
             "var txtChanged=(t.textContent!==wantTxt);" +
@@ -907,7 +935,11 @@ final class RendererAssets {
             "var k=w?window.__thinkKey(w):null;" +
             "var open=b.style.display==='none';" +
             "b.style.display=open?'block':'none';" +
-            "if(open){btn.textContent='@@L_FOLD@@';}" +
+            // 展开后折叠条写「折叠思考」；已经估出数字的块把数字带上，
+            // 与收起时那条「展开思考（N tokens）」保持同一个口径。
+            "if(open){var tf=parseInt(btn.getAttribute('data-tok'),10);" +
+            "btn.textContent=(tf>0)?('@@L_FOLD_N@@'+window.fmtTok(tf)+' tokens）──')" +
+            ":'@@L_FOLD@@';}" +
             "else{" +
             // 数值取渲染时写进 data-tok 的源码估算值。data-tok=0 表示思考还在输出
             // （还没有可信的最终数字），这时显示「思考中…」而不是拿正文长度瞎估一个数。

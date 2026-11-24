@@ -2145,6 +2145,7 @@
     <string name="renderer_006">运行</string>
     <string name="renderer_007">预览</string>
     <string name="renderer_008">── 折叠思考 ──</string>
+    <string name="renderer_022">── 折叠思考（</string>
     <string name="renderer_009">── 展开思考（</string>
     <string name="renderer_010">（点击展开）</string>
     <string name="renderer_011">收起更早的 {n} 条</string>
