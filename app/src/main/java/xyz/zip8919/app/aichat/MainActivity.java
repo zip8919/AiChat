@@ -178,7 +178,6 @@ public class MainActivity extends ThemedActivity {
     private View queueBar;
     private TextView queueBarText;
     private MessageQueue queue;
-    private boolean userPicked = false;
     /** 思考下拉当前的可选档位（下标与下拉项一一对应）。 */
     private final List<String> thinkingChoices = new ArrayList<String>();
     /** 上次按哪一版探测结论生成档位下拉，探测在别的页面完成时用它判断要不要重建。 */
@@ -1813,7 +1812,6 @@ public class MainActivity extends ThemedActivity {
         ArrayAdapter<String> thinkingAdapter = new ArrayAdapter<String>(this,
                 android.R.layout.simple_spinner_item, labels);
         thinkingAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-        userPicked = false;
         thinkingSpinner.setAdapter(thinkingAdapter);
 
         String level = configManager.getThinkingLevel();
@@ -1824,17 +1822,29 @@ public class MainActivity extends ThemedActivity {
             level = ThinkingLevels.resolve(level, available, false);
         }
         int levelPos = ThinkingLevels.indexIn(thinkingChoices, level);
-        // 先复位再去 setSelection：setSelection 会同步触发一次 onItemSelected，
-        // 此时的 pos 还是旧的，不能当作用户操作写盘（见 refreshModelSpinner 的复位）
+        // 先把监听摘掉再 setSelection：程序化设值同样会触发 onItemSelected，
+        // 不摘掉就会被当成用户操作。
+        //
+        // 旧版用一个 userPicked 标记挡程序化回调，可那个标记在重构后再也没被置为
+        // true（只剩「置 false」和「if (!userPicked) return」），于是监听器成了死代码：
+        // 下拉里能选到「关闭」，界面也显示「关闭」，但配置里的档位从来没变过，请求
+        // 永远按最初那一档（medium）发。用户看到的就是「选了关闭，回答里还在思考」，
+        // 换哪家、换哪个模型都一样。
+        thinkingSpinner.setOnItemSelectedListener(null);
         thinkingSpinner.setSelection(levelPos);
         LogUtil.d(TAG, "thinking levels for model=%s: %s (global=%s -> pos=%d)",
                 model == null ? "-" : model.name, thinkingChoices, level, levelPos);
 
+        // 本次绑定后下拉里显示的值。程序化设值、换模型后的落档回显都可能再触发一次
+        // onItemSelected，那一次不该写盘——否则切到一个不支持当前档位的模型，会把
+        // 全局档位悄悄改成该模型的最近档。
+        final String boundLevel = level;
         thinkingSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             public void onItemSelected(AdapterView<?> parent, View view, int pos, long id) {
-                if (!userPicked) return;
                 if (pos < 0 || pos >= thinkingChoices.size()) return;
                 String picked = thinkingChoices.get(pos);
+                if (picked.equals(boundLevel)) return;
+                if (picked.equals(configManager.getThinkingLevel())) return;
                 LogUtil.d(TAG, "thinking level selected: pos=%d -> %s", pos, picked);
                 configManager.setThinkingLevel(picked);
                 configManager.save();

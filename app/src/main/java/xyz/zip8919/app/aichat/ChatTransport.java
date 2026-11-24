@@ -122,24 +122,15 @@ final class ChatTransport {
             String providerName = provider == null ? null : provider.name;
             ModelInfo m = cfg.findModel(providerName, model);
             if ("off".equals(globalLevel)) {
-                // 探测/实测确认这个模型关不掉思考（o 系列、Gemini Pro、推理专用模型等）：
-                // 界面里不会提供「关闭」，全局配置可能还留着旧的 off。
-                // 这里落到最低档，既避免明知无效还发关闭字段，也让界面与实际一致。
+                // 「关闭」原样下发，不再因为配置里的 thinkingOffBlocked 偷偷换成最低档。
                 //
-                // 只看<b>探测或实测明确给出「关不掉」结论</b>的那一条（配置里的
-                // thinkingOffBlocked），不再看运行期记忆：记忆会被「某次回复恰好没有
-                // 推理痕迹」写成「能关」，也会被「一次 400」写成「关不掉」，
-                // 两种方向的误判都会让「关闭」忽明忽暗。
-                boolean blocked = m != null && m.thinkingOffBlocked;
-                if (blocked) {
-                    List<String> levels = m == null ? null : m.levelList();
-                    if (levels == null || levels.isEmpty()) {
-                        // 没探过档位但已确认关不掉：用家族先验的最低档兜底
-                        levels = ReasoningProfiles.of(model).levels;
-                    }
-                    if (levels != null && !levels.isEmpty()) return ThinkingLevels.lowest(levels);
-                    return "low";
-                }
+                // 旧版在这里把 off 改写成最低档，界面却仍显示「关闭」——用户看到的是
+                // 「关了还在思考」，实际是请求压根没带关闭字段。判定「关不掉」本来就
+                // 不可靠（探测条件与真实聊天不同，一次 400 也会被记成关不掉），
+                // 拿它改写用户明确选择的档位，等于用一个不确定的结论覆盖确定的意图。
+                //
+                // 真正的兜底放在请求侧：端点拒收关闭写法时由 ChatStreamRunner 逐级
+                // 降级重发，最后才按端点默认回答，并在界面上如实提示。
                 return globalLevel;
             }
             if (m == null || !m.levelsProbed()) {

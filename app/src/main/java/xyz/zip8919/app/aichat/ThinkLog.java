@@ -30,8 +30,36 @@ public final class ThinkLog {
 
     private static File outFile;
     private static long written;
+    /** 应用级上下文：请求线程没有 Activity，日志落盘只能靠它。 */
+    private static volatile Context appCtx;
 
     private ThinkLog() {
+    }
+
+    /** 由 {@code AcApp} 在进程启动时调用一次；之后各处可直接 {@link #line(String)}。 */
+    static void init(Context ctx) {
+        if (ctx != null) appCtx = ctx.getApplicationContext();
+    }
+
+    /** 追加一行，使用进程级上下文；未初始化时静默丢弃。 */
+    public static void line(String msg) {
+        line(appCtx, msg);
+    }
+
+    /** 日志文件；未初始化时返回 null。 */
+    public static File file() {
+        return file(appCtx);
+    }
+
+    /** 清空日志：每次开始一轮新的排查都从干净状态记起，免得旧内容混进来。 */
+    public static synchronized void reset() {
+        try {
+            File f = file(appCtx);
+            if (f == null) return;
+            new FileOutputStream(f, false).close();
+            written = 0;
+        } catch (Throwable ignored) {
+        }
     }
 
     /** 日志文件；未初始化时返回 null */

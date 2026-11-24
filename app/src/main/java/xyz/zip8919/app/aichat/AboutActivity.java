@@ -10,8 +10,15 @@ import android.content.pm.PackageInfo;
 import android.net.Uri;
 import android.os.Bundle;
 import android.view.View;
+import android.view.ViewGroup;
 import android.widget.Button;
+import android.widget.LinearLayout;
 import android.widget.TextView;
+
+import java.io.File;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Locale;
 
 /**
  * 关于页。版本号、开源许可、使用说明，「检查更新」（跳 {@link UpdateActivity}）与「反馈建议」入口。
@@ -64,6 +71,9 @@ public class AboutActivity extends ThemedActivity {
                 startActivity(new Intent(AboutActivity.this, UpdateActivity.class));
             }
         });
+        // 仅调试包：关闭思考的诊断日志导出。正式包没有这个入口，
+        // 也不会产生日志文件（ThinkLog / OffDiag 都按 BuildConfig.DEBUG 关闭）。
+        if (OffDiag.ENABLED) installDiagEntry(checkUpdate);
         feedback.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 showFeedback();
@@ -211,6 +221,60 @@ public class AboutActivity extends ThemedActivity {
                 })
                 .setNegativeButton(Strings.get(R.string.aboutactivity_013), null)
                 .show();
+    }
+
+    /**
+     * 在「检查更新」下面插入诊断导出按钮（仅调试包）。
+     *
+     * <p>为什么不放进设置页：排查这类问题的人需要少点几下就能拿到文件，
+     * 关于页在首页一次点击就到，且这里不会和常规设置项混在一起。
+     */
+    private void installDiagEntry(View anchor) {
+        try {
+            if (!(anchor.getParent() instanceof ViewGroup)) return;
+            final ViewGroup parent = (ViewGroup) anchor.getParent();
+            Button btn = new Button(this);
+            btn.setText(Strings.get(R.string.aboutactivity_026));
+            btn.setLayoutParams(new LinearLayout.LayoutParams(anchor.getLayoutParams()));
+            btn.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    exportDiagLog();
+                }
+            });
+            int idx = parent.indexOfChild(anchor) + 1;
+            parent.addView(btn, idx);
+        } catch (Throwable t) {
+            LogUtil.w(TAG, "installDiagEntry failed: %s", t.getMessage());
+        }
+    }
+
+    /**
+     * 把诊断日志复制进导出目录再分享。
+     *
+     * <p>日志本体在 {@code files/logs} 下，属于应用私有目录，别的应用读不到；
+     * 先落到 {@code exports} 才能通过 {@code content://} 交给接收方。
+     */
+    private void exportDiagLog() {
+        File src = ThinkLog.file();
+        if (src == null || !src.isFile() || src.length() == 0) {
+            AcToast.showLong(this, Strings.get(R.string.aboutactivity_027));
+            return;
+        }
+        StorageManager sm = StorageManager.getInstance(getApplicationContext());
+        String text = sm.readFile(src.getAbsolutePath());
+        if (text == null || text.length() == 0) {
+            AcToast.showLong(this, Strings.get(R.string.aboutactivity_027));
+            return;
+        }
+        String name = "thinking_trace_"
+                + new SimpleDateFormat("MMdd_HHmm", Locale.US).format(new Date()) + ".log";
+        String path = sm.saveExport(name, text);
+        if (path == null) {
+            AcToast.showLong(this, Strings.get(R.string.aboutactivity_029));
+            return;
+        }
+        AcToast.showLong(this, Strings.get(R.string.aboutactivity_028, path));
+        FileActions.share(this, new File(path));
     }
 
     private void shareMail() {

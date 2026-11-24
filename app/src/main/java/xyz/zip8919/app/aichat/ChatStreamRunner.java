@@ -305,6 +305,35 @@ final class ChatStreamRunner {
             // 每轮重新 new 会让它清零，工具卡片之后多出一整次无谓的整段重渲染
             renderer = new StreamRenderer(ui, job.aiIndex, job.generation,
                     job.realtimeRender);
+            // 诊断（仅 debug 包）：把「界面选了什么、实际发什么」的前提一次写全。
+            // 关闭不生效最常见的一种是「界面显示关闭，请求里根本没带关闭字段」，
+            // 光看界面永远发现不了，这里先把两者摆在一起。
+            boolean modelBlocked = false;
+            try {
+                ModelInfo dmHead = ConfigManager.getInstance()
+                        .findModel(job.providerName, job.modelName);
+                if (dmHead != null) modelBlocked = dmHead.thinkingOffBlocked;
+            } catch (Throwable ignored) {
+                // 查不到配置不影响对话
+            }
+            if (OffDiag.ENABLED) {
+                String resolvedHead = ChatTransport.resolveThinkingLevel(
+                        job.modelName, job.provider, job.thinkingLevel);
+                OffDiag.log("==== 发送开始 ====");
+                OffDiag.log("模型=%s 提供商=%s 端点=%s", job.modelName, job.providerName,
+                        OffDiag.endpoint(job.provider == null ? null : job.provider.apiUrl));
+                OffDiag.log("档位：界面=%s 实际=%s 关闭字段=%s", job.thinkingLevel, resolvedHead,
+                        thinkingOff ? "下发" : (userWantsNoThinking ? "不下发" : "无需"));
+                OffDiag.log("模型记录：关不掉=%s 已探测档位=%s", modelBlocked,
+                        modelRecord());
+                OffDiag.log("提供商配置：thinkingType=%s paramName=%s",
+                        job.provider == null ? "" : job.provider.thinkingType,
+                        job.provider == null ? "" : job.provider.thinkingParamName);
+                if (userWantsNoThinking && !sendThinking) {
+                    OffDiag.log("注意：本次因续写官方前缀而不下发思考参数");
+                }
+            }
+            int reqSeq = 0;
             while (true) {
                 st.round = round;
                 // 换轮次就重置 429 计数：每一轮都是一个新的 HTTP 请求，
@@ -330,6 +359,18 @@ final class ChatStreamRunner {
                         job.thinkingLevel, conversation, job.streamEnabled,
                         toolsEnabled ? toolDefs : null, includeUsage, sendThinking,
                         !offNativeDropped, !offBoolOnly);
+                if (OffDiag.ENABLED) {
+                    OffDiag.log("请求 #%d 轮次=%d %s", reqSeq, round, OffDiag.shape(body));
+                    OffDiag.log("  思考字段：%s",
+                            OffDiag.fields(body, job.provider == null
+                                    ? null : job.provider.thinkingParamName));
+                    if (thinkingOff && (offNativeDropped || offBoolOnly)) {
+                        OffDiag.log("  降级状态：自填字段=%s 仅布尔关闭=%s",
+                                offNativeDropped ? "已去掉" : "保留",
+                                offBoolOnly ? "是" : "否");
+                    }
+                    reqSeq++;
+                }
                 // 关闭思考只靠协议字段：不再追加「不要思考」之类的提示词约束。
                 // 提示词管不住模型内部推理，只会污染上下文、让模型输出变形。
                 // 统计口径：一次 open 就是一次 HTTP 请求（含工具轮、含重试）。
@@ -384,6 +425,10 @@ final class ChatStreamRunner {
 
                     String errBody = ChatTransport.readErrorBody(conn);
                     LogUtil.e(TAG, "request failed: HTTP %d, body=%s", code, LogUtil.preview(errBody, 800));
+                    if (OffDiag.ENABLED) {
+                        OffDiag.log("请求 #%d 失败 HTTP=%d 响应体=%s", reqSeq - 1, code,
+                                OffDiag.snippet(errBody));
+                    }
 
                     // 降级顺序很关键：usage 排在最后。
                     // onUsageUnsupported() 会把这个 provider「不支持 stream_options」永久写进
@@ -420,6 +465,7 @@ final class ChatStreamRunner {
                             && !offNativeDropped) {
                         offNativeDropped = true;
                         LogUtil.w(TAG, "thinking-off rejected, retry without provider-declared field");
+                        OffDiag.log("降级：端点拒收，去掉自填字段重发（关闭意图保留）");
                         ChatTransport.close(conn);
                         conn = null;
                         session.setConnection(null);
@@ -429,6 +475,7 @@ final class ChatStreamRunner {
                             && !offBoolOnly) {
                         offBoolOnly = true;
                         LogUtil.w(TAG, "thinking-off rejected, retry with boolean switches only");
+                        OffDiag.log("降级：端点仍拒收，只留布尔关闭重发");
                         ChatTransport.close(conn);
                         conn = null;
                         session.setConnection(null);
@@ -439,6 +486,7 @@ final class ChatStreamRunner {
                         sendThinking = false;
                         thinkingOff = false;
                         LogUtil.w(TAG, "thinking-off rejected in every form, send defaults");
+                        OffDiag.log("降级：所有关闭写法都被拒收，按端点默认重发（本次不再尝试关闭）");
                         if (session.isCurrent(job.generation)) {
                             ui.toast(Strings.get(R.string.chatstreamrunner_019));
                         }
@@ -498,6 +546,19 @@ final class ChatStreamRunner {
                 // 真正的新回答由宿主按请求代数重新起步。
                 SseRound.Result rr = readRound(conn, st, renderer);
                 st.chunks = rr.chunks;
+                if (OffDiag.ENABLED) {
+                    OffDiag.log("响应 #%d 分片=%d 推理分片=%d 推理字符=%d 推理tokens=%d 正文=%d",
+                            reqSeq - 1, rr.chunks, rr.thinkingChunks,
+                            rr.reasoning.length(), rr.reasoningTokens, rr.content.length());
+                    if (rr.reasoning.length() > 0) {
+                        OffDiag.log("  推理片段：%s", OffDiag.snippet(rr.reasoning));
+                    }
+                    OffDiag.log(OffDiag.verdict(userWantsNoThinking,
+                            thinkingOff && sendThinking,
+                            ChatTransport.resolveThinkingLevel(job.modelName, job.provider,
+                                    job.thinkingLevel),
+                            modelBlocked, rr.reasoning.length(), rr.reasoningTokens));
+                }
                 // 统计要的是「本轮这一发」的用量，而 st 里是跨轮累计值。
                 // 不做差直接记，一条带 3 次工具轮的回复会把总量算成 1+2+3=6 倍。
                 final int ptBefore = st.promptTokens;
@@ -682,6 +743,25 @@ final class ChatStreamRunner {
      *
      * @return false 表示等待期间请求已被取代/打断，调用方应立即返回
      */
+    /**
+     * 诊断用：当前模型在配置里的档位记录。
+     *
+     * <p>「界面显示关闭、请求却按低档发」这类问题，根源就在这份记录里
+     * （{@code thinkingOffBlocked} 会让解析后的档位从 off 落到最低档），
+     * 所以每次发送都把它的原样写进日志。
+     */
+    private String modelRecord() {
+        try {
+            ModelInfo m = ConfigManager.getInstance().findModel(job.providerName, job.modelName);
+            if (m == null) return "（配置里没有这条模型）";
+            return "probed=" + m.levelsProbed()
+                    + " levels=" + (m.thinkingLevels == null ? "" : m.thinkingLevels)
+                    + " unverifiable=" + m.levelsUnverifiable;
+        } catch (Throwable t) {
+            return "（读取失败：" + t.getMessage() + "）";
+        }
+    }
+
     private boolean sleepInterruptible(long totalMs, int generation) {
         long end = System.currentTimeMillis() + Math.max(0L, totalMs);
         while (true) {

@@ -117,12 +117,15 @@ final class ThinkingOff {
                 }
                 return true;
             }
-            // 1) reasoning_effort 必须最先写：只认 effort 的家族（o 系列、gpt-5、
-            //    Gemini、Grok）用它降到最低档，而它的值只能是该家族认的词——
-            //    Anthropic 那边由下面第 4 步的 budget:0 关掉。
-            boolean effortFamily = needsEffort(model);
-            if (effortFamily) {
-                body.put("reasoning_effort", lowestEffort(model));
+            // 1) 只认 effort 的家族（o 系列、gpt-5、Gemini、Grok）：它们没有「关闭」
+            //    这个档位，能做的只有压到最低。这里只写 reasoning_effort 就返回——
+            //    OpenAI 官方对不认识的参数直接 400，多写 thinking /
+            //    chat_template_kwargs 换不来任何效果，只会让每条消息多吃两次失败请求。
+            //    gpt-5.1 起支持 effort=none，那才是真正的关闭。
+            if (needsEffort(model)) {
+                body.put("reasoning_effort", supportsNone(model) ? "none" : lowestEffort(model));
+                if (includeNative) applyNative(body, p);
+                return true;
             }
             // 2) thinking 对象：DeepSeek、Kimi、混元、豆包、GLM、Anthropic，
             //    以及大部分网关的通用写法
@@ -217,7 +220,8 @@ final class ThinkingOff {
         if ("claude".equals(ReasoningProfiles.of(model).family)) {
             sb.append(", thinking_budget:0");
         } else if (needsEffort(model)) {
-            sb.append(", reasoning_effort:").append(lowestEffort(model));
+            sb.append(", reasoning_effort:")
+                    .append(supportsNone(model) ? "none" : lowestEffort(model));
         }
         if (p != null) {
             String n = paramName(p);

@@ -15,5 +15,12 @@ public class AcApp extends Application {
         super.onCreate();
         Strings.init(this);
         CrashCatcher.install(this);
+        // 诊断日志也只在 debug 构建里生效，内部按 BuildConfig.DEBUG 自行判断
+        ThinkLog.init(this);
+        if (OffDiag.ENABLED) {
+            OffDiag.log("==== 应用启动 v%s (%d) 设备=%s API=%d ====",
+                    BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE,
+                    android.os.Build.MODEL, android.os.Build.VERSION.SDK_INT);
+        }
     }
 }

@@ -370,23 +370,32 @@ final class CapabilityProbe {
             return Intent.unknown();
         }
         if (stop != null && stop.stopped()) return Intent.unknown();
+        int baseSig = reasoningSignal(base.body);
+        OffDiag.log("探测·关闭：默认请求 HTTP=%d 推理信号=%d", base.httpCode, baseSig);
         Raw off = post(url, snap.apiKey, offBody(snap, model), TIMEOUT_MS);
-        if (off.error != null) return Intent.unknown();
+        if (off.error != null) {
+            OffDiag.log("探测·关闭：关闭请求失败（%s），不下结论", off.error);
+            return Intent.unknown();
+        }
         if (off.httpCode == 400 || off.httpCode == 422) {
             // 端点拒收关闭字段：这次请求根本不成立，不下结论。
             // 旧版在这里直接判「关不掉」，随后界面就删掉了「关闭」——用户看到
             // 的「选项忽然没了」就是这么来的。真实聊天里还有「去掉自填字段重发」
             // 这一步，探测不该比聊天更早下结论。
             LogUtil.d(TAG, "off probe: fields rejected (HTTP %d), no conclusion", off.httpCode);
+            OffDiag.log("探测·关闭：端点拒收关闭字段 HTTP=%d，不下结论", off.httpCode);
             return Intent.unknown();
         }
         if (off.httpCode < 200 || off.httpCode >= 300) {
             // 认证、限流、服务端错误与关闭能力无关
             return Intent.unknown();
         }
-        int baseSig = reasoningSignal(base.body);
         int offSig = reasoningSignal(off.body);
         LogUtil.d(TAG, "off probe: baseline=%d off=%d", baseSig, offSig);
+        OffDiag.log("探测·关闭：关闭请求 HTTP=%d 推理信号=%d，结论=%s", off.httpCode, offSig,
+                (baseSig > 0 && offSig == 0) ? "能关"
+                        : (baseSig > 0 && offSig > 0) ? "关不掉"
+                        : "测不出来");
         if (baseSig > 0 && offSig == 0) return Intent.yes(0);
         if (baseSig > 0 && offSig > 0) return Intent.no();
         if (baseSig == 0 && offSig == 0) {
