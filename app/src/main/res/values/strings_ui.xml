@@ -1139,6 +1139,11 @@
     <string name="statsactivity_040">本周（自周一起）</string>
     <string name="statsactivity_041">本月</string>
     <string name="statsactivity_042">今日</string>
+    <string name="savedpicker_001">点一个文件添加到当前对话。图片会先进裁剪页。</string>
+    <string name="savedpicker_002">还没有已保存的文件。\n导出的代码块、图片会出现在这里，之后可直接当附件添加。</string>
+    <string name="savedpicker_003">选择已保存文件</string>
+    <string name="savedpicker_004">从已保存文件添加</string>
+    <string name="savedpicker_005">文件已不存在，可能已被删除或改名</string>
     <string name="storageactivity_001">对话记录</string>
     <string name="storageactivity_002">图片附件</string>
     <string name="storageactivity_003">已保存文件</string>
@@ -2015,6 +2020,8 @@
     <string name="activity_settings_068">关于</string>
     <string name="activity_settings_069">根据用户消息生成3-15字标题。只输出标题本身。</string>
     <string name="activity_settings_070">支持占位符：{android} {api} {webview} {model} {app_version} {ua}，生成标题时替换为当前设备的实际值。</string>
+    <string name="activity_settings_071">全屏</string>
+    <string name="activity_settings_072">全屏编辑提示词</string>
     <string name="activity_stats_001">统计范围</string>
     <string name="activity_stats_002">起始日</string>
     <string name="activity_stats_003">至</string>

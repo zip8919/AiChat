@@ -35,6 +35,14 @@
             android:label="设置"
             android:name="xyz.zip8919.app.aichat.SettingsActivity"
             android:exported="false"
+            android:windowSoftInputMode="adjustResize"
+            android:configChanges="screenSize|orientation|keyboardHidden"/>
+
+        <!-- 从加号菜单进入：列已导出的文件，点一个就加进当前对话 -->
+        <activity
+            android:label="@string/savedpicker_003"
+            android:name="xyz.zip8919.app.aichat.SavedFilePickerActivity"
+            android:exported="false"
             android:configChanges="screenSize|orientation|keyboardHidden"/>
 
         <activity

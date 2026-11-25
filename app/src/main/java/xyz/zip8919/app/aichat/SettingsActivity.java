@@ -12,6 +12,7 @@ import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewTreeObserver;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
@@ -135,6 +136,13 @@ public class SettingsActivity extends ThemedActivity {
     /** 系统提示词草稿：预设页的「保存当前提示词」读它，省掉「先保存设置」这一步。 */
     public static final String KEY_SYSTEM_PROMPT_DRAFT = "system_prompt_draft";
     private static final int REQ_PRESET_MANAGER = 2001;
+    private static final int REQ_FULLSCREEN_SYSTEM = 2002;
+    private static final int REQ_FULLSCREEN_TITLE = 2003;
+    private static final int REQ_FULLSCREEN_JS = 2004;
+    /** 提示词区的滚动容器：多行输入框移动光标时不让整页跟着跳。 */
+    private FormScrollView scrollView;
+    /** 当前获得焦点的输入框：键盘弹出后按它把整框滚回可见区域。 */
+    private EditText focusedEdit;
     private int titleModelMissingPos = -1; // saved 模型不存在时 spinner 停放的位置，-1 表示无此情况
     private boolean titleModelUserPicked;  // 用户是否手动动过标题模型 spinner（尚未保存）
     private String titleModelSignature;    // 上次构建 adapter 时的模型列表快照，用于判断是否需要重建
@@ -156,6 +164,7 @@ public class SettingsActivity extends ThemedActivity {
     }
 
     private void initViews() {
+        scrollView = (FormScrollView) findViewById(R.id.settings_scroll);
         systemPromptEdit = (EditText) findViewById(R.id.system_prompt_edit);
         // 清空只动输入框，不写 SharedPreferences：与页面其它设置一样，统一由「保存」落盘。
         // 二次确认不能省——这里常常是几百字，误触一下就没了，且没有撤销。
@@ -203,6 +212,7 @@ public class SettingsActivity extends ThemedActivity {
         visionMaxImagesEdit = (EditText) findViewById(R.id.vision_max_images_edit);
         webSearchMaxCallsEdit = (EditText) findViewById(R.id.web_search_max_calls_edit);
         jsEnvPromptEdit = (EditText) findViewById(R.id.js_env_prompt_edit);
+        bindPromptEditors();
         // 三个提示词输入框的占位符快插胶囊条；集合要与各输入框下方的说明文字一致
         PlaceholderChips.attach(
                 (LinearLayout) findViewById(R.id.system_prompt_chips),
@@ -1268,6 +1278,83 @@ public class SettingsActivity extends ThemedActivity {
         dlg.show();
     }
 
+    /**
+     * 三个提示词输入框的两件配套：全屏编辑入口、键盘弹出时把整框滚回可见。
+     *
+     * <p>滚动为什么要单独管：多行输入框自己会滚（maxLines 限高），光标移动时
+     * 系统把光标矩形交给外层 ScrollView 换算，坐标基准不一致，算出来的偏移
+     * 每次偏大一截。表现是打着字整页往下跳，最后输入框被顶出屏幕。滚动请求
+     * 已由 {@link FormScrollView} 拦下，这里只在「可视高度变了」（键盘弹出、
+     * 分组展开）和「输入框刚获得焦点」这两个时机滚一次。
+     */
+    private void bindPromptEditors() {
+        bindFullscreenButton(R.id.system_prompt_fullscreen, systemPromptEdit, REQ_FULLSCREEN_SYSTEM);
+        bindFullscreenButton(R.id.title_prompt_fullscreen, titlePromptEdit, REQ_FULLSCREEN_TITLE);
+        bindFullscreenButton(R.id.js_env_prompt_fullscreen, jsEnvPromptEdit, REQ_FULLSCREEN_JS);
+
+        EditText[] editors = new EditText[]{systemPromptEdit, titlePromptEdit, jsEnvPromptEdit};
+        for (int i = 0; i < editors.length; i++) {
+            final EditText edit = editors[i];
+            edit.setOnFocusChangeListener(new View.OnFocusChangeListener() {
+                public void onFocusChange(View v, boolean hasFocus) {
+                    if (hasFocus) {
+                        focusedEdit = edit;
+                        keepEditorVisible(edit);
+                    } else if (focusedEdit == edit) {
+                        focusedEdit = null;
+                    }
+                }
+            });
+        }
+
+        View content = findViewById(android.R.id.content);
+        if (content != null) {
+            content.getViewTreeObserver().addOnGlobalLayoutListener(
+                    new ViewTreeObserver.OnGlobalLayoutListener() {
+                        public void onGlobalLayout() {
+                            if (scrollView == null) return;
+                            int h = scrollView.getHeight();
+                            // 键盘弹出、收起，分组展开收起都会改变可视高度。
+                            // 变了就把当前输入框重新带回视野——只跟着「高度变」走，
+                            // 打字和移光标不会触发，页面自然不跳。
+                            if (h != lastScrollHeight) {
+                                lastScrollHeight = h;
+                                if (focusedEdit != null) keepEditorVisible(focusedEdit);
+                            }
+                        }
+                    });
+        }
+    }
+
+    /** 每次变化后的可视高度，用来判断是键盘弹出还是普通重绘。 */
+    private int lastScrollHeight;
+
+    private void bindFullscreenButton(int buttonId, final EditText edit, final int requestCode) {
+        View b = findViewById(buttonId);
+        if (b == null) return;
+        b.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                LogUtil.d(TAG, "click: fullscreen prompt, len=%d", edit.getText().length());
+                Intent it = new Intent(SettingsActivity.this, FullscreenInputActivity.class);
+                it.putExtra(FullscreenInputActivity.EXTRA_TEXT, edit.getText().toString());
+                it.putExtra(FullscreenInputActivity.EXTRA_TITLE,
+                        Strings.get(R.string.activity_settings_072));
+                startActivityForResult(it, requestCode);
+            }
+        });
+    }
+
+    /** 把输入框整框带进视野。延迟一点，等键盘动画把窗口高度定下来再滚。 */
+    private void keepEditorVisible(final EditText edit) {
+        if (edit == null || scrollView == null) return;
+        scrollView.postDelayed(new Runnable() {
+            public void run() {
+                if (isFinishing() || scrollView == null) return;
+                scrollView.showEditor(edit);
+            }
+        }, 120);
+    }
+
     /** 打开预设管理页；应用某个预设后回填输入框。 */
     private void openPresetManager() {
         Intent it = new Intent(this, PresetManagerActivity.class);
@@ -1277,6 +1364,19 @@ public class SettingsActivity extends ThemedActivity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (resultCode == RESULT_OK && data != null
+                && (requestCode == REQ_FULLSCREEN_SYSTEM
+                || requestCode == REQ_FULLSCREEN_TITLE
+                || requestCode == REQ_FULLSCREEN_JS)) {
+            String text = data.getStringExtra(FullscreenInputActivity.EXTRA_RESULT);
+            if (text == null) return;
+            EditText target = requestCode == REQ_FULLSCREEN_SYSTEM ? systemPromptEdit
+                    : (requestCode == REQ_FULLSCREEN_TITLE ? titlePromptEdit : jsEnvPromptEdit);
+            target.setText(text);
+            target.setSelection(text.length());
+            LogUtil.i(TAG, "fullscreen prompt returned: len=%d", text.length());
+            return;
+        }
         if (requestCode == REQ_PRESET_MANAGER && resultCode == RESULT_OK && data != null) {
             String prompt = data.getStringExtra(PresetManagerActivity.EXTRA_APPLY_PROMPT);
             String name = data.getStringExtra(PresetManagerActivity.EXTRA_APPLY_NAME);

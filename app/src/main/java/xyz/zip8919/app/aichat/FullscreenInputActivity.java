@@ -24,6 +24,8 @@ public class FullscreenInputActivity extends ThemedActivity {
 
     public static final String EXTRA_TEXT = "fullscreen_text";
     public static final String EXTRA_RESULT = "fullscreen_result";
+    /** 可选标题：设置页里的提示词、标题模板等都用这一页，标题要说清在改什么。 */
+    public static final String EXTRA_TITLE = "fullscreen_title";
 
     private EditText edit;
     private TextView counter;
@@ -41,6 +43,11 @@ public class FullscreenInputActivity extends ThemedActivity {
         setContentView(R.layout.activity_fullscreen_input);
 
         edit = (EditText) findViewById(R.id.fullscreen_edit);
+        android.widget.TextView title = (android.widget.TextView) findViewById(R.id.fullscreen_title);
+        String customTitle = getIntent().getStringExtra(EXTRA_TITLE);
+        if (title != null && customTitle != null && customTitle.length() > 0) {
+            title.setText(customTitle);
+        }
         counter = (TextView) findViewById(R.id.fullscreen_count);
         clear = (Button) findViewById(R.id.fullscreen_clear);
         Button cancel = (Button) findViewById(R.id.fullscreen_cancel);

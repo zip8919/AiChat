@@ -304,8 +304,17 @@ final class RendererAssets {
             "border-bottom:1px dashed #e0e0e0;margin-bottom:6px;" +
             "-webkit-tap-highlight-color:rgba(100,180,255,0.2);}";
 
-    /** 页面脚本：复制 / 保存按钮、工具卡片折叠、流式更新、图片预览桥接。 */
-    static final String JS =
+
+    /**
+     * 两半分开声明：Java 字符串常量池单条上限 65535 字节，整段脚本已经超过
+     * 这个长度，拼成一个字面量会直接编译失败（constant string too long）。
+     * 在方法里拼，编译器不会把它折回一个常量。
+     */
+    private static String jsPack(String a, String b) {
+        return a + b;
+    }
+
+    private static final String JS_PART_1 =
             "(function(){" +
             "function addCopyBtns(root){" +
             "var pres=(root||document).querySelectorAll('pre');" +
@@ -1146,39 +1155,56 @@ final class RendererAssets {
             "msgs.insertBefore(frag,msgs.firstChild);" +
             "var after=doc.scrollHeight||document.body.scrollHeight;" +
             "var delta=after-before;" +
-            "if(delta>0)window.scrollTo(0,(window.pageYOffset||doc.scrollTop||0)+delta);" +
+            // 这是程序性补偿，要打上「程序滚动」时间戳，否则紧接着的 scroll 事件
+            // 会被当成用户操作，把跟随状态改掉
+            "if(delta>0){window.__progRoll=Date.now()+400;" +
+            "window.scrollTo(0,(window.pageYOffset||doc.scrollTop||0)+delta);}" +
             "addCopyBtns();applyToolStates(document);" +
             "window.__loadingOlder=false;setOlderHint(remaining);};" +
             "var __olderTicking=false;" +
             "window.__lastSt=null;window.__lastSh=0;" +
-            "window.addEventListener('scroll',function(){" +
-            // 视口位置是「用户意图」唯一可靠的事实来源：遥控器方向键、鼠标滚轮、
-            // 拖动滚动条都不会产生 touchmove，只靠触摸判方向就会漏掉这些操作，
-            // 表现就是「我已经翻上去了，它还是把我拽回底部」。
+            // ---- 跟随状态 ----
             //
-            // 这里在事件里同步采样（读 scrollTop 不触发布局，代价可忽略），
-            // 不受下面 150ms 节流闸门影响，快速滑动也不会漏。
-            "var st0=document.documentElement.scrollTop||document.body.scrollTop||window.pageYOffset||0;" +
-            "var sh0=Math.max(document.documentElement.scrollHeight||0,document.body.scrollHeight||0);" +
-            // 只认「位置往上走 + 内容没有变短」：内容变短会把 scrollTop 夹到新上限，
-            // 这是浏览器的行为（思考块自动收起、卡片收合都会），不是用户操作。
-            // 把这种情况当成「用户上翻」会导致明明没动却被锁死不再跟随。
+            // 只用一个状态：__follow = 用户最近一次操作后是否还贴着底部。
+            //
+            // 旧版靠 __userUp（「用户上翻过」）这个记忆位，配上一堆「贴底就清掉它」
+            // 的补丁。问题在于 scrollTop 会自己动的场合太多：内容变短把位置夹到新
+            // 上限（思考块收起、卡片收合）、tail 重建让高度瞬间归零、程序自己
+            // scrollTo —— 每一种只要骗过一次，记忆位就变成「用户在底部」，之后这
+            // 一整轮都把视口往下拽。长内容每更新一次就掉到底，就是这么来的。
+            //
+            // 现在改成两条硬规则：
+            //   ① 只有「不是程序滚的」且「内容没有变短」的 scroll 事件才采信；
+            //   ② 采信时按位置直接算出跟不跟随，不做记忆、不做推断。
+            "window.__follow=true;window.__progRoll=0;" +
+            "window.__posTop=function(){" +
+            "return document.documentElement.scrollTop||document.body.scrollTop||window.pageYOffset||0;};" +
+            "window.__posH=function(){" +
+            "return Math.max(document.documentElement.scrollHeight||0,document.body.scrollHeight||0);};" +
+            "window.__posCh=function(){" +
+            "return document.documentElement.clientHeight||document.body.clientHeight||window.innerHeight||0;};" +
+            "window.addEventListener('scroll',function(){" +
+            // 遥控器方向键、滚轮、拖滚动条都不产生 touchmove，只有视口位置能覆盖
+            // 全部输入方式。这里同步采样，不受下面 150ms 节流影响。
+            "var st0=window.__posTop();var sh0=window.__posH();" +
+            // 内容变短会把 scrollTop 夹到新上限，浏览器行为，不是用户操作
             "var shrank0=(window.__lastSh>0&&sh0<window.__lastSh-4);" +
-            "if(window.__lastSt!=null&&st0<window.__lastSt-4&&!shrank0)window.__userUp=true;" +
-            "window.__lastSt=st0;window.__lastSh=sh0;window.__lastShrank=shrank0;" +
+            // 程序滚动窗口内不采信；但「视口明显往上跳」一定是用户干的
+            // （程序滚动只会往下），这条让手指上滑不必等窗口过期
+            "var up0=(window.__lastSt!=null&&st0<window.__lastSt-40);" +
+            "if((Date.now()>window.__progRoll||up0)&&!shrank0){" +
+            // 48px：比输入栏矮一截，正常阅读不会恰好停在这根线上
+            "window.__follow=(sh0-window.__posCh()-st0<48);}" +
+            "window.__lastSt=st0;window.__lastSh=sh0;" +
             "if(__olderTicking)return;__olderTicking=true;" +
             "setTimeout(function(){" +
             "__olderTicking=false;" +
-            "var st=document.documentElement.scrollTop||document.body.scrollTop||window.pageYOffset||0;" +
-            "var sh=Math.max(document.documentElement.scrollHeight||0,document.body.scrollHeight||0);" +
-            "var ch=document.documentElement.clientHeight||document.body.clientHeight||window.innerHeight||0;" +
-            // 回到底部气泡：离底超过 160px 才出现。用 160 而不是 0——
-            // 正常阅读时最后一行常被键盘/输入栏挡掉一点，差几十像素就弹个按钮太吵。
+            "var st=window.__posTop();" +
+            "var sh=window.__posH();" +
+            "var ch=window.__posCh();" +
+            // 回到底部气泡：离底超过 160px 才出现，差几十像素就弹按钮太吵
             "if(window.Android&&Android.setScrollBubble)Android.setScrollBubble(st+ch<sh-160);" +
-            // 用户自己滚回底部就恢复跟随，但要排除「内容变短把视口夹到底」这种
-            // 假贴底：判定用的 __lastShrank 是事件入口处采到的（当时高度确实比
-            // 上一帧矮），150ms 后的回调里再比高度已经比不出来了。
-            "if(st+ch>=sh-24&&!window.__lastShrank)window.__userUp=false;" +
+            "window.__lastSh=sh;" +
             "if(window.__olderDone||window.__loadingOlder)return;" +
             "if(st<=40)loadOlderNow();},150);});" +
             // 首屏也要判一次：否则从历史会话打开、停在顶部时气泡不会出现
@@ -1198,51 +1224,55 @@ final class RendererAssets {
             "var menu=all[i].querySelector('.user-menu-wrap');" +
             "if(card){if(menu)all[i].insertBefore(card,menu);else all[i].appendChild(card);}" +
             // 用户消息失败：这条是他自己刚发的，必须滚到能看见，不能等用户去找
-            "window.__userUp=false;smartScrollToBottom(true);" +
+            "smartScrollToBottom(true);" +
             "return;}}};" +
-            "window.__userUp=false;" +
             "window.__touchY=null;" +
-            // 手指方向只作为「提前量」：真正的判据是 scroll 事件里视口有没有往上走。
-            //
-            // 旧写法拿「单帧位移 > 8px」判方向，慢慢拖动时每一帧只走两三像素，
-            // 这个条件永远不成立，__userUp 一直是 false，于是每 100ms 被
-            // smartScrollToBottom 拽回底部（用户说的「稍微往上滑一点就回到底部」
-            // 就是这么来的）。改成从按下的那一点算累计位移。
+            // 手指一碰就作废「程序滚动」时间戳：用户操作永远优先于自己刚做的滚动。
+            // 触摸方向只作为提前量，真正的判据是 scroll 事件里的位置。
+            // 只认「手指下滑 = 往回看」：反方向（上滑）在生成中常只是想把被
+            // 输入栏挡住的行推上来，不该被当成「我要回到底部」。
             "document.addEventListener('touchstart',function(e){" +
+            "window.__progRoll=0;" +
             "window.__touchY=(e.touches&&e.touches.length)?e.touches[0].clientY:null;},true);" +
             "document.addEventListener('touchmove',function(e){" +
             "if(!e.touches||!e.touches.length)return;" +
             "var y=e.touches[0].clientY;" +
-            // 手指往下拖 = 内容往回看。反方向（上滑）不解除：生成过程中内容一直在长，
-            // 用户常只是往上推一点想看被输入栏挡住的行。
-            "if(window.__touchY!=null&&y-window.__touchY>10)window.__userUp=true;},true);" +
+            "if(window.__touchY!=null&&y-window.__touchY>10)window.__follow=false;},true);" +
             "document.addEventListener('touchend',function(){window.__touchY=null;},true);" +
             "document.addEventListener('touchcancel',function(){window.__touchY=null;},true);" +
+            // 滚轮、拖滚动条、方向键：都不产生 touch 事件，同样要作废时间戳，
+            // 否则一次程序滚动之后的 400ms 里，用户的滚动会被当成自己滚的而忽略
+            "window.addEventListener('wheel',function(){window.__progRoll=0;},true);" +
+            "window.addEventListener('mousedown',function(){window.__progRoll=0;},true);" +
+            "window.addEventListener('keydown',function(){window.__progRoll=0;},true);" +
             "window.smartScrollToBottom=function(force){" +
             // 手指按在可横滑容器上：不要拽视口，否则表格被滚出屏幕，看起来就是「滑不动」
             "if(window.__holdRender)return;" +
-            // 强制滚动（点气泡、切会话、发新消息）视为用户想回到最新，顺手解除「上翻」状态，
-            // 否则滚到底之后新内容还是不跟随
-            "if(force)window.__userUp=false;" +
-            // 非强制滚动时只看用户意图，不看距离：内容长高造成的落后必须继续跟随，
-            // 否则生成越快越容易「自动滚动停住」。用户真的往上翻时 __userUp 已置位。
-            "if(!force&&window.__userUp)return;" +
+            "var maxY=window.__posH();" +
+            "var ch=window.__posCh();" +
+            // 内容还不足一屏：没有「历史」可看，停在哪都是底部，直接按跟随处理。
+            // 不加这一条，内容从长变短（思考块收起）把视口夹到顶部之后，
+            // 用户想回底部都没有可滚的余量，scroll 事件不会来，跟随状态就一直是关的。
+            "if(maxY<=ch+2)window.__follow=true;" +
+            // 强制滚动（点气泡、切会话、发新消息）视为用户想回到最新
+            "if(force)window.__follow=true;" +
+            // 用户在看历史：一次都不滚。内容长高不影响这个判断——他那一眼停在
+            // 哪里是他自己决定的，不会被「新内容到了」改成想回底部。
+            "if(!window.__follow)return;" +
             // 浏览器允许滚动的范围是「内容高 - 视口高」，直接写内容高会被夹到上限；
             // 夹不上去时（低端机上 innerHeight 与外层布局偶尔对不上）末尾那几行
             // 会永远停在视口下方，看起来就是「滚到底了但最后两行被挡住」。
-            // 上限外再给 200px，剩下的交给浏览器自己夹。同一次任务里不重复设置：
-            // 值没变时写 scrollTo 也会触发一次排版，压帧率。
-            // 读 scrollHeight / clientHeight 会强制排版（回流）。这里必须只读一次：
-            // 旧实现在同一个函数体里把同一段计算写了两遍，每帧多出两次同步回流，
-            // 而流式每 100ms 就调一次——长回答上这是掉帧的固定开销。
-            "var maxY=Math.max(document.documentElement.scrollHeight||0," +
-            "document.body.scrollHeight||0);" +
-            "var topY=maxY-(document.documentElement.clientHeight||document.body.clientHeight||0)+200;" +
+            // 上限外再给 200px，剩下的交给浏览器自己夹。
+            "var topY=maxY-ch+200;" +
             "if(topY<maxY)topY=maxY;" +
-            "var real=(document.documentElement.scrollTop||document.body.scrollTop||0)" +
-            "+document.documentElement.clientHeight;" +
-            "if(window.__smLastTop!==topY||real<maxY-40){" +
-            "window.__smLastTop=topY;window.scrollTo(0,topY);}" +
+            "var st=window.__posTop();" +
+            // 已经贴底、目标也没变：不写 scrollTo。同一次任务里值没变时写一次
+            // 也会触发排版；而且每次写都产生 scroll 事件，白白多一轮判定。
+            "if(window.__smLastTop===topY&&st>=maxY-ch-60)return;" +
+            "window.__smLastTop=topY;" +
+            "window.__progRoll=Date.now()+400;" +
+            "window.scrollTo(0,topY);" +
+            "window.__lastSh=maxY;window.__lastSt=window.__posTop();" +
             // 滚到底了，气泡立刻收起来，不用等下一次 scroll 事件（force 滚动不一定触发）
             "if(window.Android&&Android.setScrollBubble)Android.setScrollBubble(false);};" +
             "window.runScripts=function(root){" +
@@ -1509,7 +1539,9 @@ final class RendererAssets {
             // （旧代码把整层连同内容一起删掉，base 又被记成「已渲染到全文」，
             // 这一轮已经显示出来的正文就永久消失了。）
             "if(ck.nodeType===1&&(' '+ck.className+' ').indexOf('smooth-shown')>=0){" +
-            "while(ck.firstChild)b.appendChild(ck.firstChild);" +
+            "while(ck.firstChild)b.appendChild(ck.firstChild);";
+
+    private static final String JS_PART_2 =
             "t.removeChild(ck);continue;}" +
             "b.appendChild(ck);}" +
             "t.className='stream-tail';t.innerHTML='';" +
@@ -1804,7 +1836,7 @@ final class RendererAssets {
             // 按 90 帧/秒每次都做，在 4.4 的低端机会把排版时间翻倍。
             "var now=Date.now();" +
             "if(!window.__smScrollAt||now-window.__smScrollAt>100){" +
-            "window.__smScrollAt=now;if(!window.__userUp)smartScrollToBottom();}};" +
+            "window.__smScrollAt=now;smartScrollToBottom();}};" +
             // 上一帧画过的单位序列与本帧的第一处分叉下标：-1 表示已画前缀完全没变。
             //
             // 同一个数组对象 = 这一帧是增量续写的（只在尾部 push，元素引用没变），
@@ -2230,7 +2262,7 @@ final class RendererAssets {
             "if(s.box===t){var want=s.shown<s.len?'stream-tail plain':'stream-tail';" +
             "if(s.cls!==want){t.className=want;s.cls=want;}}" +
             "window.__clearStatusIn(t);" +
-            "if(!window.__userUp)smartScrollToBottom();};" +
+            "smartScrollToBottom();};" +
             "window.__smPaintPlain=function(t,text,show){" +
             // 显示量缺失（NaN）时按 0 处理：NaN 会让后面每个比较都判假，
             // 文本既不画出来也不清掉，屏幕上就是一片空白
@@ -2693,11 +2725,14 @@ final class RendererAssets {
             "window.__olderDone=(!__oh||__oh.style.display==='none');" +
             "addCopyBtns();" +
             "applyToolStates(document);" +
-            "window.scrollTo(0,document.body.scrollHeight);" +
+            "smartScrollToBottom(true);" +
             // 页面就绪这一刻把「最后一条气泡」补出来：内容若早于页面到达
             // （气泡先建在即将被冲掉的旧文档上），这里补一次，不让它落空。
             "if(window.__needLastAi){window.__needLastAi=false;" +
             "var la=window.__lastAi();" +
             "if(!la||la.querySelector('.content').childNodes.length===0){window.appendAiDiv(-1);}}" +
             "})();";
+
+    /** 页面脚本：复制 / 保存按钮、工具卡片折叠、流式更新、图片预览桥接。 */
+    static final String JS = jsPack(JS_PART_1, JS_PART_2);
 }

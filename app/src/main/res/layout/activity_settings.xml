@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='utf-8'?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="match_parent" android:fillViewport="true">
+<xyz.zip8919.app.aichat.FormScrollView xmlns:android="http://schemas.android.com/apk/res/android" android:id="@+id/settings_scroll" android:layout_width="match_parent" android:layout_height="match_parent" android:fillViewport="true">
     <LinearLayout android:orientation="vertical" android:background="@color/background" android:padding="16dp" android:layout_width="match_parent" android:layout_height="wrap_content">
         <TextView android:textSize="20sp" android:textStyle="bold" android:textColor="@color/text_primary" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="10dp" android:text="@string/activity_settings_001" />
         <LinearLayout android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="18dp">
@@ -48,6 +48,8 @@
         <LinearLayout android:id="@+id/group_body_B" android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:visibility="gone" android:minHeight="48dp" android:gravity="center_vertical">
             <LinearLayout android:orientation="horizontal" android:gravity="center_vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="4dp">
                 <TextView android:textSize="14sp" android:textStyle="bold" android:textColor="@color/text_primary" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="@string/system_prompt" />
+                <!-- 全屏编辑：几百字的提示词在小屏上只能看到三四行，逐句改很费劲 -->
+                <Button android:textSize="11sp" android:id="@+id/system_prompt_fullscreen" android:layout_width="wrap_content" android:layout_height="wrap_content" android:minWidth="0dp" android:minHeight="0dp" android:layout_marginRight="6dp" android:paddingLeft="8dp" android:paddingRight="8dp" android:paddingTop="2dp" android:paddingBottom="2dp" android:text="@string/activity_settings_071" />
                 <!-- 系统提示词常常几百字，逐字删太费事；与输入栏的清空按钮一样带二次确认，避免误触丢内容 -->
                 <Button android:textSize="11sp" android:id="@+id/clear_system_prompt_button" android:layout_width="wrap_content" android:layout_height="wrap_content" android:minWidth="0dp" android:minHeight="0dp" android:paddingLeft="8dp" android:paddingRight="8dp" android:paddingTop="2dp" android:paddingBottom="2dp" android:text="@string/clear" />
             </LinearLayout>
@@ -63,7 +65,10 @@
                 <Button android:textSize="12sp" android:id="@+id/manage_presets_button" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:minWidth="0dp" android:minHeight="44dp" android:text="@string/activity_settings_017" />
                 <Button android:textSize="12sp" android:id="@+id/save_preset_button" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:layout_marginLeft="6dp" android:minWidth="0dp" android:minHeight="44dp" android:text="@string/activity_settings_018" />
             </LinearLayout>
-            <TextView android:textSize="14sp" android:textStyle="bold" android:textColor="@color/text_primary" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="4dp" android:text="@string/activity_settings_019" />
+            <LinearLayout android:orientation="horizontal" android:gravity="center_vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="4dp">
+                <TextView android:textSize="14sp" android:textStyle="bold" android:textColor="@color/text_primary" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="@string/activity_settings_019" />
+                <Button android:textSize="11sp" android:id="@+id/title_prompt_fullscreen" android:layout_width="wrap_content" android:layout_height="wrap_content" android:minWidth="0dp" android:minHeight="0dp" android:paddingLeft="8dp" android:paddingRight="8dp" android:paddingTop="2dp" android:paddingBottom="2dp" android:text="@string/activity_settings_071" />
+            </LinearLayout>
             <EditText android:gravity="top" android:id="@+id/title_prompt_edit" android:background="@drawable/edit_text_background" android:padding="12dp" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="6dp" android:hint="@string/activity_settings_069" android:maxLines="3" android:minLines="2" android:inputType="textMultiLine" />
             <LinearLayout android:id="@+id/title_prompt_chips" android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="6dp" />
             <TextView android:textSize="12sp" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="16dp" android:textColor="@color/text_secondary" android:text="@string/activity_settings_070" />
@@ -72,7 +77,10 @@
                 <Spinner android:id="@+id/title_model_spinner" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginLeft="8dp" />
             </LinearLayout>
             <Button android:textSize="14sp" android:id="@+id/manage_models_button" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="16dp" android:text="@string/activity_settings_023" />
-            <TextView android:textSize="14sp" android:textStyle="bold" android:textColor="@color/text_primary" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="6dp" android:text="@string/activity_settings_024" />
+            <LinearLayout android:orientation="horizontal" android:gravity="center_vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="6dp">
+                <TextView android:textSize="14sp" android:textStyle="bold" android:textColor="@color/text_primary" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="@string/activity_settings_024" />
+                <Button android:textSize="11sp" android:id="@+id/js_env_prompt_fullscreen" android:layout_width="wrap_content" android:layout_height="wrap_content" android:minWidth="0dp" android:minHeight="0dp" android:paddingLeft="8dp" android:paddingRight="8dp" android:paddingTop="2dp" android:paddingBottom="2dp" android:text="@string/activity_settings_071" />
+            </LinearLayout>
             <EditText android:id="@+id/js_env_prompt_edit" android:background="@drawable/edit_text_background" android:gravity="top|start" android:inputType="textMultiLine" android:minLines="4" android:maxLines="10" android:padding="8dp" android:textSize="13sp" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="4dp" />
             <LinearLayout android:id="@+id/js_env_prompt_chips" android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="4dp" />
             <TextView android:textSize="12sp" android:textColor="@color/text_secondary" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="12dp" android:text="@string/activity_settings_025" />
@@ -230,4 +238,4 @@
             <Button android:textColor="@android:color/white" android:id="@+id/save_button" android:background="@color/primary" android:layout_width="wrap_content" android:layout_height="wrap_content" android:minWidth="100dp" android:text="@string/save" />
         </LinearLayout>
     </LinearLayout>
-</ScrollView>
+</xyz.zip8919.app.aichat.FormScrollView>

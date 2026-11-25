@@ -84,11 +84,14 @@ public class MainActivity extends ThemedActivity {
     private static final int REQUEST_PICK_IMAGE = 5;
     private static final int REQUEST_TAKE_PHOTO = 6;
     private static final int REQUEST_CROP = 7;
+    private static final int REQUEST_PICK_SAVED = 8;
     /** 附件菜单项 id（单项目前用常量，后续加项改成 menu 资源）。 */
     private static final int MENU_ATTACH_TEXT = 1;
     private static final int MENU_ATTACH_IMAGE = 2;
     private static final int MENU_ATTACH_IMAGE_URL = 3;
     private static final int MENU_ATTACH_CAMERA = 4;
+    /** 从「已保存文件」里挑：代码块导出、查看器截图、主题包都在那里。 */
+    private static final int MENU_ATTACH_SAVED = 5;
     /** 单文件上限 10 MB：超过直接报错，不截断——半截代码更难排查。 */
     private static final int MAX_IMPORT_BYTES = 10 * 1024 * 1024;
     // 单次附件数与合计字符上限已搬进设置，见 Limits.maxAttachments / Limits.attachTotalChars
@@ -1051,13 +1054,18 @@ public class MainActivity extends ThemedActivity {
         }
         PopupMenu menu = new PopupMenu(menuCtx, plusButton);
         menu.getMenu().add(0, MENU_ATTACH_TEXT, 0, R.string.upload_text_file);
-        menu.getMenu().add(0, MENU_ATTACH_IMAGE, 1, R.string.upload_image);
-        menu.getMenu().add(0, MENU_ATTACH_CAMERA, 2, R.string.take_photo);
-        menu.getMenu().add(0, MENU_ATTACH_IMAGE_URL, 3, R.string.upload_image_url);
+        menu.getMenu().add(0, MENU_ATTACH_SAVED, 1, R.string.savedpicker_004);
+        menu.getMenu().add(0, MENU_ATTACH_IMAGE, 2, R.string.upload_image);
+        menu.getMenu().add(0, MENU_ATTACH_CAMERA, 3, R.string.take_photo);
+        menu.getMenu().add(0, MENU_ATTACH_IMAGE_URL, 4, R.string.upload_image_url);
         menu.setOnMenuItemClickListener(new PopupMenu.OnMenuItemClickListener() {
             public boolean onMenuItemClick(MenuItem item) {
                 if (item.getItemId() == MENU_ATTACH_TEXT) {
                     pickTextFile();
+                    return true;
+                }
+                if (item.getItemId() == MENU_ATTACH_SAVED) {
+                    pickSavedFile();
                     return true;
                 }
                 if (item.getItemId() == MENU_ATTACH_IMAGE) {
@@ -1093,6 +1101,22 @@ public class MainActivity extends ThemedActivity {
                     REQUEST_PICK_TEXT);
         } catch (Exception e) {
             LogUtil.w(TAG, "pickTextFile failed: %s", e.getMessage());
+            AcToast.show(this, Strings.get(R.string.mainactivity_006));
+        }
+    }
+
+    /**
+     * 从「已保存文件」里挑一个。
+     *
+     * <p>本应用导出的代码块、截图、主题包都在 exports 目录里，用户常要拿它们
+     * 再发给模型。走系统选择器要把那条路径重新点一遍，这里直接列出来。
+     */
+    private void pickSavedFile() {
+        try {
+            startActivityForResult(new Intent(this, SavedFilePickerActivity.class),
+                    REQUEST_PICK_SAVED);
+        } catch (Exception e) {
+            LogUtil.w(TAG, "pickSavedFile failed: %s", e.getMessage());
             AcToast.show(this, Strings.get(R.string.mainactivity_006));
         }
     }
@@ -2619,6 +2643,20 @@ public class MainActivity extends ThemedActivity {
                 importTextFile(picked);
             } else {
                 LogUtil.d(TAG, "pick text cancelled or empty");
+            }
+        } else if (requestCode == REQUEST_PICK_SAVED) {
+            String path = data == null ? null : data.getStringExtra(SavedFilePickerActivity.EXTRA_PATH);
+            LogUtil.d(TAG, "pick saved returned: %s", path);
+            if (resultCode == RESULT_OK && path != null) {
+                File f = new File(path);
+                if (!f.exists() || !f.isFile()) {
+                    // 选中到返回之间被外部删掉：说清楚，不要静默什么都不做
+                    AcToast.show(this, Strings.get(R.string.savedpicker_005));
+                } else if (FileKinds.looksLikeImage(f.getName(), null)) {
+                    importImageFile(Uri.fromFile(f), f.getName());
+                } else {
+                    importTextFile(Uri.fromFile(f));
+                }
             }
         } else if (requestCode == REQUEST_PICK_IMAGE) {
             Uri picked = data == null ? null : data.getData();
