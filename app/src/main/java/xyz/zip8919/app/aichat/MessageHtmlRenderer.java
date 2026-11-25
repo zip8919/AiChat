@@ -453,117 +453,80 @@ public class MessageHtmlRenderer {
     /**
      * 本地 token 估算。端点返回 usage 时一律以返回值为准，这里只在拿不到用量时兜底。
      *
-     * <p>系数按厂商文档：中文（含全角标点）约 0.6 token/字，英文与符号约 0.3 token/字符。
-     * 早先按「字数 × 2/3」一刀切，纯中文消息会被高估一倍多，纯英文代码又被低估——
-     * 附件动辄几十万 token，系数差一倍就是「发得出去」和「必然超限」的区别。
+     * <p>系数按真实分词器实测校准（o200k / cl100k 各测一遍，再对照厂商文档）：
+     * <ul>
+     *   <li>中日韩表意文字：0.70 token/字（实测 0.56~1.05）</li>
+     *   <li>全角标点（，。：；！？、等）：1.00 token/个——每个都是独立 token</li>
+     *   <li>ASCII 字母、数字：0.25 token/字符（英文约 4~5 字符一个 token）</li>
+     *   <li>空格、制表：0.15；换行：0.50</li>
+     *   <li>其余 ASCII 符号（代码、标点、Markdown 记号）：0.50</li>
+     * </ul>
+     *
+     * <p>旧版是「中文 0.6 / 其它 0.3」两档，中文一律低估：63 字的中文散文实测
+     * 47~66 token（0.75~1.05 字均），0.6 只能给出 38，0.7 给 45。低估是最糟的方向——
+     * 用户拿这个数字跟消息底部的真实用量对账，看到的永远是「估算比实际少」；
+     * 上下文是否超限也会因为低估而算错。宁可略高，不能偏低。
      *
      * <p>不同模型分词不同，这始终是估算：调用方必须打 {@code ~}，不能当账目。
      */
     static int estimateTokens(CharSequence text) {
         if (text == null || text.length() == 0) return 0;
-        int wide = 0;
-        int narrow = 0;
+        long hundredths = 0;
         int n = text.length();
         for (int i = 0; i < n; i++) {
             char c = text.charAt(i);
-            // 代理对（emoji、扩展区生僻字）在 UTF-16 里占两个 char，按一个宽字符算，
+            // 代理对（emoji、扩展区生僻字）在 UTF-16 里占两个 char，按一个表意字算，
             // 否则一条 emoji 密集的消息会被算成两倍的 token
             if (Character.isHighSurrogate(c) && i + 1 < n
                     && Character.isLowSurrogate(text.charAt(i + 1))) {
                 i++;
-                wide++;
-            } else if (isWideChar(c)) {
-                wide++;
+                hundredths += 70;
             } else {
-                narrow++;
+                hundredths += charHundredths(c);
             }
         }
-        // 按 0.1 token 为单位做整数运算：wide*6 + narrow*3，再向上取整
-        int tenths = wide * 6 + narrow * 3;
-        return Math.max(1, (tenths + 9) / 10);
+        // 以 0.01 token 为单位做整数运算，最后向上取整
+        return (int) Math.max(1, (hundredths + 99) / 100);
+    }
+
+    /** 单个字符折算成「百分之一 token」。页面前端 {@code __thTok} 必须用同一套规则。 */
+    private static int charHundredths(char c) {
+        if (isFullwidthPunct(c)) return 100;
+        if (isWideChar(c)) return 70;
+        if ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z')
+                || (c >= 'A' && c <= 'Z') || (c >= 0x00C0 && c <= 0x024F)) return 25;
+        if (c == ' ' || c == '\t' || c == 0x00A0) return 15;
+        // 换行、制表之外的符号（含 \n）：Markdown 记号、代码标点基本都是半个 token 起
+        return 50;
     }
 
     /**
-     * 思考块的 token 估算：先剥掉 Markdown 语法，再按 {@link #estimateTokens} 的系数算。
+     * 全角标点：，。：；！？、「」『』（）【】——…· 这些在 BPE 里几乎都是独立 token，
+     * 和中日韩表意文字（常两字并成一个 token）不是一个价。
+     */
+    private static boolean isFullwidthPunct(char c) {
+        return (c >= 0x3000 && c <= 0x303F)   // 空格、。、「」、〈〉
+                || (c >= 0xFF01 && c <= 0xFF0F)  // ！＂＃＄％＆＇（）＊＋，－．／
+                || (c >= 0xFF1A && c <= 0xFF20)  // ：；＜＝＞？＠
+                || (c >= 0xFF3B && c <= 0xFF40)  // ［＼］＾＿｀
+                || (c >= 0xFF5B && c <= 0xFF65)  // ｛｜｝～｟｠
+                || (c >= 0xFFE0 && c <= 0xFFE6)  // ￠￡￢￣￤￥￦
+                || (c >= 0x2010 && c <= 0x2027); // –—‘’“”…‧
+    }
+
+    /**
+     * 思考块的 token 估算：与 {@link #estimateTokens} 完全同一口径，**不剥 Markdown**。
      *
-     * <p>页面上看到的是渲染后的文字，而 {@link #estimateTokens} 扫的是源码：
-     * {@code **}、{@code `}、代码围栏、链接地址这些标记都会当成普通字符计进 token，
-     * 一段带代码块的思考能虚高三成。用户拿这个数字和消息底部的 usage 对比，
-     * 自然会觉得「估算不准」。
-     *
-     * <p>这里按「最终会显示出来的文字」计数，口径与页面里的 {@code __thTok}
-     * （扫 {@code textContent}）一致，于是生成中与生成完之后数字不会跳变。
+     * <p>v1.21.44 之前这里会把 {@code **}、{@code `}、代码围栏、链接地址整段剔掉，
+     * 理由是「页面上看不到这些符号」。这个理由不成立：思考内容是模型一个字一个字
+     * 生成出来的，{@code **}、换行、缩进、列表记号同样是它吐出的 token，服务端
+     * 计费时一个都不会少。剔掉只会让估算进一步低于实际值，方向刚好反了。
      */
     static int estimateThinkingTokens(CharSequence text) {
-        if (text == null || text.length() == 0) return 0;
-        int n = text.length();
-        StringBuilder sb = new StringBuilder(n);
-        boolean lineStart = true;
-        for (int i = 0; i < n; i++) {
-            char c = text.charAt(i);
-            if (c == '\n') {
-                sb.append(c);
-                lineStart = true;
-                continue;
-            }
-            if (lineStart) {
-                // 行首的标题 / 引用 / 列表记号不是文字
-                if (c == '#' || c == '>' || c == '|' || c == '-') {
-                    continue;
-                }
-                if (c != ' ' && c != '\t') lineStart = false;
-            }
-            switch (c) {
-                case '`':
-                case '*':
-                case '_':
-                case '~':
-                case '|':
-                    // 强调、行内代码、删除线、表格竖线：内容保留，符号不计数
-                    continue;
-                case '!':
-                    // ![alt](url) 只保留 alt
-                    if (i + 1 < n && text.charAt(i + 1) == '[') continue;
-                    break;
-                case '[': {
-                    // [text](url) -> text；纯方括号属于标点，也去掉
-                    int close = indexOfChar(text, ']', i + 1);
-                    if (close > 0 && close + 1 < n && text.charAt(close + 1) == '(') {
-                        int paren = indexOfChar(text, ')', close + 2);
-                        if (paren > 0) {
-                            sb.append(text, i + 1, close);
-                            i = paren;
-                            continue;
-                        }
-                    }
-                    continue;
-                }
-                case '<': {
-                    // HTML 标签整段跳过；「a < b」这类比较式保留
-                    int gt = indexOfChar(text, '>', i + 1);
-                    if (gt > 0 && gt - i <= 80) {
-                        i = gt;
-                        continue;
-                    }
-                    break;
-                }
-                default:
-                    break;
-            }
-            sb.append(c);
-        }
-        return estimateTokens(sb);
+        return estimateTokens(text);
     }
 
-    private static int indexOfChar(CharSequence text, char target, int from) {
-        int n = text.length();
-        for (int i = from; i < n; i++) {
-            if (text.charAt(i) == target) return i;
-        }
-        return -1;
-    }
-
-    /** 中日韩字符与全角符号：这些按 0.6 token/字，其余按 0.3。 */
+    /** 中日韩表意文字、假名、谚文：这些按 0.70 token/字，其余字符按类别细分。 */
     private static boolean isWideChar(char c) {
         return (c >= 0x1100 && c <= 0x115F)      // 谚文字母
                 || (c >= 0x2E80 && c <= 0x303E)  // 中日韩部首、标点

@@ -456,27 +456,62 @@ final class RendererAssets {
             "n=n|0;if(n<1000)return ''+n;" +
             "if(n<1000000)return (n/1000).toFixed(1)+'k';" +
             "return (n/1000000).toFixed(1)+'M';};" +
-            // 思考内容的 token 估算（与 MessageHtmlRenderer.estimateTokens 同一口径：
-            // 中日韩/全角 0.6，其余 0.3，按 0.1 向上取整）。
+            // 思考内容的 token 估算：与 MessageHtmlRenderer.estimateTokens 逐条同口径
+            // （表意文字 0.70，全角标点 1.00，字母数字 0.25，空格 0.15，换行/其余符号 0.50）。
             //
-            // 只在「块已经不再输出、但渲染时没来得及写数字」时用：流式期间的那个
-            // 折叠条是 data-tok="0" 的常量版（为了逐帧字节不变），它被
-            // streamCommitTail 整棵搬进 base 之后就再也不会重渲染，属性一直是 0，
-            // 折叠条也就一直显示「思考中…」，永远看不到 token 数。
+            // 页面里只剩渲染后的 DOM，Markdown 记号（**、#、-、```、链接地址）已经
+            // 被吃进标签里了。这些记号模型是实打实生成过的，计费也算，所以这里按
+            // 标签把它们「还原」回去再计数：
+            //   <strong> +4（** **）  <em> +2（* *）  <code> +2（` `）  <pre> +9（围栏）
+            //   <h1..h6> +#+1  <li> +2（- ）  <blockquote> +2（> ）  <p> +2（空行）
+            //   <a> +4+href  <img> +4+src  <br> +1  <tr> +1  <td>/<th> +3（ | ）
+            // 不补这一截，同一段思考在生成中（按 DOM 算）和归档后（按源码算）
+            // 会差一成以上，用户看到的就是「一结束数字突然变大」。
             "window.__thTok=function(b){" +
             "if(!b)return 0;" +
-            "var s=b.textContent||'',wide=0,narrow=0,n=s.length;" +
-            "for(var i=0;i<n;i++){" +
+            "var hs=0;" +
+            "var add=function(s){" +
+            "for(var i=0;i<s.length;i++){" +
             "var c=s.charCodeAt(i);" +
-            "if(c>=0xD800&&c<=0xDBFF&&i+1<n){var d=s.charCodeAt(i+1);" +
-            "if(d>=0xDC00&&d<=0xDFFF){i++;wide++;continue;}}" +
-            "if((c>=0x1100&&c<=0x115F)||(c>=0x2E80&&c<=0x303E)||(c>=0x3041&&c<=0x33FF)||" +
+            "if(c>=0xD800&&c<=0xDBFF&&i+1<s.length){" +
+            "var d=s.charCodeAt(i+1);" +
+            "if(d>=0xDC00&&d<=0xDFFF){i++;hs+=70;continue;}}" +
+            // 全角标点先判：它落在下面的宽字符区间里，但价码不同（独立 token）
+            "if((c>=0x3000&&c<=0x303F)||(c>=0xFF01&&c<=0xFF0F)||(c>=0xFF1A&&c<=0xFF20)||" +
+            "(c>=0xFF3B&&c<=0xFF40)||(c>=0xFF5B&&c<=0xFF65)||(c>=0xFFE0&&c<=0xFFE6)||" +
+            "(c>=0x2010&&c<=0x2027)){hs+=100;}" +
+            "else if((c>=0x1100&&c<=0x115F)||(c>=0x2E80&&c<=0x303E)||(c>=0x3041&&c<=0x33FF)||" +
             "(c>=0x3400&&c<=0x4DBF)||(c>=0x4E00&&c<=0x9FFF)||(c>=0xA000&&c<=0xA4CF)||" +
             "(c>=0xAC00&&c<=0xD7A3)||(c>=0xF900&&c<=0xFAFF)||(c>=0xFE30&&c<=0xFE4F)||" +
-            "(c>=0xFF00&&c<=0xFF60)||(c>=0xFFE0&&c<=0xFFE6)){wide++;}else{narrow++;}}" +
-            "var tenths=wide*6+narrow*3;" +
-            "if(tenths<=0)return 0;" +
-            "return Math.max(1,Math.ceil(tenths/10));};" +
+            "(c>=0xFF00&&c<=0xFF60)||(c>=0xFFE0&&c<=0xFFE6)){hs+=70;}" +
+            "else if((c>=48&&c<=57)||(c>=65&&c<=90)||(c>=97&&c<=122)||(c>=0xC0&&c<=0x24F)){hs+=25;}" +
+            "else if(c===32||c===9||c===0xA0){hs+=15;}" +
+            "else{hs+=50;}}};" +
+            "var walk=function(n){" +
+            "if(!n)return;" +
+            "if(n.nodeType===3){add(n.nodeValue||'');return;}" +
+            "if(n.nodeType!==1)return;" +
+            "var g=n.tagName,m='';" +
+            "if(g==='STRONG'||g==='B')m='****';" +
+            "else if(g==='EM'||g==='I')m='**';" +
+            "else if(g==='CODE'){if(!(n.parentNode&&n.parentNode.tagName==='PRE'))m='``';}" +
+            "else if(g==='PRE')m='```\\n\\n```';" +
+            "else if(g==='H1')m='# ';else if(g==='H2')m='## ';else if(g==='H3')m='### ';" +
+            "else if(g==='H4')m='#### ';else if(g==='H5')m='##### ';else if(g==='H6')m='###### ';" +
+            "else if(g==='LI')m='- ';" +
+            "else if(g==='BLOCKQUOTE')m='> ';" +
+            "else if(g==='HR')m='\\n---\\n';" +
+            "else if(g==='BR')m='\\n';" +
+            "else if(g==='P')m='\\n\\n';" +
+            "else if(g==='TR')m='\\n';" +
+            "else if(g==='TD'||g==='TH')m=' | ';" +
+            "else if(g==='A')m='[]('+(n.getAttribute('href')||'')+')';" +
+            "else if(g==='IMG')m='![]('+(n.getAttribute('src')||'')+')';" +
+            "if(m)add(m);" +
+            "for(var c=n.firstChild;c;c=c.nextSibling)walk(c);};" +
+            "walk(b);" +
+            "if(hs<=0)return 0;" +
+            "return Math.max(1,Math.ceil(hs/100));};" +
             // 思考块的展开状态必须存在 JS 变量里：流式每 200ms 会整段重建
             // .stream-tail 的 innerHTML，只改 DOM style 的话下一次重绘就回到
             // HTML 里写死的 display:none，表现为「展开闪一下又折叠回去」。
@@ -783,14 +818,25 @@ final class RendererAssets {
             "var el=window.__thTok(b);" +
             // 太短先不报数：刚开写时估出来是 1、2，数字每帧往上蹦比
             // 「思考中…」更吵，也容易被当成错误。等攒够一行再切过去。
-            "if(el>=12&&el!==tokN){tokN=el;t.setAttribute('data-tok',''+el);}}}" +
-            // 已结束的块：按正文估算一个写回 data-tok，之后的文案/折叠/重建都用这个数。
-            // 只在第一次（__thTokFinal 未置位）算一次；live 期间可能停在节流窗口里，
-            // 归档这一下重算等于按最终正文校正，数字与消息底部的用量口径一致。
-            "else if(!it.__thTokFinal){" +
-            "it.__thTokFinal=1;" +
+            // 只增不减：数字往回跳比不刷新更让人怀疑。
+            "if(el>=12&&el>tokN){tokN=el;t.setAttribute('data-tok',''+el);}}}" +
+            // 已结束的块：服务端按源码算过一个数（data-tok>0），那是准的，
+            // **绝不能**再用 DOM 反推的数覆盖它。
+            //
+            // 旧代码这里无条件重算并写回，两个问题叠在一起：① DOM 里没有
+            // Markdown 记号，反推的数天然偏小；② 归档这一下，逐字渐显可能还
+            // 只画出了前几段（渐显进度落后于到达量），拿半截正文估出来再被
+            // __thTokFinal 锁死，用户看到的就是「一整段思考只有 8 token」。
+            "else if(tokN<=0){" +
+            // 只在「确实没有服务端数字」时兜底（流式期间建出来的块搬进 base 后
+            // 还是 data-tok=0）。渐显可能没画完，所以允许在 2 秒内校正几次，
+            // 只取更大的值；正文不再增长后数字自然稳定，最多扫 4 遍就停。
+            "var tries=it.__thTokTry||0;" +
+            "var nowF=Date.now();" +
+            "if(tries<4&&(!it.__thTokAt||nowF-it.__thTokAt>500)){" +
+            "it.__thTokTry=tries+1;it.__thTokAt=nowF;" +
             "var ef=window.__thTok(b);" +
-            "if(ef>0&&ef!==tokN){tokN=ef;t.setAttribute('data-tok',''+ef);}}" +
+            "if(ef>tokN){tokN=ef;t.setAttribute('data-tok',''+ef);}}}" +
             // 展开着的块也带上数字：只写「折叠思考」的话，用户在生成期间
             // 展开看内容，反而看不到这段已经花了多少 token。
             "var wantTxt=open?(tokN>0" +
@@ -1104,7 +1150,22 @@ final class RendererAssets {
             "addCopyBtns();applyToolStates(document);" +
             "window.__loadingOlder=false;setOlderHint(remaining);};" +
             "var __olderTicking=false;" +
+            "window.__lastSt=null;window.__lastSh=0;" +
             "window.addEventListener('scroll',function(){" +
+            // 视口位置是「用户意图」唯一可靠的事实来源：遥控器方向键、鼠标滚轮、
+            // 拖动滚动条都不会产生 touchmove，只靠触摸判方向就会漏掉这些操作，
+            // 表现就是「我已经翻上去了，它还是把我拽回底部」。
+            //
+            // 这里在事件里同步采样（读 scrollTop 不触发布局，代价可忽略），
+            // 不受下面 150ms 节流闸门影响，快速滑动也不会漏。
+            "var st0=document.documentElement.scrollTop||document.body.scrollTop||window.pageYOffset||0;" +
+            "var sh0=Math.max(document.documentElement.scrollHeight||0,document.body.scrollHeight||0);" +
+            // 只认「位置往上走 + 内容没有变短」：内容变短会把 scrollTop 夹到新上限，
+            // 这是浏览器的行为（思考块自动收起、卡片收合都会），不是用户操作。
+            // 把这种情况当成「用户上翻」会导致明明没动却被锁死不再跟随。
+            "var shrank0=(window.__lastSh>0&&sh0<window.__lastSh-4);" +
+            "if(window.__lastSt!=null&&st0<window.__lastSt-4&&!shrank0)window.__userUp=true;" +
+            "window.__lastSt=st0;window.__lastSh=sh0;window.__lastShrank=shrank0;" +
             "if(__olderTicking)return;__olderTicking=true;" +
             "setTimeout(function(){" +
             "__olderTicking=false;" +
@@ -1114,9 +1175,10 @@ final class RendererAssets {
             // 回到底部气泡：离底超过 160px 才出现。用 160 而不是 0——
             // 正常阅读时最后一行常被键盘/输入栏挡掉一点，差几十像素就弹个按钮太吵。
             "if(window.Android&&Android.setScrollBubble)Android.setScrollBubble(st+ch<sh-160);" +
-            // 用户自己滚回底部（或内容变短后自然贴底）就恢复跟随，
-            // 否则上翻过一次之后，这一整轮都不会再自动滚了
-            "if(st+ch>=sh-24)window.__userUp=false;" +
+            // 用户自己滚回底部就恢复跟随，但要排除「内容变短把视口夹到底」这种
+            // 假贴底：判定用的 __lastShrank 是事件入口处采到的（当时高度确实比
+            // 上一帧矮），150ms 后的回调里再比高度已经比不出来了。
+            "if(st+ch>=sh-24&&!window.__lastShrank)window.__userUp=false;" +
             "if(window.__olderDone||window.__loadingOlder)return;" +
             "if(st<=40)loadOlderNow();},150);});" +
             // 首屏也要判一次：否则从历史会话打开、停在顶部时气泡不会出现
@@ -1140,21 +1202,22 @@ final class RendererAssets {
             "return;}}};" +
             "window.__userUp=false;" +
             "window.__touchY=null;" +
-            // 只认「手指往上拖」（看历史）这一个信号。早先靠「离底超过 80px」判断，
-            // 生成快的时候一帧追加就能顶出几百像素，程序自己把视口甩开，然后被当成
-            // 用户上翻，从此再也不跟随——表现就是「回答一快就停在半截不滚了」。
+            // 手指方向只作为「提前量」：真正的判据是 scroll 事件里视口有没有往上走。
+            //
+            // 旧写法拿「单帧位移 > 8px」判方向，慢慢拖动时每一帧只走两三像素，
+            // 这个条件永远不成立，__userUp 一直是 false，于是每 100ms 被
+            // smartScrollToBottom 拽回底部（用户说的「稍微往上滑一点就回到底部」
+            // 就是这么来的）。改成从按下的那一点算累计位移。
             "document.addEventListener('touchstart',function(e){" +
-            "if(e.touches&&e.touches.length)window.__touchY=e.touches[0].clientY;},true);" +
+            "window.__touchY=(e.touches&&e.touches.length)?e.touches[0].clientY:null;},true);" +
             "document.addEventListener('touchmove',function(e){" +
             "if(!e.touches||!e.touches.length)return;" +
             "var y=e.touches[0].clientY;" +
-            "if(window.__touchY!=null){" +
-            // 只认「手指下滑 = 往回看」。反方向（上滑）一律不解除 __userUp：
-            // 生成过程中内容一直在长，用户常常只是往上推一点想看被输入栏挡住的行，
-            // 旧版 8px 就把它当成「我要回到底部」，于是刚滑开就被自动滚底吸回去。
-            // 想回底的人会一直滑到底，scroll 事件里「贴底即恢复跟随」那条足够。
-            "if(y>window.__touchY+8)window.__userUp=true;}" +
-            "window.__touchY=y;},true);" +
+            // 手指往下拖 = 内容往回看。反方向（上滑）不解除：生成过程中内容一直在长，
+            // 用户常只是往上推一点想看被输入栏挡住的行。
+            "if(window.__touchY!=null&&y-window.__touchY>10)window.__userUp=true;},true);" +
+            "document.addEventListener('touchend',function(){window.__touchY=null;},true);" +
+            "document.addEventListener('touchcancel',function(){window.__touchY=null;},true);" +
             "window.smartScrollToBottom=function(force){" +
             // 手指按在可横滑容器上：不要拽视口，否则表格被滚出屏幕，看起来就是「滑不动」
             "if(window.__holdRender)return;" +
