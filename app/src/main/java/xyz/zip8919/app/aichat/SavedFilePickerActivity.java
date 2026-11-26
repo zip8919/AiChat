@@ -1,5 +1,6 @@
 package xyz.zip8919.app.aichat;
 
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.os.Bundle;
 import android.view.LayoutInflater;
@@ -26,7 +27,8 @@ import java.util.Locale;
  * <p>加号菜单原来是「文本文件 / 图片 / 拍照 / 图片链接」四条，全部落进系统文件
  * 选择器。但这里面有一类文件是本应用自己导出的（代码块、查看器截图、主题包），
  * 用户早就知道它在哪，却还要在选择器里从根目录一路点进去找。这一页直接列出来，
- * 点一下即添加。
+ * 点一下即添加；长按可以只查看内容或预览，不必先加进对话。查看与预览都走
+ * {@link FileActions}，与「存储空间 → 已保存文件」是同一套实现。
  *
  * <p>只读，不做重命名和删除：那些操作在「存储空间 → 已保存文件」里，两处都能改
  * 会让「改完这页没刷新」变成常态。
@@ -42,11 +44,14 @@ public class SavedFilePickerActivity extends ThemedActivity {
     private ListView list;
     private TextView empty;
     private FileAdapter adapter;
+    /** HTML / SVG 预览器，与存储页、聊天页同一套实现。 */
+    private ViewerController viewer;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_saved_file_picker);
+        viewer = new ViewerController(this);
 
         list = (ListView) findViewById(R.id.picker_list);
         empty = (TextView) findViewById(R.id.picker_empty);
@@ -63,7 +68,47 @@ public class SavedFilePickerActivity extends ThemedActivity {
                 finish();
             }
         });
+        // 长按只查看：点按是「加进对话」这个主动作，查看不该抢走它，
+        // 也不该让用户为了看一眼内容先往输入框里塞一个附件。
+        list.setOnItemLongClickListener(new AdapterView.OnItemLongClickListener() {
+            public boolean onItemLongClick(AdapterView<?> p, View v, int pos, long id) {
+                if (pos < 0 || pos >= files.size()) return false;
+                showActions(files.get(pos));
+                return true;
+            }
+        });
         reload();
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (viewer != null) {
+            viewer.destroy();
+            viewer = null;
+        }
+        super.onDestroy();
+    }
+
+    /** 长按菜单：只给「看」，不给「改」——编辑、重命名、删除留在存储页。 */
+    private void showActions(final File f) {
+        String[] items = {
+                Strings.get(R.string.storagefilesactivity_007),
+                Strings.get(R.string.storagefilesactivity_008)
+        };
+        AcDialog.builder(this)
+                .setTitle(f.getName())
+                .setItems(items, new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface d, int which) {
+                        LogUtil.i(TAG, "action %d on %s", which, f.getName());
+                        if (which == 0) {
+                            FileActions.viewText(SavedFilePickerActivity.this, f);
+                        } else if (which == 1) {
+                            FileActions.previewCode(SavedFilePickerActivity.this, viewer, f);
+                        }
+                    }
+                })
+                .setNegativeButton(Strings.get(R.string.storagefilesactivity_014), null)
+                .show();
     }
 
     private File exportsDir() {

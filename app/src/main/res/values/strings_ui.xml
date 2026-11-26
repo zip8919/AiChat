@@ -1139,8 +1139,8 @@
     <string name="statsactivity_040">本周（自周一起）</string>
     <string name="statsactivity_041">本月</string>
     <string name="statsactivity_042">今日</string>
-    <string name="savedpicker_001">点一个文件添加到当前对话。图片会先进裁剪页。</string>
-    <string name="savedpicker_002">还没有已保存的文件。\n导出的代码块、图片会出现在这里，之后可直接当附件添加。</string>
+    <string name="savedpicker_001">点按添加到当前对话，长按可查看内容或预览。图片会先进裁剪页。</string>
+    <string name="savedpicker_002">还没有已保存的文件。\n导出的代码块、图片会出现在这里，之后可直接当附件添加，长按可查看。</string>
     <string name="savedpicker_003">选择已保存文件</string>
     <string name="savedpicker_004">从已保存文件添加</string>
     <string name="savedpicker_005">文件已不存在，可能已被删除或改名</string>
