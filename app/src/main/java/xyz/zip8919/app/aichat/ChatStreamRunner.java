@@ -1,7 +1,9 @@
 package xyz.zip8919.app.aichat;
 
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
+import java.net.SocketTimeoutException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -61,6 +63,25 @@ final class ChatStreamRunner {
     /** 空回复重发前的等待：给端点一点缓存/调度上的余量，立刻重发往往同样为空。 */
     private static final long EMPTY_RETRY_DELAY_MS = 800;
 
+    /**
+     * 单次请求里允许几次「连接阶段（还没拿到 HTTP 状态）」失败后的自动重连。
+     *
+     * <p>这类失败没有服务端的任何回应：连接超时、域名解析失败、TLS 握手被拒、
+     * 连接被重置。重发一次不会有重复计费，而偶发的握手失败重试一次基本都能过。
+     * 早期版本只对 429 自动重试，这类失败直接判死，用户看到的就是「发出去了、
+     * 没有任何回应」，错误提示一闪而过，随后空气泡被回滚。
+     */
+    private static final int MAX_CONNECT_RETRY = 2;
+
+    /** 连接阶段重连的等待，按次数递增：1s、2s… */
+    private static final long CONNECT_RETRY_BASE_MS = 1000L;
+
+    /** 收到响应之后多久一个字节都没读到，就提示「服务端还没有返回内容」。 */
+    private static final long NO_DATA_HINT_MS = 20000L;
+
+    /** 收到响应后这么久无任何字节，直接断开并报错。低于读超时，让用户更早知道结果。 */
+    private static final long STALL_LIMIT_MS = 90000L;
+
     /** 视图侧能力。继承 {@link StreamRenderer.Ui}，渲染器直接用同一个实现。 */
     interface Ui extends StreamRenderer.Ui {
         void toast(String msg);
@@ -105,6 +126,13 @@ final class ChatStreamRunner {
 
         /** 等待结束（已重发或已中止）：收起卡片。 */
         void onRetryWaitEnd();
+
+        /**
+         * 收到响应后迟迟没有内容：显示一行说明，不是错误，消息仍在等待。
+         *
+         * <p>没有这条提示时，慢端点与卡死从界面上完全看不出区别。
+         */
+        void onWaitingHint(String text, int generation, int aiIndex);
 
         /**
          * 单轮请求结算，只在端点真的返回了 usage 时回调。
@@ -230,6 +258,9 @@ final class ChatStreamRunner {
                 : msgs;
     }
 
+    /** 本次请求的最终结果码，只用于诊断记录与日志，不参与任何判断。 */
+    private String outcomeCode = "";
+
     /** 阻塞执行，由调用方放进请求线程。 */
     void execute() {
         final long startMs = System.currentTimeMillis();
@@ -237,6 +268,7 @@ final class ChatStreamRunner {
         activeTrace = st.trace;
         HttpURLConnection conn = null;
         StreamRenderer renderer = null;
+        diagBegin(st);
         try {
             JSONArray conversation = job.isResume()
                     // 续跑复用的是上一次失败时保存的 conversation，那份可能停在
@@ -289,6 +321,11 @@ final class ChatStreamRunner {
             int retryCount = 0;
             /** 本轮空回复已经重发过几次；换轮次（工具轮）清零。 */
             int emptyRetry = 0;
+            /**
+             * 连接阶段失败后的重连计数。只统计「还没拿到状态码」的失败；
+             * 拿到状态码之后的错误各走各的降级链，不受它影响。
+             */
+            int connectRetry = 0;
             int round = job.isResume() ? job.resume.round : 0;
             // 上限按「本次 execute 实际跑的工具轮数」算，不能用绝对 round：
             // 续跑的 round 起点是上次累计轮数（可能已是 8），round+1>=MAX 会
@@ -356,6 +393,7 @@ final class ChatStreamRunner {
                 }
                 if (!session.isAlive(job.generation)) {
                     LogUtil.i(TAG, "round loop aborted before round %d", round);
+                    if (outcomeCode.length() == 0) outcomeCode = "aborted";
                     return;
                 }
                 if (round > 0) {
@@ -365,7 +403,7 @@ final class ChatStreamRunner {
                     renderer.commitTail(st.trace.toString());
                     ui.showStatus(Strings.get(R.string.chatstreamrunner_003), job.generation, st.trace.toString(), job.aiIndex);
                 }
-                JSONObject body = ChatTransport.buildRequestBody(job.modelName, job.provider,
+                ChatTransport.Prepared prep = ChatTransport.prepare(job.modelName, job.provider,
                         job.thinkingLevel, conversation, job.streamEnabled,
                         toolsEnabled ? toolDefs : null, includeUsage, sendThinking,
                         // 注意这里不能取反：offBoolOnly 的语义是「只留布尔」，
@@ -374,6 +412,9 @@ final class ChatStreamRunner {
                         // 端点（混元、DeepSeek、Kimi、GLM）于是完全收不到关闭意图，
                         // 表现为「换了多少家、多少模型都关不掉」。
                         !offNativeDropped, offBoolOnly);
+                JSONObject body = prep.body;
+                final String payload = body.toString();
+                diagRound(st, round, prep, payload);
                 if (OffDiag.ENABLED) {
                     OffDiag.log("请求 #%d 轮次=%d %s", reqSeq, round, OffDiag.shape(body));
                     OffDiag.log("  思考字段：%s",
@@ -393,14 +434,59 @@ final class ChatStreamRunner {
                 // 统计按「界面上的名字」记：用户看报表时要能对上模型下拉里的那一项
                 UsageStats.get().onRequest(modelLabelOf(job.modelName), providerLabelOf(job.providerName));
                 final long roundStartMs = System.currentTimeMillis();
-                conn = ChatTransport.open(job.provider,
-                        job.isContinue() && job.cont.officialPrefix);
-                session.setConnection(conn);
-                writeBody(conn, body.toString());
+                int code;
+                try {
+                    conn = ChatTransport.open(job.provider,
+                            job.isContinue() && job.cont.officialPrefix, job.streamEnabled);
+                    session.setConnection(conn);
+                    diagEvent(st, "connect", "ok in " + (System.currentTimeMillis() - roundStartMs) + "ms");
+                    long tWrite = System.currentTimeMillis();
+                    writeBody(conn, payload);
+                    diagEvent(st, "body-sent", "ok " + payload.length() + " chars in "
+                            + (System.currentTimeMillis() - tWrite) + "ms");
 
-                long reqMs = System.currentTimeMillis();
-                int code = conn.getResponseCode();
-                LogUtil.i(TAG, "HTTP %d in %d ms (round=%d)", code, System.currentTimeMillis() - reqMs, round);
+                    long reqMs = System.currentTimeMillis();
+                    code = conn.getResponseCode();
+                    LogUtil.i(TAG, "HTTP %d in %d ms (round=%d)", code, System.currentTimeMillis() - reqMs, round);
+                    diagEvent(st, "http", "code=" + code + " in " + (System.currentTimeMillis() - reqMs) + "ms");
+                    diagHeaders(st, conn);
+                } catch (Exception openFail) {
+                    // 连接阶段失败：还没有拿到任何状态码，服务端必然没有处理这次请求。
+                    // 逐次重连；仍失败就把原因写进错误卡片，不让请求无声无息地消失。
+                    if (!session.isAlive(job.generation)) {
+                        outcomeCode = "aborted";
+                        return;
+                    }
+                    diagEvent(st, "connect-failed", openFail.getClass().getName() + ": " + openFail.getMessage());
+                    LogUtil.w(TAG, "connect phase failed (round=%d, attempt=%d): %s",
+                            round, connectRetry, describe(openFail));
+                    ChatTransport.close(conn);
+                    conn = null;
+                    session.setConnection(null);
+                    if (connectRetry < MAX_CONNECT_RETRY) {
+                        long wait = CONNECT_RETRY_BASE_MS << connectRetry;
+                        connectRetry++;
+                        if (session.isCurrent(job.generation)) {
+                            ui.showStatus(Strings.get(R.string.chatstreamrunner_022,
+                                    connectRetry, MAX_CONNECT_RETRY), job.generation,
+                                    st.trace.toString(), job.aiIndex);
+                        }
+                        if (!sleepInterruptible(wait, job.generation)) {
+                            outcomeCode = "aborted";
+                            return;
+                        }
+                        continue;
+                    }
+                    st.failed = true;
+                    st.httpCode = -1;
+                    st.errorDetail = ErrorReport.build(job.providerName, job.modelName,
+                            job.chatEndpoint, round, -1, "", openFail);
+                    if (session.isCurrent(job.generation)) {
+                        ui.toast(Strings.get(R.string.chatstreamrunner_023, friendly(openFail)));
+                    }
+                    outcomeCode = "connect-failed";
+                    return;
+                }
 
                 if (code != 200) {
                     // 429 最优先处理：此时 body 还没读，直接关掉重连最干净
@@ -410,6 +496,7 @@ final class ChatStreamRunner {
                         // 关连接重连，用户只看到「等待重试」，永远不知道服务端说了什么。
                         String body429 = ChatTransport.readErrorBody(conn);
                         if (body429 != null && body429.trim().length() > 0) last429Body = body429;
+                        diagBody(st, "429-body", body429, 2000);
                         String reason429 = ErrorReport.providerMessage(last429Body);
                         if (reason429.length() > 160) reason429 = reason429.substring(0, 160) + "…";
                         int retryAfter = ChatTransport.retryAfterSeconds(conn);
@@ -440,6 +527,7 @@ final class ChatStreamRunner {
 
                     String errBody = ChatTransport.readErrorBody(conn);
                     LogUtil.e(TAG, "request failed: HTTP %d, body=%s", code, LogUtil.preview(errBody, 800));
+                    diagBody(st, "error-body", errBody, 4000);
                     if (OffDiag.ENABLED) {
                         OffDiag.log("请求 #%d 失败 HTTP=%d 响应体=%s", reqSeq - 1, code,
                                 OffDiag.snippet(errBody));
@@ -453,6 +541,7 @@ final class ChatStreamRunner {
                     // 一级降级：端点不认识 tools 参数。首轮 400 时去掉工具与搜索
                     // 系统提示重试一次，保证原有普通对话不受联网开关影响。
                     if ((code == 400 || code == 422) && toolsEnabled && round == 0 && !fallbackTried) {
+                        diagEvent(st, "degrade", "drop tools after HTTP " + code);
                         fallbackTried = true;
                         toolsEnabled = false;
                         conversation = buildConversation(job.systemPrompt);
@@ -479,6 +568,7 @@ final class ChatStreamRunner {
                     if ((code == 400 || code == 422) && sendThinking && thinkingOff
                             && !offNativeDropped) {
                         offNativeDropped = true;
+                        diagEvent(st, "degrade", "thinking-off: drop provider field after HTTP " + code);
                         LogUtil.w(TAG, "thinking-off rejected, retry without provider-declared field");
                         OffDiag.log("降级：端点拒收，去掉自填字段重发（关闭意图保留）");
                         ChatTransport.close(conn);
@@ -489,6 +579,7 @@ final class ChatStreamRunner {
                     if ((code == 400 || code == 422) && sendThinking && thinkingOff
                             && !offBoolOnly) {
                         offBoolOnly = true;
+                        diagEvent(st, "degrade", "thinking-off: boolean only after HTTP " + code);
                         LogUtil.w(TAG, "thinking-off rejected, retry with boolean switches only");
                         OffDiag.log("降级：端点仍拒收，只留布尔关闭重发");
                         ChatTransport.close(conn);
@@ -497,6 +588,7 @@ final class ChatStreamRunner {
                         continue;
                     }
                     if ((code == 400 || code == 422) && sendThinking && thinkingOff) {
+                        diagEvent(st, "degrade", "thinking-off rejected in every form");
                         ThinkingOff.rememberCannotOff(modelOriginal);
                         sendThinking = false;
                         thinkingOff = false;
@@ -513,6 +605,7 @@ final class ChatStreamRunner {
 
                     // 开着思考时端点不认参数：整套去掉再发一次，别让用户卡死在这里。
                     if ((code == 400 || code == 422) && sendThinking && !thinkingDowngraded) {
+                        diagEvent(st, "degrade", "drop thinking params after HTTP " + code);
                         thinkingDowngraded = true;
                         sendThinking = false;
                         LogUtil.w(TAG, "endpoint rejected thinking params, retry without them");
@@ -525,6 +618,7 @@ final class ChatStreamRunner {
                     // 三级降级（最后）：端点不认 stream_options。严格校验参数的网关会直接 400。
                     // 去掉它重发，并让宿主记住，避免每次对话都白吃一个 400。
                     if ((code == 400 || code == 422) && includeUsage && !usageDowngraded) {
+                        diagEvent(st, "degrade", "drop stream_options after HTTP " + code);
                         usageDowngraded = true;
                         includeUsage = false;
                         LogUtil.w(TAG, "endpoint rejected stream_options, retry without usage");
@@ -537,6 +631,7 @@ final class ChatStreamRunner {
 
                     st.failed = true;
                     st.httpCode = code;
+                    outcomeCode = "http-" + code;
                     String bodyForReport = (errBody != null && errBody.trim().length() > 0)
                             ? errBody : last429Body;
                     st.errorDetail = ErrorReport.build(job.providerName, job.modelName,
@@ -559,8 +654,15 @@ final class ChatStreamRunner {
                 // 这里不重置渐显。重置会让已画出的字被搬进 base、渐变窗口清零，
                 // 屏幕上表现为整段回答消失、再从第一个字快速长回来。
                 // 真正的新回答由宿主按请求代数重新起步。
+                // 收到状态码后一个字节都收不到：先提示，超过上限直接断开。
+                // 没有这一段时，这类请求会静静躺到 120s 读超时，界面上没有任何信号。
+                startStallWatch(st, conn, job.generation);
                 SseRound.Result rr = readRound(conn, st, renderer);
                 st.chunks = rr.chunks;
+                diagEvent(st, "stream-end", "chunks=" + rr.chunks
+                        + " elapsed=" + (System.currentTimeMillis() - roundStartMs) + "ms"
+                        + " content=" + rr.content.length() + " reasoning=" + rr.reasoning.length()
+                        + " reasoningTokens=" + rr.reasoningTokens + " tools=" + rr.toolCalls.length());
                 if (OffDiag.ENABLED) {
                     OffDiag.log("响应 #%d 分片=%d 推理分片=%d 推理字符=%d 推理tokens=%d 正文=%d",
                             reqSeq - 1, rr.chunks, rr.thinkingChunks,
@@ -596,6 +698,7 @@ final class ChatStreamRunner {
                     // 这里会误报「服务端没有返回任何内容」。打断不是失败，静默返回。
                     if (!session.isAlive(job.generation)) {
                         LogUtil.i(TAG, "round %d aborted by user: %s", round, rr.error);
+                        outcomeCode = "aborted";
                         return;
                     }
                     // 端点正常收尾却一个字都没有：先自动重发，别让用户对着空气泡等。
@@ -603,6 +706,7 @@ final class ChatStreamRunner {
                     // lastStreamTrace 也还停在上一轮结束的位置，重发会直接续上。
                     if (rr.emptyReply && emptyRetry < MAX_EMPTY_RETRY) {
                         emptyRetry++;
+                        diagEvent(st, "retry", "empty reply, resend " + emptyRetry);
                         LogUtil.w(TAG, "empty reply at round %d, auto retry %d/%d",
                                 round, emptyRetry, MAX_EMPTY_RETRY);
                         ChatTransport.close(conn);
@@ -615,6 +719,7 @@ final class ChatStreamRunner {
                         continue;
                     }
                     st.failed = true;
+                    outcomeCode = rr.emptyReply ? "empty-reply" : "stream-error";
                     // 本轮流式已经吐出来的内容不能丢：错误卡片要挂在这段内容之下，
                     // 否则用户看到的是「回答突然没了，只剩一张报错卡」
                     // 与「断流 catch」一致记下截断点：SseRound 正常返回 r.error
@@ -676,6 +781,7 @@ final class ChatStreamRunner {
                     }
                     if (outcome.aborted) {
                         LogUtil.i(TAG, "tool loop aborted at round %d", round);
+                        outcomeCode = "aborted";
                         return;
                     }
                     // 轮次硬上限。模型的 tool_calls 可以无限循环（尤其搜索类工具：
@@ -692,6 +798,8 @@ final class ChatStreamRunner {
                                 job.chatEndpoint, round, -1, "",
                                 new Exception(Strings.get(R.string.chatstreamrunner_008, MAX_TOOL_ROUNDS)));
                         LogUtil.w(TAG, "tool round limit %d reached, stop looping", MAX_TOOL_ROUNDS);
+                        outcomeCode = "tool-round-limit";
+                        diagEvent(st, "limit", "tool rounds " + MAX_TOOL_ROUNDS + " reached");
                         if (session.isCurrent(job.generation)) {
                             ui.toast(Strings.get(R.string.chatstreamrunner_010));
                         }
@@ -701,8 +809,23 @@ final class ChatStreamRunner {
                     continue;
                 }
 
+                // 工具调用成功但一个字都没写（只有 usage 帧）也算失败：没有它，
+                // 这种情况会走到成功分支，用内容为空的结果覆盖气泡，用户看到回答凭空消失。
+                if (rr.display.length() == 0 && ToolCalls.hasUsable(rr.toolCalls)) {
+                    st.failed = true;
+                    outcomeCode = "empty-with-tools";
+                    st.errorDetail = ErrorReport.build(job.providerName, job.modelName,
+                            job.chatEndpoint, round, rr.httpCode, rr.rawBody,
+                            new Exception("tool_calls delta arrived without any payload fields"));
+                    diagEvent(st, "anomaly", "tool_calls deltas without id/name/arguments");
+                    if (session.isCurrent(job.generation)) {
+                        ui.toast(Strings.get(R.string.chatstreamrunner_024));
+                    }
+                    return;
+                }
                 st.trace.append(rr.display);
                 if (TraceKit.cap(st.trace)) ui.onTraceTrimmed();
+                outcomeCode = "success";
                 st.apiText = job.isContinue()
                         ? job.cont.prefixText + rr.content.toString()
                         : rr.content.toString();
@@ -725,9 +848,12 @@ final class ChatStreamRunner {
             ui.nextSeq();
         } catch (Exception e) {
             st.failed = true;
+            // 读超时 / 连接重置 / TLS 中断分开标记，导出记录时一眼能对上是哪一类
+            outcomeCode = e instanceof SocketTimeoutException ? "read-timeout" : "exception";
             st.errorDetail = ErrorReport.build(job.providerName, job.modelName,
                     job.chatEndpoint, st.round, -1, "", e);
             LogUtil.e(TAG, "streaming request exception: %s", e.getMessage(), e);
+            diagEvent(st, "exception", describe(e));
             // 用户主动打断（打断已自增代数）导致的 Socket closed 不算请求失败
             if (session.isCurrent(job.generation)) {
                 ui.toast(Strings.get(R.string.chatstreamrunner_011, e.getMessage()));
@@ -744,6 +870,7 @@ final class ChatStreamRunner {
             if (conn != null) {
                 try { conn.disconnect(); } catch (Exception ignored) { }
             }
+            diagEnd(st, outcomeCode, startMs);
             // 只有代数匹配才收尾：过期线程不得污染新请求的 UI 与持久化状态
             if (session.isCurrent(job.generation)) {
                 session.setConnection(null);
@@ -809,7 +936,9 @@ final class ChatStreamRunner {
         final long interval = job.realtimeRender ? 200 : 120;
         final long[] lastPush = new long[] { 0 };
         try {
-            return SseRound.read(job.streamEnabled, conn.getInputStream(),
+            InputStream in = conn.getInputStream();
+            diagEvent(st, "body-open", "input stream ready");
+            return SseRound.read(job.streamEnabled, in,
                     new SseRound.Progress() {
                         public void onProgress(CharSequence display) {
                             long now = System.currentTimeMillis();
@@ -822,7 +951,20 @@ final class ChatStreamRunner {
                         public boolean isAborted() {
                             return !session.isAlive(job.generation);
                         }
-                    }, partial);
+                    }, partial, new SseRound.Trace() {
+                        public void onFirstByte(long now) {
+                            st.firstByteSeen = true;
+                            diagEvent(st, "first-byte", "at " + now);
+                        }
+
+                        public void onFirstData(long now, int chunks) {
+                            diagEvent(st, "first-data", "chunk#" + chunks);
+                        }
+
+                        public void onEnd(long now, int chunks, boolean done) {
+                            diagEvent(st, "stream-close", "chunks=" + chunks + " done-mark=" + done);
+                        }
+                    });
         } catch (Exception e) {
             // 断流（读超时、连接重置、TLS 中断）不是「什么都没发生」：调用方会走失败
             // 链路，用 st.trace 重写气泡并落盘。这里不把半截 display 补进 trace，
@@ -851,6 +993,173 @@ final class ChatStreamRunner {
         } finally {
             os.close();
         }
+    }
+
+    /**
+     * 收到响应后等内容的看门狗。
+     *
+     * <p>专治「发出去了、服务端也回了状态，但之后一个字节都没有」：界面原本没有任何
+     * 信号，只能等到读超时。这里在 {@value #NO_DATA_HINT_MS} 时提示一行说明，
+     * 超过 {@value #STALL_LIMIT_MS} 仍未收到第一个字节就直接断开——由调用方走失败
+     * 链路，错误卡片写清「服务端已响应但没有返回内容」。
+     *
+     * <p>只在「还没收到第一个字节」时生效：一旦开始出内容，慢是模型在思考，
+     * 交给读超时判断，看门狗不再介入。
+     */
+    private void startStallWatch(final State st, final HttpURLConnection target, final int generation) {
+        final long startAt = System.currentTimeMillis();
+        Thread t = new Thread(new Runnable() {
+            public void run() {
+                boolean hinted = false;
+                while (true) {
+                    if (st.firstByteSeen) return;
+                    if (!session.isAlive(generation)) return;
+                    long waited = System.currentTimeMillis() - startAt;
+                    if (waited >= STALL_LIMIT_MS) {
+                        LogUtil.w(TAG, "no byte %d ms after response, aborting", waited);
+                        diagEvent(st, "stall", "no byte in " + waited + "ms, aborted");
+                        try { target.disconnect(); } catch (Exception ignored) { }
+                        return;
+                    }
+                    if (!hinted && waited >= NO_DATA_HINT_MS && session.isCurrent(generation)) {
+                        hinted = true;
+                        diagEvent(st, "stall-hint", waited + "ms without body");
+                        ui.onWaitingHint(Strings.get(R.string.chatstreamrunner_025,
+                                waited / 1000L), generation, job.aiIndex);
+                    }
+                    try {
+                        Thread.sleep(1000L);
+                    } catch (InterruptedException e) {
+                        return;
+                    }
+                }
+            }
+        }, "aichat-stall-watch");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    // ---------- 诊断记录 ----------
+    // 全部在请求线程上同步写；开关关掉时 job.diag 为 null，这里只剩一次判空。
+
+    /** 请求开始：模型、提供商、档位、能力、检索配置等一次性信息。 */
+    private void diagBegin(State st) {
+        if (job.diag == null) return;
+        RequestDiag.Recorder d = job.diag;
+        String resolved = "";
+        ModelInfo m = null;
+        try {
+            m = ConfigManager.getInstance().findModel(job.providerName, job.modelName);
+            resolved = ChatTransport.resolveThinkingLevel(job.modelName, job.provider, job.thinkingLevel);
+        } catch (Throwable ignored) {
+        }
+        d.head("request", job.isResume() ? "resume" : (job.isContinue() ? "continue" : "new"));
+        d.kv("provider", job.providerName + (job.provider == null || job.provider.displayName == null
+                ? "" : " (" + job.provider.displayName + ")"));
+        d.kv("endpoint", job.chatEndpoint);
+        d.kv("model", job.modelName);
+        d.kv("modelLabel", m == null ? "-" : m.label());
+        d.kv("thinkingLevel", job.thinkingLevel + " -> " + resolved);
+        d.kv("thinkingType", job.provider == null ? "-" : job.provider.thinkingType
+                + "/" + job.provider.thinkingParamName);
+        d.kv("capability", m == null ? "-" : ("vision=" + m.supportsVision
+                + " thinking=" + m.supportsThinking
+                + " levels=" + (m.thinkingLevels == null || m.thinkingLevels.length() == 0
+                        ? "未探测" : m.thinkingLevels)
+                + (m.levelsUnverifiable ? "(不校验)" : "")));
+        d.kv("stream", job.streamEnabled + " includeUsage=" + job.includeUsage
+                + " realtime=" + job.realtimeRender);
+        d.kv("webSearch", job.webSearchEnabled + " ready=" + job.searchReady
+                + " backend=" + (job.useTavily ? "tavily" : "deepseek")
+                + " httpTool=" + job.httpToolEnabled);
+        d.kv("retry429", job.retryPolicy.enabled + " max=" + job.retryPolicy.maxAttempts
+                + " base=" + job.retryPolicy.baseMs + "ms backoff=" + job.retryPolicy.backoff);
+        d.kv("context", "messages=" + job.snapshot.size() + " aiIndex=" + job.aiIndex
+                + " generation=" + job.generation
+                + (job.isResume() ? " resumeRound=" + job.resume.round : ""));
+    }
+
+    /** 每轮请求：实际下发的档位、各字段是否带上，以及完整请求体（构造处已排除密钥）。 */
+    private void diagRound(State st, int round, ChatTransport.Prepared prep, String payload) {
+        if (job.diag == null) return;
+        RequestDiag.Recorder d = job.diag;
+        d.head("round", String.valueOf(round + 1));
+        d.kv("thinking", prep.thinkingLevel + (prep.thinkingSent ? "" : " (未下发)"));
+        d.kv("tools", prep.toolsSent ? "on" : "off");
+        d.kv("stream_options", prep.usageRequested ? "on" : "off");
+        d.body("request-body", payload, 200000);
+    }
+
+    private void diagHeaders(State st, HttpURLConnection conn) {
+        if (job.diag == null || conn == null) return;
+        try {
+            job.diag.event("response-headers", "request-id=" + header(conn, "x-request-id")
+                    + " server=" + header(conn, "server")
+                    + " content-type=" + header(conn, "content-type")
+                    + " content-length=" + header(conn, "content-length")
+                    + " retry-after=" + header(conn, "retry-after"));
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private void diagEvent(State st, String event, String detail) {
+        if (job.diag != null) job.diag.event(event, detail);
+    }
+
+    private void diagBody(State st, String key, String content, int max) {
+        if (job.diag != null) job.diag.body(key, content, max);
+    }
+
+    private void diagEnd(State st, String outcome, long startMs) {
+        if (job.diag == null) return;
+        long total = System.currentTimeMillis() - startMs;
+        RequestDiag.Recorder d = job.diag;
+        String code = outcome == null || outcome.length() == 0 ? "unknown" : outcome;
+        d.kv("result", code + " http=" + st.httpCode + " failed=" + st.failed
+                + " tokens=" + st.promptTokens + "/" + st.completionTokens
+                + " cached=" + st.cachedTokens + " chunks=" + st.chunks);
+        if (st.errorDetail != null && st.errorDetail.length() > 0) {
+            d.body("error-detail", st.errorDetail, 4000);
+        }
+        d.end(code, st.httpCode, total);
+        d.flush();
+    }
+
+    private static String header(HttpURLConnection conn, String name) {
+        try {
+            String v = conn.getHeaderField(name);
+            return v == null ? "-" : v;
+        } catch (Throwable t) {
+            return "-";
+        }
+    }
+
+    /** 异常 → 一行完整原因（含 cause 链），用于日志与诊断记录。 */
+    private static String describe(Exception e) {
+        if (e == null) return "-";
+        StringBuilder sb = new StringBuilder(e.getClass().getName());
+        if (e.getMessage() != null) sb.append(": ").append(e.getMessage());
+        Throwable c = e.getCause();
+        int depth = 0;
+        while (c != null && depth < 3) {
+            sb.append(" <- ").append(c.getClass().getName());
+            if (c.getMessage() != null) sb.append(": ").append(c.getMessage());
+            c = c.getCause();
+            depth++;
+        }
+        return sb.toString();
+    }
+
+    /** 异常 → 一句用户能看懂的原因，用于重连耗尽后的提示。 */
+    private static String friendly(Exception e) {
+        if (e instanceof SocketTimeoutException) return Strings.get(R.string.chatstreamrunner_026);
+        String n = e.getClass().getName().toLowerCase(java.util.Locale.US);
+        String msg = e.getMessage() == null ? "" : e.getMessage().toLowerCase(java.util.Locale.US);
+        if (n.indexOf("ssl") >= 0 || n.indexOf("cert") >= 0 || msg.indexOf("ssl") >= 0) {
+            return Strings.get(R.string.chatstreamrunner_027);
+        }
+        if (n.indexOf("unknownhost") >= 0) return Strings.get(R.string.chatstreamrunner_028);
+        return Strings.get(R.string.chatstreamrunner_029);
     }
 
     /** 工具执行：把运行期策略（能力是否就绪、key 从哪来）与 {@link ToolExecutor} 的通用逻辑隔开。 */
@@ -954,6 +1263,8 @@ final class ChatStreamRunner {
          * 必须能从续跑基准里截掉，否则新旧两份回答会连在一起。
          */
         int partialStart = -1;
+        /** 读流是否已经收到第一段字节；停滞看门狗据此让位。 */
+        volatile boolean firstByteSeen;
 
         /**
          * 累加一轮的 usage。工具轮次会发多次请求，逐轮相加才是这条消息的真实消耗；

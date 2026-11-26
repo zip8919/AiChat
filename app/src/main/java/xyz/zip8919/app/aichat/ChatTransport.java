@@ -151,6 +151,57 @@ final class ChatTransport {
     }
 
     /**
+     * 拼好的请求体，附带这次请求实际下发的关键参数，供诊断记录使用。
+     *
+     * <p>参数不重新推导：{@link #buildRequestBody} 内部会做档位落档与协议修复，
+     * 在外面再算一遍很可能与真正发出去的不一致。这里是唯一事实来源。
+     */
+    static final class Prepared {
+        final JSONObject body;
+        /** 落档后真正下发的思考档位。 */
+        final String thinkingLevel;
+        final boolean toolsSent;
+        final boolean usageRequested;
+        final boolean thinkingSent;
+
+        Prepared(JSONObject body, String thinkingLevel, boolean toolsSent,
+                boolean usageRequested, boolean thinkingSent) {
+            this.body = body;
+            this.thinkingLevel = thinkingLevel;
+            this.toolsSent = toolsSent;
+            this.usageRequested = usageRequested;
+            this.thinkingSent = thinkingSent;
+        }
+    }
+
+    static Prepared prepare(String model, ProviderInfo provider, String thinkingLevel,
+            JSONArray messages, boolean stream, JSONArray tools, boolean includeUsage,
+            boolean sendThinking) throws Exception {
+        return prepare(model, provider, thinkingLevel, messages, stream, tools,
+                includeUsage, sendThinking, true, false);
+    }
+
+    /**
+     * @param offIncludeNative 关闭思考时是否写自填的原生字段（false 表示 400 后已去掉）
+     * @param offBoolOnly      关闭思考时是否只留 {@code enable_thinking:false}
+     */
+    static Prepared prepare(String model, ProviderInfo provider, String thinkingLevel,
+            JSONArray messages, boolean stream, JSONArray tools, boolean includeUsage,
+            boolean sendThinking, boolean offIncludeNative, boolean offBoolOnly)
+            throws Exception {
+        JSONObject body = buildRequestBody(model, provider, thinkingLevel, messages, stream,
+                tools, includeUsage, sendThinking, offIncludeNative, offBoolOnly);
+        String pName = provider.thinkingParamName;
+        if (pName == null || pName.trim().length() == 0) pName = "thinking";
+        // 关闭思考时字段由 ThinkingOff 写全，没有 reasoning_effort 键是正常的
+        boolean thinkingSent = sendThinking && body.has(pName);
+        return new Prepared(body, resolveThinkingLevel(model, provider, thinkingLevel),
+                tools != null && tools.length() > 0,
+                stream && includeUsage,
+                thinkingSent);
+    }
+
+    /**
      * 读 {@code Retry-After} 头，返回需要等待的秒数；没有或解析失败返回 -1。
      *
      * <p>两种合法格式都要支持：纯秒数（{@code 120}）与 HTTP-date
@@ -209,6 +260,15 @@ final class ChatTransport {
 
     /** @param beta 走官方前缀续写端点，仅 {@link #isOfficialDeepSeek} 为真时传 true。 */
     static HttpURLConnection open(ProviderInfo provider, boolean beta) throws Exception {
+        return open(provider, beta, true);
+    }
+
+    /**
+     * @param streamMode {@code body.stream} 为 true 时才声明接受事件流；非流式请求拿到的是
+     *                   普通 JSON，声明 text/event-stream 会让个别网关改写响应形态。
+     */
+    static HttpURLConnection open(ProviderInfo provider, boolean beta, boolean streamMode)
+            throws Exception {
         // 走 Endpoint 统一拼接：老配置里 apiUrl 与 chatPath 常常各带一个斜杠，
         // 裸拼会发出 //chat/completions，部分网关直接 404。
         String endpoint = (beta
@@ -219,6 +279,12 @@ final class ChatTransport {
         conn.setRequestMethod("POST");
         conn.setRequestProperty("Content-Type", "application/json");
         conn.setRequestProperty("Authorization", "Bearer " + provider.apiKey);
+        // SSE 默认会被中间代理缓冲：服务端一直在写，客户端却直到连接关闭才看到字节。
+        // 表现就是「发了消息没有任何回应」，而服务端侧显示早已返回。显式声明不缓冲，
+        // 让每一片都直接透传（端点不认这些头时按普通响应头忽略）。
+        conn.setRequestProperty("Cache-Control", "no-cache");
+        if (streamMode) conn.setRequestProperty("Accept", "text/event-stream");
+        conn.setRequestProperty("X-Accel-Buffering", "no");
         conn.setDoOutput(true);
         conn.setConnectTimeout(30000);
         // 读超时不能为 0：SSE 本来就是长连接，但「一直等不到字节」和「正在思考」
@@ -240,12 +306,22 @@ final class ChatTransport {
         }
     }
 
-    /** 读取错误响应体，最多 4KB——够看错误原因，又不至于把日志撑爆。 */
+    /**
+     * 读取错误响应体，最多 4KB——够看错误原因，又不至于把日志撑爆。
+     *
+     * <p>没有错误流、但响应声明了 Content-Length 时再读普通输入流：部分网关把错误体
+     * 放在 {@code getInputStream()} 里，只读 errorStream 会让错误卡片只剩一个状态码。
+     * 没有 Content-Length 时不能贸然读，可能一直等到读超时。
+     */
     static String readErrorBody(HttpURLConnection conn) {
         if (conn == null) return "";
         InputStream es = null;
         try {
             es = conn.getErrorStream();
+            if (es == null) {
+                if (conn.getHeaderField("Content-Length") == null) return "";
+                es = conn.getInputStream();
+            }
             if (es == null) return "";
             ByteArrayOutputStream bos = new ByteArrayOutputStream();
             byte[] buf = new byte[1024];

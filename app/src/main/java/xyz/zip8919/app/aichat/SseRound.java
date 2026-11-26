@@ -87,6 +87,22 @@ final class SseRound {
         boolean isAborted();
     }
 
+    /**
+     * 读流过程中的真实进度，供诊断记录写「卡在哪」。
+     *
+     * <p>只做记录，不参与协议判断；实现方在 trace 为 null 时不会被调用。
+     */
+    interface Trace {
+        /** 第一个字节到达。 */
+        void onFirstByte(long now);
+
+        /** 第一次出现 data 行。 */
+        void onFirstData(long now, int chunks);
+
+        /** 读流结束。[DONE] 与 EOF 分开标记。 */
+        void onEnd(long now, int chunks, boolean doneMark);
+    }
+
     private SseRound() {
     }
 
@@ -106,9 +122,15 @@ final class SseRound {
      */
     static Result read(boolean stream, InputStream in, Progress progress, Abort abort,
             Result[] partialOut) throws Exception {
+        return read(stream, in, progress, abort, partialOut, null);
+    }
+
+    /** @param trace 读流进度回调，可为 null。 */
+    static Result read(boolean stream, InputStream in, Progress progress, Abort abort,
+            Result[] partialOut, Trace trace) throws Exception {
         Result r = new Result();
         if (partialOut != null) partialOut[0] = r;
-        if (stream) readStream(in, progress, abort, r);
+        if (stream) readStream(in, progress, abort, r, trace);
         else readWhole(in, r);
         // tool_calls 的 arguments 是分片拼接的，流中途断开会留下半截 JSON；下游
         // ToolExecutor.parseArgs 解析失败会静默返回空对象照常执行，等于把半截参数
@@ -251,6 +273,11 @@ final class SseRound {
     /** 流式：逐行读 SSE，只在 data: 行上取 JSON。 */
     private static void readStream(InputStream in, Progress progress, Abort abort, Result r)
             throws Exception {
+        readStream(in, progress, abort, r, null);
+    }
+
+    private static void readStream(InputStream in, Progress progress, Abort abort, Result r,
+            Trace trace) throws Exception {
         boolean thinkingActive = false;
         boolean thinkingFinished = false;
 
@@ -260,9 +287,16 @@ final class SseRound {
         // 原来这种情况只报「服务端没有返回任何内容」，把唯一有用的那句原因丢了。
         // 只在还没见到任何 data 行时累积，正常 SSE 一进来就停手，零额外开销。
         StringBuilder head = new StringBuilder();
+        boolean firstByte = false;
+        boolean firstData = false;
+        boolean doneMark = false;
         try {
             String line;
             while (!abort.isAborted() && (line = reader.readLine()) != null) {
+                if (!firstByte) {
+                    firstByte = true;
+                    if (trace != null) trace.onFirstByte(System.currentTimeMillis());
+                }
                 line = line.trim();
                 // SSE 规范里冒号后的空格可选，兼容 "data:" 与 "data: "
                 if (!line.startsWith("data:")) {
@@ -275,9 +309,14 @@ final class SseRound {
                 String data = line.substring(5).trim();
                 if ("[DONE]".equals(data)) {
                     LogUtil.i(TAG, "SSE [DONE] after %d chunks", r.chunks);
+                    doneMark = true;
                     break;
                 }
                 r.chunks++;
+                if (!firstData) {
+                    firstData = true;
+                    if (trace != null) trace.onFirstData(System.currentTimeMillis(), r.chunks);
+                }
 
                 JSONObject json;
                 try {
@@ -383,6 +422,7 @@ final class SseRound {
                 if (progress != null) progress.onProgress(r.display);
             }
         } finally {
+            if (trace != null) trace.onEnd(System.currentTimeMillis(), r.chunks, doneMark);
             // 半截思考块必须在这里收口，而不是放到 try 之后：读取中途抛 IOException
             // （超时、连接重置）时 try 之后的一段根本不会执行，未闭合的 [thinking]
             // 会让调用方把之后的正文整段当成思考内容渲染。正常结束时下面的判断

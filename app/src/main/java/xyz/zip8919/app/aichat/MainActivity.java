@@ -3176,6 +3176,7 @@ public class MainActivity extends ThemedActivity {
                 .retryPolicy(RetryPolicy.from(this))
                 .resume(resume)
                 .cont(cont)
+                .diag(RequestDiag.isEnabled(this) ? new RequestDiag.Recorder(this) : null)
                 .build();
 
         final Channel channel = new Channel();
@@ -3249,6 +3250,10 @@ public class MainActivity extends ThemedActivity {
 
         public void onRetryWaitEnd() {
             webViewEvalJs("hideRetryCard()");
+        }
+
+        public void onWaitingHint(final String text, final int generation, final int aiIndex) {
+            showStatus(text, generation, lastStreamTrace, aiIndex);
         }
 
         public void onRoundUsage(final int aiIndex, final int prompt, final int completion,
@@ -3478,6 +3483,14 @@ public class MainActivity extends ThemedActivity {
         traceRenderSeq.incrementAndGet(); // 定稿后不许旧 trace 结果再改写 base
         // 收尾是否要等渐显追平：等的话，队列的放行权也一起押后到定稿之后
         final boolean[] deferred = new boolean[] { false };
+        // 收尾也要放行「发送」按钮：完整正文的渲染在后台线程里，低端机上可能要几百毫秒，
+        // 期间按钮一直是「停止」，用户点了只会打断一条已经结束的请求，看起来就像
+        // 「消息发出去了，什么都没有」。排队消息仍由定稿后的 drain 放行。
+        runOnUiThread(new Runnable() {
+            public void run() {
+                if (requestGeneration.get() == settled.generation) setRequestInProgress(false);
+            }
+        });
         new Thread(new Runnable() {
             public void run() {
                 try {

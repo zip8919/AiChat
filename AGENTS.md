@@ -50,7 +50,7 @@ Java 源码**单包平铺**，不按功能拆 package。这是既有结构：角
 
 | 模块 | 职责 | 关键类 |
 |---|---|---|
-| **请求链路** | 一次回复的编排：组请求体、读 SSE、跑工具轮次、失败分类、收尾 | `ChatStreamRunner` `StreamJob` `ChatTransport` `SseRound` `ToolExecutor` `ChatHistory` `ToolHistoryRecovery` `ToolCalls` `MessageSanitizer` `TraceKit` `StreamRenderer` `RetryPolicy` `ErrorReport` `ApiClient` |
+| **请求链路** | 一次回复的编排：组请求体、读 SSE、跑工具轮次、失败分类、收尾 | `ChatStreamRunner` `StreamJob` `ChatTransport` `SseRound` `ToolExecutor` `ChatHistory` `ToolHistoryRecovery` `ToolCalls` `MessageSanitizer` `TraceKit` `StreamRenderer` `RetryPolicy` `ErrorReport` `ApiClient` `RequestDiag` |
 | **联网工具** | 提供给模型的搜索、抓取、发请求能力 | `WebSearchTool` `TavilyTool` `HttpRequestTool` `NetSecurity` |
 | **渲染** | 消息 → HTML → WebView；Markdown、公式、代码高亮 | `MessageHtmlRenderer` `MarkdownPipeline` `MathRenderer` `RendererAssets` `CodeHighlighter` `Html` `TextKit` `MarkdownPage` `SourcePage` |
 | **界面与交互** | 主界面、查看器、输入、排队、附件、裁剪、扫描、小工具 | `MainActivity` `ViewerController` `ViewerBg` `ViewerExport` `FullscreenInputActivity` `MessageQueue` `AttachmentText` `AttachmentFiles` `ImageTokens` `CropActivity` `CropView` `FileKinds` `FileIcons` `FileIconBinder` `FileActions` `ScanActivity` `ToolsActivity` `JsRunnerActivity` |
@@ -144,6 +144,7 @@ Android/data/xyz.zip8919.app.aichat/files/
 | `SseRound` | 单轮响应的字节流 → display/content/toolCalls | 不认识 Message，不判断重试 |
 | `ToolExecutor` | tool_calls → conversation/toolHistory/trace | 不决定"用哪个 key"，由 Host 提供 |
 | `ChatTransport` | 请求体、连接、错误体 | 不判断 400 该不该回退 |
+| `RequestDiag` | 最近 3 次请求的诊断记录：模型、档位、能力、请求体、响应体、事件时序 | 不判断请求成败，不碰 View；开关关闭时 `job.diag` 为 null |
 | `ChatHistory` | 历史压缩、tool 配对校验、回放 | 不发请求 |
 | `ToolHistoryRecovery` | 旧会话：从正文卡片反推工具历史 | 不碰网络，不改消息 |
 | `MessageSanitizer` | 发送前修正 messages 的协议顺序 | 不改消息内容与语义 |
@@ -527,7 +528,26 @@ adb logcat -s "AiChat/*"
 
 未捕获异常由 `CrashCatcher` 追加到 `Android/data/xyz.zip8919.app.aichat/files/crash.log`（含 `Caused by` 链、机型、系统版本、ABI）。用户不连 adb 也能用文件管理器取出。
 
-### 14.3 一次请求的形状
+### 14.3 请求诊断记录
+
+偶发问题（发出去没反应、没报错、也没超时）事后靠日志文件很难还原：日志里看不到请求体，
+也不知道服务端到底回了什么。`RequestDiag` 把每次请求单独落一份到 `files/request_logs/`，
+只保留最近 3 次（`index.json` 记索引，`<id>.log` 是正文）。
+
+- 开关：设置 → 调试与性能 → 「记录最近 3 次请求」，键 `diagnostic_log_enabled`，改完立即生效。
+- 记录粒度：一次请求（含工具轮次）一份。`Recorder` 由 `MainActivity` 在构造 `StreamJob` 时传入，
+  中途改开关不影响正在跑的这次。
+- 内容：提供商 / 端点 / 模型、思考档位（请求值与落档后实际值）、模型能力（视觉 / 工具 / 流式）、
+  完整请求体、SSE 事件与响应体片段、连接与首字节耗时、每次降级（去 tools / 去思考参数 /
+  去 stream_options）与重试的原因、429 等待、停滞判定、最终 `outcomeCode` 与 HTTP 状态码。
+- 上限：请求体 256 KB、响应体 16 KB、单行 2 KB、事件 400 条。超出截断并标注。
+- 鉴权头经 `maskAuth` 遮蔽，只留前 6 后 4 位。
+- 导出：设置页「导出请求记录」把 3 次合并成一个文本文件，走 `StorageManager.saveExport` 写入导出目录。
+
+排查顺序：先看 `outcomeCode`（`success` / `connect-failed` / `stall` / `empty-with-tools` / `aborted` …），
+再看 `connect` 与 `first-byte` 两处耗时，最后看 `degrade` / `retry` 事件和响应体片段。
+
+### 14.4 一次请求的形状
 
 ```
 >>> request START: gen=3 ... webSearch=true backend=tavily

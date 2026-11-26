@@ -112,6 +112,14 @@ final class StreamJob {
     /** 429 重试策略，随请求固化，避免跑到一半参数被改。 */
     final RetryPolicy retryPolicy;
 
+    /**
+     * 请求诊断记录；null 表示用户在设置里关掉了记录。
+     *
+     * <p>随 job 传进来而不是在请求线程里现查设置：一次回复会跑多轮工具，
+     * 中途改开关不应该让同一条记录一半有一半没有。
+     */
+    final RequestDiag.Recorder diag;
+
     StreamJob(Builder b) {
         this.provider = b.provider;
         this.modelName = b.modelName;
@@ -143,6 +151,7 @@ final class StreamJob {
         this.cont = b.cont;
         this.retryPolicy = b.retryPolicy == null
                 ? new RetryPolicy(false, 0, 2000L, true, 30000L) : b.retryPolicy;
+        this.diag = b.diag;
     }
 
     /** 续跑时沿用原来的消息与轮次，否则从头开始。 */
@@ -192,6 +201,7 @@ final class StreamJob {
         Resume resume;
         Continue cont;
         RetryPolicy retryPolicy;
+        RequestDiag.Recorder diag;
 
         Builder provider(ProviderInfo v) { provider = v; return this; }
         Builder modelName(String v) { modelName = v; return this; }
@@ -223,6 +233,7 @@ final class StreamJob {
         Builder resume(Resume v) { resume = v; return this; }
         Builder cont(Continue v) { cont = v; return this; }
         Builder retryPolicy(RetryPolicy v) { retryPolicy = v; return this; }
+        Builder diag(RequestDiag.Recorder v) { diag = v; return this; }
 
         StreamJob build() {
             return new StreamJob(this);

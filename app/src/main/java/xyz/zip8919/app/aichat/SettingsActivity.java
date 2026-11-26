@@ -119,6 +119,8 @@ public class SettingsActivity extends ThemedActivity {
     /** loadSettings 期间置 true：否则 setChecked 会当成用户操作，弹出风险确认。 */
     private boolean bindingSwitches;
     private Switch retry429Switch, retry429BackoffSwitch;
+    /** 请求诊断记录开关；导出/清空按钮同组。 */
+    private Switch diagLogSwitch;
     private EditText retry429MaxEdit, retry429BaseEdit, retry429MaxWaitEdit;
     private EditText attachMaxCharsEdit, attachTotalEdit, maxAttachmentsEdit, imageMaxMbEdit;
     private EditText toolMaxKbEdit, httpTimeoutEdit, searchCountEdit, searchSummaryEdit;
@@ -200,6 +202,21 @@ public class SettingsActivity extends ThemedActivity {
         retry429MaxEdit = (EditText) findViewById(R.id.retry_429_max_edit);
         retry429BaseEdit = (EditText) findViewById(R.id.retry_429_base_edit);
         retry429MaxWaitEdit = (EditText) findViewById(R.id.retry_429_max_wait_edit);
+        diagLogSwitch = (Switch) findViewById(R.id.diag_log_switch);
+        // 立即生效，不等「保存」：用户填完设置去复现问题，回来就该有记录。
+        diagLogSwitch.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+            public void onCheckedChanged(CompoundButton b, boolean checked) {
+                if (bindingSwitches) return;
+                RequestDiag.setEnabled(SettingsActivity.this, checked);
+                LogUtil.d(TAG, "diag log -> %s", checked);
+            }
+        });
+        findViewById(R.id.diag_export_button).setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { exportRequestDiag(); }
+        });
+        findViewById(R.id.diag_clear_button).setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { confirmClearRequestDiag(); }
+        });
         attachMaxCharsEdit = (EditText) findViewById(R.id.attach_max_chars_edit);
         attachTotalEdit = (EditText) findViewById(R.id.attach_total_edit);
         maxAttachmentsEdit = (EditText) findViewById(R.id.max_attachments_edit);
@@ -458,6 +475,7 @@ public class SettingsActivity extends ThemedActivity {
         retry429MaxEdit.setText(String.valueOf(getRetry429MaxAttempts(this)));
         retry429BaseEdit.setText(String.valueOf(getRetry429BaseSeconds(this)));
         retry429MaxWaitEdit.setText(String.valueOf(getRetry429MaxWaitSeconds(this)));
+        diagLogSwitch.setChecked(RequestDiag.isEnabled(this));
         searchBackendSpinner.setSelection(
                 SEARCH_BACKEND_DEEPSEEK.equals(getSearchBackend(this)) ? 1 : 0);
         tavilyKeyEdit.setText(getTavilyKey(this));
@@ -557,6 +575,51 @@ public class SettingsActivity extends ThemedActivity {
      * 计算命中。改一个字，从那个字开始往后的全部内容都要重算——不是「多花一点」，
      * 而是整段上下文按未命中计费。用户有权知道这件事再决定，而不是月底看账单。
      */
+    /**
+     * 导出最近 3 次请求记录到导出目录。
+     *
+     * <p>没有记录时不生成空文件：空文件发回去只会多一轮来回。
+     */
+    private void exportRequestDiag() {
+        final boolean enabled = RequestDiag.isEnabled(this);
+        if (RequestDiag.list(this).length == 0) {
+            AcToast.show(this, Strings.get(enabled
+                    ? R.string.requestdiag_006 : R.string.requestdiag_005));
+            return;
+        }
+        final String text = RequestDiag.exportText(this);
+        // 导出可能上百 KB，放后台写，写完回主线程提示路径
+        final String name = RequestDiag.exportFileName();
+        new Thread(new Runnable() {
+            public void run() {
+                final String path = StorageManager.getInstance().saveExport(name, text);
+                runOnUiThread(new Runnable() {
+                    public void run() {
+                        if (isFinishing()) return;
+                        AcToast.showLong(SettingsActivity.this, path == null
+                                ? Strings.get(R.string.requestdiag_008)
+                                : Strings.get(R.string.requestdiag_007, path));
+                    }
+                });
+            }
+        }, "aichat-diag-export").start();
+    }
+
+    private void confirmClearRequestDiag() {
+        AcDialog.builder(this)
+                .setTitle(Strings.get(R.string.requestdiag_010))
+                .setMessage(Strings.get(R.string.requestdiag_011))
+                .setPositiveButton(Strings.get(R.string.requestdiag_012),
+                        new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface d, int w) {
+                        RequestDiag.clear(SettingsActivity.this);
+                        AcToast.show(SettingsActivity.this, Strings.get(R.string.requestdiag_009));
+                    }
+                })
+                .setNegativeButton(Strings.get(R.string.cancel), null)
+                .show();
+    }
+
     private void saveSettings() {
         String current = systemPromptEdit.getText().toString().trim();
         String saved = prefs.getString(KEY_SYSTEM_PROMPT, "");
