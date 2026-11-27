@@ -363,7 +363,7 @@ ci: Release body 直接读 RELEASE_NOTES.md
 仓库内**没有自动化测试**（`app/src/test` 不存在）。验证靠三条：
 
 1. `./gradlew clean assembleDebug` 必须成功，无新增 warning 级别的资源/清单错误。
-2. 改动涉及的功能在真机上手动过一遍，写在提交信息里。
+2. 改动涉及的功能在真机上手动过一遍，结论写进提交信息。真机确认不是发版的前置条件：修复、功能、版本更新在本地验证通过后直接发正式版；确实需要真机复核的（涉及硬件、系统版本差异、无法在本地复现的场景）在提交里写明待复核点，发版后进行。
 3. 纯逻辑类优先在本地 JVM 桩工程里断言（`.test/`，不入库）：`SseRound`、`ToolExecutor`、`StreamRenderer`、`ChatHistory`、`MarkdownPipeline`、`FileKinds`、`ThemeText`、`TextKit`、`Endpoint`、`MessageSanitizer`、`VisionJudge` 都不依赖 Android 运行时，三个桩（`android.util.Log`、`Context`、`Bitmap`）就能跑。`ChatStreamRunner` 依赖 HTTP，不做单测，靠真机回归。
 
 新增纯逻辑类时，尽量让它不碰 `Bitmap` / `Context`，这样才留得住可测性。
@@ -406,7 +406,7 @@ KEYSTORE_PASSWORD=<口令> KEY_ALIAS=mc ./tools/build_debug.sh
 2. 更新 `.github/RELEASE_NOTES.md`：CI 用 `body_path` 把它当 Release 正文。写用户能看懂的变更，不写内部实现过程。
 3. 提交并推送到 `master`。
    - 推送前先读远端 `master` 的最新提交，确认本地已包含远端全部改动。沙箱里 `git push` / `git fetch` 常因网络中断失败，此时用 GitHub Git Data API：`blobs` → `tree`（`base_tree` 取远端最新 tree）→ `commit` → 更新 ref。**跳过读远端这一步，会把别人刚推上去的提交覆盖掉。**
-4. 在 `master` 当前提交上打标签 `vX.Y.Z`，推送标签。
+4. 在 `master` 当前提交上打标签 `vX.Y.Z`，推送标签。打标签不需要额外的真机确认步骤：本地验证通过即可发版（见 §11.5）。
 5. 等 GitHub Actions 的 `Release APK` 跑完，**以最终状态为准**，不中途假定成功。
 6. 确认 Release 里有 5 个 APK + `speedtest.txt`。不从 GitHub 回下载正式包，不校验包内容。
 
