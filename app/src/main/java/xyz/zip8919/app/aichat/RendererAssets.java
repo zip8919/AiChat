@@ -1469,26 +1469,32 @@ final class RendererAssets {
             "b=c.querySelector('.stream-base');t=c.querySelector('.stream-tail');" +
             "if(keep)b.innerHTML=keep;}" +
             "if(html)b.innerHTML=html;" +
-            // 关掉实时渲染时，base 重建必须带上此前已经流出去的正文：同一轮的正文
-            // 在调用工具前是纯文本 tail，调用结束后若只重渲染「卡片 + 新一轮正文」，
-            // 那一段会被直接从屏幕上抹掉（切走再回来才对得上）。
-            "var tw=window.__takeTailText(t);" +
-            "if(tw&&tw.length)b.appendChild(tw);" +
+            // 这里刻意<b>不</b>把 tail 里的正文搬进 base。
+            // 旧代码用 __takeTailText 搬（且判断写成了 tw.length，DOM 节点没有 length，
+            // 实际从未生效）。分层之后 base 重建只动 .stream-base，tail 原样留在屏幕上，
+            // 本轮正文不会因为 base 重建而消失；轮次收尾由 streamCommitTail 整棵搬移。
+            // 若这里再搬一份纯文本，屏幕上就是「base 一份 + tail 一份」——正是
+            // 生成过程中同一段正文/思考重复出现、定稿后又消失的那个现象。
             "window.__absorbLive(t,b);" +
             "applyToolStates(b);addCopyBtns(b);clearStatus();" +
             // 落地回执，语义与 streamAppendBase 相同（见 __landNote）
-            "if(note)window.__landNote(note[0],note[1],idx);};" +
-            // 取出 tail 里的正文纯文本（含实时卡片容器里的），搬成 base 里的一个块。
-            // 结构约定见 liveTools：正文按出现顺序被 .tool-live 分成若干段。
-            "window.__takeTailText=function(t){" +
-            "if(!t)return null;" +
-            "var out='',nodes=t.childNodes;" +
-            "for(var i=0;i<nodes.length;i++){var n=nodes[i];" +
-            "if(n.className&&(''+n.className).indexOf('tool-live')>=0)continue;" +
-            "var s=n.textContent||'';if(s.length)out+=(out?String.fromCharCode(10):'')+s;}" +
-            "if(!out.length)return null;" +
-            "var pw=document.createElement('div');pw.className='stream-plain';pw.textContent=out;" +
-            "return pw;};" +
+            "if(note)window.__landNote(note[0],note[1],idx);return 1;};" +
+            // 增量卡片的缓存合并：同一段内容可能被下发多次。
+            //
+            // 为什么会重复下发：闸门挡住帧时页面不回执（见 __landNote），Java 侧
+            // 的屏幕真值就不会推进，下一帧仍以旧前缀为基准算增量，于是<b>带着这一段
+            // 原样重发</b>。旧实现把重发的片段无条件累加进缓存，抬手补挂时同一张
+            // 卡片就被挂了两次（生成中重复、定稿整段重建后消失）。
+            //
+            // 合并规则按「谁包含谁」判重：流式下发的片段天然是前缀关系（重发的
+            // 一定包含缓存里的那几段），取更长的即可；只有完全不重叠才拼接。
+            "window.__paMerge=function(old,nw){" +
+            "old=old||'';nw=nw||'';" +
+            "if(!old)return nw;if(!nw)return old;" +
+            "if(nw===old)return old;" +
+            "if(nw.indexOf(old)===0)return nw;" +
+            "if(old.indexOf(nw)===0)return old;" +
+            "return old+nw;};" +
             // 增量追加：只把「本轮新增的那几张卡片」解析后挂到 base 末尾。
             // 与 streamBase 的区别是不动已有子树——已经渲染好的公式图片、代码高亮、
             // 展开状态全部原样保留，也不重新解析几万字的历史 markdown。
@@ -1503,14 +1509,21 @@ final class RendererAssets {
             "window.streamAppendBase=function(html,idx,note){" +
             // 指定了目标气泡就按 data-idx 精确取，见 __msgAi
             "var c=window.__aiContent(idx);" +
-            // 气泡还没进 DOM（先到的是卡片）：交给 appendAiDiv 补写，别丢
-            "if(!c){if(html)window.__orphanAppend=(window.__orphanAppend||'')+html;return 0;}" +
+            // 气泡还没进 DOM（先到的是卡片）：记下来，appendAiDiv 建好气泡后补挂。
+            // 同样按前缀合并去重：这段没回执，Java 下一帧会原样重发一次
+            "if(!c){" +
+            "if(html){var oa=window.__orphanAppend;" +
+            "if(!oa)oa=window.__orphanAppend={h:'',note:null,idx:idx};" +
+            "oa.h=window.__paMerge(oa.h,html);if(note)oa.note=note;" +
+            "if(idx!=null)oa.idx=idx;}return 0;}" +
             // 手指按在表格/代码块上：与 streamBase 一致，先缓存再落地。
             // 这里不能丢帧：调用方已经按「本文本已推送」记账，丢了就再也没人补。
             "window.__guardHold();" +
             "if(window.__holdRender){" +
-            "if(html)window.__pendingAppend=(window.__pendingAppend===null?'':window.__pendingAppend)+html;" +
-            "return 0;}" +
+            "if(html){var pa=window.__pendingAppend;" +
+            "if(!pa)pa=window.__pendingAppend={h:'',note:null,idx:idx};" +
+            "pa.h=window.__paMerge(pa.h,html);if(note)pa.note=note;" +
+            "if(idx!=null)pa.idx=idx;}return 0;}" +
             "var b=c.querySelector('.stream-base');" +
             "if(!b){" +
             "var keep=c.innerHTML;" +
@@ -1520,7 +1533,25 @@ final class RendererAssets {
             "if(keep)b.innerHTML=keep;}" +
             "if(html){var d=document.createElement('div');d.innerHTML=html;" +
             "var frag=document.createDocumentFragment();" +
-            "while(d.firstChild)frag.appendChild(d.firstChild);" +
+            "while(d.firstChild){" +
+            "var nd=d.firstChild;" +
+            // 落点去重：同一张卡片 / 同一个思考块按 key 只允许在 base 里存在一份。
+            //
+            // 为什么不能只靠缓存去重：缓存只覆盖「还没落地」的那一段。上一帧已经
+            // 挂进 base、但回执还在跨桥路上（Java 屏幕真值没来得及推进）时，下一帧
+            // 仍会带着这一段重发——此时缓存是空的，直接 append 就是第二份。
+            // 表现正是「生成过程中某张卡片/某段思考出现两次，定稿整段重建后消失」。
+            "var dk=nd.getAttribute?nd.getAttribute('data-tool-key'):null;" +
+            "if(dk){var hc=b.querySelectorAll('.tool-card[data-tool-key]');var hp=false;" +
+            "for(var hi=0;hi<hc.length;hi++){" +
+            "if(hc[hi].getAttribute('data-tool-key')===dk){hp=true;break;}}" +
+            "if(hp){d.removeChild(nd);continue;}}" +
+            // 思考块会随生成不断变长，同一个 key 不能跳过（跳过就停在旧内容），
+            // 用新节点整体替换旧的，展开状态随后由 applyThinkingStates 恢复
+            "var tk=nd.getAttribute?nd.getAttribute('data-think-key'):null;" +
+            "if(tk){var ho=b.querySelector('[data-think-key=\"'+tk+'\"]');" +
+            "if(ho&&ho.parentNode)ho.parentNode.removeChild(ho);}" +
+            "frag.appendChild(nd);}" +
             "b.appendChild(frag);}" +
             "applyToolStates(b);addCopyBtns(b);clearStatus();" +
             // 真挂进 DOM 了才回执（见 __landNote）。闸门/无气泡两条早退不回执，
@@ -1598,7 +1629,8 @@ final class RendererAssets {
             "window.__holdRender=false;window.__holdToken=0;window.__holdSince=0;" +
             "window.__HOLD_MAX_MS=1200;window.__holdWatchdog=0;" +
             "window.__pendingTailHtml=null;window.__pendingTailText=null;window.__pendingBaseHtml=null;" +
-            // 被闸门挡住的增量卡片（见 streamAppendBase）：纯字符串累加，抬手后原样补挂
+            // 被闸门挡住的增量卡片（见 streamAppendBase）：{h,note,idx}，
+            // 抬手后按前缀合并去重再补挂，并补回执
             "window.__pendingAppend=null;" +
             // 气泡还没出现时先到的内容（见 appendAiDiv 里的补写逻辑）
             "window.__orphanBase=null;window.__orphanTail=null;window.__orphanAppend=null;" +
@@ -2517,8 +2549,12 @@ final class RendererAssets {
             // 闸门挡住了哪几帧增量卡片，就在这里原件补挂回 base（见 streamAppendBase）。
             // 必须先于 streamBase：整段重建会按 trace 重画 base，缓存的那几段也在里面，
             // 先重建再挂会变成两份。
+            //
+            // 补挂之后必须<b>补一次回执</b>：挡住的那几帧当时没有回执，Java 侧屏幕真值
+            // 还停在旧前缀，下一帧会把同一段原样重发一遍——补挂一份、重发再一份，
+            // 屏幕上就是同一张卡片出现两次（定稿整段重建后才消失）。
             "var pa=window.__pendingAppend;window.__pendingAppend=null;" +
-            "if(pa)window.streamAppendBase(pa,idx);" +
+            "if(pa&&pa.h)window.streamAppendBase(pa.h,pa.idx==null?idx:pa.idx,pa.note||undefined);" +
             "var bh=window.__pendingBaseHtml;window.__pendingBaseHtml=null;" +
             "if(bh!==null)window.streamBase(bh,idx);" +      // hold 已清，这里可以正常写入
             "var h=window.__pendingTailHtml,x=window.__pendingTailText;" +
@@ -2678,7 +2714,15 @@ final class RendererAssets {
             "event.stopPropagation();return false;\">" +
             "<span class=\"mdot\"></span><span class=\"mdot\"></span><span class=\"mdot\"></span>" +
             "</button></div>';" +
-            "document.getElementById('msgs').appendChild(d);" +
+            // 同一条消息的气泡只允许有一个。
+            //
+            // 请求开始、页面就绪补建、队列重放这几条路径都可能调到这里，同一个
+            // data-idx 被调用两次时就并列挂出两个内容相同的气泡——用户看到的就是
+            // 「某些消息整条重复一份」。已有同名气泡时原位替换掉旧的（新的本来就是
+            // 空白骨架，这一条正要重新生成），既保证唯一，也不会跑到列表末尾。
+            "var old=(start!=='-1')?document.querySelector(\".msg.ai[data-idx='\"+start+\"']\"):null;" +
+            "if(old&&old.parentNode)old.parentNode.replaceChild(d,old);" +
+            "else document.getElementById('msgs').appendChild(d);" +
             // 内容比气泡先到：appendAiDiv 之前到达的 streamBase / streamTail 会
             // 因为找不到 .msg.ai 而只能丢弃，那一段就永久丢了（用户看到的
             // 「有时候消息不渲染」）。这里把孤儿内容补回来。
@@ -2686,9 +2730,12 @@ final class RendererAssets {
             "window.streamBase(ob);}" +
             "if(window.__orphanTail!=null){var ot=window.__orphanTail;window.__orphanTail=null;" +
             "if(ot.h!=null)window.streamTailHtml(ot.h);else window.streamTailText(ot.t);}" +
-            // 先于气泡到达的增量卡片：骨架建好之后按顺序补挂到 base
+            // 先于气泡到达的增量卡片：骨架建好之后补挂到 base。
+            // 缓存的是 {h,note,idx}（见 streamAppendBase），补挂时把当时那份回执
+            // 一并交出去——不回执的话 Java 会以为没画上，下一帧再发一遍，
+            // 屏幕上就是同一张卡片两份。
             "if(window.__orphanAppend){var oa=window.__orphanAppend;window.__orphanAppend=null;" +
-            "window.streamAppendBase(oa);}" +
+            "if(oa.h)window.streamAppendBase(oa.h,oa.idx,oa.note||undefined);}" +
             "smartScrollToBottom();};" +
             "window.updateMsgAt=function(idx,html){" +
             "var all=document.querySelectorAll('.msg');" +

@@ -220,6 +220,7 @@ Android/data/xyz.zip8919.app.aichat/files/
 | `isRequestInProgress` | 是否有一条请求在跑 | UI 线程 | 队列、发送键、Abort |
 | `renderSeq` | 渲染序号。每次发起渲染自增，回来时对不上就丢弃 | 任意线程 | 渲染回调 |
 | `lastStreamTrace` | base 层当前已推送的 trace 文本 | UI 线程 | 请求线程（判断要不要写 base） |
+| `baseShown` | base 层「页面确认真的画上去了」的 trace 文本（增量基准） | 页面回执 `onRenderLanded` | `renderTraceAsync` |
 | `smoothGeneration` | 渐显服务的是哪一次请求；旧气泡上的「直接显示」据此失效 | UI 线程 | UI 线程 |
 | `queue.paused` | 重试期间暂停队列放行 | UI 线程 | drain |
 | `__holdRender`（JS） | 手指按在表格/代码块上时暂停重绘，保护横向滚动 | touchstart | touchend 后 180ms |
@@ -228,6 +229,14 @@ Android/data/xyz.zip8919.app.aichat/files/
 页面就绪只能靠页面自报。WebView 一直是 `loadDataWithBaseURL(null, …)`，`onPageFinished` 拿到的 URL 恒为 `about:blank`，无法分辨回调属于哪一次加载；切会话时旧页的迟到回调会把页面判成可用，随后 `appendMsg` / `appendAiDiv` 写进即将被冲掉的旧 DOM，表现为「发完消息界面没有任何变化，重进历史才看得到」。所以版本号写进 `<body data-ac-page>`，`onPageFinished` 只当触发信号，真正判断靠 `evaluateJavascript` 读回版本号比对；另有 2.5 秒 watchdog 无条件放行，避免探测失效时页面被永久锁死。新增任何"往 DOM 里写东西"的路径都必须经过 `webViewEvalJs` / `evalAppendJs`，不要直接调 `evaluateJavascript`。
 
 `lastStreamTrace` 是**两条渲染路径共享**的状态：流式 tick 的 `streamBase`（整段替换）和工具卡片的 `streamAppendBase`（只追加增量）。任何一方写完都要更新它，否则另一方会按旧前缀重渲染，卡片重复或消失。任何"整段替换 `.content`"的操作（刷新整页、`updateMsgAt` 之外的 DOM 重建）都必须把它清空。
+
+`streamAppendBase` 是**只追加**的操作，重发同一段就会在屏幕上多一份，因此它必须做到幂等，三层一起保证：
+
+1. 落点按 `data-tool-key` 去重（同 key 的思考块用新节点整体替换，卡片直接跳过）；
+2. 闸门（`__holdRender`）挡下的帧进 `__pendingAppend`，抬手补挂时按「谁包含谁」合并，**并补一次 `__landNote` 回执**——不回执的话宿主屏幕真值不推进，下一帧还会把同一段原样重发；
+3. 补挂、直挂、早退三条路径都只在真正挂进 DOM 后回执，宿主才推进 `baseShown`。
+
+`streamBase` 是整段替换（幂等），但**不要**在里面把 tail 的正文搬进 base：分层之后 base 重建不影响 tail，轮次收尾由 `streamCommitTail` 整棵搬移，两处都搬就是两份。
 
 - 判断「这条回复还是不是当前这条」→ 用代数（`session.isCurrent(gen)`）。
 - 判断「用户有没有打断」→ 用 `isAlive`（代数匹配且仍在进行中）。
