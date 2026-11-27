@@ -251,6 +251,35 @@ public class MainActivity extends ThemedActivity {
     // 已经推到 WebView 的 trace（base 层）文本。流式期间状态行与工具卡片会交替
     // 下发，内容没变就只更新状态行，别再整段重渲染——那是低端机上最明显的闪烁源。
     private volatile String lastStreamTrace = "";
+    /**
+     * renderTraceAsync 最近一次「页面确认已落地」的序号（只增不减）。
+     *
+     * <p>页面回执 {@code Android.onRenderLanded(list,gen,seq)} 落在 UI 线程，而
+     * {@link #renderTraceAsync} 的记账也在 UI 线程，两边串行，因此不需要再加锁。
+     * 用途只有一处：确认上一帧已经画上去之后，才允许下一帧按增量追加——
+     * 两帧之间前缀没落地就追加，屏幕上会少一整段（工具卡片「消失」的成因）。
+     */
+    private volatile int renderLandedSeq = 0;
+
+    /**
+     * 屏幕上那份 base 到底是哪一段文本，以及它属于哪条消息。
+     *
+     * <p>由页面在完成一次 base 写入后回报（{@code __landNote} → {@code onRenderLanded}）。
+     * {@link #lastStreamTrace} 是「Java 以为画上去了什么」，这一份是「屏幕上真的装着
+     * 什么」——两者会错开（commitTail 搬走 tail、页面缓存了某一帧、页面换版），
+     * 而增量追加必须以后者为准。对不上就整段重建，宁可多渲染一次也不能少内容。
+     */
+    private volatile String baseShown = "";
+    private volatile int baseShownIdx = -1;
+
+    /**
+     * 屏幕真值之外还有多少字已经在渐显缓冲里。
+     *
+     * <p>逐字渐显打开时，正文先到平滑缓冲、再按字放到屏幕上：屏幕上可见的比「已到达」
+     * 少一截，所以不能拿屏幕真值去比 trace 的前缀。这里按「真值 + 已在缓冲里、
+     * 但还没画出来的那部分（HTML 片段）」算出逻辑上的已到达文本，增量判定用它。
+     */
+    private String smoothPendingHtml = "";
     // 当前气泡在 DOM 上实际显示的完整正文（base + tail）。收尾时用它判断
     // 「界面已经是最终内容」——是就只把 tail 定型进 base，省掉一次整段重渲染。
     private volatile String lastPushedContent = "";
@@ -3120,6 +3149,12 @@ public class MainActivity extends ThemedActivity {
         // 继续生成这里刻意留空：让第一帧走 streamBase 重建骨架，顺带把已有正文
         // 渲染进 base，后续分片只追加 tail，不会把旧内容盖掉。
         lastStreamTrace = isResume && resume.trace != null ? resume.trace : "";
+        // 屏幕真值：新请求的气泡刚建、内容是空的；续跑时页面上挂着上次的正文。
+        // 继续生成同样从空白开始——第一帧走 streamBase 重建，把已有正文一并画进 base。
+        baseShown = isResume ? lastStreamTrace : "";
+        baseShownIdx = aiIndex;
+        smoothPendingHtml = "";
+        renderLandedSeq = traceRenderSeq.get();
         // DOM 内容基准同理：续跑时界面上已经有上次的正文，新请求从空白开始
         lastPushedContent = lastStreamTrace;
         runOnUiThread(new Runnable() {
@@ -3226,6 +3261,21 @@ public class MainActivity extends ThemedActivity {
         }
 
         public void noteBaseRendered(String base) {
+            // 只更新「Java 这边的记账」，不动屏幕真值：屏幕真值由 _landNote 回报
+            lastStreamTrace = base == null ? "" : base;
+        }
+
+        /**
+         * {@code streamBase} 已下发。
+         *
+         * <p>这里只记下「Java 以为画上去了哪一段」，屏幕真值等页面回调
+         * {@code onRenderLanded} 再更新（见 {@link #onRenderLanded}）。两者必须分开记：
+         * 页面在闸门未释放、气泡还没进 DOM、页面正在换版时都不会真正写入，
+         * 而写进去时又会把 tail 里已有的正文/卡片一并搬进 base 再整体替换。
+         * 把「发出去了」当成「画上了」，后续的增量追加就会以一段屏幕上并不存在的
+         * base 为前提——工具卡片「生成中消失、收尾整段重建才回来」就是这么来的。
+         */
+        public void noteBaseRendered(String base, String html, int seq) {
             lastStreamTrace = base == null ? "" : base;
         }
 
@@ -3239,6 +3289,11 @@ public class MainActivity extends ThemedActivity {
             lastStreamTrace = "";
             renderSeq.incrementAndGet();
             traceRenderSeq.incrementAndGet(); // 同时作废在飞的 trace 渲染
+            // 在飞的那几帧不会再有回执（序号已被跳过），落地记账跟着对齐到当前值。
+            // 屏幕真值按「DOM 现在是空的」处理：下一次渲染走整段 streamBase。
+            renderLandedSeq = traceRenderSeq.get();
+            baseShown = "";
+            baseShownIdx = -1;
             LogUtil.d(TAG, "trace trimmed: render base reset");
         }
 
@@ -3481,6 +3536,10 @@ public class MainActivity extends ThemedActivity {
         final boolean failed = settled.failed;
         renderSeq.incrementAndGet(); // 作废进行中的流式渲染
         traceRenderSeq.incrementAndGet(); // 定稿后不许旧 trace 结果再改写 base
+        // 在飞的 trace 帧已被上面这一跳作废，不会再回执；落地记账直接对齐，
+        // 免得续跑的第一帧被「上一帧没落地」拖去整段重建。
+        // 屏幕真值在定稿那一帧（updateLastMsg 整段重写）之后才重新对齐，见 commitUi。
+        smoothPendingHtml = "";
         // 收尾是否要等渐显追平：等的话，队列的放行权也一起押后到定稿之后
         final boolean[] deferred = new boolean[] { false };
         // 收尾也要放行「发送」按钮：完整正文的渲染在后台线程里，低端机上可能要几百毫秒，
@@ -3574,9 +3633,18 @@ public class MainActivity extends ThemedActivity {
                                     webViewEvalJs("streamFinalize(" + finalIdx + ")");
                                     webViewEvalJs("updateLastMsg('" + jsEscape(html) + "',"
                                             + finalIdx + ")");
+                                    // updateLastMsg 是整段重写气泡，DOM 与这里记的完全对齐：
+                                    // 上一段流式期间所有「以为画上了、其实没有」的差额到此清零。
+                                    // 不推进落地序号的话，续跑（同一条消息接着生成）时第一帧
+                                    // 会被判成「前缀没落地」，无谓地整段重建一次。
                                     // base 层此时等于这条消息的全文。不更新的话，续跑时增量渲染
                                     // 会拿「旧 prefix」当基准，把已经显示的内容再追加一遍。
                                     lastStreamTrace = settled.content == null ? "" : settled.content;
+                                    // 整段重写之后屏幕真值与全文一致：续跑的第一帧可以直接增量
+                                    baseShown = lastStreamTrace;
+                                    baseShownIdx = finalIdx;
+                                    renderLandedSeq = traceRenderSeq.get();
+                                    smoothPendingHtml = "";
                                     // 来源区独立渲染在 .content 之外，默认折叠
                                     Message am = finalIdx >= 0 && finalIdx < messages.size()
                                             ? messages.get(finalIdx) : null;
@@ -3747,11 +3815,38 @@ public class MainActivity extends ThemedActivity {
         // 与「正文要不要逐帧转 HTML」是两件事。旧版在这里额外要求实时渲染开着，
         // 关掉之后每一张卡片都退回整段重建，而且重建的只是「新增的那一段」——
         // 前面已经落地的思考块、卡片全被覆盖掉，屏幕上就只剩最后一轮的内容。
+        //
+        // 增量还是整段，看的是「屏幕上那份 base 到底是哪一段文本」。
+        //
+        // 以前这里只比 lastStreamTrace（Java 以为已经画上去的文本）与 trace 的前缀，
+        // 但两者会错开：commitTail 把 tail 的 DOM 节点搬进 base 之后，屏幕上已经没有
+        // 本轮那段正文了，而 lastStreamTrace 还停在旧值（甚至反过来，记成「含卡片」）。
+        // 错开之后，part 要么重复一段已经在屏幕上的内容，要么缺一段——工具卡片
+        // 「生成中消失、收尾整段重建才回来」就是这么来的。
+        //
+        // baseShown 是页面在真正完成一次 base 写入后回报的文本（__landNote），
+        // 它才是「屏幕上装着的是哪一段」的唯一真值。对不上就整段重建：
+        // streamBase 幂等，最多多花一次渲染，绝不会把卡片画丢。
+        final String shownRaw = baseShown == null ? "" : baseShown;
+        // 逻辑已到达文本 = 屏幕真值 + 已在渐显缓冲、还没放出来的那部分
+        final String shown0 = smoothStream ? shownRaw + smoothPendingHtml : shownRaw;
+        final int shownMsgIdx = baseShownIdx;
+        // 续跑时屏幕上的 base 可能是「上次收尾时整段重写」留下的，而 trace 从更早的
+        // 位置接着长（中间那截正文已经进了 content 而不是 base）。两边对不上就整段重建。
         final boolean append = isRequestInProgress.get()
-                && base0.length() > 0 && snapshot.startsWith(base0);
-        final String part = append ? snapshot.substring(base0.length()) : snapshot;
-
-        final int mySeq = traceRenderSeq.incrementAndGet();
+                && shown0.length() > 0
+                && shownMsgIdx == aiIndex
+                && snapshot.startsWith(shown0);
+        if (!append && base0.length() > 0) {
+            // 有用的诊断：说明「Java 记账」与「屏幕真值」不一致，正是丢卡片的前置状态
+            LogUtil.d(TAG, "trace base resync: java=%d shown=%d snapshot=%d idx=%d/%d",
+                    base0.length(), shown0.length(), snapshot.length(), shownMsgIdx, aiIndex);
+        }
+        final String part = append ? snapshot.substring(shown0.length()) : snapshot;
+        // 落地回执：页面真正把这些节点挂进 DOM 之后才回调（见 RendererAssets 的 __landNote）。
+        // 没画上就不记账，下一帧会带着这一段重新发，最多晚一帧。
+        final int[] note = new int[] { generation, traceRenderSeq.incrementAndGet() };
+        final int mySeq = note[1];
         new Thread(new Runnable() {
             public void run() {
                 final String html = MessageHtmlRenderer.contentToHtml(part, MainActivity.this, false);
@@ -3766,20 +3861,21 @@ public class MainActivity extends ThemedActivity {
                         // !baseNow.equals(baseRendered()) 二次校验兜住旧 base；
                         // 这里再 bump renderSeq 反而会把同帧刚发出的 tail tick
                         // 判过期，导致流式丢帧。只做幂等判重，不动序号。
-                        if (!snapshot.equals(lastStreamTrace)) {
-                            lastStreamTrace = snapshot;
-                            // 追加模式在关掉实时渲染时不成立：那份 trace 的结尾是本轮
-                            // 正文纯文本，DOM 里正文在 tail 上，追加进去会让屏幕上多一份。
-                            // 纯文本模式下统一走 streamBase 重建，并把 tail 的正文带过来。
-                            if (append) {
-                                webViewEvalJs("streamAppendBase('" + jsEscape(html) + "',"
-                                        + aiIndex + ")");
-                            } else {
-                                // 只写 base 层；tail 上正在流的内容原样保留
-                                webViewEvalJs("streamBase('" + jsEscape(html) + "',"
-                                        + aiIndex + ")");
-                            }
+                        // 追加模式在关掉实时渲染时不成立：那份 trace 的结尾是本轮
+                        // 正文纯文本，DOM 里正文在 tail 上，追加进去会让屏幕上多一份。
+                        // 纯文本模式下统一走 streamBase 重建，并把 tail 的正文带过来。
+                        if (append) {
+                            webViewEvalJs("streamAppendBase('" + jsEscape(html) + "',"
+                                    + aiIndex + ",[" + generation + "," + mySeq + "])");
+                        } else {
+                            // 只写 base 层；tail 上正在流的内容原样保留
+                            webViewEvalJs("streamBase('" + jsEscape(html) + "',"
+                                    + aiIndex + ",[" + generation + "," + mySeq + "])");
                         }
+                        // Java 侧记账：屏幕真值等页面的回执，这条只表示「我以为已经发了」，
+                        // 供 StreamRenderer 避免重复渲染同一份 base。必须放在下发之后、
+                        // 且不参与增量判定（增量判定只看 baseShown）。
+                        lastStreamTrace = snapshot;
                         if (status != null) {
                             webViewEvalJs("setStatus('" + jsEscape(status) + "')");
                         }
@@ -3787,6 +3883,31 @@ public class MainActivity extends ThemedActivity {
                 });
             }
         }).start();
+    }
+
+    /**
+     * 页面回报「这次 base 写入真的画上去了」（{@code Android.onRenderLanded}）。
+     *
+     * <p>只有命中当前这次渲染的序号时才推进 {@code lastStreamTrace}：更早或更晚的帧
+     * 已经在别处对齐过，迟到的回执不能再改基准（否则会把后来居上的帧判成旧帧）。
+     */
+    private void onRenderLanded(int listId, int generation, int seq, int aiIdx) {
+        if (requestGeneration.get() != generation) return;
+        // 列表版本对不上说明这次写入落在上一版页面上：那一版已经不在屏幕上，
+        // 不能据此认为「这一版已经画好」
+        if (listId != 0 && listId != curMsgListId) return;
+        renderLandedSeq = Math.max(renderLandedSeq, seq);
+        // 屏幕真值以「这一帧期望的文本」为准。JavascriptInterface 的回调是异步的，
+        // 期间可能有更新的帧已经记账，所以只取更长的那个，绝不回退——
+        // 回退会让下一帧把已经画上去的内容再追加一遍。
+        String want = lastStreamTrace == null ? "" : lastStreamTrace;
+        String cur = baseShown == null ? "" : baseShown;
+        if (want.length() >= cur.length()) {
+            baseShown = want;
+            baseShownIdx = aiIdx;
+        } else {
+            baseShownIdx = aiIdx;
+        }
     }
 
     // ========== WebView helpers ==========
@@ -3926,6 +4047,13 @@ public class MainActivity extends ThemedActivity {
                         // 整页重建，DOM 里不存在上一次流式留下的 base 骨架，
                         // 「已推送基准」必须作废，否则下一次 trace 渲染会误走增量
                         lastStreamTrace = "";
+                        // 落地记账同样作废：新页面里一条回执都还没来，谁也没画上去
+                        renderLandedSeq = 0;
+                        baseShown = "";
+                        baseShownIdx = -1;
+                        // 渐显缓冲里的那一截刻意不清（页面侧会按 __smoothStart 重画），
+                        // 它属于「屏幕真值之外」的那一段，留着才能继续按增量推新内容。
+                        //
                         // 流式途中换版（主题、字号、上滑加载历史都会重灌）：拼页取的是
                         // 「已落盘的消息」，没有正在写的那条。不补建的话，这一轮的字
                         // 会被写进即将被冲掉的旧文档，屏幕上停在半截。补建由页面在
@@ -4197,6 +4325,10 @@ public class MainActivity extends ThemedActivity {
             }
             // 手指按在气泡上（阅读、选字、拖表格）：停一下，抬手后接着浮
             if (smoothPaused) {
+                // 暂停期间也要把「已到达」记下来：暂停只影响显示节奏，不影响内容推进。
+                // 不记的话，恢复后直到下一帧到达之前，增量判定看不到缓冲里那一段，
+                // 会误判成「屏幕真值落后于 trace」而无谓地整段重建一次。
+                smoothPendingHtml = smoothTail.arrivedHtml();
                 handler.postDelayed(this, 120);
                 return;
             }
@@ -4240,6 +4372,10 @@ public class MainActivity extends ThemedActivity {
     private void pushSmoothFrame() {
         final int idx = smoothIdx();
         final String arrived = smoothTail.arrivedHtml();
+        // 渐显缓冲里那部分正文必须能被增量判定看见（见 baseShown）。
+        // 只记 HTML 片段：卡片与思考块的推进走 renderTraceAsync，与这里无关，
+        // 而且 feedSmooth 收到的本来就是 base 之后的片段。
+        smoothPendingHtml = arrived == null ? "" : arrived;
         // 两种模式都按「已经放出多少个字」推进。
         //
         // 旧版 HTML 模式传的是「源串偏移」：标签、属性、实体都算进偏移里，
@@ -4345,6 +4481,7 @@ public class MainActivity extends ThemedActivity {
             smoothTail.restart();
             smoothPushedHtml = "";
             smoothShownChars = -1;
+            smoothPendingHtml = "";
         } else {
             smoothTail.beginRound();
         }
@@ -4355,6 +4492,7 @@ public class MainActivity extends ThemedActivity {
         if (smoothPlainMode != wasPlain) {
             smoothPushedHtml = "";
             smoothShownChars = -1;
+            smoothPendingHtml = "";
         }
         webViewEvalJs("__smoothStart(" + smoothIdx() + ",'" + smoothKey(generation) + "')");
         if (!smoothRunning) {
@@ -4783,6 +4921,23 @@ public class MainActivity extends ThemedActivity {
     // ========== JavaScript bridge ==========
 
     class JsBridge {
+        /**
+         * 渲染落地回执：页面把一次 base 写入真正挂进 DOM 之后调这里。
+         *
+         * @param listId 页面归属（{@code window.__acMsgList}），0 表示页面没标
+         * @param gen    请求代数
+         * @param seq    renderTraceAsync 的渲染序号
+         * @param idx    这次写入的 AI 气泡下标
+         */
+        @JavascriptInterface
+        public void onRenderLanded(final int listId, final int gen, final int seq, final int aiIdx) {
+            handler.post(new Runnable() {
+                public void run() {
+                    MainActivity.this.onRenderLanded(listId, gen, seq, aiIdx);
+                }
+            });
+        }
+
         /**
          * 思考块诊断上报：页面每发生一次「定态 / 点击 / display 被改写」都调这里，
          * 落到 {@link ThinkLog} 的文件里。debug 包才写，正式包直接返回。

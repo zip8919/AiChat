@@ -14,13 +14,24 @@ TWO_BS = BS + BS
 
 SRC = 'app/src/main/java/xyz/zip8919/app/aichat/RendererAssets.java'
 src = open(SRC, encoding='utf-8').read()
-start = src.index('static final String JS =')
+# JS 现在拆成 JS_PART_1/JS_PART_2 两段（见 jsPack），拼接后在最后一行：
+#   static final String JS = jsPack(JS_PART_1, JS_PART_2);
+# 早先这里找的是 'static final String JS ='，改成分段后整段变成空串，
+# 校验永远「通过」——等于没校验。改为从第一段开头一直读到 JS 那一行。
+try:
+    start = src.index('static final String JS_PART_1 =')
+except ValueError:
+    start = src.index('static final String JS =')
+# 语句之间还会夹着下一个 private static final String JS_PART_2 = 这样的声明行，
+# 它既不是字符串行也不是「读完了」——continue 继续扫，否则只还原出第一段。
 parts = []
 for ln in src[start:].split('\n')[1:]:
     t = ln.strip()
     if not t or t.startswith('//'):
         continue
     if t[0] != QUOTE:
+        if 'static final String' in t:
+            continue
         break
     i = 0
     buf = []

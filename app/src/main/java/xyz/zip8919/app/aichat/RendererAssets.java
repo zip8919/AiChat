@@ -879,6 +879,18 @@ final class RendererAssets {
             "if(window.__thBuf.length>400)window.__thBuf.shift();" +
             "try{if(window.Android&&Android.thinkTrace)Android.thinkTrace(s);}catch(e){}};" +
             "window.__thLog=function(){return window.__thBuf.join('\\n');};" +
+            // 渲染认领回执：Java 侧把一次 base 写入交给页面后，页面在自己这一侧真正
+            // 写完时回调 Android.onRenderLanded(list,gen,seq)。
+            //
+            // 为什么要有这条反向确认：Java 的 lastStreamTrace 是「我以为画上去了」，
+            // 而页面可能因为闸门、气泡还没进 DOM、页面换版而没有画。两边一旦错开，
+            // 增量渲染会拿一段屏幕上根本不存在的前缀继续追加，用户看到的就是
+            // 「生成过程中卡片没了，生成结束整段重建又回来了」。
+            // 没有这条回执，错开之后没有任何路径能自己恢复。
+            "window.__landNote=function(gen,seq,idx){" +
+            "if(!(seq>0))return;" +
+            "try{if(window.Android&&Android.onRenderLanded)" +
+            "Android.onRenderLanded(window.__acMsgList||0,gen|0,seq|0,idx|0);}catch(e){}};" +
             "window.__thMark=function(it,b,why,open){" +
             "var k='';try{k=window.__thinkKey(it);}catch(e){}" +
             "window.__thRec('mark key='+k+' why='+why+' open='+(open?1:0)+" +
@@ -1435,17 +1447,17 @@ final class RendererAssets {
             "if(dup){live.removeChild(card);continue;}}" +
             "b.appendChild(card);}" +
             "if(live.parentNode)live.parentNode.removeChild(live);};" +
-            "window.streamBase=function(html,idx){" +
+            "window.streamBase=function(html,idx,note){" +
             // 指定了目标气泡就按 data-idx 精确取，见 __msgAi
             "var c=window.__aiContent(idx);" +
             "if(!c){" +
             // 内容比气泡先到：记下来，appendAiDiv 建好气泡后会补写（见下）
-            "window.__orphanBase=html;return;}" +
+            "window.__orphanBase=html;return 0;}" +
             // 手指按在表格/代码块上：先缓存，抬手后由 __flushPending 写入。
             // 直接吞掉不行——Java 侧的 lastStreamTrace 已按「已推送」记账，
             // 这一帧丢了就再也不会补，卡片会凭空消失。
             "window.__guardHold();" +
-            "if(window.__holdRender){if(html)window.__pendingBaseHtml=html;return;}" +
+            "if(window.__holdRender){if(html)window.__pendingBaseHtml=html;return 0;}" +
             "var b=c.querySelector('.stream-base');" +
             "var t=c.querySelector('.stream-tail');" +
             "if(!b||!t){" +
@@ -1463,7 +1475,9 @@ final class RendererAssets {
             "var tw=window.__takeTailText(t);" +
             "if(tw&&tw.length)b.appendChild(tw);" +
             "window.__absorbLive(t,b);" +
-            "applyToolStates(b);addCopyBtns(b);clearStatus();};" +
+            "applyToolStates(b);addCopyBtns(b);clearStatus();" +
+            // 落地回执，语义与 streamAppendBase 相同（见 __landNote）
+            "if(note)window.__landNote(note[0],note[1],idx);};" +
             // 取出 tail 里的正文纯文本（含实时卡片容器里的），搬成 base 里的一个块。
             // 结构约定见 liveTools：正文按出现顺序被 .tool-live 分成若干段。
             "window.__takeTailText=function(t){" +
@@ -1479,10 +1493,24 @@ final class RendererAssets {
             // 与 streamBase 的区别是不动已有子树——已经渲染好的公式图片、代码高亮、
             // 展开状态全部原样保留，也不重新解析几万字的历史 markdown。
             // 没有骨架时按 streamBase 的兜底把现有内容整体当 base，绝不丢内容。
-            "window.streamAppendBase=function(html,idx){" +
+            //
+            // 返回值 == 1 表示「这一帧的节点确实挂进 DOM 了」，0 表示没画（闸门 / 气泡还没进 DOM）。
+            // 第三个参数 note=[gen,seq] 是回执：画上了才回调 Android.onRenderLanded。
+            // Java 侧（renderTraceAsync）靠这个回执才把 lastStreamTrace 推进到本帧——
+            // 以前无论成没成都推进，于是页面没认领的那一段（闸门吞掉、气泡还不在 DOM、
+            // 页面换版）被记成「已渲染」，之后所有增量都以它为前缀、再也不会补发——
+            // 表现正是「生成过程中工具卡片消失，生成结束后（整段重建）才回来」。
+            "window.streamAppendBase=function(html,idx,note){" +
             // 指定了目标气泡就按 data-idx 精确取，见 __msgAi
             "var c=window.__aiContent(idx);" +
-            "if(!c)return;" +
+            // 气泡还没进 DOM（先到的是卡片）：交给 appendAiDiv 补写，别丢
+            "if(!c){if(html)window.__orphanAppend=(window.__orphanAppend||'')+html;return 0;}" +
+            // 手指按在表格/代码块上：与 streamBase 一致，先缓存再落地。
+            // 这里不能丢帧：调用方已经按「本文本已推送」记账，丢了就再也没人补。
+            "window.__guardHold();" +
+            "if(window.__holdRender){" +
+            "if(html)window.__pendingAppend=(window.__pendingAppend===null?'':window.__pendingAppend)+html;" +
+            "return 0;}" +
             "var b=c.querySelector('.stream-base');" +
             "if(!b){" +
             "var keep=c.innerHTML;" +
@@ -1494,7 +1522,10 @@ final class RendererAssets {
             "var frag=document.createDocumentFragment();" +
             "while(d.firstChild)frag.appendChild(d.firstChild);" +
             "b.appendChild(frag);}" +
-            "applyToolStates(b);addCopyBtns(b);clearStatus();};" +
+            "applyToolStates(b);addCopyBtns(b);clearStatus();" +
+            // 真挂进 DOM 了才回执（见 __landNote）。闸门/无气泡两条早退不回执，
+            // Java 侧就还保留着旧前缀，下一帧会带着这一段原样重试。
+            "if(note)window.__landNote(note[0],note[1],idx);return 1;};" +
             // 轮次切换：把本轮已经流出去的 tail 并进 base。
             // 这里用 DOM 节点搬移而不是 innerHTML 拼接 —— 不重新解析 markdown、
             // 不重新解码公式图片，视觉上完全不闪，内容也不会重复或丢字。
@@ -1508,6 +1539,7 @@ final class RendererAssets {
             // 它马上就要被搬进 base；清掉会让屏幕上少一段（下一轮重渲染时才补回来，
             // 中间那段空白用户是看得见的）。
             "window.__pendingTailHtml=null;window.__pendingTailText=null;window.__pendingBaseHtml=null;" +
+            "window.__pendingAppend=null;" +
             "window.__endHold();" +
             // 指定了目标气泡就按 data-idx 精确取，见 __msgAi
             "var c=window.__aiContent(idx);" +
@@ -1566,8 +1598,10 @@ final class RendererAssets {
             "window.__holdRender=false;window.__holdToken=0;window.__holdSince=0;" +
             "window.__HOLD_MAX_MS=1200;window.__holdWatchdog=0;" +
             "window.__pendingTailHtml=null;window.__pendingTailText=null;window.__pendingBaseHtml=null;" +
+            // 被闸门挡住的增量卡片（见 streamAppendBase）：纯字符串累加，抬手后原样补挂
+            "window.__pendingAppend=null;" +
             // 气泡还没出现时先到的内容（见 appendAiDiv 里的补写逻辑）
-            "window.__orphanBase=null;window.__orphanTail=null;" +
+            "window.__orphanBase=null;window.__orphanTail=null;window.__orphanAppend=null;" +
             // 闸门必须有不依赖触摸事件的释放路径：流式每 200ms 用 innerHTML=
             // 重建 tail，会销毁正在被触摸的 <pre>/表格节点，touchend 可能根本
             // 不派发；连续两次命中横滑区也会让 180ms 定时器的 token 失效。
@@ -1579,7 +1613,7 @@ final class RendererAssets {
             "clearTimeout(window.__holdWatchdog);window.__holdWatchdog=0;}};" +
             "window.__forceLand=function(){window.__endHold();" +
             "window.__pendingTailHtml=null;window.__pendingTailText=null;" +
-            "window.__pendingBaseHtml=null;};" +
+            "window.__pendingBaseHtml=null;window.__pendingAppend=null;};" +
             "window.__armHold=function(){window.__holdRender=true;window.__holdToken++;" +
             "window.__holdSince=Date.now();" +
             "if(window.__holdWatchdog)clearTimeout(window.__holdWatchdog);" +
@@ -2480,6 +2514,11 @@ final class RendererAssets {
             // 必须先落地再 commitTail —— 否则缓存帧会被搬进一个已经定型的 base，
             // 表现是最后一段内容重复出现。
             "window.__endHold();" +
+            // 闸门挡住了哪几帧增量卡片，就在这里原件补挂回 base（见 streamAppendBase）。
+            // 必须先于 streamBase：整段重建会按 trace 重画 base，缓存的那几段也在里面，
+            // 先重建再挂会变成两份。
+            "var pa=window.__pendingAppend;window.__pendingAppend=null;" +
+            "if(pa)window.streamAppendBase(pa,idx);" +
             "var bh=window.__pendingBaseHtml;window.__pendingBaseHtml=null;" +
             "if(bh!==null)window.streamBase(bh,idx);" +      // hold 已清，这里可以正常写入
             "var h=window.__pendingTailHtml,x=window.__pendingTailText;" +
@@ -2647,6 +2686,9 @@ final class RendererAssets {
             "window.streamBase(ob);}" +
             "if(window.__orphanTail!=null){var ot=window.__orphanTail;window.__orphanTail=null;" +
             "if(ot.h!=null)window.streamTailHtml(ot.h);else window.streamTailText(ot.t);}" +
+            // 先于气泡到达的增量卡片：骨架建好之后按顺序补挂到 base
+            "if(window.__orphanAppend){var oa=window.__orphanAppend;window.__orphanAppend=null;" +
+            "window.streamAppendBase(oa);}" +
             "smartScrollToBottom();};" +
             "window.updateMsgAt=function(idx,html){" +
             "var all=document.querySelectorAll('.msg');" +

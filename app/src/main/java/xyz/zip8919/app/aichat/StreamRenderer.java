@@ -69,6 +69,17 @@ final class StreamRenderer {
         void noteBaseRendered(String base);
 
         /**
+         * 同上，并声明「这段 base 的渲染结果就是刚才下发的那一份 HTML」。
+         *
+         * <p>为什么要多这两个参数：{@code streamBase} 只在页面的闸门已释放、
+         * 气泡已经在 DOM 里时才真正写入，并且写入时会把 tail 那一段正文/卡片一
+         * 并搬进 base 再整体替换。宿主必须能分辨「我下发了」与「页面画上去了」，
+         * 否则后续的增量追加会以一段屏幕上并不存在的 base 为前提——
+         * 工具卡片就是这么「生成中消失」的。宿主据 (gen, seq) 决定是否等页面回执。
+         */
+        void noteBaseRendered(String base, String html, int seq);
+
+        /**
          * base 层当前对应的文本。读写都走宿主，是为了让流式 tick 与
          * {@code renderTraceAsync}（工具卡片/状态行走的另一条渲染路径）共享同一份
          * 状态——两边各自记一份的话，一方追加、另一方整段替换，卡片就会重复或消失。
@@ -182,16 +193,21 @@ final class StreamRenderer {
         if (committing) return;
         final java.util.concurrent.CountDownLatch latch =
                 new java.util.concurrent.CountDownLatch(1);
+        final String[] beforeHolder = new String[] { base };
         // flush 超时只返回、提交的任务并不取消。它若迟于 commitTail 落地，会
         // nextSeq() 作废新一轮在飞帧、把旧 base 和旧 tail 各写回一帧（末尾
         // 正文重复、DOM 与落盘 content 不符）。捕获代数以便届时丢弃。
         final int myEpoch = commitEpoch;
+        // 投递时的 base 账：UI 线程上落地时用它判断「这期间有没有人改过 base」，
+        // 改了就不许再用这次的结果（那时真正决定显示的是别人）
+        beforeHolder[0] = ui.baseRendered();
         RENDER_POOL.execute(new Runnable() {
             public void run() {
                 String bh = null;
                 String th = null;
+                final String before = beforeHolder[0];
                 try {
-                    if (!base.equals(ui.baseRendered())) bh = ui.renderHtml(base);
+                    if (!base.equals(before)) bh = ui.renderHtml(base);
                     th = ui.renderHtml(round);
                 } catch (Throwable t) {
                     LogUtil.e(TAG, "flush render failed: " + t.getMessage());
@@ -210,7 +226,9 @@ final class StreamRenderer {
                             ui.setContent(aiIndex, base + round);
                             if (baseHtml != null) {
                                 ui.evalJsHtml("streamBase", baseHtml, aiIndex);
-                                ui.noteBaseRendered(base);
+                                // 重载：把这个 HTML 与序号一并交给宿主记账，
+                                // 宿主据此判断页面是否真的画上了（见 Ui 接口）
+                                ui.noteBaseRendered(base, baseHtml, ui.currentSeq());
                             }
                             // 渐显时同样只交给缓冲：收尾的完整渲染紧接着就把这条
                             // 气泡整段重画，这里甩出去只会多闪一下
@@ -242,7 +260,14 @@ final class StreamRenderer {
         commitEpoch++;          // 作废旧 flush 的迟到落地帧
         committing = true;
         ui.nextSeq();              // 作废正在飞的 tick，避免它回头覆盖搬好的 base
-        ui.noteBaseRendered(baseNow);
+        // 搬完之后 DOM 的结构是「旧 base + 本轮 tail 的节点」，并不等于 trace：
+        // trace 里本轮正文是原文，搬过去的是渲染好的节点，而工具卡片此时还没写进
+        // DOM（随后由 renderTraceAsync 追加）。所以这里<b>不能</b>把 baseRendered
+        // 登记成 baseNow —— 登记了就等于告诉增量渲染「卡片已经在屏幕上了」，
+        // 而它并不在。旧代码在这里记账，正是「工具卡片在生成过程中消失」的直接来源：
+        // 后续每一帧都只追加增量，屏幕上却缺了前面那一整段，直到收尾整段重建才回来。
+        // 现在只保证「不会重画同一份 base」（与调用前的记账一致），真正的推进交给
+        // 页面回执（renderTraceAsync → onRenderLanded）与收尾的整段重建。
         ui.runOnUi(new Runnable() {
             public void run() {
                 try {
@@ -319,7 +344,7 @@ final class StreamRenderer {
                         // 就是拿旧内容盖新内容——卡片会消失，然后下一轮又冒出来。
                         if (baseHtml != null && !baseNow.equals(ui.baseRendered())) {
                             ui.evalJsHtml("streamBase", baseHtml, aiIndex);
-                            ui.noteBaseRendered(baseNow);
+                            ui.noteBaseRendered(baseNow, baseHtml, ui.currentSeq());
                         }
                         ui.renderTailHtml(baseNow, tailHtml);
                         guard.landed(System.currentTimeMillis(), queuedRef[0]);
@@ -388,7 +413,7 @@ final class StreamRenderer {
                         ui.setContent(aiIndex, baseNow + roundNow);
                         if (!baseNow.equals(ui.baseRendered())) {
                             ui.evalJsHtml("streamBase", baseHtml, aiIndex);
-                            ui.noteBaseRendered(baseNow);
+                            ui.noteBaseRendered(baseNow, baseHtml, ui.currentSeq());
                         }
                         ui.renderTailText(baseNow, tailPlain);
                         guard.landed(System.currentTimeMillis(), queuedRef[0]);
