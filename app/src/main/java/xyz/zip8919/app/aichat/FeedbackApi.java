@@ -33,6 +33,10 @@ final class FeedbackApi {
     /** 反馈中心线上地址。 */
     static final String BASE = "https://feedback.20090102.xyz";
 
+    /** 与反馈中心 config.js 的 LIMITS 保持一致：单文件 15MB、最多 5 个。 */
+    static final long MAX_FILE_BYTES = 15L * 1024 * 1024;
+    static final int MAX_FILES = 5;
+
     private static final int CONNECT_TIMEOUT = 20000;
     private static final int READ_TIMEOUT = 60000;
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
@@ -49,12 +53,19 @@ final class FeedbackApi {
         final String name;
         final long size;
         final String mime;
+        /** true 表示这是配置文件打码后的副本，界面上要标明，避免用户以为原样上传。 */
+        final boolean masked;
 
         UploadFile(Uri uri, String name, long size, String mime) {
+            this(uri, name, size, mime, false);
+        }
+
+        UploadFile(Uri uri, String name, long size, String mime, boolean masked) {
             this.uri = uri;
             this.name = name;
             this.size = size;
             this.mime = mime;
+            this.masked = masked;
         }
     }
 

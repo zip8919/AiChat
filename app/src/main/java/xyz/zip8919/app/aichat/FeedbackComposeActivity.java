@@ -35,12 +35,15 @@ import java.util.List;
 import javax.net.ssl.HttpsURLConnection;
 
 /**
- * 新建反馈：全部是安卓原生控件，输入框自己画、文件用系统选择器挑，
+ * 新建反馈：全部是安卓原生控件，输入框自己画、文件用系统选择器或应用内选择器挑，
  * 提交直接打反馈中心的 multipart 接口，不经过浏览器，也不跳 WebView。
  *
- * <p>校验在本地先做一遍：标题、描述、描述字数、单文件 15MB、最多 5 个。
+ * <p>校验在本地先做一遍：标题、描述、单文件 15MB、最多 5 个。
  * 服务端同样有一套校验，这两层重复不是冗余——本地这层让用户在点提交的瞬间就知道
  * 哪里不对，而不必等一趟网络往返才被打回。
+ *
+ * <p>应用内文件（会话、日志、主题、配置）由 {@link FeedbackFilePickerActivity} 挑，
+ * 配置文件在这里拿到的已经是打码副本，原文件不会被上传。
  *
  * <p>提交成功后 {@code setResult(RESULT_OK)}，列表页据此刷新第一页；弹窗里可以直接
  * 跳到这条反馈的详情，也可以关掉继续浏览。
@@ -50,10 +53,8 @@ public class FeedbackComposeActivity extends ThemedActivity {
     private static final String TAG = "FeedbackComposeActivity";
 
     private static final int REQ_PICK = 2001;
+    private static final int REQ_PICK_APP = 2002;
 
-    /** 与反馈中心 config.js 的 LIMITS 保持一致：单文件 15MB、最多 5 个。 */
-    private static final long MAX_FILE_BYTES = 15L * 1024 * 1024;
-    private static final int MAX_FILES = 5;
     /** 摘要由服务端在提交之后生成，这里按 1.2 秒一轮、最多 20 轮去取。 */
     private static final long SUMMARY_POLL_MS = 1200;
     private static final int SUMMARY_POLL_TRIES = 20;
@@ -64,6 +65,7 @@ public class FeedbackComposeActivity extends ThemedActivity {
     private EditText nicknameView;
     private EditText contactView;
     private Button pickButton;
+    private Button pickAppButton;
     private Button submitButton;
     private LinearLayout filesBox;
     private TextView footnoteView;
@@ -84,6 +86,7 @@ public class FeedbackComposeActivity extends ThemedActivity {
         nicknameView = (EditText) findViewById(R.id.compose_nickname);
         contactView = (EditText) findViewById(R.id.compose_contact);
         pickButton = (Button) findViewById(R.id.compose_pick);
+        pickAppButton = (Button) findViewById(R.id.compose_pick_app);
         submitButton = (Button) findViewById(R.id.compose_submit);
         filesBox = (LinearLayout) findViewById(R.id.compose_files);
         footnoteView = (TextView) findViewById(R.id.compose_footnote);
@@ -102,6 +105,11 @@ public class FeedbackComposeActivity extends ThemedActivity {
         pickButton.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 if (!busy) pickFiles();
+            }
+        });
+        pickAppButton.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                if (!busy) pickAppFiles();
             }
         });
         submitButton.setOnClickListener(new View.OnClickListener() {
@@ -124,7 +132,7 @@ public class FeedbackComposeActivity extends ThemedActivity {
      * 按 MIME 过滤只会在老 ROM 上把 .log / .json 变成灰的选不中。
      */
     private void pickFiles() {
-        if (files.size() >= MAX_FILES) {
+        if (files.size() >= FeedbackApi.MAX_FILES) {
             AcToast.show(this, Strings.get(R.string.feedbackcomposeactivity_015));
             return;
         }
@@ -141,11 +149,35 @@ public class FeedbackComposeActivity extends ThemedActivity {
         }
     }
 
+    /** 应用内文件走独立选择器：分类、说明、预览都在那一页完成。 */
+    private void pickAppFiles() {
+        if (files.size() >= FeedbackApi.MAX_FILES) {
+            AcToast.show(this, Strings.get(R.string.feedbackcomposeactivity_015));
+            return;
+        }
+        Intent intent = new Intent(this, FeedbackFilePickerActivity.class);
+        intent.putExtra(FeedbackFilePickerActivity.EXTRA_SELECTED_COUNT, files.size());
+        try {
+            startActivityForResult(intent, REQ_PICK_APP);
+        } catch (Exception e) {
+            LogUtil.w(TAG, "pickAppFiles failed: %s", e.getMessage());
+            AcToast.show(this, Strings.get(R.string.feedbackcomposeactivity_025));
+        }
+    }
+
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode != REQ_PICK || resultCode != Activity.RESULT_OK || data == null) return;
+        if (resultCode != Activity.RESULT_OK || data == null) return;
+        if (requestCode == REQ_PICK) {
+            addPickedUris(data);
+        } else if (requestCode == REQ_PICK_APP) {
+            addPickedAppFiles(data);
+        }
+    }
 
+    /** 系统选择器：不限类型，日志、截图、导出配置都要能选中。 */
+    private void addPickedUris(Intent data) {
         List<Uri> picked = new ArrayList<Uri>();
         ClipData clip = data.getClipData();
         if (clip != null) {
@@ -158,14 +190,14 @@ public class FeedbackComposeActivity extends ThemedActivity {
         }
 
         for (int i = 0; i < picked.size(); i++) {
-            if (files.size() >= MAX_FILES) {
+            if (files.size() >= FeedbackApi.MAX_FILES) {
                 AcToast.show(this, Strings.get(R.string.feedbackcomposeactivity_015));
                 break;
             }
             Uri uri = picked.get(i);
             String name = displayName(uri);
             long size = displaySize(uri);
-            if (size > MAX_FILE_BYTES) {
+            if (size > FeedbackApi.MAX_FILE_BYTES) {
                 AcToast.show(this, Strings.get(R.string.feedbackcomposeactivity_014, name));
                 continue;
             }
@@ -178,6 +210,69 @@ public class FeedbackComposeActivity extends ThemedActivity {
             files.add(new FeedbackApi.UploadFile(uri, name, size, mime));
         }
         refreshFiles();
+    }
+
+    /**
+     * 应用内文件：路径来自本应用私有目录，直接读文件即可。
+     * 配置文件拿到的已经是打码副本，标记 masked 让列表显示「密钥已打码」。
+     */
+    private void addPickedAppFiles(Intent data) {
+        ArrayList<String> paths = data.getStringArrayListExtra(FeedbackFilePickerActivity.EXTRA_PATHS);
+        ArrayList<String> names = data.getStringArrayListExtra(FeedbackFilePickerActivity.EXTRA_NAMES);
+        boolean[] masked = data.getBooleanArrayExtra(FeedbackFilePickerActivity.EXTRA_MASKED);
+        if (paths == null) return;
+
+        for (int i = 0; i < paths.size(); i++) {
+            if (files.size() >= FeedbackApi.MAX_FILES) {
+                AcToast.show(this, Strings.get(R.string.feedbackcomposeactivity_015));
+                break;
+            }
+            File f = new File(paths.get(i));
+            if (!f.isFile()) {
+                AcToast.show(this, Strings.get(R.string.feedbackcomposeactivity_025));
+                continue;
+            }
+            if (alreadyAttached(f)) continue;   // 同一份文件不重复添加
+            String name = names != null && i < names.size() ? names.get(i) : f.getName();
+            long size = f.length();
+            if (size > FeedbackApi.MAX_FILE_BYTES) {
+                AcToast.show(this, Strings.get(R.string.feedbackcomposeactivity_014, name));
+                deleteMaskedCopy(f);
+                continue;
+            }
+            boolean isMasked = masked != null && i < masked.length && masked[i];
+            files.add(new FeedbackApi.UploadFile(Uri.fromFile(f), name, size, null, isMasked));
+        }
+        refreshFiles();
+    }
+
+    private boolean alreadyAttached(File f) {
+        Uri uri = Uri.fromFile(f);
+        for (int i = 0; i < files.size(); i++) {
+            if (uri.equals(files.get(i).uri)) return true;
+        }
+        return false;
+    }
+
+    /** 用户移除或文件被拒时，打码副本没有保留的必要，连同当次目录一起删掉。 */
+    private static void deleteMaskedCopy(File f) {
+        if (f == null) return;
+        String marker = File.separator + FeedbackFileSource.MASK_DIR + File.separator;
+        if (f.getAbsolutePath().indexOf(marker) < 0) return;
+        try {
+            f.delete();
+            File dir = f.getParentFile();
+            if (dir != null) dir.delete();
+        } catch (Exception ignored) {
+            // 缓存目录由系统回收，删不掉不影响提交与展示
+        }
+    }
+
+    /** 提交成功或换一批附件时清掉所有打码副本。 */
+    private void deleteMaskedCopies() {
+        for (int i = 0; i < files.size(); i++) {
+            if (files.get(i).masked) deleteMaskedCopy(new File(files.get(i).uri.getPath()));
+        }
     }
 
     /** 选择器给的展示名；查不到就退回路径末段，绝不能出现空白文件名。 */
@@ -256,6 +351,16 @@ public class FeedbackComposeActivity extends ThemedActivity {
         row.addView(name, new LinearLayout.LayoutParams(
                 0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
+        // 打码副本必须在这里说清楚：用户选了 config.json，要能在提交前确认上传的不是原文
+        if (file.masked) {
+            TextView badge = new TextView(this);
+            badge.setTextSize(10);
+            badge.setTextColor(getResources().getColor(R.color.accent));
+            badge.setPadding(dp(8), 0, 0, 0);
+            badge.setText(R.string.feedbackcomposeactivity_042);
+            row.addView(badge);
+        }
+
         TextView remove = new TextView(this);
         remove.setTextSize(13);
         remove.setTextColor(getResources().getColor(R.color.primary));
@@ -265,7 +370,8 @@ public class FeedbackComposeActivity extends ThemedActivity {
             public void onClick(View v) {
                 if (busy) return;
                 if (index >= 0 && index < files.size()) {
-                    files.remove(index);
+                    FeedbackApi.UploadFile removed = files.remove(index);
+                    deleteMaskedCopy(new File(removed.uri.getPath()));
                     refreshFiles();
                 }
             }
@@ -302,6 +408,8 @@ public class FeedbackComposeActivity extends ThemedActivity {
                     public void onSuccess(JSONObject data) {
                         setBusy(false);
                         setResult(Activity.RESULT_OK);
+                        // 提交成功后打码副本已经没用了，缓存里不留敏感文件的影子
+                        deleteMaskedCopies();
                         showResult(data);
                     }
 
@@ -317,6 +425,7 @@ public class FeedbackComposeActivity extends ThemedActivity {
         busy = value;
         submitButton.setEnabled(!value);
         pickButton.setEnabled(!value);
+        pickAppButton.setEnabled(!value);
         submitButton.setText(value
                 ? R.string.feedbackcomposeactivity_010
                 : R.string.feedbackcomposeactivity_009);
@@ -431,6 +540,7 @@ public class FeedbackComposeActivity extends ThemedActivity {
         nicknameView.setText(draft.optString("nickname"));
         contactView.setText(draft.optString("contact"));
 
+        deleteMaskedCopies();
         files.clear();
         refreshFiles();
 
@@ -439,7 +549,7 @@ public class FeedbackComposeActivity extends ThemedActivity {
 
         final List<String> urls = new ArrayList<String>();
         final List<String> names = new ArrayList<String>();
-        for (int i = 0; i < atts.length() && urls.size() < MAX_FILES; i++) {
+        for (int i = 0; i < atts.length() && urls.size() < FeedbackApi.MAX_FILES; i++) {
             JSONObject a = atts.optJSONObject(i);
             if (a == null) continue;
             String url = a.optString("url");

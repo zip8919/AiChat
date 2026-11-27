@@ -301,6 +301,14 @@ final class RequestDiag {
         return new File(ctx.getApplicationContext().getFilesDir(), DIR_NAME);
     }
 
+    /**
+     * 请求记录的目录，供反馈页挑选附件使用。
+     * 目录可能不存在（没开过诊断记录），调用方按空列表处理。
+     */
+    static File logDir(Context ctx) {
+        return ctx == null ? null : dir(ctx);
+    }
+
     private static String readFile(Context ctx, String id) {
         try {
             return readRaw(new File(dir(ctx), id + ".log"));

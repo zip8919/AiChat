@@ -77,17 +77,28 @@ final class CrashCatcher implements Thread.UncaughtExceptionHandler {
     }
 
     private static File logFile() {
-        Context c = appCtx;
+        return crashLogFile(appCtx);
+    }
+
+    /**
+     * 崩溃日志的落盘位置。
+     *
+     * <p>写入与反馈页取附件共用这一处目录判断：两处各写一遍，
+     * 一旦外部存储不可用、回退到内部目录，反馈页就会给出一个不存在的路径。
+     */
+    static File crashLogFile(Context ctx) {
         File dir = null;
-        if (c != null) {
+        if (ctx != null) {
             try {
-                dir = c.getExternalFilesDir(null);
+                dir = ctx.getExternalFilesDir(null);
             } catch (Throwable ignored) {
+                // 外部存储未挂载或 ROM 实现异常：回退内部目录，见下
             }
             if (dir == null) {
                 try {
-                    dir = c.getFilesDir();
+                    dir = ctx.getFilesDir();
                 } catch (Throwable ignored) {
+                    // 连内部目录都取不到属于极端情况，最后由 /sdcard 兜底
                 }
             }
         }

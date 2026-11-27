@@ -133,6 +133,12 @@
             android:configChanges="screenSize|orientation|keyboardHidden"/>
 
         <activity
+            android:label="@string/feedbackfilepickeractivity_039"
+            android:name="xyz.zip8919.app.aichat.FeedbackFilePickerActivity"
+            android:exported="false"
+            android:configChanges="screenSize|orientation|keyboardHidden"/>
+
+        <activity
             android:label="@string/noticeactivity_001"
             android:name="xyz.zip8919.app.aichat.NoticeActivity"
             android:exported="false"

@@ -2280,4 +2280,51 @@
     <string name="chatstreamrunner_027">连接被服务端重置</string>
     <string name="chatstreamrunner_028">无法解析服务器地址，检查提供商地址是否正确</string>
     <string name="chatstreamrunner_029">网络异常，检查网络后重试</string>
+
+    <!-- 反馈附件：应用内文件选择 -->
+    <string name="feedbackcomposeactivity_040">应用内添加</string>
+    <string name="feedbackcomposeactivity_041">应用内文件内容会随反馈上传，配置里的密钥自动打码。</string>
+    <string name="feedbackcomposeactivity_042">密钥已打码</string>
+
+    <string name="feedbackfilepickeractivity_001">会话</string>
+    <string name="feedbackfilepickeractivity_002">文件</string>
+    <string name="feedbackfilepickeractivity_003">图片</string>
+    <string name="feedbackfilepickeractivity_004">日志</string>
+    <string name="feedbackfilepickeractivity_005">主题</string>
+    <string name="feedbackfilepickeractivity_006">配置</string>
+    <string name="feedbackfilepickeractivity_007">对话正文，点「查看」可先看内容再决定</string>
+    <string name="feedbackfilepickeractivity_008">从对话里导出保存的文件</string>
+    <string name="feedbackfilepickeractivity_009">对话里保存的图片</string>
+    <string name="feedbackfilepickeractivity_010">崩溃记录与请求记录，鉴权信息已遮蔽</string>
+    <string name="feedbackfilepickeractivity_011">自定义主题，点「预览」看效果</string>
+    <string name="feedbackfilepickeractivity_012">接口与外观设置，密钥只保留前 5 位和后 3 位</string>
+    <string name="feedbackfilepickeractivity_013">还没有对话记录</string>
+    <string name="feedbackfilepickeractivity_014">还没有保存的文件</string>
+    <string name="feedbackfilepickeractivity_015">还没有保存的图片</string>
+    <string name="feedbackfilepickeractivity_016">没有日志记录</string>
+    <string name="feedbackfilepickeractivity_017">还没有自定义主题</string>
+    <string name="feedbackfilepickeractivity_018">没有配置文件</string>
+    <string name="feedbackfilepickeractivity_019">崩溃记录，包含机型与堆栈</string>
+    <string name="feedbackfilepickeractivity_020">一次请求的完整记录，鉴权信息已遮蔽</string>
+    <string name="feedbackfilepickeractivity_021">含 API Key 与 SecretKey，打码后上传</string>
+    <string name="feedbackfilepickeractivity_022">外观与主题覆盖设置</string>
+    <string name="feedbackfilepickeractivity_023">字体索引</string>
+    <string name="feedbackfilepickeractivity_024">使用统计</string>
+    <string name="feedbackfilepickeractivity_025">查看</string>
+    <string name="feedbackfilepickeractivity_026">预览</string>
+    <string name="feedbackfilepickeractivity_027">添加</string>
+    <string name="feedbackfilepickeractivity_028">已选</string>
+    <string name="feedbackfilepickeractivity_029">已选 %1$d 个</string>
+    <string name="feedbackfilepickeractivity_030">添加文件</string>
+    <string name="feedbackfilepickeractivity_031">正在准备文件…</string>
+    <string name="feedbackfilepickeractivity_032">有文件没能读取，已跳过</string>
+    <string name="feedbackfilepickeractivity_033">这个主题文件读不出来，换一个或附上原文件</string>
+    <string name="feedbackfilepickeractivity_034">读取中…</string>
+    <string name="feedbackfilepickeractivity_035">附件最多 5 个，先移除已选的再添加</string>
+    <string name="feedbackfilepickeractivity_036">共 %1$d 条消息 · %2$s · %3$s</string>
+    <string name="feedbackfilepickeractivity_037">%1$s · %2$s</string>
+    <string name="feedbackfilepickeractivity_038">关闭</string>
+    <string name="feedbackfilepickeractivity_039">选择要附带的文件</string>
+    <string name="feedbackfilepickeractivity_040">返回</string>
+    <string name="feedbackfilepickeractivity_041">选中的文件内容会随反馈上传。配置文件里的密钥与敏感内容只保留前 5 位和后 3 位。</string>
 </resources>

@@ -22,12 +22,19 @@ import android.widget.Toast;
  */
 public class ThemePreviewActivity extends ThemedActivity {
 
+    /**
+     * 只读预览。反馈附件里的主题只是想看一眼长什么样，
+     * 此时隐藏「应用」按钮，避免看文件顺手把当前主题改掉。
+     */
+    static final String EXTRA_READ_ONLY = "read_only";
+
     private ThemeRepository repo;
     private AppearanceManager am;
     private String themeId;
     private boolean darkMode;
     private boolean useTheme = true;
     private int percent = 100;
+    private boolean readOnly;
 
     private View root;
     private ScrollView scroll;
@@ -48,7 +55,9 @@ public class ThemePreviewActivity extends ThemedActivity {
         String extra = getIntent().getStringExtra("theme_id");
         themeId = (extra == null || extra.length() == 0) ? am.getThemeId() : extra;
         darkMode = am.isDark();
+        readOnly = getIntent().getBooleanExtra(EXTRA_READ_ONLY, false);
         bindViews();
+        if (readOnly) btnApply.setVisibility(View.GONE);
         spinner.setAdapter(new ArrayAdapter<String>(this,
                 android.R.layout.simple_spinner_item,
                 new String[]{Strings.get(R.string.themepreviewactivity_001)}));

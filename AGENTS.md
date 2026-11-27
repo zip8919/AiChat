@@ -15,7 +15,7 @@ AiChat 是运行在 Android 词典笔上的 AI 对话客户端：传统原生 An
 | minSdk / targetSdk / compileSdk | 18 / 18 / 34 |
 | 源码语言 | Java 8；无 Kotlin、无 AndroidX、无第三方 UI 库 |
 | 构建 | AGP 8.2.2 + Gradle 8.2 + JDK 17 |
-| 规模 | 121 个 Java 文件 / 约 4.6 万行；25 个 Activity；37 个布局 |
+| 规模 | 154 个 Java 文件 / 约 6.2 万行；32 个 Activity；48 个布局 |
 
 `targetSdk 18` 是刻意选择：保留安装时授权，不引入运行时权限流程。改这个值会同时牵动权限、APK 安装器、文件 URI 三条链路。
 
@@ -198,6 +198,7 @@ Android/data/xyz.zip8919.app.aichat/files/
 | `Limits` | 运行期上限与配额（volatile 静态字段） | 不持久化，不碰 UI |
 | `SystemInfo` | 系统 / WebView 信息与占位符填充 | 不做 IO，不持有 Context |
 | `CrashCatcher` | 未捕获异常落盘 | 不吞异常，不弹窗 |
+| `FeedbackFileSource` | 反馈附件的应用内来源：会话 / 文件 / 图片 / 日志 / 主题 / 配置的分类枚举，配置打码副本 | 不碰 UI，不改原文件，不打乱原目录 |
 | `TlsCompat` | 老设备 TLS 兼容 | 不改变证书校验策略（风险见 §13） |
 
 ## 7. 配置约定
@@ -304,7 +305,7 @@ Android/data/xyz.zip8919.app.aichat/files/
 | 会话列表加载慢 | `ConversationIndex` |
 | 版本更新与镜像测速 | `UpdateManager` + `UpdateActivity` |
 | 反馈建议的三个入口 | `AboutActivity.showFeedback`（邮件 / Issue / 应用内反馈中心） |
-| 应用内反馈的列表、新建、详情 | `FeedbackActivity` / `FeedbackComposeActivity` / `FeedbackDetailActivity`，网络在 `FeedbackApi`，状态色在 `FeedbackUi` |
+| 应用内反馈的列表、新建、详情 | `FeedbackActivity` / `FeedbackComposeActivity` / `FeedbackDetailActivity`，网络在 `FeedbackApi`，状态色在 `FeedbackUi`；应用内附件在 `FeedbackFilePickerActivity`，分类与配置打码在 `FeedbackFileSource` |
 
 ## 11. 开发规范
 
@@ -520,6 +521,7 @@ KEYSTORE_PASSWORD=<口令> KEY_ALIAS=mc ./tools/build_debug.sh
 | 内网访问 | `NetSecurity` 默认严格：拒绝环回 / 私有网段 / 链路本地 / 唯一本地 | 只有用户显式开启并二次确认才放开 |
 | `http_request` | 默认关闭；三道边界：禁内网、禁跟 3xx、响应截断 8KB | 不要把默认值改成开启 |
 | 日志 | `LogUtil` 无脱敏 | 新增日志**不得**包含 Key、`Authorization` 头、完整请求体 |
+| 反馈附件 | 配置文件上传前由 `FeedbackFileSource` 生成打码副本（首 5 后 3），原文件不改 | 新增附件分类时先判断是否含密钥；不要把原文件直接交给反馈上传 |
 
 `targetSdk 18` 下 `file://` 外发不触发 `FileUriExposedException`，但这不构成把私有目录暴露出去的理由：对外分享一律走 `FilePathProvider`。
 
