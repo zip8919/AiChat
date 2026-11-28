@@ -234,8 +234,13 @@ final class CapabilityProbe {
         //     各档与它比，多出来多少就是这一档真实加上去的推理。
         // 关闭探不出来（关不掉 / 网络问题）时，退回用「不设参数」作基线。
         int offSignal = -1;
+        // 关闭探测已经发了「不设参数」那一次，它同时就是档位对照的基线。
+        // 旧版在关闭探不出来时又发了一遍完全相同的请求——同一份 body、
+        // 同一道题，白多一次请求，遇到限流紧的端点还会额外触发 429。
+        String carryBase = null;
         if (stop == null || !stop.stopped()) {
             Intent off = probeOff(url, snap, model, stop);
+            carryBase = off.baseBody;
             rep.offSupported = off.supported;
             offSignal = off.signal;
             if (Boolean.FALSE.equals(off.supported)) {
@@ -250,6 +255,12 @@ final class CapabilityProbe {
 
         // 对照组：优先用「关闭生效」那一次的推理量，其次用不设参数的那一次
         int baseline = offSignal;
+        if (baseline < 0 && carryBase != null) {
+            // 关闭请求本身成功、只是判不出结论（例如两次都没有推理正文）：
+            // 那次「不设参数」的响应就是基线，直接用，不再重发。
+            baseline = reasoningSignal(carryBase);
+            LogUtil.d(TAG, "thinking baseline from off probe signal=%d", baseline);
+        }
         if (baseline < 0 && (stop == null || !stop.stopped())
                 && url != null && snap.apiKey != null && snap.apiKey.trim().length() > 0) {
             Raw b = post(url, snap.apiKey, thinkingBody(snap, model, null, false));
@@ -413,9 +424,28 @@ final class CapabilityProbe {
                         : "测不出来");
         // 判据只看推理正文：用量里的推理 token 在关闭后也可能残留（有的端点在
         // 内部仍按思考模式跑一遍），拿它当「还在想」的证据会把能关的模型判成关不掉。
-        if (baseText > 0 && offText == 0) return Intent.yes(0);
-        if (baseText > 0 && offText > 0) return Intent.no();
-        return Intent.unknown();
+        if (baseText > 0 && offText == 0) return Intent.withBase(Boolean.TRUE, 0, base.body);
+        // 「关不掉」是唯一会让界面删掉「关闭」这个选项的结论，必须多验一次。
+        //
+        // 实测同一条流里草稿是否带结束标记、端点默认档是否落在中间，都会在
+        // 相邻两次请求之间变化（sensenova 首次请求完全不带标记、第二次才带），
+        // 单次「两次都有推理正文」很可能是这一次的特殊情况。这里再关一次，
+        // 两次都还有推理才落这个结论；第二次失败（限流、网络）就不下结论。
+        if (baseText > 0 && offText > 0) {
+            if (stop != null && stop.stopped()) return Intent.withBase(null, -1, base.body);
+            Raw again = post(url, snap.apiKey, offBody(snap, model), TIMEOUT_MS);
+            if (again.error != null || again.httpCode < 200 || again.httpCode >= 300) {
+                LogUtil.d(TAG, "off probe: second confirmation unusable (code=%d)",
+                        again.httpCode);
+                OffDiag.log("探测·关闭：复核请求不可用（HTTP=%d），不下结论", again.httpCode);
+                return Intent.withBase(null, -1, base.body);
+            }
+            boolean stillThinking = hasText(signalOf(again.body).reasoningText);
+            OffDiag.log("探测·关闭：复核第二次 → %s", stillThinking ? "仍在推理" : "无推理");
+            if (stillThinking) return Intent.withBase(Boolean.FALSE, -1, base.body);
+            return Intent.withBase(Boolean.TRUE, 0, base.body);
+        }
+        return Intent.withBase(null, -1, base.body);
     }
 
     /**
@@ -433,14 +463,29 @@ final class CapabilityProbe {
         final Boolean supported;
         /** 关掉时的推理量；未能判定或关不掉时 -1。 */
         final int signal;
+        /** 「不设参数」那一次的响应体（已发出，可供后续判定复用）。 */
+        final String baseBody;
 
         private Intent(Boolean supported, int signal) {
+            this(supported, signal, null);
+        }
+
+        private Intent(Boolean supported, int signal, String baseBody) {
             this.supported = supported;
             this.signal = signal;
+            this.baseBody = baseBody;
         }
 
         static Intent yes(int signal) {
             return new Intent(Boolean.TRUE, signal);
+        }
+
+        static Intent yes(int signal, String baseBody) {
+            return new Intent(Boolean.TRUE, signal, baseBody);
+        }
+
+        static Intent withBase(Boolean supported, int signal, String baseBody) {
+            return new Intent(supported, signal, baseBody);
         }
 
         static Intent no() {

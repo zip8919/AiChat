@@ -9,9 +9,9 @@ import java.util.List;
  *
  * <p>覆盖三件事：
  * <ol>
- *   <li>关闭返回里混进正文的思考草稿能被拆进思考块，正常回答不被误拆；</li>
+ *   <li>关闭返回里混进正文的思考草稿能按结束标记拆进思考块，正常回答不被误拆；</li>
  *   <li>思考正文与推理 token 分开统计，Anthropic 的 input/output 用量能读到；</li>
- *   <li>分片跨段落边界、段间空行、多段连发时正文不丢字、不走样。</li>
+ *   <li>标记被拆在两个分片里、一片里带完整草稿+标记+正文、整条流没有标记时都不丢字。</li>
  * </ol>
  *
  * <p>运行（需要 org.json，与 App 用的是同一份实现）：
@@ -29,9 +29,8 @@ public final class ThinkingFixCheck {
     private static int passed = 0;
 
     public static void main(String[] args) throws Exception {
-        drafts();
+        peelSamples();
         normalAnswers();
-        splitStream();
         usage();
         if (failed > 0) {
             System.out.println("FAILED " + failed + " / " + (failed + passed));
@@ -40,40 +39,90 @@ public final class ThinkingFixCheck {
         System.out.println("OK " + passed + " checks");
     }
 
-    // ---- 1. 草稿识别 ----
+    // ---- 1. 标记切分（纯字符串，不涉及流）----
 
-    private static void drafts() {
-        String[] draft = {
-                "思考：用户问的是价格，先打八折再算手续费。",
-                "1. 题目说的是先打八折\n2. 然后加收 5%\n3. 最后减 9 元",
-                "**分析**：题目要求一步一步算。",
-                "让我先看一遍题目。",
-                "用户想要的是最终价格，不是折扣比例。",
-                "Let me work through this step by step.",
-                "我们来逐步计算。",
-                "根据题意，原价 128 元。",
-                "Hmm, the user asks about price.",
+    /**
+     * 真实样本：sensenova-6.8-flash 关闭思考后 content 的实际形态。
+     *
+     * <p>5 个不同问题跑出来 5 种不同开头，但 5 次都带 {@code </think>}，
+     * 位置就在正文前一个字符——这是「按标记切」而不是「猜开头」的理由。
+     */
+    private static void peelSamples() {
+        // 每组：草稿原文（真实样本）, 期望正文
+        String[][] cases = {
+            {"Thinking Process:\n\n1.  **Analyze the Request:**\n    *   Input: A word problem\n",
+                    "第一步：计算原价打八折后的价格\n128 × 0.8 = 102.4"},
+            {"Here's my thought process for calculating 17 × 23:\n\n1.  **Analyze",
+                    "17 * 23 = 391"},
+            {"Here's a thinking process that leads to the suggested answer:\n\n1. **Understand",
+                    "在 Python 中，反转列表有三种最常用的方法"},
+            {"好的，用户要求我用一句话介绍自己。首先，我需要明确我的身份是商汤科技的",
+                    "我是由商汤科技开发的日日新融合模态大模型"},
+            {"用户让我写一句押韵的广告语。我需要先确定广告的主题。既然没有具体说明，",
+                    "**节能环保齐努力，幸福生活更美丽！**"},
         };
-        for (String d : draft) expectDraft(d, true);
-        String[] answer = {
-                "最终价格是 92.28 元。",
-                "- 最终价格：92.28 元\n- 折扣：八折",
-                "结论：92.28 元。",
-                "这里需要说明一下：原价 128 元打八折是 102.4 元。",
-                "1. 先算折扣 20%，得到 102.4 元",
-                "可以直接用公式：128×0.8×1.05−9。",
-                "The final price is 92.28 yuan.",
-                "答案是 92.28。",
-        };
-        for (String a : answer) expectDraft(a, false);
+        for (String[] c : cases) {
+            String raw = c[0] + "</think>" + c[1];
+            SseRound.Result r = read(sseOf(raw, 7, "delim"), SseRound.Park.MARK);
+            check("按标记切开（" + preview(c[0]) + "）",
+                    r.parkCount == 1
+                            && r.content.toString().equals(c[1])
+                            && r.display.toString().equals("[thinking]" + c[0] + "[/thinking]" + c[1]));
+        }
+
+        // 没有标记 = 不拆：一个字符都不许改
+        SseRound.Result plain = read(sseOf("最终价格是 98.52 元。\n\n先算折扣：102.4。", 5, "delim"),
+                SseRound.Park.MARK);
+        check("没有标记时原样当正文：" + preview(plain.display.toString()),
+                plain.parkCount == 0
+                        && plain.display.toString().indexOf("[thinking]") < 0
+                        && plain.content.toString().equals("最终价格是 98.52 元。\n\n先算折扣：102.4。"));
+
+        // 短回复（整条流只有几个字）：一个字都不能丢
+        SseRound.Result tiny = read(sse(single("98.52")), SseRound.Park.MARK);
+        check("短回复不丢字", tiny.display.toString().equals("98.52")
+                && tiny.content.toString().equals("98.52"));
+
+        // 标记被拆在两个分片里：不能漏判，也不能把标记留在正文里
+        String draftPrefix = "前面是一段足够长的草稿内容，结尾正好卡在标记中间。";
+        String[] pieces = {draftPrefix, "</thi", "nk>正文开始"};
+        String[] frames = new String[pieces.length];
+        for (int i = 0; i < pieces.length; i++) frames[i] = chunk(null, null, pieces[i]);
+        SseRound.Result split = read(sse(frames), SseRound.Park.MARK);
+        check("标记跨分片也能切：" + preview(split.display.toString()) + " park=" + split.parkCount
+                + " content=" + preview(split.content.toString()),
+                split.parkCount == 1
+                        && split.content.toString().equals("正文开始")
+                        && split.display.toString().equals(
+                                "[thinking]" + draftPrefix + "[/thinking]正文开始"));
+
+        // 一片里带完整草稿 + 标记 + 正文
+        SseRound.Result one = read(sse(single("草稿很长很长的一段内容，长到超过开头探测窗口。</think>最终价格 98.52 元。")),
+                SseRound.Park.MARK);
+        check("一片内含完整结构", one.parkCount == 1
+                && one.content.toString().equals("最终价格 98.52 元。")
+                && one.display.toString().equals(
+                        "[thinking]草稿很长很长的一段内容，长到超过开头探测窗口。[/thinking]最终价格 98.52 元。"));
+
+        // 真思考（reasoning_content）+ 正文里混草稿：两段都在同一个思考块
+        String mixed = sse(
+                reasoningChunk("先想想这道题"),
+                chunk(null, null, "再想一遍，这段草稿也要进思考块。</think>"),
+                chunk(null, null, "最终价格 98.52 元。"));
+        SseRound.Result m = read(mixed, SseRound.Park.MARK);
+        check("真思考与正文草稿同在一个思考块：" + preview(m.display.toString()),
+                m.reasoning.toString().equals("先想想这道题")
+                        && m.parkCount == 1
+                        && m.content.toString().equals("最终价格 98.52 元。")
+                        && m.display.toString().indexOf("最终价格") > m.display.lastIndexOf("[/thinking]"));
+
+        // 开了思考 / 不带关闭字段：即使内容里出现 </think> 也一个字不动
+        SseRound.Result off = read(sse(single("正文里提到了 </think> 这个写法。")), SseRound.Park.NONE);
+        check("未关闭时不处理标记", off.parkCount == 0
+                && off.content.toString().equals("正文里提到了 </think> 这个写法。"));
     }
 
-    private static void expectDraft(String text, boolean want) {
-        boolean got = SseRound.thinkingIsDraft(text);
-        check((want ? "识别为草稿" : "不当草稿") + "：" + text, got == want);
-    }
-
-    // ---- 2. 整段流（模拟 SSE）----
+    // ---- 2. 普通回答（多段、空行）----
 
     private static void normalAnswers() {
         // 开着思考时请求不带关闭字段：正文一个字都不拆
@@ -85,74 +134,14 @@ public final class ThinkingFixCheck {
         check("无关闭字段时不拆正文", r.parkCount == 0
                 && r.display.indexOf("[thinking]") < 0
                 && r.display.indexOf("结论：92.28") == 0);
-    }
 
-    private static void splitStream() {
-        // 关闭请求：端点把草稿和回答都塞进 content
-        String draft = "思考：用户要的是最终价格。\n\n先打八折：128×0.8=102.4。\n\n";
-        String answer = "最终价格是 98.52 元。\n\n计算：102.4×1.05−9=98.52。";
-        // 分片任意切开，模拟真实逐字下发的边界
-        String body = sseOf(draft + answer, 7, "delim");
-        SseRound.Result r = read(body, SseRound.Park.FIRST_PARAGRAPH);
-        String display = r.display.toString();
-        int thinkEnd = display.indexOf("[/thinking]");
-        // 第一段是草稿，之后逐段判断：第二段「先打八折…」不是草稿，判断到此结束，
-        // 它和后面的回答都是正文
-        check("草稿被拆进思考块：" + preview(display),
-                r.parkCount == 1 && thinkEnd > 0
-                        && display.indexOf("思考：") > 0
-                        && display.substring(0, thinkEnd).indexOf("先打八折") < 0);
-        check("正文里不再有草稿", display.substring(thinkEnd).indexOf("思考：") < 0
-                && display.indexOf("思考：") > 0);
-        check("content（上报与落盘）不含草稿：" + preview(r.content.toString()),
-                r.content.toString().indexOf("思考：") < 0
-                        && r.content.toString().startsWith("先打八折：128×0.8=102.4。")
-                        && r.content.toString().endsWith("计算：102.4×1.05−9=98.52。"));
-        check("display 以草稿开头、以回答结尾",
-                display.indexOf("思考：") < display.indexOf("[/thinking]")
-                        && display.endsWith("计算：102.4×1.05−9=98.52。"));
-
-        // 关闭请求但回答正常：一个字都不拆
-        SseRound.Result ok = read(sseOf("最终价格是 98.52 元。\n\n先算折扣：102.4。", 5, "delim"),
-                SseRound.Park.FIRST_PARAGRAPH);
-        check("正常回答不被拆", ok.parkCount == 0
-                && ok.display.toString().indexOf("[thinking]") < 0);
-
-        // 关闭请求、端点正常作答且段落之间有空行：段落分隔照原样保留
+        // 关闭请求但没有标记：段落之间的空行照原样保留
         SseRound.Result blank = read(sseOf("第一段。\n\n第二段。\n\n", 4, "delim"),
-                SseRound.Park.FIRST_PARAGRAPH);
+                SseRound.Park.MARK);
         check("段落之间的空行原样保留：" + preview(blank.display.toString()),
-                blank.display.toString().equals("第一段。\n\n第二段。")
+                blank.parkCount == 0
+                        && blank.display.toString().equals("第一段。\n\n第二段。")
                         && blank.content.toString().equals("第一段。\n\n第二段。"));
-
-        // 一片里同时带着「草稿段 + 空行 + 正文段」：边界后的字不能丢
-        SseRound.Result wide = read(sse(single("思考：先算折扣。\n\n最终价格 98.52 元。\n\n过程：102.4×1.05−9。")),
-                SseRound.Park.FIRST_PARAGRAPH);
-        check("跨段的一片不丢字：" + preview(wide.content.toString()),
-                wide.parkCount == 1
-                        && wide.content.toString().equals("最终价格 98.52 元。\n\n过程：102.4×1.05−9。"));
-
-        // 先有 reasoning_content（真思考），正文里又混一段草稿：两段都在思考块里
-        String mixed = sse(
-                reasoningChunk("先想想这道题"),
-                chunk("delim", null, "分析：题目要一步一步算。\n\n"),
-                chunk("delim", null, "最终价格 98.52 元。\n\n"),
-                chunk("delim", null, "过程如上。"));
-        SseRound.Result m = read(mixed, SseRound.Park.FIRST_PARAGRAPH);
-        String md = m.display.toString();
-        check("真思考与正文草稿同在一个思考块：" + preview(md),
-                m.reasoning.toString().equals("先想想这道题")
-                        && md.indexOf("分析：题目要一步一步算") > 0
-                        && md.indexOf("最终价格 98.52 元") > md.lastIndexOf("[/thinking]")
-                        && m.parkCount == 1);
-
-        // 草稿一段连到底、没有空行：流结束时也要归到思考块，不能留在正文
-        SseRound.Result one = read(sse(single("思考：答案是 98.52 元。")),
-                SseRound.Park.FIRST_PARAGRAPH);
-        check("单段草稿流结束时归入思考块：" + preview(one.display.toString()),
-                one.parkCount == 1
-                        && one.display.toString().startsWith("[thinking]")
-                        && one.display.toString().endsWith("[/thinking]"));
     }
 
     // ---- 3. 用量 ----
@@ -184,7 +173,14 @@ public final class ThinkingFixCheck {
 
     private static String sse(String... frames) {
         StringBuilder sb = new StringBuilder();
-        for (String f : frames) sb.append("data: ").append(f).append("\n\n");
+        for (String f : frames) {
+            // 允许把一个 JSON 对象写成多行便于阅读：SSE 的 data 行不能带裸换行，
+            // 多行内容按规范拆成多条 data: 行，解析侧会重新拼起来
+            for (String line : f.split("\n", -1)) {
+                sb.append("data: ").append(line).append("\n");
+            }
+            sb.append("\n");
+        }
         sb.append("data: [DONE]\n\n");
         return sb.toString();
     }

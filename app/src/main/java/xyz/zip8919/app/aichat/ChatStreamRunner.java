@@ -295,7 +295,6 @@ final class ChatStreamRunner {
             // 关闭时对象形态被拒：重发只留 top-level 布尔关闭。
             // 上一次请求已经被端点拒收过的模型直接从这一档开始，省掉两次
             // 必然 400 的回合（每次都要重发完整请求体）。
-            boolean offBoolOnly = ThinkingOff.rejected(job.modelName);
             // 用户是否选了「关闭」。与 thinkingOff 分开：探测/实测确认关不掉时，
             // thinkingOff 为 false（不发关闭字段，按最低档走）。此时思考内容照常
             // 展示——关不掉就如实呈现，不靠隐藏内容假装关掉了。
@@ -303,9 +302,10 @@ final class ChatStreamRunner {
             boolean thinkingOff = userWantsNoThinking
                     && "off".equals(ChatTransport.resolveThinkingLevel(
                             job.modelName, job.provider, job.thinkingLevel));
-            // 关闭字段一次写全（见 ThinkingOff），不再有「换方案」的阶梯：
-            // 端点静默忽略某个字段时，靠的不是换下一次，而是同一份请求里
-            // 已经带上了它能认的那个字段。
+            // 关闭字段只发实测能生效的那几个（见 ThinkingOff），不再有
+            // 「换方案」的阶梯：实测两家端点对不认识的关闭字段一律静默忽略、
+            // 回 200 照旧推理，换下一个字段永远不会被触发。真被 400 拒收时
+            // 说明这家根本没有关闭档，直接记「关不掉」，不再浪费 3 次请求。
             final String modelOriginal = job.modelName;
             // 最近一次 429 的响应体。重试耗尽那一轮可能已读不到 body，用它兜底进错误卡片。
             String last429Body = "";
@@ -410,12 +410,7 @@ final class ChatStreamRunner {
                 ChatTransport.Prepared prep = ChatTransport.prepare(job.modelName, job.provider,
                         job.thinkingLevel, conversation, job.streamEnabled,
                         toolsEnabled ? toolDefs : null, includeUsage, sendThinking,
-                        // 注意这里不能取反：offBoolOnly 的语义是「只留布尔」，
-                        // 初始 false 表示要写全。写成 !offBoolOnly 会让第一发就落到
-                        // 只发 enable_thinking=false 的降级档——认 thinking 对象的
-                        // 端点（混元、DeepSeek、Kimi、GLM）于是完全收不到关闭意图，
-                        // 表现为「换了多少家、多少模型都关不掉」。
-                        !offNativeDropped, offBoolOnly);
+                        !offNativeDropped);
                 JSONObject body = prep.body;
                 final String payload = body.toString();
                 diagRound(st, round, prep, payload);
@@ -424,10 +419,8 @@ final class ChatStreamRunner {
                     OffDiag.log("  思考字段：%s",
                             OffDiag.fields(body, job.provider == null
                                     ? null : job.provider.thinkingParamName));
-                    if (thinkingOff && (offNativeDropped || offBoolOnly)) {
-                        OffDiag.log("  降级状态：自填字段=%s 仅布尔关闭=%s",
-                                offNativeDropped ? "已去掉" : "保留",
-                                offBoolOnly ? "是" : "否");
+                    if (thinkingOff && offNativeDropped) {
+                        OffDiag.log("  降级状态：自填字段已去掉（关闭意图保留）");
                     }
                     reqSeq++;
                 }
@@ -570,23 +563,11 @@ final class ChatStreamRunner {
                     //   3) 整套去掉，回到端点默认。走到这里说明这家对任何关闭写法都
                     //      直接拒收，记下来，档位里不再列「关闭」。
                     if ((code == 400 || code == 422) && sendThinking && thinkingOff
-                            && !offNativeDropped && !offBoolOnly) {
+                            && !offNativeDropped) {
                         offNativeDropped = true;
                         diagEvent(st, "degrade", "thinking-off: drop provider field after HTTP " + code);
                         LogUtil.w(TAG, "thinking-off rejected, retry without provider-declared field");
                         OffDiag.log("降级：端点拒收，去掉自填字段重发（关闭意图保留）");
-                        ChatTransport.close(conn);
-                        conn = null;
-                        session.setConnection(null);
-                        continue;
-                    }
-                    if ((code == 400 || code == 422) && sendThinking && thinkingOff
-                            && !offBoolOnly) {
-                        offBoolOnly = true;
-                        ThinkingOff.rememberRejected(modelOriginal);
-                        diagEvent(st, "degrade", "thinking-off: boolean only after HTTP " + code);
-                        LogUtil.w(TAG, "thinking-off rejected, retry with boolean switches only");
-                        OffDiag.log("降级：端点仍拒收，只留布尔关闭重发");
                         ChatTransport.close(conn);
                         conn = null;
                         session.setConnection(null);
@@ -688,9 +669,6 @@ final class ChatStreamRunner {
                 }
                 // 只留布尔开关就能过：记住这一档，下一轮别再从对象形态试起。
                 // 反过来，整套字段都过、说明这个端点不挑，把旧记忆清掉。
-                if (thinkingOff && sendThinking && !offBoolOnly) {
-                    ThinkingOff.clearRejected(job.modelName);
-                }
                 if (rr.parkCount > 0 && parkedNoticeRound != round) {
                     // 端点没真正关掉思考：草稿已经转进思考块，但仍要让用户知道
                     // 这次回答不完全是「关闭」的状态，否则他只会觉得作答很奇怪。
@@ -966,10 +944,11 @@ final class ChatStreamRunner {
             diagEvent(st, "body-open", "input stream ready");
             // 关闭思考时还要再看一层：端点收了关闭字段、但把草稿塞进 content。
             // 只有用户选的是「关闭」才拆，开了思考或续写时不碰正文。
-            // 先只判第一段：第一段是回答就整段按正文，不再往下判。连接一个关不掉
-            // 思考的端点时每轮都要过一遍这个判断，判得越少越不容易误伤。
+            // 判据是草稿与正文之间的结束标记（如 </think>），不是段首引导词——
+            // 后者穷举不完，实测同一个模型 5 个问题给出 5 种不同开头。
+            // 没有标记就一个字符都不动，所以对正常回答零风险。
             SseRound.Park park = !userWantsNoThinking ? SseRound.Park.NONE
-                    : (job.isContinue() ? SseRound.Park.NONE : SseRound.Park.FIRST_PARAGRAPH);
+                    : (job.isContinue() ? SseRound.Park.NONE : SseRound.Park.MARK);
             return SseRound.read(job.streamEnabled, in,
                     new SseRound.Progress() {
                         public void onProgress(CharSequence display) {

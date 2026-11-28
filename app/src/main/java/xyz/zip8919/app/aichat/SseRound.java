@@ -3,7 +3,6 @@ package xyz.zip8919.app.aichat;
 import java.io.BufferedReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.util.Locale;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -68,6 +67,9 @@ final class SseRound {
         /** 被拆进思考块的正文片段（不含标记），用来告诉用户这次拆了什么。 */
         final StringBuilder parked = new StringBuilder();
 
+        /** 本次读取采用的草稿剥离方式，见 {@link Park}。 */
+        Park park = Park.NONE;
+
         /** 协议层失败（无 choices/无 message/既无正文也无工具调用），非 null 即失败。 */
         String error;
         /** 非流式失败时保留原始响应体，用于错误卡片。 */
@@ -101,12 +103,23 @@ final class SseRound {
     }
 
     /**
-     * 「思考关了，但端点把思考正文放在 content 里」的处理位置。
+     * content 里「思考草稿 + 结束标记 + 正文」的拆分方式。
      *
-     * <p><b>为什么需要</b>：部分端点的关闭开关只对「强度的档位」生效，模型仍会先
-     * 拟一段草稿再作答，只是把草稿一起塞进 {@code content}。此时请求里明明是
-     * {@code thinking:{type:disabled}}，用户看到的回答却以「思考过程：」开头——
+     * <p><b>为什么需要</b>：部分端点的关闭开关只对档位生效，模型仍会先拟一段草稿，
+     * 然后把草稿和正文一起塞进 {@code content}。此时请求里明明是
+     * {@code thinking:{type:disabled}}，用户看到的回答却以「Thinking Process:」开头——
      * 这就是「关了之后思考内容被当成正文」。
+     *
+     * <p><b>旧做法为什么不可靠</b>：按「段首引导词」猜。实测（sensenova-6.8-flash，
+     * 关闭思考跑 5 个不同问题）草稿的引导词有 {@code Thinking Process:}、
+     * {@code Here's my thought process}、{@code Here's a thinking process}、
+     * {@code 好的，用户要求我…}、{@code 用户让我写…} 五种，任何词表都列不全；
+     * 而正文开头千变万化，词表越全越容易把正文误判成草稿。
+     *
+     * <p><b>现在按标记切</b>：这类端点在草稿和正文之间会写一个显式的结束标记。
+     * 同一个模型 5 个问题里 5 个都带 {@code </think>}，位置就在正文前一个字符。
+     * 开关的开合天然成对，比猜开头确定得多；而且只有<b>确认存在标记</b>时才动手，
+     * 没有标记就一个字符都不改——不会误伤正常回答。
      */
     enum Park {
         /**
@@ -114,243 +127,192 @@ final class SseRound {
          * 拆它会误伤「先说思路再说答案」的正常作答。
          */
         NONE,
-        /**
-         * 逐段判断，最多判断 {@link #PARK_MAX} 段：每段落定案时看开头像不像草稿，
-         * 像就整段转进思考块并继续看下一段，不像就到此为止、后面全按正文。
-         *
-         * <p>关闭请求用这一档。只判开头几段而不是全文判断，是因为误判一次就会
-         * 把正常回答藏进思考块，代价比漏判高得多。
-         */
-        SEGMENTS,
-        /**
-         * 只看第一段（到第一个换行为止）：像草稿就转进思考块，否则整段按正文。
-         *
-         * <p>用在「第一段判完就够」的场景——只有一段的草稿、或回答一上来就是
-         * 正文时，这样不会把两段连在一起判断。
-         */
-        FIRST_PARAGRAPH
+        /** 按结束标记拆：标记之前的进思考块，之后的才是正文。 */
+        MARK
     }
 
     /**
-     * 流式正文的状态：已确定的正文、可能还算草稿的「暂存段」、以及显示到哪。
+     * 从 content 里剥掉「草稿 + 结束标记」的拆分器。
      *
-     * <p>暂存段收的是原始字，遇到段落边界就交给调用方判断一次；判断通过就并进
-     * 正文（上报与显示都只用正文），判成草稿则整段交给思考块。
+     * <p>流式下这里必须能<b>边收边判</b>：标记可能被拆在两个分片里
+     * （实测 {@code "</think>"} 整个落在一片里，但不能指望所有端点都这样），
+     * 所以状态机停在两种状态之一，只有见到完整标记才切换：
+     * <ul>
+     *   <li>{@link #STATE_DRAFT}：还没见到结束标记，收到的一切都是草稿。为避免
+     *       「先显示再收回」的抖动，草稿只进 {@link Result#display} 的思考块，
+     *       不进 {@link Result#content}；</li>
+     *   <li>{@link #STATE_BODY}：标记已过，之后收到的一切都是正文。</li>
+     * </ul>
+     *
+     * <p>如果整条流跑完都没见到标记，{@link #finish()} 把攒住的草稿原样当成正文
+     * 交出去——此时它可能本来就是正文（端点没混草稿），不能吞掉用户的内容。
      */
-    static final class Body {
-        /** 已确定的正文（含段与段之间原文的换行）。 */
-        final StringBuilder text = new StringBuilder();
-        /** 末尾还没定案的暂存段（还没遇到段落边界）。 */
-        final StringBuilder pending = new StringBuilder();
-        /**
-         * 一片里越过段落边界、还没收进来的尾巴。
-         *
-         * <p>一个分片常常同时带着「上一段的结尾 + 空行 + 下一段的开头」，
-         * 边界一到就得停下来定案，但同一片里剩下的字不能跟着丢掉——那会缺字。
-         */
-        final StringBuilder stash = new StringBuilder();
-        /** 已经判断过至少一段。 */
-        int decided;
-        /** 判定放弃（超长或判满上限）：给识别代码看，调用方据此停止判断。 */
-        boolean giveUp;
-        /** 下一个字是否处在段落起点（段首或换行之后）。 */
-        boolean atStart = true;
-        /** 暂存段已经判到边界（第一个自然段见换行，或已攒到空行）。 */
-        boolean complete;
-        /**
-         * 已经推到 display 的正文长度。
-         *
-         * <p>display 只做追加：判断阶段里暂存段可能被改判成草稿，所以只有
-         * 「已定案正文」才上台面；这个下标就是「上台面到哪」。
-         */
-        int done;
+    static final class Peeler {
+        static final int STATE_DRAFT = 0;
+        static final int STATE_BODY = 1;
+
+        private int state = STATE_DRAFT;
+        /** 还没见到标记的部分（用于跨分片匹配标记）。 */
+        private final StringBuilder hold = new StringBuilder();
+        /** 草稿全文（已确认是草稿的部分）。 */
+        private final StringBuilder draft = new StringBuilder();
+        /** 原文逐字进过来的总量，用于判断「开头够长了还没标记」。 */
+        private int seen;
+        /** 是否真的切下了一段草稿（区别于「开头够长、确认没有标记」）。 */
+        private boolean peeled;
+
+        boolean bodyStarted() {
+            return state == STATE_BODY;
+        }
+
+        /** 是否真的发生了拆分：只有拆分才值得给用户提示。 */
+        boolean peeled() {
+            return peeled;
+        }
 
         /**
-         * 收下一个分片。
+         * 收一片 content。
          *
-         * <p>{@link Park#NONE} 时直接拼正文。判断阶段里只收「段落起点之后的字」：
-         * 段前的空行与缩进不属于内容，扔掉即可——攒着它们会让段落边界永远判不出来。
-         * {@link Park#FIRST_PARAGRAPH} 只判到第一个换行，见 {@link Park}。
-         *
-         * @param s    分片文本
-         * @param mode 当前阶段
+         * @param s          分片文本
+         * @param thinking   草稿往这里写（会带 [thinking] 包裹）
+         * @param body       正文往这里写
+         * @param flushDraft 草稿是否立即上屏。不立即上屏时先攒着，
+         *                   等确认有标记再一次性给出——正常回答不能先显示再消失。
          */
-        void append(String s, Park mode) {
+        void feed(String s, StringBuilder thinking, StringBuilder body) {
             if (s == null || s.length() == 0) return;
-            // 上一片没吃完的尾巴先接回来，按这一片的阶段一起处理
-            if (stash.length() > 0) {
-                stash.append(s);
-                s = stash.toString();
-                stash.setLength(0);
-            }
-            if (mode == Park.NONE) {
-                flushPending();
-                text.append(s);
-                atStart = s.endsWith("\n");
+            if (state == STATE_BODY) {
+                body.append(s);
                 return;
             }
-            for (int i = 0; i < s.length(); i++) {
-                char c = s.charAt(i);
-                if (atStart && (c == '\n' || c == ' ' || c == '\t' || c == '\u3000')) {
-                    continue;
-                }
-                pending.append(c);
-                atStart = false;
-                // 第一个自然段只判到这一段的末尾：段之间只隔一个换行，
-                // 不能等空行才定案，否则两段会连在一起判定
-                if (mode == Park.FIRST_PARAGRAPH && c == '\n') {
-                    complete = true;
-                }
-                if (paragraphBreak(pending) || (mode == Park.FIRST_PARAGRAPH && complete)) {
-                    // 边界后的字属于下一段，等定案后再收；先存着，不能丢
-                    if (i + 1 < s.length()) stash.append(s, i + 1, s.length());
-                    return;
+            seen += s.length();
+            hold.append(s);
+            int at = indexOfClose(hold);
+            if (at >= 0) {
+                // 找到标记：前面的进草稿，跳过标记，剩下的进正文
+                String before = hold.substring(0, at);
+                draft.append(before);
+                thinking.append(before);
+                int tagEnd = at + closeTagLengthAt(hold, at);
+                String after = hold.substring(tagEnd);
+                hold.setLength(0);
+                state = STATE_BODY;
+                peeled = true;
+                if (after.length() > 0) body.append(after);
+                return;
+            }
+            // 没找到标记。此时 hold 里全是草稿候选，唯一要留住的是结尾那截
+            // 「可能是标记的半个字」（例如 "</thi"），它得等下一片才能判定。
+            //
+            // 注意这里**不能**用「开头够长就判定没有标记」的窗口：真实样本里
+            // </think> 出现在 223/329、341/437、6381/6503 这些很靠后的位置，
+            // 草稿动辄几千字。窗口一过就当正文，后面再见到标记也回不去了。
+            int keep = suffixThatMayGrowIntoTag(hold);
+            int move = hold.length() - keep;
+            if (move > 0) {
+                draft.append(hold, 0, move);
+                hold.delete(0, move);
+            }
+        }
+
+        /**
+         * 流结束：还没见到标记的残留按正文交出去。
+         *
+         * <p>整条流都没有出现结束标记，说明这个端点这次没往 content 里混草稿
+         * （或者草稿压根没写标记）。两种情况下这些字都是用户要看的回答，不能吞。
+         *
+         * @return 需要追加到正文的残留（可能为空串）
+         */
+        String finish() {
+            // 没有标记时草稿候选按正文交出去：draft 里是已挪出的前缀，hold 里是
+            // 还没判定的尾巴，两段都要给。只交 hold 会丢开头——上一版就是这个错：
+            // finish() 只返回 hold，`abc` 这种三字回复整条丢失。
+            String rest = draft.toString() + hold.toString();
+            hold.setLength(0);
+            draft.setLength(0);
+            state = STATE_BODY;
+            return rest;
+        }
+
+        /** 草稿（已确认部分）文本，供诊断用。 */
+        String draftText() {
+            return draft.toString();
+        }
+
+        /** 是否还在草稿候选阶段（还没见到标记）。 */
+        boolean drafting() {
+            return state == STATE_DRAFT;
+        }
+
+        private static int indexOfClose(CharSequence s) {
+            for (String t : CLOSE_TAGS) {
+                int i = indexOfIgnoreCase(s, t);
+                if (i >= 0) return i;
+            }
+            return -1;
+        }
+
+        /** 该位置命中的是哪个标记，返回它的长度。 */
+        private static int closeTagLengthAt(CharSequence s, int at) {
+            for (String t : CLOSE_TAGS) {
+                if (startsWithIgnoreCase(s, at, t)) return t.length();
+            }
+            return 0;
+        }
+
+        /**
+         * 结尾有多少个字可能是一段还没收全的标记。
+         *
+         * <p>例如没收全的 {@code "</thi"} 必须留着等下一片，挪进草稿就再也拼不回来了。
+         */
+        private static int suffixThatMayGrowIntoTag(StringBuilder s) {
+            int max = 0;
+            for (String t : CLOSE_TAGS) {
+                if (t.length() > max) max = t.length();
+            }
+            int n = Math.min(max, s.length());
+            for (int k = n; k > 0; k--) {
+                int from = s.length() - k;
+                for (String t : CLOSE_TAGS) {
+                    if (k <= t.length() && startsWithIgnoreCase(s, from, t.substring(0, k))) {
+                        return k;
+                    }
                 }
             }
-            // 一直等不到段落边界又写了很长：当正文定下来，后面的分片直接拼正文
-            if (pending.length() > PARK_GIVE_UP_CHARS) {
-                flushPending();
-                decided = PARK_MAX;
-                giveUp = true;
+            return 0;
+        }
+
+        private static boolean startsWithIgnoreCase(CharSequence s, int at, String t) {
+            if (at + t.length() > s.length()) return false;
+            for (int i = 0; i < t.length(); i++) {
+                if (Character.toLowerCase(s.charAt(at + i))
+                        != Character.toLowerCase(t.charAt(i))) {
+                    return false;
+                }
             }
+            return true;
         }
 
-        /** 暂存段原样并进正文（判断结束、放弃判断、或超长兜底）。 */
-        private void flushPending() {
-            if (pending.length() == 0) return;
-            text.append(pending);
-            pending.setLength(0);
-            atStart = false;
-        }
-
-        /**
-         * 把 {@link #stash} 里的尾巴按给定阶段收进来。
-         *
-         * <p>定案后必须调用一次：同一片里边界之后的字要接着按新阶段处理，
-         * 否则它一直压在 stash 里，直到下一片才出现。
-         */
-        void drain(Park mode) {
-            if (stash.length() == 0) return;
-            String s = stash.toString();
-            stash.setLength(0);
-            append(s, mode);
-        }
-
-        /** 流结束时把 stash 折进暂存段，让「最后一段是不是草稿」能看全。 */
-        void foldStash() {
-            if (stash.length() == 0) return;
-            pending.append(stash);
-            stash.setLength(0);
-        }
-
-        /**
-         * 暂存段是否已写到可以下结论的边界：段落结束、换行足够多、或明显超长。
-         *
-         * <p>超长时要先给出结论，否则整段回答会被压在暂存里，直到流结束才一次性
-         * 出现——实时渲染就废了。
-         */
-        boolean segmentComplete() {
-            if (pending.length() == 0) return false;
-            return complete || paragraphBreak(pending)
-                    || pending.length() >= PARK_DECIDE_CHARS
-                    || newlines(pending) >= PARK_DECIDE_LINES;
-        }
-
-        /** 暂存段去掉段落边界（末尾的空行）：这部分只用来找边界，不属于内容。 */
-        String peekSegment() {
-            String s = pending.toString();
-            int end = s.length();
-            while (end > 0 && (s.charAt(end - 1) == '\n' || s.charAt(end - 1) == ' '
-                    || s.charAt(end - 1) == '\t' || s.charAt(end - 1) == '\u3000')) {
-                end--;
+        private static int indexOfIgnoreCase(CharSequence s, String t) {
+            int last = s.length() - t.length();
+            for (int i = 0; i <= last; i++) {
+                if (startsWithIgnoreCase(s, i, t)) return i;
             }
-            return s.substring(0, end);
-        }
-
-        /**
-         * 暂存段已定案：清空暂存，进入下一段。
-         *
-         * <p>段与段之间保留原文的换行（最多一个空行）：段落边界就写在原文里，
-         * 压成一个换行会让 Markdown 把两段并成一段，排版走样。草稿不并进正文，
-         * 所以上报与落盘的正文里不会出现它。
-         *
-         * @param seg      定案的那一段（不含末尾空行）
-         * @param intoBody 这一段是否算正文（草稿为 false）
-         */
-        void settle(String seg, boolean intoBody) {
-            if (intoBody) text.append(seg).append(boundary(pending));
-            pending.setLength(0);
-            atStart = true;
-            complete = false;
-            decided++;
-        }
-
-        /** 判断阶段：把已定案正文的增量推到 display，暂存段不上台面。 */
-        void showDecided(StringBuilder display) {
-            String t = text.toString();
-            int from = Math.min(done, t.length());
-            if (t.length() > from) display.append(t.substring(from));
-            done = t.length();
-        }
-
-        /** 暂存段并进正文（判断结束，或最后一段按正文收尾）。 */
-        void mergePending() {
-            flushPending();
-        }
-
-        /** 只有空行的暂存段：丢掉，不占正文。 */
-        void dropSegment() {
-            pending.setLength(0);
-            atStart = true;
-            complete = false;
-        }
-
-        /**
-         * 已确定正文 + 暂存段（末尾空白去掉）。
-         *
-         * <p>正文里已经带了段间的原文换行，这里只把还没定案的尾段接上：
-         * 它是内容的开头，单独出现时不能算段落分隔。
-         */
-        String all() {
-            StringBuilder sb = new StringBuilder(text);
-            if (pending.length() > 0) sb.append(peekSegment());
-            if (stash.length() > 0) sb.append(stash);
-            int end = sb.length();
-            while (end > 0 && Character.isWhitespace(sb.charAt(end - 1))) end--;
-            return sb.substring(0, end);
+            return -1;
         }
     }
 
     /**
-     * 一段原文结尾的段落分隔，原样保留（最多一个空行）。
+     * 思考草稿与正文之间的结束标记。
      *
-     * <p>定案时这段字要被清掉，但它的换行是两段之间的分隔：丢掉它两段会粘在
-     * 一起，写死成一个换行又会把空行压掉。
+     * <p>全部取自真实响应：{@code </think>} 是 sensenova-6.8-flash 关闭思考后
+     * 写进 content 的那个（5 个问题 5 次都出现）；其余是各家常用来包思考块的
+     * 写法，多列几个不花代价——没有出现在 content 里就永远匹配不到。
      */
-    private static String boundary(CharSequence s) {
-        if (s == null || s.length() == 0) return "";
-        int nl = 0;
-        for (int i = s.length() - 1; i >= 0; i--) {
-            char c = s.charAt(i);
-            if (c == '\n') nl++;
-            else if (!isBlank(c)) break;
-        }
-        if (nl >= 2) return "\n\n";
-        return nl == 1 ? "\n" : "";
-    }
-
-    private static boolean isBlank(char c) {
-        return c == ' ' || c == '\t' || c == '\u3000' || c == '\r';
-    }
-
-    /** 暂存段超过这个长度就定案：真实的草稿很少一整个自然段写到这么长。 */
-    private static final int PARK_DECIDE_CHARS = 240;
-    /** 暂存段里已有两个换行（可能是一段一条的步骤清单）就提前定案。 */
-    private static final int PARK_DECIDE_LINES = 2;
-    /** 最多判断几段：连判几段都像草稿，说明这个端点关不掉思考，后面不再判断。 */
-    private static final int PARK_MAX = 6;
-    /** 一直等不到段落边界时的放弃长度：超过它就不再暂存，避免回答被压着不出。 */
-    private static final int PARK_GIVE_UP_CHARS = 1200;
+    private static final String[] CLOSE_TAGS = {
+            "</think>", "</thinking>", "</thought>", "<｜end▁of▁thinking｜>",
+            "[/thinking]", "[/think]", "[/thought]",
+    };
 
     /**
      * 读流过程中的真实进度，供诊断记录写「卡在哪」。
@@ -409,6 +371,7 @@ final class SseRound {
     static Result read(boolean stream, InputStream in, Progress progress, Abort abort,
             Result[] partialOut, Trace trace, Park park) throws Exception {
         Result r = new Result();
+        r.park = park;
         if (partialOut != null) partialOut[0] = r;
         if (stream) readStream(in, progress, abort, r, trace, park);
         else readWhole(in, r);
@@ -534,6 +497,22 @@ final class SseRound {
         }
         String content = message.has("content") && !message.isNull("content")
                 ? message.optString("content", "") : "";
+        if (r.park == Park.MARK && content.length() > 0) {
+            // 非流式一次给全，直接按标记切：标记之前的进思考块，之后的是正文
+            int at = indexOfCloseTag(content);
+            if (at >= 0) {
+                String draft = content.substring(0, at);
+                String body = content.substring(at + closeTagLengthAt(content, at));
+                if (draft.length() > 0) {
+                    if (thinkingOpen(r)) r.display.append(draft);
+                    else r.display.append("[thinking]").append(draft).append("[/thinking]");
+                    r.reasoning.append(draft);
+                    r.parkCount++;
+                    r.parked.append(draft).append("\n");
+                }
+                content = body;
+            }
+        }
         r.display.append(content);
         r.content.append(content);
         if (content.length() > 0) r.contentChunks++;
@@ -571,9 +550,11 @@ final class SseRound {
             Trace trace, Park park) throws Exception {
         boolean thinkingActive = false;
         boolean thinkingFinished = false;
-        // 段落末尾没有换行时，靠下一段的开头判断它是不是以草稿结尾
         Park pendingPark = park;
-        Body text = new Body();
+        Peeler peeler = park == Park.MARK ? new Peeler() : null;
+        // 草稿在「确认有标记」之前不上屏：正常回答不能先显示再被收回
+        StringBuilder draft = new StringBuilder();
+        StringBuilder body = new StringBuilder();
 
         BufferedReader reader = new BufferedReader(new InputStreamReader(in, "UTF-8"));
         // 头几行原文先留着：有些网关/代理会返回 HTTP 200 + 一条 JSON 错误体
@@ -699,44 +680,28 @@ final class SseRound {
                             closeThinking(r);
                             thinkingFinished = true;
                         }
-                        // 判断阶段结束后就不再进暂存，后面的字直接并进正文
-                        text.append(ct, pendingPark);
-                        if (text.giveUp) pendingPark = Park.NONE;
-                        // 一片里可能跨过好几个段落边界（一次吐出两段很常见）：
-                        // 每定案一段就把边界后剩下的字按新阶段接着收，直到收干净
-                        for (int guard = 0; guard < 8 && pendingPark != Park.NONE
-                                && text.segmentComplete(); guard++) {
-                            String seg = text.peekSegment();
-                            if (seg.length() == 0) {
-                                // 整段都是空行：不是内容，留一个分段而已
-                                text.dropSegment();
-                            } else {
-                                boolean draft = thinkingIsDraft(seg);
-                                // 定案前先收口：要落进思考块的那一段必须在正文前面
-                                if (draft) closeThinking(r);
-                                // 先定案（正文段直接并进正文），再把草稿交给思考块
-                                text.settle(seg, !draft);
-                                if (draft) {
-                                    park(r, seg);
-                                    // 第一段就是草稿说明这个端点在往正文里混思考：
-                                    // 后面的段落都按同样的方式逐段看，判满上限为止
-                                    if (text.decided >= PARK_MAX) pendingPark = Park.NONE;
-                                    else if (pendingPark == Park.FIRST_PARAGRAPH) {
-                                        pendingPark = Park.SEGMENTS;
-                                    }
-                                } else {
-                                    // 这一段是正常回答：正文从这里开始
-                                    pendingPark = Park.NONE;
+                        if (peeler != null && !peeler.bodyStarted()) {
+                            // 关闭思考的请求：先按标记判断这一片是草稿还是正文
+                            peeler.feed(ct, draft, body);
+                            if (peeler.bodyStarted()) {
+                                // 见到标记了（或确认这条流没有标记）
+                                String d = peeler.draftText();
+                                if (d.length() > 0 && peeler.peeled()) {
+                                    // 先把攒下的草稿一次性转进思考块，再把正文接上——
+                                    // 顺序不能反，否则正文会跑到思考块前面去
+                                    draft.setLength(0);
+                                    park(r, d);
+                                    LogUtil.i(TAG, "peeled %d chars of draft before "
+                                            + "</think>-style marker", d.length());
                                 }
+                                r.display.append(body);
+                                r.content.setLength(0);
+                                r.content.append(body);
                             }
-                            text.drain(pendingPark);
+                        } else {
+                            r.display.append(ct);
+                            r.content.append(ct);
                         }
-                        // 展示与上报共用一份正文：判断阶段只有已定案的正文上台面
-                        // （暂存段随时可能被改判成草稿），不再判断时暂存段就是正文
-                        if (pendingPark == Park.NONE) text.mergePending();
-                        text.showDecided(r.display);
-                        r.content.setLength(0);
-                        r.content.append(text.all());
                         if (LogUtil.ENABLED) {
                             LogUtil.v(TAG, "content chunk#%d: %s",
                                     r.contentChunks, LogUtil.preview(ct, 150));
@@ -762,29 +727,21 @@ final class SseRound {
                 r.display.append("[/thinking]");
                 LogUtil.d(TAG, "thinking left open at stream end: closed with [/thinking]");
             }
-            // 最后一段没等到段落边界就流完了：到这里它已经是正常回答，
-            // 不管前面判断过多少段，都按正文落地
-            String tail = null;
-            if (!thinkingFinished && pendingPark != Park.NONE) {
-                // 边界后剩下的字也归到最后这一段里，别让它因为没定案而漏掉
-                text.foldStash();
-                tail = text.peekSegment();
-            }
-            if (tail != null && tail.length() > 0 && thinkingIsDraft(tail)) {
-                park(r, tail);
-                text.dropSegment();
-                r.content.setLength(0);
-                r.content.append(text.all());
-            } else {
-                // 最后一段没定案就当正文：整体并进正文再补齐 display
-                text.mergePending();
-                text.showDecided(r.display);
-                r.content.setLength(0);
-                r.content.append(text.all());
+            // 流结束：还没见到标记的残留按正文交出去（短回复可能压根没有草稿）
+            if (peeler != null && !peeler.bodyStarted()) {
+                String rest = peeler.finish();
+                if (rest.length() > 0) {
+                    body.append(rest);
+                    r.display.append(rest);
+                    r.content.setLength(0);
+                    r.content.append(body);
+                }
+                pendingPark = Park.NONE;
             }
             trimTail(r.display);
+            trimTail(r.content);
             if (r.parkCount > 0) {
-                LogUtil.i(TAG, "parked %d content segment(s) into thinking block",
+                LogUtil.i(TAG, "parked %d draft segment(s) into thinking block",
                         r.parkCount);
             }
             try {
@@ -824,6 +781,24 @@ final class SseRound {
         }
         LogUtil.i(TAG, "stream finished: chunks=%d tools=%d contentLen=%d displayLen=%d",
                 r.chunks, r.toolCalls.length(), r.content.length(), r.display.length());
+    }
+
+    /** content 里第一个结束标记的下标，没有返回 -1。 */
+    private static int indexOfCloseTag(String s) {
+        int best = -1;
+        for (String t : CLOSE_TAGS) {
+            int i = s.indexOf(t);
+            if (i >= 0 && (best < 0 || i < best)) best = i;
+        }
+        return best;
+    }
+
+    /** 该位置命中的结束标记长度。 */
+    private static int closeTagLengthAt(String s, int at) {
+        for (String t : CLOSE_TAGS) {
+            if (s.startsWith(t, at)) return t.length();
+        }
+        return 0;
     }
 
     /** 思考块是否还开着（开过正文、还没收口）。 */
@@ -870,68 +845,19 @@ final class SseRound {
     /**
      * 这一段像不像模型没写出来、直接被塞进 content 的思考草稿。
      *
-     * <p><b>判据只用「开头」</b>：这类草稿几乎都以自述性的引导词起笔
-     * （「思考：」「分析一下」「用户问的是…」），而行文中间出现这些词是正常
-     * 中文表达。只看开头，宁可漏判，不误伤回答。
+     * <p><b>已废弃，保留只为兼容旧调用</b>：按段首引导词判断无法穷举——实测同一个
+     * 模型 5 个问题给出 5 种不同开头（{@code Thinking Process:}、
+     * {@code Here's my thought process}、{@code 好的，用户要求我…}、
+     * {@code 用户让我写…}、{@code Here's a thinking process}），而正文开头同样
+     * 层出不穷。现在统一按结束标记切分，见 {@link Peeler}。
      *
-     * @return 段首去掉 Markdown 标记与标点后，仍以草稿引导词开头
+     * @return 恒为 false
+     * @deprecated 改用 {@link Peeler}
      */
+    @Deprecated
     static boolean thinkingIsDraft(CharSequence seg) {
-        if (seg == null) return false;
-        String s = seg.toString();
-        int i = 0;
-        while (i < s.length()) {
-            char c = s.charAt(i);
-            // 跳过 Markdown 标记、空白、成对的括号引号
-            if (Character.isWhitespace(c) || c == '#' || c == '*' || c == '>' || c == '-'
-                    || c == '_' || c == '"' || c == '\'' || c == '「' || c == '【'
-                    || c == '（' || c == '(' || c == '`' || c == '[' || c == '＜' || c == '<') {
-                i++;
-                continue;
-            }
-            break;
-        }
-        // 有序列表里的条目通常是「步骤 1：…」「1. 先算折扣」这种答案草稿的骨架，
-        // 剔掉编号后按正文开头判断
-        while (i < s.length() && Character.isDigit(s.charAt(i)) && i < 40) {
-            int j = i;
-            while (j < s.length() && (Character.isDigit(s.charAt(j))
-                    || s.charAt(j) == '.' || s.charAt(j) == ')' || s.charAt(j) == '、'
-                    || s.charAt(j) == '．')) {
-                j++;
-            }
-            if (j == i) break;
-            while (j < s.length() && Character.isWhitespace(s.charAt(j))) j++;
-            i = j;
-        }
-        if (i > 40) return false;
-        String head = s.substring(i).toLowerCase(Locale.US);
-        return startsWithAny(head, DRAFT_LEADS);
-    }
-
-    private static boolean startsWithAny(String s, String[] leads) {
-        for (String l : leads) {
-            if (s.startsWith(l)) return true;
-        }
         return false;
     }
-
-    /**
-     * 草稿引导词。
-     *
-     * <p>刻意不收「首先」「1.」这类正常的作答开头：说明类回答也常这样起笔，
-     * 收了就会把正文误判成草稿。
-     */
-    private static final String[] DRAFT_LEADS = {
-            // 中文自述
-            "思考", "分析", "让我", "我们来", "我们来看", "我先", "我需", "我要", "我需要",
-            "我来", "我们可以", "我们需", "根据题意", "题目", "用户", "问题", "要求",
-            "理解", "首先想", "步骤", "计算过程", "推导",
-            // 英文与常见模型的口头禅
-            "thinking", "analyze", "analysis", "let me", "let's", "we need", "we should",
-            "we can", "i need", "i should", "i will", "i'll", "the user", "user asks",
-            "okay", "hm", "hmm",
-    };
 
     /**
      * 从一帧里取推理 token 数。
@@ -940,27 +866,5 @@ final class SseRound {
      */
     static int reasoningTokensOf(JSONObject frame) {
         return UsageView.of(frame).reasoning;
-    }
-
-    /** 正文里有两个以上换行（一段里已经列出多条），可以下结论了。 */
-    private static int newlines(CharSequence s) {
-        int n = 0;
-        for (int i = 0; i < s.length(); i++) {
-            if (s.charAt(i) == '\n') n++;
-        }
-        return n;
-    }
-
-    /**
-     * 暂存段末尾是否已经是段落边界：结尾是一个空行。
-     *
-     * <p>段落之间只隔一个换行时，行尾的「
-
-」是最常见的写法；
-     * 段首的空行已经被 {@link Body#append} 丢掉了，所以这里只看结尾。
-     */
-    static boolean paragraphBreak(CharSequence s) {
-        if (s == null || s.length() < 2) return false;
-        return s.charAt(s.length() - 1) == '\n' && s.charAt(s.length() - 2) == '\n';
     }
 }

@@ -47,7 +47,7 @@ final class ChatTransport {
             JSONArray messages, boolean stream, JSONArray tools, boolean includeUsage,
             boolean sendThinking) throws Exception {
         return buildRequestBody(model, provider, thinkingLevel, messages, stream, tools,
-                includeUsage, sendThinking, true, false);
+                includeUsage, sendThinking, true);
     }
 
     /**
@@ -57,7 +57,7 @@ final class ChatTransport {
      */
     static JSONObject buildRequestBody(String model, ProviderInfo provider, String thinkingLevel,
             JSONArray messages, boolean stream, JSONArray tools, boolean includeUsage,
-            boolean sendThinking, boolean offIncludeNative, boolean offBoolOnly) throws Exception {
+            boolean sendThinking, boolean offIncludeNative) throws Exception {
         JSONObject body = new JSONObject();
         body.put("model", model);
         body.put("stream", stream);
@@ -84,11 +84,10 @@ final class ChatTransport {
             String pName = provider.thinkingParamName;
             if (pName == null || pName.trim().length() == 0) pName = "thinking";
             if ("off".equals(level)) {
-                // 关闭字段一次写全：同一份请求里带上各家认的那个键，谁认谁生效，
-                // 不认识的一律当未知字段忽略（见 ThinkingOff 的说明）。
-                // 旧版按家族只发一个、被静默忽略时不重试，是「选了关仍在思考」
-                // 的主要原因。
-                ThinkingOff.apply(body, provider, model, offIncludeNative, offBoolOnly);
+                // 只发实测能生效的关闭字段（见 ThinkingOff）：实测两家端点对
+                // 不认识的关闭键一律静默忽略、回 200 照旧推理，发多了没有收益，
+                // 只会让诊断看上去「已下发关闭」而实际没关。
+                ThinkingOff.apply(body, provider, model, offIncludeNative);
             } else if ("boolean".equals(provider.thinkingType)) {
                 body.put(pName, true);
                 body.put("thinking_budget", ThinkingLevels.budget(level));
@@ -178,19 +177,18 @@ final class ChatTransport {
             JSONArray messages, boolean stream, JSONArray tools, boolean includeUsage,
             boolean sendThinking) throws Exception {
         return prepare(model, provider, thinkingLevel, messages, stream, tools,
-                includeUsage, sendThinking, true, false);
+                includeUsage, sendThinking, true);
     }
 
     /**
      * @param offIncludeNative 关闭思考时是否写自填的原生字段（false 表示 400 后已去掉）
-     * @param offBoolOnly      关闭思考时是否只留 {@code enable_thinking:false}
      */
     static Prepared prepare(String model, ProviderInfo provider, String thinkingLevel,
             JSONArray messages, boolean stream, JSONArray tools, boolean includeUsage,
-            boolean sendThinking, boolean offIncludeNative, boolean offBoolOnly)
+            boolean sendThinking, boolean offIncludeNative)
             throws Exception {
         JSONObject body = buildRequestBody(model, provider, thinkingLevel, messages, stream,
-                tools, includeUsage, sendThinking, offIncludeNative, offBoolOnly);
+                tools, includeUsage, sendThinking, offIncludeNative);
         String pName = provider.thinkingParamName;
         if (pName == null || pName.trim().length() == 0) pName = "thinking";
         // 关闭思考时字段由 ThinkingOff 写全，没有 reasoning_effort 键是正常的

@@ -34,6 +34,9 @@ final class R {
         static final int sseround_001 = 1, sseround_002 = 2, sseround_003 = 3, sseround_004 = 4,
                 sseround_005 = 5, sseround_006 = 6, sseround_007 = 7, sseround_008 = 8,
                 sseround_009 = 9, sseround_010 = 10;
+        static final int thinkinglevels_001 = 901, thinkinglevels_002 = 902,
+                thinkinglevels_003 = 903, thinkinglevels_004 = 904,
+                thinkinglevels_005 = 905, thinkinglevels_006 = 906, thinkinglevels_007 = 907;
         static final int toolcalls_001 = 11, toolcalls_002 = 12, toolcalls_003 = 13,
                 toolcalls_004 = 14, toolcalls_005 = 15, toolcalls_006 = 16, toolcalls_007 = 17,
                 toolcalls_008 = 18, toolcalls_009 = 19, toolcalls_010 = 20, toolcalls_011 = 21,
@@ -52,4 +55,15 @@ final class WebSearchTool {
 
 final class HttpRequestTool {
     static final String TOOL_HTTP = "http_request";
+}
+
+/** 精简版 ProviderInfo：离线校验只需要思考字段相关的两项。 */
+class ProviderInfo {
+    public String name;
+    public String displayName;
+    public String apiKey;
+    public String apiUrl;
+    public String chatPath;
+    public String thinkingType;
+    public String thinkingParamName;
 }
