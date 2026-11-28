@@ -113,10 +113,22 @@ final class OffDiag {
      */
     static String verdict(boolean userWantsOff, boolean offSent, String resolved,
             boolean blocked, int thinkingText, int reasoningTokens) {
+        return verdict(userWantsOff, offSent, resolved, blocked, thinkingText, reasoningTokens, 0);
+    }
+
+    /**
+     * @param parked 正文里被拆进思考块的草稿段数
+     */
+    static String verdict(boolean userWantsOff, boolean offSent, String resolved,
+            boolean blocked, int thinkingText, int reasoningTokens, int parked) {
         if (!userWantsOff) {
             return thinkingText > 0
                     ? "结论：本次选的是思考档，出现推理属正常。"
                     : "结论：本次选的是思考档。";
+        }
+        if (parked > 0) {
+            return "结论：关闭字段已下发，端点把思考写进了正文（已拆出 " + parked
+                    + " 段到思考块），这家没有真正关掉思考。";
         }
         if (!offSent) {
             return "结论：这次请求没有下发关闭字段（实际档位 " + resolved + "），所以仍会思考。";

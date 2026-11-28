@@ -292,8 +292,10 @@ final class ChatStreamRunner {
             boolean thinkingDowngraded = false;
             /** 关闭时端点拒收了提供商自填字段：重发时不再带它，写全的家族字段继续保留。 */
             boolean offNativeDropped = false;
-            /** 关闭时对象形态被拒：重发只留 top-level 布尔关闭。 */
-            boolean offBoolOnly = false;
+            // 关闭时对象形态被拒：重发只留 top-level 布尔关闭。
+            // 上一次请求已经被端点拒收过的模型直接从这一档开始，省掉两次
+            // 必然 400 的回合（每次都要重发完整请求体）。
+            boolean offBoolOnly = ThinkingOff.rejected(job.modelName);
             // 用户是否选了「关闭」。与 thinkingOff 分开：探测/实测确认关不掉时，
             // thinkingOff 为 false（不发关闭字段，按最低档走）。此时思考内容照常
             // 展示——关不掉就如实呈现，不靠隐藏内容假装关掉了。
@@ -321,6 +323,8 @@ final class ChatStreamRunner {
             int retryCount = 0;
             /** 本轮空回复已经重发过几次；换轮次（工具轮）清零。 */
             int emptyRetry = 0;
+            /** 已提示过「正文里混进思考」的轮次：同一轮重发不重复提示。 */
+            int parkedNoticeRound = -1;
             /**
              * 连接阶段失败后的重连计数。只统计「还没拿到状态码」的失败；
              * 拿到状态码之后的错误各走各的降级链，不受它影响。
@@ -566,7 +570,7 @@ final class ChatStreamRunner {
                     //   3) 整套去掉，回到端点默认。走到这里说明这家对任何关闭写法都
                     //      直接拒收，记下来，档位里不再列「关闭」。
                     if ((code == 400 || code == 422) && sendThinking && thinkingOff
-                            && !offNativeDropped) {
+                            && !offNativeDropped && !offBoolOnly) {
                         offNativeDropped = true;
                         diagEvent(st, "degrade", "thinking-off: drop provider field after HTTP " + code);
                         LogUtil.w(TAG, "thinking-off rejected, retry without provider-declared field");
@@ -579,6 +583,7 @@ final class ChatStreamRunner {
                     if ((code == 400 || code == 422) && sendThinking && thinkingOff
                             && !offBoolOnly) {
                         offBoolOnly = true;
+                        ThinkingOff.rememberRejected(modelOriginal);
                         diagEvent(st, "degrade", "thinking-off: boolean only after HTTP " + code);
                         LogUtil.w(TAG, "thinking-off rejected, retry with boolean switches only");
                         OffDiag.log("降级：端点仍拒收，只留布尔关闭重发");
@@ -657,7 +662,7 @@ final class ChatStreamRunner {
                 // 收到状态码后一个字节都收不到：先提示，超过上限直接断开。
                 // 没有这一段时，这类请求会静静躺到 120s 读超时，界面上没有任何信号。
                 startStallWatch(st, conn, job.generation);
-                SseRound.Result rr = readRound(conn, st, renderer);
+                SseRound.Result rr = readRound(conn, st, renderer, userWantsNoThinking);
                 st.chunks = rr.chunks;
                 diagEvent(st, "stream-end", "chunks=" + rr.chunks
                         + " elapsed=" + (System.currentTimeMillis() - roundStartMs) + "ms"
@@ -670,11 +675,29 @@ final class ChatStreamRunner {
                     if (rr.reasoning.length() > 0) {
                         OffDiag.log("  推理片段：%s", OffDiag.snippet(rr.reasoning));
                     }
+                    if (rr.parkCount > 0) {
+                        OffDiag.log("  正文里拆出的思考草稿：%d 段，首段：%s",
+                                rr.parkCount, OffDiag.snippet(rr.parked));
+                    }
                     OffDiag.log(OffDiag.verdict(userWantsNoThinking,
                             thinkingOff && sendThinking,
                             ChatTransport.resolveThinkingLevel(job.modelName, job.provider,
                                     job.thinkingLevel),
-                            modelBlocked, rr.reasoning.length(), rr.reasoningTokens));
+                            modelBlocked, rr.reasoning.length(), rr.reasoningTokens,
+                            rr.parkCount));
+                }
+                // 只留布尔开关就能过：记住这一档，下一轮别再从对象形态试起。
+                // 反过来，整套字段都过、说明这个端点不挑，把旧记忆清掉。
+                if (thinkingOff && sendThinking && !offBoolOnly) {
+                    ThinkingOff.clearRejected(job.modelName);
+                }
+                if (rr.parkCount > 0 && parkedNoticeRound != round) {
+                    // 端点没真正关掉思考：草稿已经转进思考块，但仍要让用户知道
+                    // 这次回答不完全是「关闭」的状态，否则他只会觉得作答很奇怪。
+                    parkedNoticeRound = round;
+                    if (session.isCurrent(job.generation)) {
+                        ui.toast(Strings.get(R.string.chatstreamrunner_030));
+                    }
                 }
                 // 统计要的是「本轮这一发」的用量，而 st 里是跨轮累计值。
                 // 不做差直接记，一条带 3 次工具轮的回复会把总量算成 1+2+3=6 倍。
@@ -701,6 +724,9 @@ final class ChatStreamRunner {
                         outcomeCode = "aborted";
                         return;
                     }
+                    // 协议层失败也计费：有的端点先正常推理、再吐一个坏分片，
+                    // 上面的成功分支没走到，这一轮的 token 不记就永远对不上账单
+                    st.addUsage(rr.usage);
                     // 端点正常收尾却一个字都没有：先自动重发，别让用户对着空气泡等。
                     // 重发前不需要清理 DOM —— 这一轮什么都没画，tail 是空的；
                     // lastStreamTrace 也还停在上一轮结束的位置，重发会直接续上。
@@ -926,7 +952,7 @@ final class ChatStreamRunner {
     }
 
     private SseRound.Result readRound(HttpURLConnection conn, final State st,
-            final StreamRenderer renderer) throws Exception {
+            final StreamRenderer renderer, boolean userWantsNoThinking) throws Exception {
         // 半成品出口：流式读到一半断流时，本轮已经推到屏幕上的文本在 Result 里，
         // 不接住就会随异常一起丢掉（见下面的 catch）。
         SseRound.Result[] partial = new SseRound.Result[1];
@@ -938,6 +964,12 @@ final class ChatStreamRunner {
         try {
             InputStream in = conn.getInputStream();
             diagEvent(st, "body-open", "input stream ready");
+            // 关闭思考时还要再看一层：端点收了关闭字段、但把草稿塞进 content。
+            // 只有用户选的是「关闭」才拆，开了思考或续写时不碰正文。
+            // 先只判第一段：第一段是回答就整段按正文，不再往下判。连接一个关不掉
+            // 思考的端点时每轮都要过一遍这个判断，判得越少越不容易误伤。
+            SseRound.Park park = !userWantsNoThinking ? SseRound.Park.NONE
+                    : (job.isContinue() ? SseRound.Park.NONE : SseRound.Park.FIRST_PARAGRAPH);
             return SseRound.read(job.streamEnabled, in,
                     new SseRound.Progress() {
                         public void onProgress(CharSequence display) {
@@ -964,7 +996,7 @@ final class ChatStreamRunner {
                         public void onEnd(long now, int chunks, boolean done) {
                             diagEvent(st, "stream-close", "chunks=" + chunks + " done-mark=" + done);
                         }
-                    });
+                    }, park);
         } catch (Exception e) {
             // 断流（读超时、连接重置、TLS 中断）不是「什么都没发生」：调用方会走失败
             // 链路，用 st.trace 重写气泡并落盘。这里不把半截 display 补进 trace，
@@ -1252,7 +1284,7 @@ final class ChatStreamRunner {
         int promptTokens;
         int completionTokens;
         int totalTokens;
-        /** 命中前缀缓存的 token 数；两家厂商字段名不同，见 {@link #cacheHitOf}。 */
+        /** 命中前缀缓存的 token 数；两家厂商字段名不同，见 {@link UsageView#cacheHitOf}。 */
         int cachedTokens;
         /** 收尾时刻，用于算端到端生成速度。 */
         long finishedAt;
@@ -1272,33 +1304,17 @@ final class ChatStreamRunner {
          */
         void addUsage(JSONObject u) {
             if (u == null) return;
-            int p = u.optInt("prompt_tokens", 0);
-            int c = u.optInt("completion_tokens", 0);
-            int t = u.optInt("total_tokens", p + c);
-            promptTokens += p;
-            completionTokens += c;
-            totalTokens += t;
-            cachedTokens += cacheHitOf(u);
-        }
-
-        /**
-         * 解析「命中缓存的输入 token」。
-         *
-         * <p>DeepSeek 放在顶层 {@code prompt_cache_hit_tokens}；OpenAI 系放在
-         * {@code prompt_tokens_details.cached_tokens}。两边都认，取第一个大于 0 的。
-         * 都不认识就返回 0——宁可这条不显示，也不要拿 prompt_tokens 冒充命中量。
-         */
-        private static int cacheHitOf(JSONObject u) {
-            int hit = u.optInt("prompt_cache_hit_tokens", 0);
-            if (hit > 0) return hit;
-            // 部分网关把 DeepSeek 的字段也塞进 details 里，一并认
-            JSONObject d = u.optJSONObject("prompt_tokens_details");
-            if (d != null) {
-                hit = d.optInt("cached_tokens", 0);
-                if (hit > 0) return hit;
-                hit = d.optInt("cache_hit_tokens", 0);
-            }
-            return Math.max(0, hit);
+            int[] p = {promptTokens};
+            int[] c = {completionTokens};
+            int[] t = {totalTokens};
+            int[] hit = {cachedTokens};
+            // 字段名统一在 UsageView 里认：OpenAI 的 prompt/completion 与
+            // Anthropic 的 input/output 两套写法都要算，否则这类端点用量恒为 0
+            UsageView.of(u).addTo(p, c, t, hit);
+            promptTokens = p[0];
+            completionTokens = c[0];
+            totalTokens = t[0];
+            cachedTokens = hit[0];
         }
 
         State(StreamJob job) {

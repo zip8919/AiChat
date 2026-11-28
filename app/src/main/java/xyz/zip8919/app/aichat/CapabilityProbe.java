@@ -267,8 +267,8 @@ final class CapabilityProbe {
         List<String> accepted = new ArrayList<String>();
         List<Integer> signals = new ArrayList<Integer>();
         // 有档位的回复被输出上限截断：此时各档的推理都被削到同一个天花板，
-        // 比值全一样，不能再据此判「这一档没比基线多」。
-        boolean anyTruncated = false;
+        // 比值全一样，不能再据此判「这一档没比基线多」——见过一次就当「思考打开了」。
+        boolean truncatedLevel = false;
         int anyAbove = 0;
         int tested = 0;
         for (int i = 0; i < candidates.size(); i++) {
@@ -283,9 +283,17 @@ final class CapabilityProbe {
                 break;
             }
             if (r.httpCode >= 200 && r.httpCode < 300) {
-                int sig = reasoningSignal(r.body);
+                // 档位强度只能比推理正文：用量里的推理 token 受温度与问题复杂度
+                // 影响，同一档连发两次就能差三成；没有推理正文时它只能说明
+                // 「确实在想」，说明不了「想得更多」。
+                Signal ls = signalOf(r.body);
+                boolean textSeen = hasText(ls.reasoningText);
+                int sig = textSeen ? Math.max(1, ls.reasoningText.trim().length() * 2 / 3) : 0;
                 boolean trunc = truncated(r.body, probeMaxTokens(level));
-                if (trunc) anyTruncated = true;
+                OffDiag.log("探测·档位 %s：HTTP=%d 推理正文=%s 推理tokens=%d 正文=%d 截断=%s",
+                        level, r.httpCode, textSeen ? String.valueOf(sig) : "无",
+                        ls.reasoningTokens, ls.contentChars, trunc ? "是" : "否");
+                if (trunc) truncatedLevel = true;
                 // 这一档要么推理量跟基线明显不同（真的按档位变了），要么被输出
                 // 上限截断（也是「思考确实打开了」的旁证）。两者都不满足的档位不
                 // 列入：端点对不认识的档位一律回 200，光看状态码会把它们全算成支持。
@@ -299,7 +307,7 @@ final class CapabilityProbe {
                     signals.add(Integer.valueOf(sig));
                     anyAbove++;
                 } else {
-                    LogUtil.d(TAG, "level %s not above baseline (%d vs %d), drop",
+                    LogUtil.d(TAG, "level %s differs too little from baseline (%d vs %d), drop",
                             level, sig, baseline);
                 }
                 tested++;
@@ -315,11 +323,13 @@ final class CapabilityProbe {
 
         if (!accepted.isEmpty()) {
             rep.levels.addAll(accepted);
-            // 探过、但没有任何一档比基线高：端点收参数却完全无视它。
-            // 这时「各档强度」没法证实，结论写成「不可验证」，而不是硬报支持。
+            // 探过、但没有任何一档跟基线拉开差距（截断的档位除外）：端点收参数
+            // 却完全无视它。这时「各档强度」没法证实，结论写成「不可验证」，
+            // 而不是硬报支持。
             if (anyAbove == 0 && tested > 0 && baseline >= 0) {
                 rep.unverifiable = true;
             }
+
         }
 
         // ---- 图片输入 ----
@@ -390,20 +400,31 @@ final class CapabilityProbe {
             // 认证、限流、服务端错误与关闭能力无关
             return Intent.unknown();
         }
-        int offSig = reasoningSignal(off.body);
-        LogUtil.d(TAG, "off probe: baseline=%d off=%d", baseSig, offSig);
-        OffDiag.log("探测·关闭：关闭请求 HTTP=%d 推理信号=%d，结论=%s", off.httpCode, offSig,
-                (baseSig > 0 && offSig == 0) ? "能关"
-                        : (baseSig > 0 && offSig > 0) ? "关不掉"
+        Signal baseSignal = signalOf(base.body);
+        Signal offSignal = signalOf(off.body);
+        int offText = hasText(offSignal.reasoningText) ? 1 : 0;
+        int baseText = hasText(baseSignal.reasoningText) ? 1 : 0;
+        LogUtil.d(TAG, "off probe: baselineText=%d offText=%d baseline=%d off=%d",
+                baseText, offText, reasoningSignal(base.body), reasoningSignal(off.body));
+        OffDiag.log("探测·关闭：关闭请求 HTTP=%d 推理正文=%d 推理tokens=%d，结论=%s",
+                off.httpCode, offText, offSignal.reasoningTokens,
+                (baseText > 0 && offText == 0) ? "能关"
+                        : (baseText > 0 && offText > 0) ? "关不掉"
                         : "测不出来");
-        if (baseSig > 0 && offSig == 0) return Intent.yes(0);
-        if (baseSig > 0 && offSig > 0) return Intent.no();
-        if (baseSig == 0 && offSig == 0) {
-            // 默认就不思考：这道题分不出关闭是否生效，不能拿它当结论。
-            return Intent.unknown();
-        }
-        // 关掉之后反而冒出推理：端点把关闭字段当成了别的意思，按关不掉处理
-        return Intent.no();
+        // 判据只看推理正文：用量里的推理 token 在关闭后也可能残留（有的端点在
+        // 内部仍按思考模式跑一遍），拿它当「还在想」的证据会把能关的模型判成关不掉。
+        if (baseText > 0 && offText == 0) return Intent.yes(0);
+        if (baseText > 0 && offText > 0) return Intent.no();
+        return Intent.unknown();
+    }
+
+    /**
+     * 推理正文是否有实际内容。
+     *
+     * <p>「默认不思考」时（两次都没有推理正文）不下结论：这道题分不出关闭是否生效。
+     */
+    private static boolean hasText(String s) {
+        return s != null && s.trim().length() > 0;
     }
 
     /** 关闭探测的结论：能否关掉 + 关掉时的推理量（用作档位对照的干净基线）。 */
@@ -453,10 +474,11 @@ final class CapabilityProbe {
     static boolean differsFrom(int signal, int baseline) {
         if (baseline <= 0) return aboveBaseline(signal, baseline);
         if (signal < 0) return false;
-        int tol = Math.max(16, baseline / 2);
-        int d = signal - baseline;
-        if (d < 0) d = -d;
-        return d >= tol;
+        // 相对差与绝对差都要满足：推理量小时（十几 token）一两句客套就能差出
+        // 50%，只看相对差会把端点抖动当成「这一档生效了」；推理量大时一两百
+        // token 的差又说明不了档位变化，只看绝对差会误收。
+        int d = Math.abs(signal - baseline);
+        return d >= Math.max(16, baseline / 5) && d >= 48;
     }
 
     /**
@@ -601,20 +623,85 @@ final class CapabilityProbe {
      */
     static int reasoningSignal(String body) {
         if (body == null || body.length() == 0) return 0;
-        int tokens = firstInt(body, "reasoning_tokens");
-        if (tokens > 0) return tokens;
-        int n = firstInt(body, "thinking_tokens");
-        if (n > 0) return n;
-        String text = firstText(body, "reasoning_content");
-        if (text == null) text = firstText(body, "reasoning");
-        if (text == null) return 0;
+        Signal sig = signalOf(body);
+        if (sig.reasoningTokens > 0) return sig.reasoningTokens;
+        String text = sig.reasoningText;
+        if (text == null || text.trim().length() == 0) return 0;
         // 没有 token 计数时按推理正文的长度估：中文约 1.5 字/token
         return Math.max(1, text.trim().length() * 2 / 3);
     }
 
-    /** 回复是否被输出上限截断（completion_tokens 顶到 max_tokens）。 */
+    /**
+     * 一次回复里的两样痕迹：单独的推理正文，以及用量里的推理 token。
+     *
+     * <p><b>为什么要分开</b>：两者是不同层级的证据。
+     * <ul>
+     *   <li>推理正文（{@code reasoning_content}）说明端点确实在思考并把过程透了出来；</li>
+     *   <li>推理 token 只说明内部算了，正文里一个字的思考都看不到。</li>
+     * </ul>
+     * 档位强度只能靠推理正文比较——用量里的推理 token 受温度与问题复杂度影响，
+     * 同一档连发两次就能差三成，拿它比档位等于在噪声里找信号。
+     */
+    static final class Signal {
+        final String reasoningText;
+        final int reasoningTokens;
+        /** 正文（content）的长度：没有推理正文时可判断「是不是答了」。 */
+        final int contentChars;
+
+        Signal(String reasoningText, int reasoningTokens, int contentChars) {
+            this.reasoningText = reasoningText;
+            this.reasoningTokens = reasoningTokens;
+            this.contentChars = contentChars;
+        }
+    }
+
+    /** 从响应体里取两类痕迹。 */
+    static Signal signalOf(String body) {
+        if (body == null || body.length() == 0) return new Signal(null, 0, 0);
+        int tokens = firstInt(body, "reasoning_tokens");
+        if (tokens <= 0) tokens = firstInt(body, "thinking_tokens");
+        String text = firstText(body, "reasoning_content");
+        if (text == null) text = firstText(body, "reasoning");
+        int content = 0;
+        try {
+            JSONObject o = new JSONObject(body);
+            JSONArray ch = o.optJSONArray("choices");
+            if (ch != null && ch.length() > 0) {
+                JSONObject m = ch.optJSONObject(0) == null ? null
+                        : ch.optJSONObject(0).optJSONObject("message");
+                if (m != null) {
+                    String c = m.optString("content", "");
+                    content = c == null ? 0 : c.trim().length();
+                }
+            }
+            JSONObject u = o.optJSONObject("usage");
+            UsageView uv = UsageView.of(u);
+            if (tokens <= 0 && uv.reasoning > 0) tokens = uv.reasoning;
+        } catch (Throwable ignored) {
+            // 结构不认识就按上面的字符串扫描结果处理
+        }
+        return new Signal(text, Math.max(0, tokens), content);
+    }
+
+    /**
+     * 回复是否被输出上限截断（用量里的输出量顶到 max_tokens）。
+     *
+     * <p>Anthropic 一类的端点不写 {@code completion_tokens}，只写
+     * {@code output_tokens}；只认前者时这类端点永远判不出截断。
+     */
     private static boolean truncated(String body, int maxTokens) {
-        int ct = firstInt(body, "completion_tokens");
+        if (body == null || body.length() == 0) return false;
+        int ct = -1;
+        try {
+            UsageView uv = UsageView.of(new JSONObject(body).optJSONObject("usage"));
+            ct = uv.output;
+        } catch (Throwable ignored) {
+            // 结构不认识：退回字符串扫描
+        }
+        if (ct <= 0) {
+            ct = firstInt(body, "completion_tokens");
+            if (ct <= 0) ct = firstInt(body, "output_tokens");
+        }
         return ct > 0 && ct >= maxTokens - 1;
     }
 
@@ -718,6 +805,18 @@ final class CapabilityProbe {
             j++;
         }
         return false;
+    }
+
+    /**
+     * 一条「关闭请求」的原始响应，离线判断用的入口。
+     *
+     * @return 关闭请求带上的字段在响应里有没有被证明生效：
+     *         响应里没有推理正文即为生效（true），有推理正文为未生效（false），
+     *         响应体不可用返回 null
+     */
+    static Boolean offFieldsHonored(String body, int httpCode) {
+        if (httpCode < 200 || httpCode >= 300 || body == null || body.length() == 0) return null;
+        return !hasText(signalOf(body).reasoningText);
     }
 
     /** 400/422 视为「参数不被接受」；其余 4xx/5xx 不是档位本身的问题。 */

@@ -52,6 +52,41 @@ final class ThinkingOff {
      * 端点升级、字段写法变化后，用户可以重新试。
      */
     private static final java.util.HashSet<String> CANNOT_OFF = new java.util.HashSet<String>();
+    /**
+     * 「上一次关闭请求被端点直接拒收」的模型。
+     *
+     * <p>与 {@link #CANNOT_OFF} 分开记：被拒收说明这份字段写法在这个端点上行不通，
+     * 但关闭意图本身未必做不到（去掉对象形态、只留布尔开关常常就能过）。
+     * 下一次请求据此直接从「只发布尔开关」开始，省掉两个必败的回合。
+     */
+    private static final java.util.HashSet<String> REJECTED = new java.util.HashSet<String>();
+
+    /** 记下「关闭字段被端点拒收」：下一轮直接走只发布尔开关的写法。 */
+    static void rememberRejected(String model) {
+        if (model == null || model.length() == 0) return;
+        synchronized (REJECTED) {
+            if (REJECTED.add(model)) {
+                LogUtil.w("ThinkingOff", "model %s rejected thinking-off fields, next try bool only",
+                        model);
+            }
+        }
+    }
+
+    /** 该模型上一次的关闭字段是否被端点拒收过。 */
+    static boolean rejected(String model) {
+        if (model == null) return false;
+        synchronized (REJECTED) {
+            return REJECTED.contains(model);
+        }
+    }
+
+    /** 端点又开始接受关闭写法了：清掉「拒收」记忆。 */
+    static void clearRejected(String model) {
+        if (model == null) return;
+        synchronized (REJECTED) {
+            REJECTED.remove(model);
+        }
+    }
 
     /**
      * 记下「真实聊天里关闭字段被端点明确拒收」的模型。
@@ -80,6 +115,7 @@ final class ThinkingOff {
         synchronized (CANNOT_OFF) {
             CANNOT_OFF.remove(model);
         }
+        clearRejected(model);
     }
 
     private ThinkingOff() {
@@ -132,14 +168,24 @@ final class ThinkingOff {
             JSONObject off = new JSONObject();
             off.put("type", "disabled");
             body.put("thinking", off);
-            // 3) Qwen 系与部分网关只认顶层布尔；vLLM / SGLang 藏在模板参数里
-            body.put("enable_thinking", false);
-            JSONObject ctk = new JSONObject();
-            ctk.put("enable_thinking", false);
-            body.put("chat_template_kwargs", ctk);
-            // 4) Anthropic：budget 为 0 即关闭
-            if ("claude".equals(ReasoningProfiles.of(model).family)) {
+            // 3) 顶层布尔与模板开关：Qwen 系、vLLM / SGLang 部署只认这几处。
+            //
+            //    只给可能认它的家族发：严格的 OpenAI 端点（官方、Azure）对多余
+            //    参数直接 400，多写一处就等于多一个 400 的来源；而大多数网关
+            //    对不认识的字段一律忽略，少发不会让它们关不掉。
+            ReasoningProfiles.Profile prof = ReasoningProfiles.of(model);
+            if (wantsTopLevelSwitch(prof.family)) {
+                body.put("enable_thinking", false);
+                JSONObject ctk = new JSONObject();
+                ctk.put("enable_thinking", false);
+                body.put("chat_template_kwargs", ctk);
+            }
+            // 4) Anthropic：budget 为 0 即关闭；顶层布尔与 thinking 对象一起发会
+            //    被它判成「同时给两套开关」而 400，所以这一族只发 thinking 对象。
+            if ("claude".equals(prof.family)) {
                 body.put("thinking_budget", 0);
+                body.remove("enable_thinking");
+                body.remove("chat_template_kwargs");
             }
             // 5) 提供商自己声明的字段名/形态（用户为这个端点亲手填的）
             if (includeNative) applyNative(body, p);
@@ -148,6 +194,19 @@ final class ThinkingOff {
             LogUtil.w("ThinkingOff", "apply failed: %s", e.getMessage());
             return false;
         }
+    }
+
+    /**
+     * 这个家族是否可能需要顶层 {@code enable_thinking} / {@code chat_template_kwargs}。
+     *
+     * <p>家族未知时照发：认不出的模型多半挂在自建网关或中转上，这类端点以
+     * 「收下未知字段、CamelCase 布尔」为主，发过去比不发有用。
+     */
+    private static boolean wantsTopLevelSwitch(String family) {
+        return "qwen".equals(family) || "glm".equals(family) || "kimi".equals(family)
+                || "minimax".equals(family) || "ernie".equals(family)
+                || "hunyuan".equals(family) || "doubao".equals(family)
+                || "unknown".equals(family);
     }
 
     /** 是否属于「只认 reasoning_effort、没有关闭档」的家族。 */
@@ -215,9 +274,12 @@ final class ThinkingOff {
      */
     static String describe(ProviderInfo p, String model) {
         StringBuilder sb = new StringBuilder();
-        sb.append("thinking:{type:disabled}, enable_thinking:false, chat_template_kwargs")
-                .append(".enable_thinking:false");
-        if ("claude".equals(ReasoningProfiles.of(model).family)) {
+        String family = ReasoningProfiles.of(model).family;
+        sb.append("thinking:{type:disabled}");
+        if (wantsTopLevelSwitch(family)) {
+            sb.append(", enable_thinking:false, chat_template_kwargs.enable_thinking:false");
+        }
+        if ("claude".equals(family)) {
             sb.append(", thinking_budget:0");
         } else if (needsEffort(model)) {
             sb.append(", reasoning_effort:")
